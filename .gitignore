@@ -7,3 +7,21 @@ CLAUDE.local.md
 .env
 .env.*
 !.env.example
+
+# Node.js 및 빌드 산출물
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# 도구 캐시와 로그
+.vite/
+.cache/
+*.log
+npm-debug.log*
+
+# 운영체제와 편집기
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
