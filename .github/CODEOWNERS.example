@@ -1,0 +1,15 @@
+# 이 파일은 예시이므로 GitHub가 CODEOWNERS로 적용하지 않습니다.
+# 실제 사용자 또는 팀으로 바꾼 뒤 파일명을 CODEOWNERS로 변경하세요.
+# 코드 소유자는 해당 저장소에 write 권한이 있어야 합니다.
+
+# 모든 파일의 기본 소유자
+# * @YOUR_ORG/core-team
+
+# 협업 정책과 GitHub 설정
+# /.github/ @YOUR_ORG/platform-team
+# /CONTRIBUTING.md @YOUR_ORG/platform-team
+
+# 프로젝트별 경로 예시
+# /apps/web/ @YOUR_ORG/frontend-team
+# /apps/api/ @YOUR_ORG/backend-team
+# /docs/ @YOUR_ORG/docs-team

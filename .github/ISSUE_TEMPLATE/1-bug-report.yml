@@ -1,0 +1,103 @@
+name: 버그 제보
+description: 재현 가능한 문제나 예상과 다른 동작을 알려주세요.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        제보 전에 기존 이슈를 검색해 주세요. 로그와 화면 캡처에서는 민감 정보를 제거해 주세요.
+
+        이 GitHub 이슈는 Linear에 자동 생성됩니다. Linear에 같은 이슈를 다시 만들지 마세요. 생성된 Linear 이슈에서 **Copy git branch name**으로 작업 브랜치를 만드세요.
+
+  - type: checkboxes
+    id: duplicate-check
+    attributes:
+      label: 사전 확인
+      options:
+        - label: 기존 이슈에서 같은 문제를 찾지 못했습니다.
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 문제 요약
+      description: 무엇이 잘못되었는지 간결하게 설명해 주세요.
+      placeholder: 어떤 상황에서 어떤 문제가 발생했나요?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 재현 방법
+      description: 다른 사람이 같은 문제를 재현할 수 있도록 순서대로 적어 주세요.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: 기대한 동작
+      description: 정상이라면 어떤 결과가 나와야 하나요?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: 실제 동작
+      description: 실제 결과와 오류 메시지를 적어 주세요.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: 영향도
+      description: 현재 업무나 사용자에게 미치는 영향을 선택해 주세요.
+      options:
+        - 작업 또는 서비스 이용이 불가능함
+        - 주요 기능을 사용할 수 없음
+        - 우회 방법이 있지만 일부 기능에 영향이 있음
+        - 경미한 문제 또는 사용성 저하
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 실행 환경
+      description: 문제와 관련된 버전, OS, 브라우저, 배포 환경 또는 커밋을 적어 주세요.
+      placeholder: |
+        - 버전/커밋:
+        - OS/브라우저:
+        - 환경: local, development, staging, production
+    validations:
+      required: true
+
+  - type: input
+    id: related-repositories
+    attributes:
+      label: 관련 저장소
+      description: 다른 저장소도 관련되어 있다면 `owner/repository` 형식으로 적어 주세요.
+      placeholder: owner/repository, owner/another-repository
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 로그 및 참고 자료
+      description: 민감 정보를 제거한 로그, 화면 캡처, 링크를 첨부해 주세요.
+
+  - type: checkboxes
+    id: sensitive-data-check
+    attributes:
+      label: 민감 정보 확인
+      options:
+        - label: 첨부 내용에서 비밀번호, 토큰, 개인정보, 내부 전용 정보를 제거했습니다.
+          required: true

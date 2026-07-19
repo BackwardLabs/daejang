@@ -1,0 +1,9 @@
+# 개인 에이전트 설정
+AGENTS.override.md
+CLAUDE.local.md
+.claude/settings.local.json
+
+# 로컬 환경 및 비밀 정보
+.env
+.env.*
+!.env.example
