@@ -1,14 +1,55 @@
-# [프로젝트 이름]
+# 대장 (Daejang)
 
-> 프로젝트가 해결하는 문제를 한 문장으로 설명하세요.
+> 거래소와 지갑의 디지털 자산 기록을 수집·정규화하고, 사용자가 검토할 수 있는 재현 가능한 장부와 보고서로 연결하는 GIWA MVP입니다.
 
-## 개요
+## 현재 범위
 
-프로젝트의 목적, 주요 사용자, 범위를 간단히 적으세요.
+이 저장소는 GIWA MVP의 웹 애플리케이션과 이후 Web API·Go Engine을 함께 수용할 기본 구조를 제공합니다. 현재 구현된 범위는 `apps/web`의 React 초기 틀과 웹 기술·온보딩 문서입니다.
+
+- Frontend: React 19, TypeScript 6, Vite 8
+- Package manager: npm workspaces
+- Quality: Oxlint, TypeScript, Vitest, Testing Library
+- MVP 데이터 소스: Upbit CSV 1개, EVM 지갑 주소 1개
+
+전체 서비스 경계와 아직 결정되지 않은 항목은 [웹 앱 기술 명세](docs/00-web-app-technical-spec.md)를 확인하세요. 로그인부터 첫 데이터 수집 시작까지의 UX는 [사용자 온보딩](docs/01-user-onboarding.md)에 정리되어 있습니다.
 
 ## 시작하기
 
-프로젝트별 설치 및 실행 방법을 적으세요.
+요구 사항:
+
+- Node.js `20.19+` 또는 `22.12+`
+- npm
+
+```bash
+npm install
+npm run dev
+```
+
+개발 서버는 기본적으로 `http://localhost:5173`에서 실행됩니다.
+
+## 검증 명령
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+## 디렉터리
+
+```text
+apps/
+  web/        React 웹 애플리케이션
+docs/         제품 흐름과 웹 기술 명세
+```
+
+기술 명세의 목표 구조에는 `apps/web-api`, `services/engine`, `proto`, `migrations`, `fixtures`가 포함되지만, 해당 구현이 시작되기 전까지 빈 디렉터리는 만들지 않습니다.
+
+## 기준 자료
+
+- [대장 Flow](https://www.figma.com/board/9rt2FVwNe1Dfv9DXLThXok/%EB%8C%80%EC%9E%A5-flow?node-id=58-145)
+- [Technical Spec — GIWA MVP v0.1](https://linear.app/giwa-daejang/document/technical-spec-giwa-mvp-v01-18d511232c66)
 
 ## 협업
 

@@ -1,0 +1,357 @@
+:root {
+  color: #171717;
+  background: #f5f3ef;
+  font-family:
+    Pretendard, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --ink: #171717;
+  --muted: #6e6a65;
+  --paper: #fffdf9;
+  --line: #dedad3;
+  --accent: #ff4b12;
+  --accent-soft: #fff0e9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+a {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 65%, white);
+  outline-offset: 4px;
+}
+
+.appShell {
+  min-height: 100vh;
+}
+
+.appHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  color: var(--ink);
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  text-decoration: none;
+}
+
+.brandMark {
+  display: grid;
+  gap: 3px;
+  width: 28px;
+}
+
+.brandMark span {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ink);
+}
+
+.brandMark span:nth-child(2) {
+  background: var(--accent);
+}
+
+.mainNavigation {
+  display: flex;
+  gap: 24px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.mainNavigation a {
+  text-decoration: none;
+}
+
+.mainNavigation a:hover {
+  color: var(--ink);
+}
+
+main {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+}
+
+.hero {
+  display: grid;
+  justify-items: start;
+  min-height: 620px;
+  padding: 112px 0 96px;
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.hero h1 {
+  max-width: 880px;
+  margin: 22px 0 28px;
+  font-size: clamp(3.4rem, 8vw, 7.2rem);
+  line-height: 0.92;
+  letter-spacing: -0.075em;
+}
+
+.hero h1 span {
+  display: block;
+  color: var(--accent);
+}
+
+.heroDescription {
+  max-width: 620px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1.75;
+  word-break: keep-all;
+}
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 38px;
+}
+
+.heroActions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 22px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.primaryAction {
+  color: white;
+  background: var(--ink);
+}
+
+.secondaryAction {
+  background: transparent;
+}
+
+.onboardingSection {
+  padding: 96px 0 112px;
+}
+
+.sectionHeading {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(280px, 0.8fr);
+  gap: 14px 60px;
+  align-items: end;
+}
+
+.sectionHeading .eyebrow {
+  grid-column: 1 / -1;
+}
+
+.sectionHeading h2,
+.sourceSection h2 {
+  margin: 0;
+  font-size: clamp(2.2rem, 4.6vw, 4.6rem);
+  line-height: 1.05;
+  letter-spacing: -0.055em;
+}
+
+.sectionHeading > p:last-child {
+  margin: 0 0 8px;
+  color: var(--muted);
+  line-height: 1.7;
+  word-break: keep-all;
+}
+
+.stepList {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  margin: 64px 0 120px;
+  padding: 0;
+  border-block: 1px solid var(--line);
+  list-style: none;
+}
+
+.stepList li {
+  display: grid;
+  gap: 52px;
+  min-height: 270px;
+  padding: 28px;
+  border-right: 1px solid var(--line);
+}
+
+.stepList li:last-child {
+  border-right: 0;
+}
+
+.stepList > li > span {
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.stepList h3,
+.sourceCard h3 {
+  margin: 0 0 10px;
+  font-size: 1.35rem;
+  letter-spacing: -0.03em;
+}
+
+.stepList p,
+.sourceCard > p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+  word-break: keep-all;
+}
+
+.sourceSection {
+  display: grid;
+  gap: 44px;
+}
+
+.sourceSection > div:first-child {
+  display: grid;
+  gap: 14px;
+}
+
+.sourceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+.sourceCard {
+  min-height: 270px;
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--paper);
+}
+
+.sourceCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 78px;
+}
+
+.sourceCardHeader p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.sourceCardHeader span {
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.footer {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 28px 0 44px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.footer p {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .appHeader {
+    width: min(100% - 28px, 1180px);
+  }
+
+  .mainNavigation {
+    gap: 14px;
+    font-size: 0.8rem;
+  }
+
+  main,
+  .footer {
+    width: min(100% - 28px, 1180px);
+  }
+
+  .hero {
+    min-height: 540px;
+    padding: 84px 0 72px;
+  }
+
+  .hero h1 {
+    font-size: clamp(3rem, 15vw, 5rem);
+  }
+
+  .sectionHeading,
+  .sourceGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .stepList {
+    grid-template-columns: 1fr;
+    margin-bottom: 88px;
+  }
+
+  .stepList li {
+    min-height: 0;
+    gap: 34px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .stepList li:last-child {
+    border-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
