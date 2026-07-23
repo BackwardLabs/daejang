@@ -9,9 +9,9 @@
 - Frontend: React 19, TypeScript 6, Vite 8
 - Package manager: npm workspaces
 - Quality: Oxlint, TypeScript, Vitest, Testing Library
-- MVP 데이터 소스: Upbit CSV 1개, EVM 지갑 주소 1개
+- MVP 데이터 소스: Upbit 거래내역 PDF 1개, EVM 지갑 주소 1개
 
-전체 서비스 경계와 아직 결정되지 않은 항목은 [웹 앱 기술 명세](docs/00-web-app-technical-spec.md)를 확인하세요. 로그인부터 첫 데이터 수집 시작까지의 UX는 [사용자 온보딩](docs/01-user-onboarding.md)에 정리되어 있습니다.
+전체 서비스 경계와 아직 결정되지 않은 항목은 [웹 앱 기술 명세](docs/00-web-app-technical-spec.md)를 확인하세요. 로그인과 가입 흐름은 [사용자 온보딩](docs/01-user-onboarding.md), 데이터 소스 등록과 날짜 설정은 [데이터 소스 등록 및 수집 기간 설정](docs/02-data-source-collection.md)에 정리되어 있습니다. 저장소에서 작업을 시작하는 방법은 [개발 가이드](docs/development-guide.md)를 따릅니다.
 
 ## 시작하기
 
@@ -58,6 +58,7 @@ docs/         제품 흐름과 웹 기술 명세
 - 변경 사항은 Pull Request로 제출합니다.
 - 코딩 에이전트는 [AGENTS.md](AGENTS.md)의 공통 지침을 따릅니다. Claude Code는 [CLAUDE.md](CLAUDE.md)를 통해 같은 지침을 불러옵니다.
 - 기여 방법은 [CONTRIBUTING.md](CONTRIBUTING.md)를 확인하세요.
+- 이슈부터 branch, 검증, PR과 병합까지의 실제 순서는 [개발 가이드](docs/development-guide.md)를 확인하세요.
 
 ## 저장소 초기 설정
 

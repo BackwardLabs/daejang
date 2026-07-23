@@ -8,11 +8,21 @@ const onboardingSteps = [
   },
   {
     id: '02',
+    title: '필수 내용 확인·동의',
+    description: '이용약관과 개인정보 처리방침을 각각 읽고 동의합니다.',
+  },
+  {
+    id: '03',
+    title: '서비스 계정 인증',
+    description: '지원 방식 중 하나를 선택하고 해당 인증 절차를 완료합니다.',
+  },
+  {
+    id: '04',
     title: '데이터 소스 등록',
     description: 'Upbit CSV 또는 EVM 지갑 주소 중 첫 소스를 등록합니다.',
   },
   {
-    id: '03',
+    id: '05',
     title: '수집 작업 시작',
     description: '비동기 Job을 만들고 홈에서 진행 상태를 이어서 확인합니다.',
   },
@@ -23,7 +33,7 @@ export function OnboardingOverview() {
     <section className="onboardingSection" id="onboarding" aria-labelledby="onboarding-title">
       <div className="sectionHeading">
         <p className="eyebrow">USER ONBOARDING</p>
-        <h2 id="onboarding-title">첫 데이터 수집까지 세 단계</h2>
+        <h2 id="onboarding-title">첫 데이터 수집까지 다섯 단계</h2>
         <p>
           온보딩 완료는 분석 완료가 아니라, 유효한 데이터 소스를 등록하고
           수집 작업을 시작한 시점입니다.

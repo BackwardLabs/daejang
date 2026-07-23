@@ -30,8 +30,9 @@ Go Engine 내부의 계산 모델, 데이터베이스 인덱스, 체인 Reorg, �
 | Public boundary | 확정 | React는 Web Backend의 HTTPS/JSON API만 호출 |
 | Internal boundary | 확정 | Web Backend는 private gRPC로 Go Engine 호출 |
 | Long-running work | 확정 | 요청은 즉시 `job_id`를 반환하고 웹은 polling |
-| MVP 입력 | 확정 | Upbit CSV 1개 + 등록 EVM 주소 1개 |
+| MVP 입력 | 확정 | Upbit 거래내역 PDF 1개 + 등록 EVM 주소 1개 |
 | Web Backend runtime | 미결정 | TypeScript/Node 또는 Go |
+| 회원가입 필수 절차 | 확정 | 이용약관·개인정보 처리방침을 각각 확인·동의한 뒤 선택한 서비스 계정 인증 진행 |
 | 로그인 방식 | 미결정 | email, OIDC 또는 지갑 서명 |
 | 첫 지원 체인 | 미결정 | Golden Dataset을 기준으로 결정 |
 
@@ -147,6 +148,7 @@ React는 화면에서 직접 gRPC 또는 Engine 모델을 사용하지 않는다
 | 지갑 등록 | `POST /api/v1/sources/wallets` | 등록된 데이터 소스 |
 | 업로드 세션 생성 | `POST /api/v1/uploads` | 제한된 Presigned URL |
 | 업로드 확정 | `POST /api/v1/uploads/{id}/confirm` | 검증된 데이터 소스 |
+| 수집 preview | `POST /api/v1/collection-previews` | 데이터 소스별 기간·예상 건수·경고 |
 | 수집 시작 | `POST /api/v1/syncs` | `job_id` |
 | 작업 조회 | `GET /api/v1/jobs/{id}` | 상태·단계·진행률 |
 | 활동 조회 | `GET /api/v1/activities` | cursor 기반 거래 목록 |
@@ -156,8 +158,9 @@ React는 화면에서 직접 gRPC 또는 Engine 모델을 사용하지 않는다
 
 다음 계약은 아직 미결정이다.
 
-- 회원가입 endpoint와 계정 활성화 방식
+- 회원가입 endpoint, 동의 문서 버전 조회·기록과 계정 활성화 방식
 - 등록된 데이터 소스 목록 및 온보딩 상태 조회 API
+- 수집 기간의 timezone, 포함 범위와 source coverage 검증 계약
 - 표준 JSON 성공·오류 envelope
 - `Idempotency-Key` 전달 방식, 보존 시간, 충돌 규칙
 - 보고서 다운로드용 공개 endpoint
@@ -169,6 +172,9 @@ API 계약이 확정되면 OpenAPI 또는 동등한 schema를 source of truth로
 
 상위 기술 명세의 웹 인증 기준:
 
+- 신규 사용자는 이용약관과 개인정보 처리방침을 각각 확인·동의한 뒤 서비스 계정 인증 방식을 선택한다.
+- Web Backend는 동의 문서 종류·버전, 동의 시각과 사용자를 연결해 기록하며 Client의 동의 여부만 신뢰하지 않는다.
+- 선택한 인증 방식의 서버 검증이 성공한 뒤에만 서비스 계정과 Session을 활성화한다.
 - Access Token은 약 10분 수명의 JWT이며 JavaScript memory에만 둔다.
 - Refresh Token은 임의 문자열이며 `__Host-giwa_rt` 이름의 `HttpOnly; Secure; SameSite=Strict; Path=/` cookie에 둔다.
 - Access Token과 Refresh Token을 `localStorage` 또는 `sessionStorage`에 저장하지 않는다.
@@ -233,10 +239,10 @@ UI 분기는 HTTP status만이 아니라 안정적인 application error code를 
 ## 10. 데이터와 보안
 
 - 지갑 private key와 seed phrase는 어떤 화면에서도 요청하지 않는다.
-- MVP 거래소 입력은 Upbit CSV이며 API Key·Secret 연결은 후속 범위다.
-- CSV는 짧은 수명의 제한된 Presigned URL로 private Object Storage에 업로드한다.
+- MVP 거래소 입력은 Upbit 거래내역 PDF이며 API Key·Secret 연결은 후속 범위다.
+- PDF는 짧은 수명의 제한된 Presigned URL로 private Object Storage에 업로드한다.
 - 서버가 크기, MIME type, checksum과 파일 구조를 검증하기 전에는 수집을 시작하지 않는다.
-- 브라우저 로그·분석 이벤트·오류 추적에 토큰, CSV 내용, 전체 지갑 주소, 거래 금액을 보내지 않는다.
+- 브라우저 로그·분석 이벤트·오류 추적에 토큰, PDF 내용, 전체 지갑 주소, 거래 금액을 보내지 않는다.
 - 다운로드 산출물은 private object의 short-lived URL로만 제공한다.
 - 다른 workspace의 리소스에 접근할 수 없음을 통합 테스트한다.
 
@@ -253,8 +259,10 @@ DB URL, S3 장기 자격증명, RPC Key, 거래소 Secret, Engine private endpoi
 Frontend 단위·컴포넌트 테스트:
 
 - 세션 확인 중 route 전환과 잘못된 화면 노출 방지
+- 이용약관·개인정보 처리방침 개별 동의와 미동의 상태의 다음 단계 차단
+- 서비스 계정 인증 방식 선택, 성공, 실패와 재시도 상태
 - refresh single-flight와 logout 상태 정리
-- 데이터 소스 선택, CSV, 지갑 입력 검증
+- 데이터 소스 선택, Upbit PDF, 지갑과 수집 기간 입력 검증
 - 모든 Job 상태·stage·오류 code 렌더링
 - keyboard, focus, label과 오류 연결
 - Access·Refresh Token을 Web Storage에 저장하지 않는지 확인
@@ -265,21 +273,26 @@ Frontend 단위·컴포넌트 테스트:
 - 인증·schema·권한 실패 요청이 Engine gRPC에 도달하지 않음
 - 다른 workspace 리소스 접근 차단
 - mutation 재시도 시 데이터 소스나 Job이 중복 생성되지 않음
-- Presigned URL 만료, MIME, 크기, checksum 검증
+- Presigned URL 만료, PDF MIME, 크기, checksum과 source coverage 검증
 
 End-to-end 핵심 경로:
 
-1. 신규 사용자 로그인 또는 회원가입
-2. Upbit CSV 또는 EVM 주소 등록
-3. 수집 Job 생성과 홈 이동
-4. Job 성공·실패·검토 필요 상태 확인
-5. 새로고침 이후 진행 상태 복구
+1. 신규 사용자가 이용약관과 개인정보 처리방침을 각각 확인·동의
+2. 서비스 계정 인증 방식 선택과 인증 성공
+3. 회원가입 완료 후 데이터 소스 등록 또는 나중에 하기
+4. Upbit PDF 또는 EVM 주소 선택과 수집 기간 설정
+5. 수집 Job 생성과 홈 이동
+6. Job 성공·실패·검토 필요 상태 확인
+7. 새로고침 이후 진행 상태 복구
 
 ## 12. 웹 완료 기준
 
 - [ ] React가 공개 Web API 외의 Engine·DB·S3 endpoint를 알지 못한다.
 - [ ] 인증 토큰이 Web Storage, bundle, log에 남지 않는다.
-- [ ] Upbit CSV와 EVM 주소 등록 경로가 제공된다.
+- [ ] 이용약관·개인정보 처리방침을 개별 동의하고 동의 버전을 추적할 수 있다.
+- [ ] 선택한 서비스 계정 인증이 성공한 뒤에만 회원가입이 완료된다.
+- [ ] Upbit PDF와 EVM 주소 등록 경로 및 가입 중 나중에 하기 동작이 제공된다.
+- [ ] 과세연도 또는 시작일·종료일로 수집 기간을 설정하고 source coverage를 확인할 수 있다.
 - [ ] 장시간 요청은 `job_id`로 추적하고 terminal 상태에서 polling을 중지한다.
 - [ ] 여섯 Job 상태와 주요 오류를 명시적으로 표현한다.
 - [ ] 새로고침 후 진행 중 작업을 복구한다.
@@ -291,9 +304,12 @@ End-to-end 핵심 경로:
 
 - TS-01 Web Backend runtime
 - 로그인·회원가입 방식과 endpoint
+- 이용약관·개인정보 처리방침 조회, 버전과 동의 기록 API
+- 서비스 계정 인증 방식별 challenge, callback, 만료와 복구 계약
 - 첫 EVM 체인과 주소 validation 규칙
 - 데이터 소스 목록 및 onboarding status API
-- CSV 최대 크기, encoding, 필수 column과 행 수 제한
+- Upbit PDF 문서 종류, 최대 크기, 페이지 수와 파싱 제한
+- 수집 기간의 최대 범위, timezone과 source coverage 정책
 - 표준 API envelope와 field error schema
 - Idempotency key의 header, TTL과 재사용 규칙
 - Polling 주기, background 정책과 진행률 신뢰 수준
@@ -305,5 +321,6 @@ End-to-end 핵심 경로:
 ## 14. 관련 문서
 
 - [사용자 온보딩 및 데이터 소스 연결](01-user-onboarding.md)
+- [데이터 소스 등록 및 수집 기간 설정](02-data-source-collection.md)
 - [대장 Flow](https://www.figma.com/board/9rt2FVwNe1Dfv9DXLThXok/%EB%8C%80%EC%9E%A5-flow?node-id=58-145)
 - [Technical Spec — GIWA MVP v0.1](https://linear.app/giwa-daejang/document/technical-spec-giwa-mvp-v01-18d511232c66)
