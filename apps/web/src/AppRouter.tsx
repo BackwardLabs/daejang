@@ -3,6 +3,9 @@ import { App } from './App.tsx'
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx'
 import { LedgerPage } from './features/ledger/LedgerPage.tsx'
 import { ReportPage } from './features/reports/ReportPage.tsx'
+import { SourceManagementPage } from './features/sources/SourceManagementPage.tsx'
+import { SourceMethodIntroPage } from './features/sources/SourceMethodIntroPage.tsx'
+import { SourceTypeSelectionPage } from './features/sources/SourceTypeSelectionPage.tsx'
 import {
   ProductPage,
   type ProductPageKind,
@@ -35,7 +38,10 @@ export function AppRouter() {
     return () => window.removeEventListener('popstate', handlePathChange)
   }, [])
 
-  if (protectedRoutes.has(path) && !isMockSessionAuthenticated()) {
+  const isProtectedRoute =
+    protectedRoutes.has(path) || path.startsWith('/sources/')
+
+  if (isProtectedRoute && !isMockSessionAuthenticated()) {
     return <App />
   }
 
@@ -51,9 +57,24 @@ export function AppRouter() {
     return <ReportPage />
   }
 
+  if (path === '/sources') {
+    return <SourceManagementPage />
+  }
+
+  if (path === '/sources/new') {
+    return <SourceTypeSelectionPage />
+  }
+
+  if (path === '/sources/new/upbit') {
+    return <SourceMethodIntroPage methodId="upbit-pdf" />
+  }
+
+  if (path === '/sources/new/wallet') {
+    return <SourceMethodIntroPage methodId="evm-address" />
+  }
+
   const productRoutes: Partial<Record<string, ProductPageKind>> = {
     '/settings': 'settings',
-    '/sources': 'sources',
   }
   const productPage = productRoutes[path]
 
