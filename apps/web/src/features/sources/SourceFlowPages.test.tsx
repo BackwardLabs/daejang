@@ -62,7 +62,7 @@ describe('source flow pages', () => {
       within(methods).getByRole('link', { name: 'EVM 공개 주소 선택' }),
     ).toHaveAttribute('href', '/app/sources/new/wallet')
     expect(
-      within(methods).getByText('암호화되지 않은 PDF 지원'),
+      within(methods).getByText('암호화 PDF는 비밀번호로 처리'),
     ).toBeInTheDocument()
     expect(
       within(methods).getByText('새 거래는 최신 PDF를 다시 등록'),
@@ -90,9 +90,11 @@ describe('source flow pages', () => {
       screen.getByText(/Upbit PDF는 자동 동기화되지 않습니다/),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/MVP에서는 암호화되지 않은 Upbit 거래내역서 PDF만/),
+      screen.getByText(/암호화된 PDF의 비밀번호는 파일 처리에만 사용하고/),
     ).toBeInTheDocument()
-    expect(screen.queryByText(/PDF 비밀번호/)).not.toBeInTheDocument()
+    expect(
+      within(flow).getByText(/PDF 비밀번호는 파일 처리에만 사용하고/),
+    ).toBeInTheDocument()
 
     expect(
       screen.getByRole('link', { name: 'PDF 등록 시작' }),

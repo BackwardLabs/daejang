@@ -241,8 +241,8 @@ MVP 선택지:
 1. React가 Web API에 Upload Session을 요청한다.
 2. 제한된 object key와 만료 시간을 가진 Presigned URL을 받는다.
 3. React가 private Object Storage에 파일을 직접 업로드한다.
-4. 업로드 완료를 Web API에 확인 요청한다.
-5. 서버가 크기, MIME type, checksum, PDF 구조와 문서 포함 기간을 검증한다.
+4. 업로드 완료를 Web API에 확인 요청하며 암호화된 문서인 경우에만 PDF 비밀번호를 HTTPS request body로 전달한다.
+5. 서버가 비밀번호를 요청 처리 중에만 사용해 크기, MIME type, checksum, PDF 구조와 문서 포함 기간을 검증한다.
 6. 성공한 경우에만 데이터 소스를 생성한다.
 7. 사용자가 수집 기간을 설정하고 확인하면 수집 Job을 생성한다.
 8. React는 `job_id`를 기준으로 홈에서 진행 상태를 조회한다.
@@ -252,12 +252,12 @@ MVP 선택지:
 - 허용 파일 크기와 최대 페이지 수
 - 실제 MIME type과 확장자
 - 지원하는 Upbit 문서 종류와 버전
-- 암호화, 빈 문서 또는 손상 여부
+- 입력한 비밀번호로 암호화 문서를 열 수 있는지, 빈 문서 또는 손상 여부
 - 거래 레코드와 날짜·수량·금액 추출 가능 여부
 - 문서에 포함된 최초·최종 거래일
 - 동일 checksum 파일의 중복 등록
 
-원본은 같은 object key로 덮어쓰지 않는다. 파일명과 PDF 내용은 분석 이벤트나 일반 application log에 기록하지 않는다. 상세 흐름과 날짜 기준은 [데이터 소스 등록 및 수집 기간 설정](02-data-source-collection.md)을 따른다.
+원본은 같은 object key로 덮어쓰지 않는다. 파일명, PDF 내용과 PDF 비밀번호는 browser storage, URL, 분석 이벤트나 일반 application log에 기록하지 않는다. 비밀번호는 Presigned URL이나 Object Storage metadata에 포함하지 않고 업로드 확인 요청 처리 후 폐기한다. 상세 흐름과 날짜 기준은 [데이터 소스 등록 및 수집 기간 설정](02-data-source-collection.md)을 따른다.
 
 ### 6.2 EVM 지갑 주소
 
