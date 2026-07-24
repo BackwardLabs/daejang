@@ -44,7 +44,7 @@ describe('upbitPdfRegistrationReducer', () => {
     })
     state = upbitPdfRegistrationReducer(state, {
       sourceId: 'source-upbit-1',
-      sourceStatus: 'UPLOADED',
+      sourceStatus: 'SOURCE_SAVED',
       type: 'SUBMIT_SUCCEEDED',
     })
 
@@ -54,7 +54,7 @@ describe('upbitPdfRegistrationReducer', () => {
         size: file.size,
       },
       sourceId: 'source-upbit-1',
-      sourceStatus: 'UPLOADED',
+      sourceStatus: 'SOURCE_SAVED',
       status: 'SOURCE_SAVED',
       view: 'complete',
     })

@@ -49,7 +49,7 @@ export type UpbitPdfRegistrationState =
         size: number
       }
       sourceId: string
-      sourceStatus: 'UPLOADED'
+      sourceStatus: 'SOURCE_SAVED'
       status: 'SOURCE_SAVED'
       view: 'complete'
     }
@@ -89,7 +89,7 @@ export type UpbitPdfRegistrationAction =
     }
   | {
       sourceId: string
-      sourceStatus: 'UPLOADED'
+      sourceStatus: 'SOURCE_SAVED'
       type: 'SUBMIT_SUCCEEDED'
     }
   | {
@@ -244,7 +244,7 @@ export type UpbitPdfRegistrationResult =
   | {
       ok: true
       sourceId: string
-      sourceStatus: 'UPLOADED'
+      sourceStatus: 'SOURCE_SAVED'
     }
   | {
       error: UpbitPdfRegistrationError
@@ -302,7 +302,7 @@ export const registerUpbitPdfMock: RegisterUpbitPdf = async ({
   return {
     ok: true,
     sourceId: 'src_upbit_preview',
-    sourceStatus: 'UPLOADED',
+    sourceStatus: 'SOURCE_SAVED',
   }
 }
 

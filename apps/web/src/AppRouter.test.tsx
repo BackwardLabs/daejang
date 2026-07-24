@@ -96,6 +96,59 @@ describe('AppRouter', () => {
     expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
   })
 
+  it('renders the collection period page for the saved source', async () => {
+    window.history.pushState(
+      {},
+      '',
+      '/app/sources/src_upbit_preview/period',
+    )
+
+    render(<AppRouter />)
+
+    expect(
+      screen.getByRole('heading', { name: '조회 기간 설정' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('src_upbit_preview'),
+    ).toBeInTheDocument()
+  })
+
+  it('resets period state when navigation changes to another source', async () => {
+    window.history.pushState(
+      {},
+      '',
+      '/app/sources/src_upbit_preview/period',
+    )
+    render(<AppRouter />)
+
+    expect(
+      await screen.findByText('src_upbit_preview'),
+    ).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: '조회 범위 확인' }),
+    )
+    expect(
+      await screen.findByRole('heading', {
+        name: '조회 기간 확인이 끝났어요',
+      }),
+    ).toBeInTheDocument()
+
+    window.history.pushState(
+      {},
+      '',
+      '/app/sources/src_upbit_preview_alt/period',
+    )
+    window.dispatchEvent(new PopStateEvent('popstate'))
+
+    expect(
+      await screen.findByRole('heading', { name: '조회 기간 설정' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('src_upbit_preview_alt'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('src_upbit_preview')).not.toBeInTheDocument()
+  })
+
   it('renders the settings product page', () => {
     window.history.pushState({}, '', '/app/settings')
 
