@@ -63,7 +63,7 @@ describe('UpbitPdfRegistrationPage', () => {
       return {
         ok: true,
         sourceId: 'source-upbit-2027',
-        sourceStatus: 'UPLOADED',
+        sourceStatus: 'SOURCE_SAVED',
       }
     }
 
@@ -112,10 +112,13 @@ describe('UpbitPdfRegistrationPage', () => {
         name: 'Upbit 데이터 소스를 등록했어요',
       }),
     ).toHaveFocus()
-    expect(screen.getByText('UPLOADED')).toBeInTheDocument()
+    expect(screen.getByText('SOURCE_SAVED')).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: '조회 기간 설정' }),
-    ).toBeDisabled()
+      screen.getByRole('link', { name: '조회 기간 설정' }),
+    ).toHaveAttribute(
+      'href',
+      '/sources/source-upbit-2027/period',
+    )
     expect(registrationCalls).toBe(1)
     expect(submittedFile).toBe(pdf)
     expect(submittedPassword).toBe(pdfPassword)
@@ -134,7 +137,7 @@ describe('UpbitPdfRegistrationPage', () => {
       return {
         ok: true,
         sourceId: 'source-upbit-no-password',
-        sourceStatus: 'UPLOADED',
+        sourceStatus: 'SOURCE_SAVED',
       }
     }
 
@@ -187,7 +190,7 @@ describe('UpbitPdfRegistrationPage', () => {
       return {
         ok: true,
         sourceId: 'unexpected-source',
-        sourceStatus: 'UPLOADED',
+        sourceStatus: 'SOURCE_SAVED',
       }
     }
 
@@ -235,7 +238,7 @@ describe('UpbitPdfRegistrationPage', () => {
       return {
         ok: true,
         sourceId: 'source-upbit-password-corrected',
-        sourceStatus: 'UPLOADED',
+        sourceStatus: 'SOURCE_SAVED',
       }
     }
 
@@ -319,7 +322,7 @@ describe('UpbitPdfRegistrationPage', () => {
       deferred.resolve({
         ok: true,
         sourceId: 'source-upbit-once',
-        sourceStatus: 'UPLOADED',
+        sourceStatus: 'SOURCE_SAVED',
       })
       await deferred.promise
     })
@@ -364,7 +367,7 @@ describe('UpbitPdfRegistrationPage', () => {
       return Promise.resolve({
         ok: true,
         sourceId: 'source-upbit-after-retry',
-        sourceStatus: 'UPLOADED',
+        sourceStatus: 'SOURCE_SAVED',
       })
     }
 

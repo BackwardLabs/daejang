@@ -7,6 +7,7 @@ import { SourceManagementPage } from './features/sources/SourceManagementPage.ts
 import { SourceMethodIntroPage } from './features/sources/SourceMethodIntroPage.tsx'
 import { SourceTypeSelectionPage } from './features/sources/SourceTypeSelectionPage.tsx'
 import { UpbitPdfRegistrationPage } from './features/sources/UpbitPdfRegistrationPage.tsx'
+import { CollectionPeriodPage } from './features/sources/CollectionPeriodPage.tsx'
 import {
   ProductPage,
   type ProductPageKind,
@@ -26,6 +27,25 @@ const protectedRoutes = new Set([
   '/settings',
   '/sources',
 ])
+
+function getCollectionPeriodSourceId(path: string) {
+  const match = path.match(/^\/sources\/([^/]+)\/period$/)
+
+  if (!match) {
+    return null
+  }
+
+  const encodedSourceId = match[1]
+  if (!encodedSourceId) {
+    return null
+  }
+
+  try {
+    return decodeURIComponent(encodedSourceId)
+  } catch {
+    return null
+  }
+}
 
 export function AppRouter() {
   const [path, setPath] = useState(() => normalizePath(window.location.pathname))
@@ -60,6 +80,17 @@ export function AppRouter() {
 
   if (path === '/sources') {
     return <SourceManagementPage />
+  }
+
+  const collectionPeriodSourceId = getCollectionPeriodSourceId(path)
+
+  if (collectionPeriodSourceId) {
+    return (
+      <CollectionPeriodPage
+        key={collectionPeriodSourceId}
+        sourceId={collectionPeriodSourceId}
+      />
+    )
   }
 
   if (path === '/sources/new') {

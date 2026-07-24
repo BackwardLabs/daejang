@@ -202,7 +202,7 @@ function RegistrationErrorNotice({
         ) : null}
         {copy.recovery === 'manage-or-replace' ? (
           <div className="pdf-error-notice__actions">
-            <a href="/app/sources">기존 소스 확인</a>
+            <a href="/sources">기존 소스 확인</a>
           </div>
         ) : null}
       </div>
@@ -555,11 +555,13 @@ function PdfReviewStep({
 function PdfCompletionStep({
   fileSummary,
   onReset,
+  periodHref,
   sourceStatus,
 }: {
   fileSummary: { name: string; size: number }
   onReset: () => void
-  sourceStatus: 'UPLOADED'
+  periodHref: string
+  sourceStatus: 'SOURCE_SAVED'
 }) {
   return (
     <section className="pdf-completion-card" aria-labelledby="pdf-completion-title">
@@ -595,20 +597,15 @@ function PdfCompletionStep({
       </div>
 
       <div className="pdf-completion-actions">
-        <button
-          type="button"
-          className="source-primary-action"
-          disabled
-          aria-describedby="period-follow-up-note"
-        >
+        <a className="source-primary-action" href={periodHref}>
           조회 기간 설정 <span aria-hidden="true">→</span>
-        </button>
+        </a>
         <button type="button" className="pdf-secondary-action" onClick={onReset}>
           PDF 추가 등록
         </button>
       </div>
       <p id="period-follow-up-note" className="pdf-completion-follow-up">
-        조회 기간 설정은 다음 stacked PR에서 연결됩니다.
+        등록한 Source는 유지되며, 다음 화면에서 문서 포함 기간을 확인합니다.
       </p>
     </section>
   )
@@ -849,6 +846,7 @@ export function UpbitPdfRegistrationPage({
           <PdfCompletionStep
             fileSummary={state.fileSummary}
             onReset={() => dispatch({ type: 'RESET' })}
+            periodHref={`/sources/${encodeURIComponent(state.sourceId)}/period`}
             sourceStatus={state.sourceStatus}
           />
         ) : null}

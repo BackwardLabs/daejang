@@ -98,7 +98,7 @@ describe('source flow pages', () => {
 
     expect(
       screen.getByRole('link', { name: 'PDF 등록 시작' }),
-    ).toHaveAttribute('href', '/app/sources/new/upbit/upload')
+    ).toHaveAttribute('href', '/sources/new/upbit/upload')
     expect(
       screen.getByRole('link', { name: '연결 방식 다시 선택' }),
     ).toHaveAttribute('href', '/sources/new')
