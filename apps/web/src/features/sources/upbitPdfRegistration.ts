@@ -7,6 +7,7 @@ export type UpbitPdfSelectionErrorCode =
 export type UpbitPdfRegistrationErrorCode =
   | 'DUPLICATE_SOURCE'
   | 'ENCRYPTED_OR_DAMAGED_DOCUMENT'
+  | 'PASSWORD_INVALID'
   | 'PROCESSING_FAILED'
   | 'UNSUPPORTED_DOCUMENT'
   | 'UPLOAD_CANCELLED'
@@ -256,6 +257,7 @@ export type UpbitPdfRegistrationRequest = {
   onStageChange: (
     status: 'DOCUMENT_UPLOADING' | 'SOURCE_SUBMITTING',
   ) => void
+  password: string | null
   signal: AbortSignal
 }
 

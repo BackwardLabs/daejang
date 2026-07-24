@@ -4,6 +4,7 @@ import {
   useRef,
   type ChangeEvent,
   type DragEvent,
+  type RefObject,
 } from 'react'
 import pdfStepActive from '../../assets/sources/pdf-step-active.svg'
 import pdfStepComplete from '../../assets/sources/pdf-step-complete.svg'
@@ -55,7 +56,7 @@ const registrationErrorCopy: Record<
   UpbitPdfRegistrationErrorCode,
   {
     body: string
-    recovery: 'manage-or-replace' | 'replace' | 'retry'
+    recovery: 'manage-or-replace' | 'password' | 'replace' | 'retry'
     title: string
   }
 > = {
@@ -65,9 +66,14 @@ const registrationErrorCopy: Record<
     title: '이미 등록된 PDF예요',
   },
   ENCRYPTED_OR_DAMAGED_DOCUMENT: {
-    body: '파일 암호를 입력받아 해제하지 않습니다. 암호화되지 않고 정상적으로 열리는 PDF로 교체해 주세요.',
+    body: '파일이 손상되었거나 서버에서 해독할 수 없습니다. 정상적으로 열리는 다른 PDF를 선택해 주세요.',
     recovery: 'replace',
     title: 'PDF를 열어 확인할 수 없어요',
+  },
+  PASSWORD_INVALID: {
+    body: '입력한 비밀번호를 확인한 뒤 다시 입력해 주세요. 선택한 파일은 유지됩니다.',
+    recovery: 'password',
+    title: 'PDF 비밀번호가 올바르지 않아요',
   },
   PROCESSING_FAILED: {
     body: '문서를 확인하는 동안 일시적인 문제가 발생했습니다. 선택한 파일을 유지한 채 다시 시도할 수 있습니다.',
@@ -178,7 +184,11 @@ function RegistrationErrorNotice({
   const copy = registrationErrorCopy[error.code]
 
   return (
-    <div className="pdf-error-notice pdf-error-notice--registration" role="alert">
+    <div
+      id="upbit-pdf-registration-error"
+      className="pdf-error-notice pdf-error-notice--registration"
+      role="alert"
+    >
       <span className="pdf-error-notice__icon" aria-hidden="true">
         !
       </span>
@@ -318,8 +328,8 @@ function PdfSelectionStep({
           <li>
             <span aria-hidden="true">02</span>
             <div>
-              <strong>암호화되지 않은 PDF</strong>
-              <p>파일 암호를 요청하거나 저장하지 않습니다.</p>
+              <strong>파일이 열리는지 확인</strong>
+              <p>손상된 PDF는 등록할 수 없습니다.</p>
             </div>
           </li>
           <li>
@@ -330,6 +340,16 @@ function PdfSelectionStep({
             </div>
           </li>
         </ul>
+        <div className="pdf-registration-aside__password-note">
+          <span>선택</span>
+          <div>
+            <strong>암호화된 PDF</strong>
+            <p>
+              다음 단계에서 비밀번호를 입력할 수 있으며, 입력값은 저장하지
+              않습니다.
+            </p>
+          </div>
+        </div>
         <div className="pdf-registration-aside__note">
           <strong>등록 후 처리</strong>
           <p>
@@ -350,6 +370,7 @@ function PdfReviewStep({
   onCancel,
   onReplace,
   onSubmit,
+  passwordInputRef,
   status,
 }: {
   error: UpbitPdfRegistrationError | null
@@ -359,12 +380,19 @@ function PdfReviewStep({
   onCancel: () => void
   onReplace: () => void
   onSubmit: () => void
+  passwordInputRef: RefObject<HTMLInputElement | null>
   status: 'DOCUMENT_UPLOADING' | 'SOURCE_EDITING' | 'SOURCE_SAVE_FAILED' | 'SOURCE_SUBMITTING'
 }) {
   const recovery = error ? registrationErrorCopy[error.code].recovery : null
-  const canRetry = recovery === 'retry'
+  const canRetry = recovery === 'password' || recovery === 'retry'
   const canCancelUpload =
     isSubmitting && status === 'DOCUMENT_UPLOADING'
+
+  useEffect(() => {
+    if (error?.code === 'PASSWORD_INVALID') {
+      passwordInputRef.current?.focus()
+    }
+  }, [error, passwordInputRef])
 
   return (
     <div className="pdf-registration-grid">
@@ -411,6 +439,30 @@ function PdfReviewStep({
           </div>
         </dl>
 
+        <div className="pdf-password-field">
+          <label htmlFor="upbit-pdf-password">
+            PDF 비밀번호 <span>(암호화되지 않은 경우 공백)</span>
+          </label>
+          <input
+            ref={passwordInputRef}
+            id="upbit-pdf-password"
+            type="password"
+            autoComplete="off"
+            disabled={isSubmitting}
+            aria-describedby={
+              error?.code === 'PASSWORD_INVALID'
+                ? 'upbit-pdf-password-notice upbit-pdf-registration-error'
+                : 'upbit-pdf-password-notice'
+            }
+            aria-invalid={error?.code === 'PASSWORD_INVALID' || undefined}
+            placeholder="비밀번호 입력"
+            spellCheck={false}
+          />
+          <p id="upbit-pdf-password-notice">
+            입력한 비밀번호는 파일 처리에만 사용하며 저장하지 않습니다.
+          </p>
+        </div>
+
         {isSubmitting ? (
           <div className="pdf-submit-status" role="status" aria-live="polite">
             <span className="pdf-submit-status__spinner" aria-hidden="true" />
@@ -451,7 +503,9 @@ function PdfReviewStep({
             >
               {isSubmitting
                 ? '등록 중…'
-                : canRetry
+                : recovery === 'password'
+                  ? '비밀번호로 다시 등록'
+                  : canRetry
                   ? '다시 시도'
                   : 'Upbit PDF 등록'}
               {!isSubmitting ? <span aria-hidden="true">→</span> : null}
@@ -571,6 +625,7 @@ export function UpbitPdfRegistrationPage({
   )
   const activeRequestRef = useRef(0)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const passwordInputRef = useRef<HTMLInputElement>(null)
   const submittingRef = useRef(false)
   const stepContentRef = useRef<HTMLDivElement>(null)
   const previousStepRef = useRef(1)
@@ -630,6 +685,9 @@ export function UpbitPdfRegistrationPage({
     activeRequestRef.current += 1
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
+    if (passwordInputRef.current) {
+      passwordInputRef.current.value = ''
+    }
     submittingRef.current = false
     dispatch({ type: 'REPLACE_FILE' })
   }
@@ -660,6 +718,13 @@ export function UpbitPdfRegistrationPage({
     const controller = new AbortController()
     abortControllerRef.current = controller
     const { file, intentKey } = state
+    const enteredPassword = passwordInputRef.current?.value ?? ''
+    let password: string | null =
+      enteredPassword === '' ? null : enteredPassword
+
+    if (passwordInputRef.current) {
+      passwordInputRef.current.value = ''
+    }
 
     dispatch({ type: 'SUBMIT_STARTED' })
 
@@ -675,6 +740,7 @@ export function UpbitPdfRegistrationPage({
             dispatch({ status, type: 'SUBMIT_STAGE_CHANGED' })
           }
         },
+        password,
         signal: controller.signal,
       })
 
@@ -705,6 +771,7 @@ export function UpbitPdfRegistrationPage({
         })
       }
     } finally {
+      password = null
       if (activeRequestRef.current === requestId) {
         abortControllerRef.current = null
         submittingRef.current = false
@@ -727,7 +794,7 @@ export function UpbitPdfRegistrationPage({
           }
         : {
             description:
-              '암호화되지 않은 Upbit 거래내역서 PDF 한 개를 등록합니다.',
+              'Upbit 거래내역서 PDF 한 개를 등록하고, 암호화된 파일은 다음 단계에서 비밀번호를 입력합니다.',
             title: 'Upbit PDF 등록',
           }
 
@@ -759,6 +826,7 @@ export function UpbitPdfRegistrationPage({
             onCancel={() => undefined}
             onReplace={handleReplace}
             onSubmit={handleSubmit}
+            passwordInputRef={passwordInputRef}
             status={state.status}
           />
         ) : null}
@@ -772,6 +840,7 @@ export function UpbitPdfRegistrationPage({
             onCancel={handleCancelUpload}
             onReplace={() => undefined}
             onSubmit={() => undefined}
+            passwordInputRef={passwordInputRef}
             status={state.status}
           />
         ) : null}
@@ -786,7 +855,8 @@ export function UpbitPdfRegistrationPage({
       </div>
 
       <p className="source-footer-note">
-        PDF 파일·본문·파일명은 브라우저 저장소나 URL에 남기지 않습니다.
+        PDF 파일·본문·파일명·비밀번호는 브라우저 저장소나 URL에 남기지
+        않습니다.
       </p>
     </SourceFlowLayout>
   )

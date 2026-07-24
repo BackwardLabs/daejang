@@ -42,7 +42,7 @@ export const sourceMethodDefinitions: Record<
     badge: 'PDF 업로드',
     bullets: [
       'Upbit 거래내역서 PDF만 필수',
-      '암호화되지 않은 PDF 지원',
+      '암호화 PDF는 비밀번호로 처리',
       '새 거래는 최신 PDF를 다시 등록',
     ],
     description:
@@ -52,7 +52,7 @@ export const sourceMethodDefinitions: Record<
     intro: {
       badge: 'PDF 업로드',
       description:
-        'MVP에서는 암호화되지 않은 Upbit 거래내역서 PDF만 등록하면 됩니다. 입출금 증명서나 별도 자산 자료는 필수가 아닙니다.',
+        'MVP에서는 Upbit 거래내역서 PDF만 등록하면 됩니다. 암호화된 PDF의 비밀번호는 파일 처리에만 사용하고 저장하지 않습니다.',
       eyebrow: 'DATA SOURCES · UPBIT',
       footer:
         '소스 등록이 끝나면 조회 기간과 문서 포함 기간을 확인한 뒤 수집을 시작합니다.',

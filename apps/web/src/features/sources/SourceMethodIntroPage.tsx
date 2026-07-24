@@ -94,10 +94,17 @@ export function SourceMethodIntroPage({
           </ol>
           <div>
             <strong>보안 원칙</strong>
-            <p>
-              파일 암호·계정 자격증명·private key·seed phrase를 요청하거나
-              저장하지 않습니다.
-            </p>
+            {isUpbitPdf ? (
+              <p>
+                PDF 비밀번호는 파일 처리에만 사용하고 저장하지 않습니다.
+                계정 자격증명·private key·seed phrase는 요청하지 않습니다.
+              </p>
+            ) : (
+              <p>
+                파일 암호·계정 자격증명·private key·seed phrase를 요청하거나
+                저장하지 않습니다.
+              </p>
+            )}
           </div>
         </aside>
       </section>
