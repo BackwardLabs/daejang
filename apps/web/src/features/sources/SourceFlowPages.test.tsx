@@ -74,7 +74,7 @@ describe('source flow pages', () => {
     ).toBeInTheDocument()
   })
 
-  it('explains the Upbit PDF flow while its follow-up step remains unavailable', () => {
+  it('explains the Upbit PDF flow and links to registration', () => {
     render(<SourceMethodIntroPage methodId="upbit-pdf" />)
 
     expect(
@@ -85,7 +85,7 @@ describe('source flow pages', () => {
     })
     expect(within(flow).getByText('PDF 선택')).toBeInTheDocument()
     expect(within(flow).getByText('등록 정보 확인')).toBeInTheDocument()
-    expect(within(flow).getByText('수집 범위 확인')).toBeInTheDocument()
+    expect(within(flow).getByText('등록 완료')).toBeInTheDocument()
     expect(
       screen.getByText(/Upbit PDF는 자동 동기화되지 않습니다/),
     ).toBeInTheDocument()
@@ -94,11 +94,9 @@ describe('source flow pages', () => {
     ).toBeInTheDocument()
     expect(screen.queryByText(/PDF 비밀번호/)).not.toBeInTheDocument()
 
-    const startButton = screen.getByRole('button', { name: 'PDF 등록 시작' })
-    expect(startButton).toBeDisabled()
-    expect(startButton).toHaveAccessibleDescription(
-      '입력·업로드 단계는 다음 stacked PR에서 연결됩니다.',
-    )
+    expect(
+      screen.getByRole('link', { name: 'PDF 등록 시작' }),
+    ).toHaveAttribute('href', '/sources/new/upbit/upload')
     expect(
       screen.getByRole('link', { name: '연결 방식 다시 선택' }),
     ).toHaveAttribute('href', '/sources/new')

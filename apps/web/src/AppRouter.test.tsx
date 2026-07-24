@@ -80,6 +80,7 @@ describe('AppRouter', () => {
   it.each([
     ['/sources/new', '데이터 소스 추가'],
     ['/sources/new/upbit', 'Upbit PDF 등록'],
+    ['/sources/new/upbit/upload', 'Upbit PDF 등록'],
     ['/sources/new/wallet', 'EVM 공개 주소 등록'],
   ])('renders the source flow page at %s', (path, heading) => {
     window.history.pushState({}, '', path)
