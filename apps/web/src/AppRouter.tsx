@@ -6,6 +6,7 @@ import { ReportPage } from './features/reports/ReportPage.tsx'
 import { SourceManagementPage } from './features/sources/SourceManagementPage.tsx'
 import { SourceMethodIntroPage } from './features/sources/SourceMethodIntroPage.tsx'
 import { SourceTypeSelectionPage } from './features/sources/SourceTypeSelectionPage.tsx'
+import { UpbitPdfRegistrationPage } from './features/sources/UpbitPdfRegistrationPage.tsx'
 import {
   ProductPage,
   type ProductPageKind,
@@ -56,6 +57,10 @@ export function AppRouter() {
 
   if (path === '/app/sources/new/upbit') {
     return <SourceMethodIntroPage methodId="upbit-pdf" />
+  }
+
+  if (path === '/app/sources/new/upbit/upload') {
+    return <UpbitPdfRegistrationPage />
   }
 
   if (path === '/app/sources/new/wallet') {

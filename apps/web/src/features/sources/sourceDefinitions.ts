@@ -66,12 +66,12 @@ export const sourceMethodDefinitions: Record<
           label: 'PDF 선택',
         },
         {
-          description: '파일 정보와 문서 포함 기간을 확인합니다.',
+          description: '파일 정보와 등록 조건을 확인합니다.',
           label: '등록 정보 확인',
         },
         {
-          description: '조회 기간과 예상 거래를 확인합니다.',
-          label: '수집 범위 확인',
+          description: '서버 확인 후 데이터 소스를 저장합니다.',
+          label: '등록 완료',
         },
       ],
       subtitle: '거래소 거래내역서 PDF를 데이터 소스로 등록합니다.',
