@@ -481,6 +481,11 @@ body:has(.source-page) {
   text-underline-offset: 3px;
 }
 
+.source-intro-actions > .source-primary-action {
+  color: #fff;
+  text-decoration: none;
+}
+
 .source-follow-up-note {
   margin: 9px 0 0;
   color: var(--source-subtle);
