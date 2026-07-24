@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import './page-header.css'
 
-export type PageHeaderTone = 'dashboard' | 'product' | 'workspace'
+export type PageHeaderTone = 'dashboard' | 'product' | 'source' | 'workspace'
 
 export function PageHeader({
   actions,

@@ -3,6 +3,9 @@ import { App } from './App.tsx'
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx'
 import { LedgerPage } from './features/ledger/LedgerPage.tsx'
 import { ReportPage } from './features/reports/ReportPage.tsx'
+import { SourceManagementPage } from './features/sources/SourceManagementPage.tsx'
+import { SourceMethodIntroPage } from './features/sources/SourceMethodIntroPage.tsx'
+import { SourceTypeSelectionPage } from './features/sources/SourceTypeSelectionPage.tsx'
 import {
   ProductPage,
   type ProductPageKind,
@@ -43,9 +46,24 @@ export function AppRouter() {
     return <ReportPage />
   }
 
+  if (path === '/app/sources') {
+    return <SourceManagementPage />
+  }
+
+  if (path === '/app/sources/new') {
+    return <SourceTypeSelectionPage />
+  }
+
+  if (path === '/app/sources/new/upbit') {
+    return <SourceMethodIntroPage methodId="upbit-pdf" />
+  }
+
+  if (path === '/app/sources/new/wallet') {
+    return <SourceMethodIntroPage methodId="evm-address" />
+  }
+
   const productRoutes: Partial<Record<string, ProductPageKind>> = {
     '/app/settings': 'settings',
-    '/app/sources': 'sources',
   }
   const productPage = productRoutes[path]
 
