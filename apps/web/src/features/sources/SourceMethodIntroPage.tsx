@@ -11,8 +11,9 @@ export function SourceMethodIntroPage({
   methodId: SourceMethodId
 }) {
   const method = sourceMethodDefinitions[methodId]
+  const isUpbitPdf = methodId === 'upbit-pdf'
   const actionLabel =
-    methodId === 'upbit-pdf' ? 'PDF 등록 시작' : '공개 주소 등록 시작'
+    isUpbitPdf ? 'PDF 등록 시작' : '공개 주소 등록 시작'
 
   return (
     <SourceFlowLayout
@@ -50,21 +51,32 @@ export function SourceMethodIntroPage({
           </div>
 
           <div className="source-intro-actions">
-            <button
-              type="button"
-              className="source-primary-action"
-              disabled
-              aria-describedby={`${method.id}-follow-up`}
-            >
-              {actionLabel} <span aria-hidden="true">→</span>
-            </button>
+            {isUpbitPdf ? (
+              <a
+                className="source-primary-action"
+                href="/sources/new/upbit/upload"
+              >
+                {actionLabel} <span aria-hidden="true">→</span>
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="source-primary-action"
+                disabled
+                aria-describedby={`${method.id}-follow-up`}
+              >
+                {actionLabel} <span aria-hidden="true">→</span>
+              </button>
+            )}
             <a href="/sources/new">
               <span aria-hidden="true">←</span> 연결 방식 다시 선택
             </a>
           </div>
-          <p id={`${method.id}-follow-up`} className="source-follow-up-note">
-            입력·업로드 단계는 다음 stacked PR에서 연결됩니다.
-          </p>
+          {!isUpbitPdf ? (
+            <p id={`${method.id}-follow-up`} className="source-follow-up-note">
+              입력·업로드 단계는 다음 stacked PR에서 연결됩니다.
+            </p>
+          ) : null}
         </div>
 
         <aside className="source-intro-summary" aria-label={`${method.title} 등록 흐름`}>
