@@ -13,14 +13,14 @@ export function SourceMethodIntroPage({
   const method = sourceMethodDefinitions[methodId]
   const isUpbitPdf = methodId === 'upbit-pdf'
   const actionLabel =
-    isUpbitPdf ? 'PDF 등록 시작' : '공개 주소 등록 시작'
+    isUpbitPdf ? 'PDF 등록 시작' : '지갑 연결 시작'
 
   return (
     <SourceFlowLayout
       badge={{ label: method.intro.badge, tone: method.tone, type: 'flow' }}
       description={method.intro.subtitle}
       eyebrow={method.intro.eyebrow}
-      title={methodId === 'upbit-pdf' ? 'Upbit PDF 등록' : 'EVM 공개 주소 등록'}
+      title={methodId === 'upbit-pdf' ? 'Upbit PDF 등록' : 'EVM Wallet 연결'}
     >
       <section
         className={`source-intro-card source-intro-card--${method.tone}`}
@@ -51,32 +51,20 @@ export function SourceMethodIntroPage({
           </div>
 
           <div className="source-intro-actions">
-            {isUpbitPdf ? (
-              <a
-                className="source-primary-action"
-                href="/app/sources/new/upbit/upload"
-              >
-                {actionLabel} <span aria-hidden="true">→</span>
-              </a>
-            ) : (
-              <button
-                type="button"
-                className="source-primary-action"
-                disabled
-                aria-describedby={`${method.id}-follow-up`}
-              >
-                {actionLabel} <span aria-hidden="true">→</span>
-              </button>
-            )}
+            <a
+              className="source-primary-action"
+              href={
+                isUpbitPdf
+                  ? '/app/sources/new/upbit/upload'
+                  : '/app/sources/new/wallet/connect'
+              }
+            >
+              {actionLabel} <span aria-hidden="true">→</span>
+            </a>
             <a href="/app/sources/new">
               <span aria-hidden="true">←</span> 연결 방식 다시 선택
             </a>
           </div>
-          {!isUpbitPdf ? (
-            <p id={`${method.id}-follow-up`} className="source-follow-up-note">
-              입력·업로드 단계는 다음 stacked PR에서 연결됩니다.
-            </p>
-          ) : null}
         </div>
 
         <aside className="source-intro-summary" aria-label={`${method.title} 등록 흐름`}>
@@ -101,8 +89,9 @@ export function SourceMethodIntroPage({
               </p>
             ) : (
               <p>
-                파일 암호·계정 자격증명·private key·seed phrase를 요청하거나
-                저장하지 않습니다.
+                private key·seed phrase·쓰기·출금 권한을 요청하거나
+                저장하지 않습니다. 오프체인 서명은 지갑 소유권 확인에만
+                사용합니다.
               </p>
             )}
           </div>

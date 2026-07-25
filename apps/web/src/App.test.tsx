@@ -17,7 +17,7 @@ describe('App', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Upbit CSV' })).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: 'EVM 지갑 주소' }),
+      screen.getByRole('heading', { name: 'EVM Wallet 연결' }),
     ).toBeInTheDocument()
   })
 })

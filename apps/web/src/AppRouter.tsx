@@ -8,6 +8,7 @@ import { SourceMethodIntroPage } from './features/sources/SourceMethodIntroPage.
 import { SourceTypeSelectionPage } from './features/sources/SourceTypeSelectionPage.tsx'
 import { UpbitPdfRegistrationPage } from './features/sources/UpbitPdfRegistrationPage.tsx'
 import { CollectionPeriodPage } from './features/sources/CollectionPeriodPage.tsx'
+import { EvmWalletConnectionPage } from './features/sources/EvmWalletConnectionPage.tsx'
 import {
   ProductPage,
   type ProductPageKind,
@@ -95,7 +96,11 @@ export function AppRouter() {
   }
 
   if (path === '/app/sources/new/wallet') {
-    return <SourceMethodIntroPage methodId="evm-address" />
+    return <SourceMethodIntroPage methodId="evm-wallet" />
+  }
+
+  if (path === '/app/sources/new/wallet/connect') {
+    return <EvmWalletConnectionPage />
   }
 
   const productRoutes: Partial<Record<string, ProductPageKind>> = {

@@ -42,7 +42,7 @@ describe('source flow pages', () => {
     expect(screen.getByText('2026 과세연도')).toBeInTheDocument()
   })
 
-  it('offers only the documented Upbit PDF and EVM public-address methods', () => {
+  it('offers only the documented Upbit PDF and EVM Wallet methods', () => {
     render(<SourceTypeSelectionPage />)
 
     const methods = screen.getByRole('region', {
@@ -59,7 +59,7 @@ describe('source flow pages', () => {
       within(methods).getByRole('link', { name: 'Upbit PDF 선택' }),
     ).toHaveAttribute('href', '/app/sources/new/upbit')
     expect(
-      within(methods).getByRole('link', { name: 'EVM 공개 주소 선택' }),
+      within(methods).getByRole('link', { name: 'EVM Wallet 선택' }),
     ).toHaveAttribute('href', '/app/sources/new/wallet')
     expect(
       within(methods).getByText('암호화 PDF는 비밀번호로 처리'),
@@ -69,7 +69,12 @@ describe('source flow pages', () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        'Upbit는 PDF 업로드, EVM은 공개 주소 읽기 방식으로 연결합니다.',
+        'Upbit는 PDF 업로드, EVM은 브라우저 지갑의 읽기 전용 연결 방식으로 등록합니다.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(methods).getByText(
+        /소유권 확인 서명은 거래나 자산 이동을 승인하지 않습니다/,
       ),
     ).toBeInTheDocument()
   })
@@ -104,29 +109,35 @@ describe('source flow pages', () => {
     ).toHaveAttribute('href', '/app/sources/new')
   })
 
-  it('keeps EVM registration read-only and does not request wallet secrets', () => {
-    render(<SourceMethodIntroPage methodId="evm-address" />)
+  it('explains the read-only EVM Wallet connection and links to the connection flow', () => {
+    render(<SourceMethodIntroPage methodId="evm-wallet" />)
 
     expect(
-      screen.getByRole('heading', { name: 'EVM 공개 주소 등록' }),
+      screen.getByRole('heading', { name: 'EVM Wallet 연결' }),
     ).toBeInTheDocument()
     const flow = screen.getByRole('complementary', {
       name: 'EVM Wallet 등록 흐름',
     })
-    expect(within(flow).getByText('공개 주소 등록')).toBeInTheDocument()
+    expect(within(flow).getByText('지갑 연결')).toBeInTheDocument()
     expect(within(flow).getByText('수집 범위 확인')).toBeInTheDocument()
-    expect(within(flow).getByText('수집 전 확인')).toBeInTheDocument()
+    expect(within(flow).getByText('연결 완료')).toBeInTheDocument()
     expect(
-      screen.getByText(/소유권 확인 서명을 요구하거나 저장하지 않습니다/),
+      screen.getByText(/가스비가 없는 오프체인 메시지 서명/),
+    ).toBeInTheDocument()
+    expect(
+      within(flow).getByText(
+        /private key·seed phrase·쓰기·출금 권한을 요청하거나 저장하지 않습니다/,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(flow).getByText(
+        /오프체인 서명은 지갑 소유권 확인에만 사용합니다/,
+      ),
     ).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
 
-    const startButton = screen.getByRole('button', {
-      name: '공개 주소 등록 시작',
-    })
-    expect(startButton).toBeDisabled()
-    expect(startButton).toHaveAccessibleDescription(
-      '입력·업로드 단계는 다음 stacked PR에서 연결됩니다.',
-    )
+    expect(
+      screen.getByRole('link', { name: '지갑 연결 시작' }),
+    ).toHaveAttribute('href', '/app/sources/new/wallet/connect')
   })
 })

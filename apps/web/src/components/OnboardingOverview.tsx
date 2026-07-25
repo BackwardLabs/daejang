@@ -19,7 +19,7 @@ const onboardingSteps = [
   {
     id: '04',
     title: '데이터 소스 등록',
-    description: 'Upbit CSV 또는 EVM 지갑 주소 중 첫 소스를 등록합니다.',
+    description: 'Upbit 문서 또는 EVM Wallet 중 첫 소스를 등록합니다.',
   },
   {
     id: '05',
@@ -67,8 +67,8 @@ export function OnboardingOverview() {
           <SourceOptionCard
             eyebrow="개인 지갑"
             status="MVP"
-            title="EVM 지갑 주소"
-            description="지원 체인과 공개 주소를 등록합니다. private key나 seed phrase는 요청하지 않습니다."
+            title="EVM Wallet 연결"
+            description="브라우저 지갑을 읽기 전용으로 연결하고 오프체인 서명으로 소유권을 확인합니다. private key나 seed phrase는 요청하지 않습니다."
           />
         </div>
       </div>
