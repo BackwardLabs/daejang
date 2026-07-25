@@ -31,7 +31,7 @@ function SourceMethodCard({
         <span>{method.noticeBody}</span>
       </div>
       <a className="source-primary-action" href={method.href}>
-        {method.id === 'upbit-pdf' ? 'Upbit PDF 선택' : 'EVM 공개 주소 선택'}
+        {method.id === 'upbit-pdf' ? 'Upbit PDF 선택' : 'EVM Wallet 선택'}
         <span aria-hidden="true">→</span>
       </a>
     </article>
@@ -47,17 +47,18 @@ export function SourceTypeSelectionPage() {
       <div className="source-mvp-guide" role="note">
         <strong>MVP</strong>
         <span>
-          Upbit는 PDF 업로드, EVM은 공개 주소 읽기 방식으로 연결합니다.
+          Upbit는 PDF 업로드, EVM은 브라우저 지갑의 읽기 전용 연결 방식으로
+          등록합니다.
         </span>
       </div>
 
       <section className="source-method-grid" aria-label="데이터 소스 연결 방식">
         <SourceMethodCard method={sourceMethodDefinitions['upbit-pdf']} />
-        <SourceMethodCard method={sourceMethodDefinitions['evm-address']} />
+        <SourceMethodCard method={sourceMethodDefinitions['evm-wallet']} />
       </section>
 
       <p className="source-footer-note">
-        두 방식 모두 소스 등록과 조회 기간 확인 후 수집 작업을 시작합니다.
+        두 방식 모두 수집 범위를 확인한 뒤 최초 수집 작업을 시작합니다.
       </p>
     </SourceFlowLayout>
   )
