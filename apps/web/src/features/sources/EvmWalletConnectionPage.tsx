@@ -8,24 +8,19 @@ import {
 } from 'react'
 import pdfStepComplete from '../../assets/sources/pdf-step-complete.svg'
 import registrationComplete from '../../assets/sources/registration-complete.svg'
-import coinbaseLogo from '../../assets/sources/wallet/coinbase.svg'
 import metamaskLogo from '../../assets/sources/wallet/metamask.svg'
 import noMark from '../../assets/sources/wallet/no-mark.svg'
 import otherWalletsIcon from '../../assets/sources/wallet/other-wallets.svg'
-import rabbyLogo from '../../assets/sources/wallet/rabby.svg'
 import stepActive from '../../assets/sources/wallet/step-active.svg'
 import stepInactive from '../../assets/sources/wallet/step-inactive.svg'
-import walletConnectLogo from '../../assets/sources/wallet/walletconnect.svg'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import {
   EVM_WALLET_ALLOWED_TAX_YEARS,
   completeWalletConnectionMock,
-  connectWalletMock,
   createEvmWalletIntentKey,
   evmWalletFlowReducer,
   initialEvmWalletFlowState,
   maskEvmAddress,
-  requestOwnershipSignatureMock,
   validateEvmWalletPeriodDraft,
   type CompleteWalletConnection,
   type ConnectedWallet,
@@ -37,10 +32,17 @@ import {
   type EvmWalletOwnershipError,
   type EvmWalletPeriodDraft,
   type EvmWalletPeriodFieldErrorCode,
+  type EvmWalletProofMode,
   type EvmWalletProviderId,
   type NormalizedEvmWalletPeriod,
   type RequestOwnershipSignature,
 } from './evmWalletFlow.ts'
+import {
+  connectMetaMaskWallet,
+  requestMetaMaskOwnershipSignature,
+  subscribeToMetaMaskSession,
+  type MetaMaskSessionHandlers,
+} from './metamaskWalletAdapter.ts'
 import './evm-wallet-flow.css'
 
 const walletProviders: ReadonlyArray<{
@@ -48,14 +50,7 @@ const walletProviders: ReadonlyArray<{
   id: EvmWalletProviderId
   name: string
 }> = [
-  { icon: rabbyLogo, id: 'rabby', name: 'Rabby Wallet' },
   { icon: metamaskLogo, id: 'metamask', name: 'MetaMask' },
-  {
-    icon: walletConnectLogo,
-    id: 'walletconnect',
-    name: 'WalletConnect (Reown)',
-  },
-  { icon: coinbaseLogo, id: 'coinbase', name: 'Coinbase Wallet' },
   { icon: otherWalletsIcon, id: 'other', name: 'Other Wallets' },
 ]
 
@@ -72,6 +67,10 @@ const connectionErrorCopy: Record<
   EvmWalletConnectionError['code'],
   { body: string; title: string }
 > = {
+  ACCOUNT_CHANGED: {
+    body: 'MetaMask에서 선택한 계정이 변경되었습니다. 사용할 계정을 확인한 뒤 다시 연결해 주세요.',
+    title: '연결된 계정이 변경되었어요',
+  },
   CONNECTION_FAILED: {
     body: '지갑 연결을 완료하지 못했습니다. 지갑 앱과 네트워크 상태를 확인한 뒤 다시 시도해 주세요.',
     title: '지갑을 연결하지 못했어요',
@@ -80,9 +79,21 @@ const connectionErrorCopy: Record<
     body: '지갑에서 연결 요청을 취소했습니다. 준비가 되면 같은 지갑으로 다시 연결할 수 있습니다.',
     title: '지갑 연결이 취소되었어요',
   },
+  NETWORK_CHANGED: {
+    body: 'MetaMask 네트워크가 Ethereum Mainnet이 아닌 체인으로 변경되었습니다. 네트워크를 확인한 뒤 다시 연결해 주세요.',
+    title: '연결된 네트워크가 변경되었어요',
+  },
+  PROVIDER_DISCONNECTED: {
+    body: 'MetaMask 연결이 종료되었습니다. 지갑 잠금과 브라우저 확장 상태를 확인한 뒤 다시 연결해 주세요.',
+    title: 'MetaMask 연결이 끊어졌어요',
+  },
   PROVIDER_UNAVAILABLE: {
-    body: '선택한 지갑을 이 브라우저에서 찾을 수 없습니다. 지갑을 설치하거나 다른 연결 방식을 선택해 주세요.',
-    title: '선택한 지갑을 사용할 수 없어요',
+    body: '이 브라우저에서 MetaMask 확장 프로그램을 찾을 수 없습니다. MetaMask를 설치하고 이 사이트의 접근을 허용한 뒤 다시 시도해 주세요.',
+    title: 'MetaMask를 찾을 수 없어요',
+  },
+  UNSUPPORTED_NETWORK: {
+    body: '현재는 Ethereum Mainnet만 지원합니다. MetaMask 네트워크를 Ethereum Mainnet으로 전환해 주세요.',
+    title: '지원하지 않는 네트워크예요',
   },
 }
 
@@ -200,9 +211,13 @@ function FlowAlert({
       : error.code === 'BACKFILL_FAILED' ||
           error.code === 'SOURCE_SAVE_FAILED'
         ? completionErrorCopy[error.code]
-        : error.code === 'CONNECTION_FAILED' ||
+        : error.code === 'ACCOUNT_CHANGED' ||
+            error.code === 'CONNECTION_FAILED' ||
             error.code === 'CONNECTION_REJECTED' ||
-            error.code === 'PROVIDER_UNAVAILABLE'
+            error.code === 'NETWORK_CHANGED' ||
+            error.code === 'PROVIDER_DISCONNECTED' ||
+            error.code === 'PROVIDER_UNAVAILABLE' ||
+            error.code === 'UNSUPPORTED_NETWORK'
           ? connectionErrorCopy[error.code]
           : signatureErrorCopy[error.code]
 
@@ -215,6 +230,34 @@ function FlowAlert({
         <strong>{copy.title}</strong>
         <p>{copy.body}</p>
       </div>
+    </div>
+  )
+}
+
+function WalletRuntimeNotice({
+  proofMode,
+}: {
+  proofMode: EvmWalletProofMode
+}) {
+  if (proofMode === 'SERVER_VERIFIED') {
+    return null
+  }
+
+  const copy =
+    proofMode === 'CLIENT_PREVIEW'
+      ? {
+          body: '현재 브라우저의 MetaMask로 계정 연결과 메시지 서명을 완료했습니다. Source 저장과 실제 backfill은 Web Backend 연결 후 동작합니다.',
+          title: 'MetaMask 연결·서명 실제 동작',
+        }
+      : {
+          body: '현재 화면은 개발용 adapter로 동작합니다. 실제 지갑 서명, Source 저장과 backfill은 실행되지 않습니다.',
+          title: '개발용 지갑 flow preview',
+        }
+
+  return (
+    <div className="wallet-runtime-notice" role="note">
+      <strong>{copy.title}</strong>
+      <p>{copy.body}</p>
     </div>
   )
 }
@@ -299,9 +342,14 @@ function WalletSelectionStep({
   onProviderChange: (provider: EvmWalletProviderId) => void
   selectedProvider: EvmWalletProviderId | null
 }) {
+  const isComingSoon = selectedProvider === 'other'
+
   return (
     <div className="wallet-flow-grid">
-      <section className="wallet-flow-card" aria-labelledby="wallet-select-title">
+      <section
+        className="wallet-flow-card wallet-flow-card--selection"
+        aria-labelledby="wallet-select-title"
+      >
         <header className="wallet-flow-card__heading">
           <h2 id="wallet-select-title" tabIndex={-1}>
             지갑 선택
@@ -324,6 +372,11 @@ function WalletSelectionStep({
                 value={provider.id}
                 checked={selectedProvider === provider.id}
                 disabled={isConnecting}
+                aria-describedby={
+                  provider.id === 'other' && isComingSoon
+                    ? 'other-wallets-coming-soon'
+                    : undefined
+                }
                 onChange={() => onProviderChange(provider.id)}
               />
               <strong>{provider.name}</strong>
@@ -332,6 +385,17 @@ function WalletSelectionStep({
           ))}
         </fieldset>
 
+        {isComingSoon ? (
+          <div
+            className="wallet-provider-coming-soon"
+            id="other-wallets-coming-soon"
+            role="status"
+          >
+            <strong>Other Wallets는 추후 지원 예정입니다</strong>
+            <p>현재 실제 지갑 연결은 MetaMask만 지원합니다.</p>
+          </div>
+        ) : null}
+
         <div className="wallet-flow-actions">
           <a className="wallet-flow-secondary-action" href="/app/sources/new">
             <span aria-hidden="true">←</span> 취소
@@ -339,10 +403,14 @@ function WalletSelectionStep({
           <button
             type="button"
             className="source-primary-action"
-            disabled={!selectedProvider || isConnecting}
+            disabled={!selectedProvider || isConnecting || isComingSoon}
             onClick={onConnect}
           >
-            {isConnecting ? '지갑 연결 중…' : '지갑 연결'}
+            {isConnecting
+              ? '지갑 연결 중…'
+              : isComingSoon
+                ? '추후 지원 예정'
+                : '지갑 연결'}
             <span aria-hidden="true">→</span>
           </button>
         </div>
@@ -577,6 +645,7 @@ function ScopeStep({
   onPeriodChange,
   onSubmit,
   period,
+  proofMode,
   startDateRef,
   taxYearRef,
   wallet,
@@ -587,6 +656,7 @@ function ScopeStep({
   onPeriodChange: (period: EvmWalletPeriodDraft) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   period: EvmWalletPeriodDraft
+  proofMode: EvmWalletProofMode
   startDateRef: RefObject<HTMLInputElement | null>
   taxYearRef: RefObject<HTMLSelectElement | null>
   wallet: ConnectedWallet
@@ -620,6 +690,7 @@ function ScopeStep({
         </header>
 
         {error ? <FlowAlert error={error} /> : null}
+        <WalletRuntimeNotice proofMode={proofMode} />
 
         <div className="wallet-scope-summary">
           <div>
@@ -851,12 +922,22 @@ function CompletionStep({
   network,
   normalizedPeriod,
   onReset,
+  proofMode,
 }: {
   addressPreview: string
   network: string
   normalizedPeriod: NormalizedEvmWalletPeriod
   onReset: () => void
+  proofMode: EvmWalletProofMode
 }) {
+  const isPreview = proofMode !== 'SERVER_VERIFIED'
+  const completionDescription =
+    proofMode === 'CLIENT_PREVIEW'
+      ? 'MetaMask 연결과 메시지 서명을 완료했습니다. 데이터 Source 생성은 아직 실행되지 않습니다.'
+      : proofMode === 'MOCK_PREVIEW'
+        ? '개발용 adapter로 지갑 연결 flow를 확인했습니다. 실제 지갑 연결과 데이터 Source 생성은 실행되지 않았습니다.'
+        : '최근 90일 거래부터 우선 수집하고 있습니다.'
+
   return (
     <div className="wallet-flow-grid">
       <section className="wallet-flow-card" aria-labelledby="wallet-complete-title">
@@ -869,19 +950,29 @@ function CompletionStep({
             <h2 id="wallet-complete-title" tabIndex={-1}>
               지갑 연결이 완료됐어요
             </h2>
-            <p>최근 90일 거래부터 우선 수집하고 있습니다.</p>
+            <p>{completionDescription}</p>
           </div>
         </div>
 
+        <WalletRuntimeNotice proofMode={proofMode} />
+
         <div className="wallet-backfill-status" role="status">
           <div>
-            <span>현재 동기화 상태</span>
-            <strong>최근 90일 수집 중</strong>
+            <span>
+              {isPreview ? '현재 연동 상태' : '현재 동기화 상태'}
+            </span>
+            <strong>
+              {isPreview
+                ? 'Source 저장·backfill 연동 대기'
+                : '최근 90일 수집 중'}
+            </strong>
           </div>
-          <b>BACKFILLING</b>
+          <b>{isPreview ? 'PREVIEW' : 'BACKFILLING'}</b>
         </div>
         <p className="wallet-signature-expiry">
-          연결은 완료됐으며 나머지 기간은 백그라운드에서 이어집니다.
+          {isPreview
+            ? 'Web Backend가 연결되면 선택한 기간의 Source 저장과 backfill을 시작할 수 있습니다.'
+            : '연결은 완료됐으며 나머지 기간은 백그라운드에서 이어집니다.'}
         </p>
 
         <dl className="wallet-completion-details">
@@ -907,12 +998,18 @@ function CompletionStep({
           >
             <span aria-hidden="true">←</span> 다른 지갑 연결
           </button>
-          <a className="source-primary-action" href="/app/dashboard">
-            수집 진행 상태 보기 <span aria-hidden="true">→</span>
+          <a
+            className="source-primary-action"
+            href={isPreview ? '/app/sources' : '/app/dashboard'}
+          >
+            {isPreview ? '데이터 소스 목록으로' : '수집 진행 상태 보기'}{' '}
+            <span aria-hidden="true">→</span>
           </a>
         </div>
         <p className="source-footer-note">
-          페이지를 닫아도 backfill은 계속됩니다.
+          {isPreview
+            ? 'Preview에서는 실제 backfill 작업을 생성하지 않습니다.'
+            : '페이지를 닫아도 backfill은 계속됩니다.'}
         </p>
       </section>
 
@@ -923,8 +1020,15 @@ function CompletionStep({
 
 function getPageCopy(state: EvmWalletFlowState) {
   if (state.view === 'complete') {
+    const description =
+      state.proofMode === 'SERVER_VERIFIED'
+        ? '지갑이 연결되고 최초 backfill이 시작됐습니다.'
+        : state.proofMode === 'CLIENT_PREVIEW'
+          ? 'MetaMask 연결과 서명을 완료했습니다. Source 저장은 서버 연동 후 동작합니다.'
+          : '개발용 지갑 flow preview를 완료했습니다.'
+
     return {
-      description: '지갑이 연결되고 최초 backfill이 시작됐습니다.',
+      description,
       title: 'EVM Wallet 연결 완료',
     }
   }
@@ -953,12 +1057,16 @@ function getPageCopy(state: EvmWalletFlowState) {
 
 export function EvmWalletConnectionPage({
   completeConnection = completeWalletConnectionMock,
-  connectWallet = connectWalletMock,
-  requestSignature = requestOwnershipSignatureMock,
+  connectWallet = connectMetaMaskWallet,
+  requestSignature = requestMetaMaskOwnershipSignature,
+  subscribeToWalletSession = subscribeToMetaMaskSession,
 }: {
   completeConnection?: CompleteWalletConnection
   connectWallet?: ConnectWallet
   requestSignature?: RequestOwnershipSignature
+  subscribeToWalletSession?: (
+    handlers: MetaMaskSessionHandlers,
+  ) => () => void
 }) {
   const [state, dispatch] = useReducer(
     evmWalletFlowReducer,
@@ -991,6 +1099,77 @@ export function EvmWalletConnectionPage({
       previousFocusKeyRef.current = focusKey
     }
   }, [focusKey])
+
+  const activeWalletAddress =
+    state.view === 'ownership' || state.view === 'scope'
+      ? state.wallet.address.toLowerCase()
+      : null
+  const shouldMonitorMetaMask =
+    (state.view === 'ownership' || state.view === 'scope') &&
+    state.wallet.provider === 'metamask'
+
+  useEffect(() => {
+    if (!shouldMonitorMetaMask || activeWalletAddress === null) {
+      return
+    }
+
+    let isActive = true
+    const expectedAddress = activeWalletAddress
+
+    function invalidateSession(
+      code: EvmWalletConnectionError['code'],
+    ) {
+      if (!isActive) {
+        return
+      }
+
+      isActive = false
+      activeRequestRef.current += 1
+      abortControllerRef.current?.abort()
+      abortControllerRef.current = null
+      requestPendingRef.current = false
+      setSignatureReminder('')
+      dispatch({
+        error: { code },
+        expectedAddress,
+        type: 'SESSION_INVALIDATED',
+      })
+    }
+
+    const unsubscribe = subscribeToWalletSession({
+      onAccountsChanged(accounts) {
+        const nextAddress = accounts[0]?.toLowerCase()
+        if (
+          !nextAddress ||
+          activeWalletAddress === null ||
+          nextAddress !== activeWalletAddress
+        ) {
+          invalidateSession('ACCOUNT_CHANGED')
+        }
+      },
+      onChainChanged(chainId) {
+        try {
+          if (BigInt(chainId) !== 1n) {
+            invalidateSession('NETWORK_CHANGED')
+          }
+        } catch {
+          invalidateSession('NETWORK_CHANGED')
+        }
+      },
+      onDisconnect() {
+        invalidateSession('PROVIDER_DISCONNECTED')
+      },
+    })
+
+    return () => {
+      isActive = false
+      unsubscribe()
+    }
+  }, [
+    activeWalletAddress,
+    shouldMonitorMetaMask,
+    subscribeToWalletSession,
+  ])
 
   function startRequest() {
     activeRequestRef.current += 1
@@ -1083,6 +1262,7 @@ export function EvmWalletConnectionPage({
 
       if (result.ok) {
         dispatch({
+          proofMode: result.proofMode,
           type: 'SIGNATURE_SUCCEEDED',
           verificationId: result.verificationId,
         })
@@ -1234,6 +1414,7 @@ export function EvmWalletConnectionPage({
             error={state.status === 'EDITING' ? state.error : null}
             isSubmitting={state.status === 'SUBMITTING'}
             period={state.period}
+            proofMode={state.proofMode}
             startDateRef={startDateRef}
             taxYearRef={taxYearRef}
             wallet={state.wallet}
@@ -1250,6 +1431,7 @@ export function EvmWalletConnectionPage({
             addressPreview={state.addressPreview}
             network={state.network}
             normalizedPeriod={state.normalizedPeriod}
+            proofMode={state.proofMode}
             onReset={() => dispatch({ type: 'RESET' })}
           />
         ) : null}

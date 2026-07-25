@@ -1,8 +1,5 @@
 export const EVM_WALLET_PROVIDER_IDS = [
-  'rabby',
   'metamask',
-  'walletconnect',
-  'coinbase',
   'other',
 ] as const
 
@@ -69,9 +66,13 @@ export type EvmWalletPeriodInvalidError = {
 
 export type EvmWalletConnectionError = {
   code:
+    | 'ACCOUNT_CHANGED'
     | 'CONNECTION_FAILED'
     | 'CONNECTION_REJECTED'
+    | 'NETWORK_CHANGED'
+    | 'PROVIDER_DISCONNECTED'
     | 'PROVIDER_UNAVAILABLE'
+    | 'UNSUPPORTED_NETWORK'
   requestId?: string
 }
 
@@ -95,6 +96,11 @@ export type EvmWalletFlowError =
   | EvmWalletCompletionError
   | EvmWalletConnectionError
   | EvmWalletOwnershipError
+
+export type EvmWalletProofMode =
+  | 'CLIENT_PREVIEW'
+  | 'MOCK_PREVIEW'
+  | 'SERVER_VERIFIED'
 
 export const EVM_WALLET_ALLOWED_TAX_YEARS = [
   '2027',
@@ -143,6 +149,7 @@ type ScopeEditingState = {
   error: EvmWalletCompletionError | null
   intentKey: string | null
   period: EvmWalletPeriodDraft
+  proofMode: EvmWalletProofMode
   status: 'EDITING'
   verificationId: string
   view: 'scope'
@@ -152,6 +159,7 @@ type ScopeEditingState = {
 type ScopeSubmittingState = {
   intentKey: string
   period: EvmWalletPeriodDraft
+  proofMode: EvmWalletProofMode
   status: 'SUBMITTING'
   verificationId: string
   view: 'scope'
@@ -164,6 +172,7 @@ type CompleteState = {
   jobId: string
   network: string
   normalizedPeriod: NormalizedEvmWalletPeriod
+  proofMode: EvmWalletProofMode
   provider: EvmWalletProviderId
   sourceId: string
   sourceStatus: 'SOURCE_SAVED'
@@ -201,6 +210,7 @@ export type EvmWalletFlowAction =
       type: 'SIGNATURE_STARTED'
     }
   | {
+      proofMode: EvmWalletProofMode
       type: 'SIGNATURE_SUCCEEDED'
       verificationId: string
     }
@@ -223,6 +233,11 @@ export type EvmWalletFlowAction =
   | {
       result: CompleteWalletConnectionSuccess
       type: 'SCOPE_SUBMIT_SUCCEEDED'
+    }
+  | {
+      error: EvmWalletConnectionError
+      expectedAddress: string
+      type: 'SESSION_INVALIDATED'
     }
   | {
       type: 'BACK_REQUESTED'
@@ -319,6 +334,7 @@ export function evmWalletFlowReducer(
         error: null,
         intentKey: null,
         period: { ...DEFAULT_EVM_WALLET_PERIOD },
+        proofMode: action.proofMode,
         status: 'EDITING',
         verificationId,
         view: 'scope',
@@ -381,6 +397,7 @@ export function evmWalletFlowReducer(
       return {
         intentKey,
         period: state.period,
+        proofMode: state.proofMode,
         status: 'SUBMITTING',
         verificationId: state.verificationId,
         view: 'scope',
@@ -396,6 +413,7 @@ export function evmWalletFlowReducer(
         error: action.error,
         intentKey: state.intentKey,
         period: state.period,
+        proofMode: state.proofMode,
         status: 'EDITING',
         verificationId: state.verificationId,
         view: 'scope',
@@ -417,11 +435,28 @@ export function evmWalletFlowReducer(
         jobId: action.result.jobId,
         network: state.wallet.network,
         normalizedPeriod: action.result.normalizedPeriod,
+        proofMode: state.proofMode,
         provider: state.wallet.provider,
         sourceId: action.result.sourceId,
         sourceStatus: action.result.sourceStatus,
         status: action.result.jobStatus,
         view: 'complete',
+      }
+    case 'SESSION_INVALIDATED':
+      if (
+        (state.view !== 'ownership' && state.view !== 'scope') ||
+        state.wallet.provider !== 'metamask' ||
+        state.wallet.address.toLowerCase() !==
+          action.expectedAddress.trim().toLowerCase()
+      ) {
+        return state
+      }
+
+      return {
+        error: action.error,
+        provider: state.wallet.provider,
+        status: 'SELECTING',
+        view: 'select',
       }
     case 'BACK_REQUESTED':
       if (state.view === 'connect') {
@@ -641,6 +676,7 @@ export type RequestOwnershipSignatureRequest = {
 
 export type RequestOwnershipSignatureSuccess = {
   ok: true
+  proofMode: EvmWalletProofMode
   verificationId: string
 }
 
@@ -732,6 +768,7 @@ export const requestOwnershipSignatureMock: RequestOwnershipSignature =
 
     return {
       ok: true,
+      proofMode: 'MOCK_PREVIEW',
       verificationId: 'verification_evm_preview',
     }
   }

@@ -104,6 +104,10 @@
   padding: 24px;
 }
 
+.wallet-flow-card--selection {
+  min-height: 0;
+}
+
 .wallet-flow-card__heading {
   margin-bottom: 26px;
 }
@@ -184,6 +188,29 @@
   width: 40px;
   height: 40px;
   object-fit: contain;
+}
+
+.wallet-provider-coming-soon {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid #eadfce;
+  border-radius: 12px;
+  background: #faf7f1;
+}
+
+.wallet-provider-coming-soon strong {
+  color: var(--source-ink);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.wallet-provider-coming-soon p {
+  margin: 0;
+  color: var(--source-muted);
+  font-size: 12px;
+  line-height: 19px;
 }
 
 .wallet-flow-actions {
@@ -368,6 +395,29 @@
   color: var(--source-muted);
   font-size: 12px;
   line-height: 19px;
+}
+
+.wallet-runtime-notice {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid #f0dbc9;
+  border-radius: 12px;
+  background: #fff7f2;
+}
+
+.wallet-runtime-notice strong {
+  color: #a33d18;
+  font-size: 12px;
+  line-height: 19px;
+}
+
+.wallet-runtime-notice p {
+  margin: 0;
+  color: var(--source-muted);
+  font-size: 11px;
+  line-height: 18px;
 }
 
 .wallet-connected-card {

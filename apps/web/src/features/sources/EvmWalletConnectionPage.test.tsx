@@ -1,20 +1,36 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+} from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   EvmWalletConnectionPage,
 } from './EvmWalletConnectionPage.tsx'
-import type {
-  CompleteWalletConnection,
-  ConnectedWallet,
-  ConnectWallet,
-  RequestOwnershipSignature,
+import {
+  completeWalletConnectionMock,
+  connectWalletMock,
+  requestOwnershipSignatureMock,
+  type CompleteWalletConnection,
+  type ConnectedWallet,
+  type ConnectWallet,
+  type RequestOwnershipSignature,
 } from './evmWalletFlow.ts'
+import type { MetaMaskSessionHandlers } from './metamaskWalletAdapter.ts'
 
 const connectedWallet: ConnectedWallet = {
   address: '0x1234567890abcdef1234567890abcdef12345678',
   chainId: 'eip155:1',
   network: 'Ethereum',
   provider: 'metamask',
+}
+
+const mockWalletProps = {
+  completeConnection: completeWalletConnectionMock,
+  connectWallet: connectWalletMock,
+  requestSignature: requestOwnershipSignatureMock,
+  subscribeToWalletSession: () => () => undefined,
 }
 
 function deferred<T>() {
@@ -37,7 +53,7 @@ function serializeStorage(storage: Storage) {
 async function moveToOwnership(
   props: Parameters<typeof EvmWalletConnectionPage>[0] = {},
 ) {
-  render(<EvmWalletConnectionPage {...props} />)
+  render(<EvmWalletConnectionPage {...mockWalletProps} {...props} />)
   fireEvent.click(screen.getByRole('radio', { name: 'MetaMask' }))
   fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
 
@@ -62,7 +78,7 @@ afterEach(() => {
 
 describe('EvmWalletConnectionPage', () => {
   it('completes the Figma wallet connection, signature, scope, and backfill flow', async () => {
-    render(<EvmWalletConnectionPage />)
+    render(<EvmWalletConnectionPage {...mockWalletProps} />)
 
     expect(
       screen.getByRole('heading', { name: 'EVM Wallet 연결' }),
@@ -70,6 +86,15 @@ describe('EvmWalletConnectionPage', () => {
     expect(
       screen.getByRole('button', { name: '지갑 연결' }),
     ).toBeDisabled()
+    expect(
+      screen.queryByRole('radio', { name: 'Rabby Wallet' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('radio', { name: 'WalletConnect (Reown)' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('radio', { name: 'Coinbase Wallet' }),
+    ).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('radio', { name: 'MetaMask' }))
     fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
@@ -92,15 +117,21 @@ describe('EvmWalletConnectionPage', () => {
     expect(
       screen.getByText(/매일 자동 \+ 수동 새로고침/),
     ).toBeInTheDocument()
+    expect(
+      screen.getByText('개발용 지갑 flow preview'),
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '연결 완료' }))
 
     await screen.findByRole('heading', { name: '지갑 연결이 완료됐어요' })
-    expect(screen.getByText('BACKFILLING')).toBeInTheDocument()
-    expect(screen.getByText('최근 90일 수집 중')).toBeInTheDocument()
+    expect(screen.getByText('PREVIEW')).toBeInTheDocument()
     expect(
-      screen.getByRole('link', { name: '수집 진행 상태 보기' }),
-    ).toHaveAttribute('href', '/app/dashboard')
+      screen.getByText('Source 저장·backfill 연동 대기'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('BACKFILLING')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: '데이터 소스 목록으로' }),
+    ).toHaveAttribute('href', '/app/sources')
     expect(window.location.href).not.toContain(connectedWallet.address)
     expect(serializeStorage(window.localStorage)).not.toContain(
       connectedWallet.address,
@@ -120,15 +151,176 @@ describe('EvmWalletConnectionPage', () => {
       ok: false,
     })
 
-    render(<EvmWalletConnectionPage connectWallet={connectWallet} />)
-    fireEvent.click(screen.getByRole('radio', { name: 'Rabby Wallet' }))
+    render(
+      <EvmWalletConnectionPage
+        {...mockWalletProps}
+        connectWallet={connectWallet}
+      />,
+    )
+    fireEvent.click(screen.getByRole('radio', { name: 'MetaMask' }))
     fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
 
     expect(
-      await screen.findByText('선택한 지갑을 사용할 수 없어요'),
+      await screen.findByText('MetaMask를 찾을 수 없어요'),
     ).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: 'Rabby Wallet' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'MetaMask' })).toBeChecked()
     expect(screen.queryByText('wallet-request-01')).not.toBeInTheDocument()
+  })
+
+  it('marks Other Wallets as coming soon and prevents connection', () => {
+    const connectWallet = vi.fn<ConnectWallet>()
+
+    render(
+      <EvmWalletConnectionPage
+        {...mockWalletProps}
+        connectWallet={connectWallet}
+      />,
+    )
+    fireEvent.click(screen.getByRole('radio', { name: 'Other Wallets' }))
+
+    expect(
+      screen.getByText('Other Wallets는 추후 지원 예정입니다'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('현재 실제 지갑 연결은 MetaMask만 지원합니다.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '추후 지원 예정' }),
+    ).toBeDisabled()
+    expect(connectWallet).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      emit: (handlers: MetaMaskSessionHandlers) =>
+        handlers.onAccountsChanged?.([
+          '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+        ]),
+      heading: '연결된 계정이 변경되었어요',
+    },
+    {
+      emit: (handlers: MetaMaskSessionHandlers) =>
+        handlers.onChainChanged?.('0xaa36a7'),
+      heading: '연결된 네트워크가 변경되었어요',
+    },
+    {
+      emit: (handlers: MetaMaskSessionHandlers) =>
+        handlers.onDisconnect?.({ code: 4900 }),
+      heading: 'MetaMask 연결이 끊어졌어요',
+    },
+  ])(
+    'invalidates ownership when a MetaMask session event occurs: $heading',
+    async ({ emit, heading }) => {
+      let subscribedHandlers: MetaMaskSessionHandlers | null = null
+      const unsubscribe = vi.fn()
+      const subscribeToWalletSession = vi.fn(
+        (handlers: MetaMaskSessionHandlers) => {
+          subscribedHandlers = handlers
+          return unsubscribe
+        },
+      )
+
+      await moveToOwnership({ subscribeToWalletSession })
+      expect(subscribeToWalletSession).toHaveBeenCalledTimes(1)
+      const handlers =
+        subscribedHandlers as MetaMaskSessionHandlers | null
+      if (!handlers) {
+        throw new Error('Expected MetaMask session handlers.')
+      }
+
+      act(() => emit(handlers))
+
+      expect(await screen.findByText(heading)).toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: 'MetaMask' })).toBeChecked()
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('keeps ownership active for the same account and Ethereum mainnet', async () => {
+    let subscribedHandlers: MetaMaskSessionHandlers | null = null
+    const unsubscribe = vi.fn()
+    const subscribeToWalletSession = vi.fn(
+      (handlers: MetaMaskSessionHandlers) => {
+        subscribedHandlers = handlers
+        return unsubscribe
+      },
+    )
+
+    await moveToOwnership({ subscribeToWalletSession })
+    const handlers =
+      subscribedHandlers as MetaMaskSessionHandlers | null
+    if (!handlers) {
+      throw new Error('Expected MetaMask session handlers.')
+    }
+
+    act(() => {
+      handlers.onAccountsChanged?.([
+        connectedWallet.address.toUpperCase(),
+      ])
+      handlers.onChainChanged?.('0x1')
+    })
+
+    expect(
+      screen.getByRole('heading', { name: '지갑 소유권 확인' }),
+    ).toBeInTheDocument()
+    expect(unsubscribe).not.toHaveBeenCalled()
+  })
+
+  it('aborts signing and ignores its late result after the account changes', async () => {
+    const pendingSignature =
+      deferred<Awaited<ReturnType<RequestOwnershipSignature>>>()
+    let requestSignal: AbortSignal | null = null
+    const requestSignature: RequestOwnershipSignature = vi.fn(
+      ({ signal }) => {
+        requestSignal = signal
+        return pendingSignature.promise
+      },
+    )
+    let subscribedHandlers: MetaMaskSessionHandlers | null = null
+    const subscribeToWalletSession = vi.fn(
+      (handlers: MetaMaskSessionHandlers) => {
+        subscribedHandlers = handlers
+        return () => undefined
+      },
+    )
+
+    await moveToOwnership({
+      requestSignature,
+      subscribeToWalletSession,
+    })
+    fireEvent.click(
+      screen.getByRole('button', { name: '지갑에서 서명하기' }),
+    )
+    await screen.findByRole('heading', { name: '서명 확인 중' })
+
+    const handlers =
+      subscribedHandlers as MetaMaskSessionHandlers | null
+    if (!handlers) {
+      throw new Error('Expected MetaMask session handlers.')
+    }
+    act(() => {
+      handlers.onAccountsChanged?.([
+        '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+      ])
+    })
+
+    expect((requestSignal as AbortSignal | null)?.aborted).toBe(true)
+    expect(
+      await screen.findByText('연결된 계정이 변경되었어요'),
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      pendingSignature.resolve({
+        ok: true,
+        proofMode: 'CLIENT_PREVIEW',
+        verificationId: 'late-session-verification',
+      })
+      await Promise.resolve()
+    })
+
+    expect(
+      screen.queryByRole('heading', { name: '연결 및 수집 범위' }),
+    ).not.toBeInTheDocument()
   })
 
   it('supports a rejected signature and succeeds when the user retries', async () => {
@@ -140,6 +332,7 @@ describe('EvmWalletConnectionPage', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
+        proofMode: 'CLIENT_PREVIEW',
         verificationId: 'verification-retry',
       })
 
@@ -190,6 +383,7 @@ describe('EvmWalletConnectionPage', () => {
 
     pendingSignature.resolve({
       ok: true,
+      proofMode: 'CLIENT_PREVIEW',
       verificationId: 'late-verification',
     })
 

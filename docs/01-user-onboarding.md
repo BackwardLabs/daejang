@@ -46,9 +46,9 @@ flowchart TB
 
   selectType --> accountType{데이터 소스 유형은?}
   accountType -->|거래소| cexInput[거래소 선택<br/>API Key·Secret 입력]
-  accountType -->|개인 지갑| walletMethod[Rabby · MetaMask · WalletConnect(Reown)<br/>Coinbase · Other Wallets 선택]
-  walletMethod --> walletConnect[브라우저 지갑 연결]
-  walletConnect --> walletSign[5분 만료 1회용<br/>오프체인 소유권 메시지 서명]
+  accountType -->|개인 지갑| walletMethod[MetaMask 브라우저 확장<br/>Other Wallets는 후속 지원]
+  walletMethod --> walletConnect[EIP-6963 탐색<br/>EIP-1193 연결]
+  walletConnect --> walletSign[Ethereum Mainnet<br/>personal_sign]
 
   cexInput --> verify{연동 검증 성공?}
   walletSign --> verify
@@ -70,7 +70,7 @@ flowchart TB
   class accountReady,signupComplete,complete,home success;
 ```
 
-이 Mermaid는 목표 사용자 흐름을 표현한다. 오류 안내 노드에서는 직전 입력 단계로 돌아가 재시도한다. 역방향 선이 전체 흐름을 밀어내지 않도록 재시도 경로는 다이어그램에서 생략했다. MVP에서는 거래소 API Key·Secret 대신 Upbit 거래내역 PDF를 받고, 개인 지갑은 Ethereum에서 지원하는 지갑 방식을 선택해 브라우저 지갑을 연결한 뒤 5분 만료 1회용 오프체인 소유권 메시지에 서명한다.
+이 Mermaid는 목표 사용자 흐름을 표현한다. 오류 안내 노드에서는 직전 입력 단계로 돌아가 재시도한다. 역방향 선이 전체 흐름을 밀어내지 않도록 재시도 경로는 다이어그램에서 생략했다. MVP에서는 거래소 API Key·Secret 대신 Upbit 거래내역 PDF를 받는다. 현재 개인 지갑 Frontend는 MetaMask 브라우저 확장을 EIP-6963 우선·EIP-1193 fallback으로 연결하고 Ethereum Mainnet에서 실제 `personal_sign`을 요청한다. 서버 challenge 검증, Source 저장과 backfill은 아직 mock preview이며 `Other Wallets`는 후속 지원이다.
 
 ## 3. 용어
 
@@ -91,9 +91,9 @@ flowchart TB
 | 회원가입 동의 | 이용약관·개인정보 처리방침 각각 확인 및 동의 | 선택 동의 항목과 동의 관리 화면 |
 | 서비스 계정 인증 | 지원 방식 중 하나를 선택해 인증 완료 | 인증 방식 추가·변경·복구 |
 | 거래소 연결 | Upbit 거래내역 PDF 업로드 | 거래소 API Key·Secret 연결 |
-| 개인 지갑 | Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나로 Ethereum 지갑 연결 | 다른 EVM 체인과 지갑 방식 확장 |
-| 연동 검증 | 브라우저 지갑 연결과 5분 만료 1회용 오프체인 소유권 메시지 서명 | 추가 소유권 증명 방식 |
-| 거래 수집 | 최근 90일 우선 backfill, 나머지 background 처리, 매일 자동 동기화와 수동 새로고침 | 사용자별 상세 schedule 설정 |
+| 개인 지갑 | MetaMask 브라우저 확장 우선 지원, EIP-6963 탐색과 EIP-1193 연결, Ethereum Mainnet | `Other Wallets`와 다른 EVM 체인 확장 |
+| 연동 검증 | 실제 `personal_sign`; 서버 challenge 검증과 Source 저장은 mock preview | Web Backend challenge·검증 API 연결 |
+| 거래 수집 | 최근 90일 우선 backfill UI preview | 실제 backfill, 매일 자동 동기화와 수동 새로고침 |
 | 진행 상태 | Web API polling | 실시간 streaming 알림 |
 | 완료 후 이동 | 홈에서 Job 진행 상태 표시 | 고급 알림·백그라운드 동기화 설정 |
 
@@ -220,7 +220,7 @@ UI 상태:
 MVP 선택지:
 
 1. Upbit 거래내역 PDF 업로드
-2. Ethereum 지갑 방식 선택·연결과 1회용 소유권 메시지 서명
+2. MetaMask 브라우저 확장 연결과 Ethereum Mainnet `personal_sign`
 
 권장 정책은 첫 소스 하나를 정상 등록하면 홈 진입을 허용하고, 홈의 “데이터 소스 추가”에서 두 번째 소스를 연결하는 방식이다. 두 소스를 모두 필수로 할지는 제품 결정이 필요하다.
 
@@ -233,7 +233,7 @@ MVP 선택지:
 | 로그인 | 등록된 인증 방식에 필요한 입력 | 형식과 필수값 | identity, rate limit, session 생성 |
 | 데이터 소스 선택 | `Upbit 문서` 또는 `Ethereum 지갑` | 하나 선택 | 지원 source type |
 | Upbit PDF | 파일 1개 | 확장자, 크기 사전 안내 | MIME, 크기, checksum, 문서 구조, 거래 기간 |
-| Ethereum 지갑 | 지갑 방식, 연결된 주소, network, 선택 별칭, 소유권 signature | 지원 방식 선택, provider 연결 상태와 Ethereum network | 5분 TTL·1회용 challenge, signature와 주소 일치, workspace 중복, 개수 제한 |
+| Ethereum 지갑 | MetaMask provider, 연결된 주소, chain ID, 선택 별칭, 소유권 signature | EIP-6963/EIP-1193 provider 연결 상태와 Ethereum Mainnet | 목표 계약: 5분 TTL·1회용 challenge, signature와 주소 일치, workspace 중복, 개수 제한 |
 | 수집 기간 | 과세연도 또는 시작일·종료일 | 필수값, 시작일≤종료일, 직접 기간 최대 1년 | timezone, 허용 범위, Upbit source coverage 또는 Ethereum RPC 수집 가능 범위 |
 
 브라우저 검증은 빠른 피드백을 위한 보조 수단이며 서버 검증을 최종 기준으로 한다.
@@ -265,55 +265,81 @@ MVP 선택지:
 
 ### 6.2 Ethereum 지갑 연결
 
-지원 방식:
+현재 지원 방식:
 
-- Rabby
-- MetaMask
-- WalletConnect(Reown)
-- Coinbase
-- Other Wallets
+- MetaMask 브라우저 확장
+- EIP-6963 provider announce/request 탐색 우선
+- EIP-6963 결과가 없을 때 EIP-1193 호환 `window.ethereum` fallback
+- Ethereum Mainnet(`0x1`)
 
-필드와 서버 확인 정보:
+`Other Wallets`와 Rabby, WalletConnect(Reown), Coinbase의 실제 연결은 후속 범위다. 선택 UI에 표시되더라도 현재 live-connect 지원으로 해석하지 않는다.
 
-- 사용자가 선택한 지갑 방식
+현재 Client가 다루는 정보:
+
+- 탐색한 MetaMask provider
 - 브라우저 지갑이 반환한 Ethereum 주소와 network
 - 사용자용 별칭(선택)
+- Frontend preview용 message와 `personal_sign` signature
+
+현재 처리 순서:
+
+1. Client가 `eip6963:requestProvider`를 dispatch하고 `eip6963:announceProvider`에서 MetaMask를 찾는다.
+2. 탐색 결과가 없으면 EIP-1193 호환 `window.ethereum`을 fallback으로 확인한다.
+3. `eth_requestAccounts`로 사용자의 명시적인 연결 승인을 요청한다.
+4. `eth_chainId`가 Ethereum Mainnet(`0x1`)인지 확인한다. 다른 chain에서는 다음 단계로 진행하지 않는다.
+5. Client가 가스비·거래 승인·token allowance·자산 이동이 없는 오프체인 확인임을 표시하고 실제 `personal_sign`을 요청한다.
+6. 서명 성공 후에는 mock verification ID를 사용해 기간 설정으로 이동한다. mock Source와 Job을 반환해 완료·backfill 화면을 preview한다.
+
+Client는 `accountsChanged`, `chainChanged`, `disconnect`를 구독한다. 계정이 바뀌거나 빈 계정 목록이 반환되면 기존 소유권 상태와 진행 중 요청을 무효화한다. chain이 바뀌면 기존 서명 상태를 무효화하고 Ethereum Mainnet 여부를 다시 확인한다. provider가 disconnect되면 연결 상태로 되돌리고 재연결을 요구한다.
+
+현재 `personal_sign`의 원문 message와 반환된 signature는 요청 처리 중 메모리에서만 사용하며 browser storage, URL, 분석 이벤트와 일반 log에 저장하지 않는다. mock 완료 결과에는 원문 message나 signature를 포함하지 않는다.
+
+목표 Web Backend 계약에서 추가되는 정보:
+
 - 현재 Session·workspace·주소·network에 결합된 challenge ID
+- 서버가 발급한 5분 만료 1회용 challenge message
 - challenge message에 대한 signature
 
-처리 순서:
+목표 서버 연동 순서:
 
-1. 사용자가 지원 지갑 방식을 선택하고 브라우저 지갑 연결을 승인한다.
-2. Client는 연결된 주소와 Ethereum network를 확인하고 Web Backend에 소유권 challenge를 요청한다.
-3. 서버는 nonce와 발급 시각을 포함한 1회용 오프체인 메시지와 5분 만료 시각을 반환한다.
-4. Client는 메시지가 가스비·거래 승인·자산 이동을 만들지 않는 소유권 확인임을 표시한 뒤 지갑 서명을 요청한다.
-5. Client는 challenge ID와 signature를 HTTPS request body로 제출한다.
-6. 서버는 challenge가 미사용·미만료 상태이고 현재 Session·workspace·주소·network에 일치하는지 확인한 뒤 signature를 검증한다.
-7. 서버가 같은 workspace의 중복 주소와 개수 제한을 확인하고, 성공한 경우에만 데이터 소스를 저장해 `source_id`를 반환한다.
-8. 사용자가 과세연도 전체 또는 최대 1년의 직접 기간을 확인하면 초기 수집 Job을 만든다.
+1. Client는 연결된 주소와 Ethereum network를 확인하고 Web Backend에 소유권 challenge를 요청한다.
+2. 서버는 nonce와 발급 시각을 포함한 1회용 오프체인 메시지와 5분 만료 시각을 반환한다.
+3. Client는 메시지가 가스비·거래 승인·자산 이동을 만들지 않는 소유권 확인임을 표시한 뒤 지갑 서명을 요청한다.
+4. Client는 challenge ID와 signature를 HTTPS request body로 제출한다.
+5. 서버는 challenge가 미사용·미만료 상태이고 현재 Session·workspace·주소·network에 일치하는지 확인한 뒤 signature를 검증한다.
+6. 서버가 같은 workspace의 중복 주소와 개수 제한을 확인하고, 성공한 경우에만 데이터 소스를 저장해 `source_id`를 반환한다.
+7. 사용자가 과세연도 전체 또는 최대 1년의 직접 기간을 확인하면 초기 수집 Job을 만든다.
 
-소유권 메시지 서명은 온체인 transaction이 아니다. 가스비, 거래 승인, token allowance와 자산 이동이 발생하지 않으며 private key, seed phrase, 쓰기 권한과 출금 권한을 요청하거나 수집하지 않는다. challenge message와 signature는 browser storage, URL, 분석 이벤트나 일반 log에 남기지 않고 한 번 사용하거나 5분이 지나면 폐기한다. 주소 또는 network가 바뀌면 기존 challenge를 버리고 처음부터 다시 요청한다.
+목표 서버 challenge 기반 소유권 메시지 서명도 온체인 transaction이 아니다. 가스비, 거래 승인, token allowance와 자산 이동이 발생하지 않으며 private key, seed phrase, 쓰기 권한과 출금 권한을 요청하거나 수집하지 않는다. challenge message와 signature는 browser storage, URL, 분석 이벤트나 일반 log에 남기지 않고 한 번 사용하거나 5분이 지나면 폐기한다. 주소 또는 network가 바뀌면 기존 challenge를 버리고 처음부터 다시 요청한다.
 
-MVP 지원 network는 Ethereum이다. 선택 범위의 종료일을 기준으로 최근 90일을 먼저 backfill하고, 더 이른 구간은 background에서 이어서 처리한다. 초기 수집 뒤에는 서버 checkpoint부터 매일 자동 동기화하며 사용자는 수동 새로고침을 요청할 수 있다. 자동·수동 Job은 idempotency key와 checkpoint로 중복 거래와 중복 Job을 막는다.
+MVP 지원 network는 Ethereum Mainnet이다. 목표 구현은 선택 범위의 종료일을 기준으로 최근 90일을 먼저 backfill하고, 더 이른 구간은 background에서 이어서 처리한다. 초기 수집 뒤에는 서버 checkpoint부터 매일 자동 동기화하며 사용자는 수동 새로고침을 요청할 수 있다. 자동·수동 Job은 idempotency key와 checkpoint로 중복 거래와 중복 Job을 막는다. 현재 완료·backfill 표시는 mock preview이므로 실제 거래를 수집하거나 Source를 저장하지 않는다.
 
 연결 해제는 향후 자동 동기화와 수동 새로고침을 중단하지만 이미 수집한 거래와 계산 근거를 삭제하지 않는다. 데이터 삭제는 별도 동작과 정책으로 제공한다.
 
 ### 6.3 등록 완료
 
-완료 화면은 다음을 분명히 전달한다.
+현재 preview 완료 화면은 다음을 분명히 전달한다.
 
-- 데이터 소스 등록이 완료됨
-- 기간 확인 후 거래 내역 수집 Job이 생성됨
-- 화면을 닫거나 새로고침해도 서버 작업은 계속됨
-- 진행 상태는 홈에서 확인할 수 있음
-- Ethereum은 선택 범위의 최근 90일을 우선 처리하고 나머지를 background에서 이어서 처리함
-- Ethereum은 초기 수집 뒤 매일 자동 동기화되며 수동 새로고침도 제공됨
+- MetaMask `personal_sign`이 완료됨
+- 표시되는 데이터 소스, 수집 Job과 backfill 상태는 mock임
+- Source가 서버에 저장되지 않았고 실제 거래 수집도 시작되지 않음
+- 페이지를 닫으면 이어서 실행되는 서버 작업이 없음
+
+목표 서버 연동 후 완료 화면은 다음을 표시한다.
+
+- 데이터 소스 등록과 거래 내역 수집 Job 생성
+- 화면을 닫거나 새로고침해도 서버 작업이 계속됨
+- 홈에서 확인하는 진행 상태
+- Ethereum 선택 범위의 최근 90일 우선 처리와 나머지 background 처리
+- 초기 수집 이후 매일 자동 동기화와 수동 새로고침
 
 “분석 완료”, “세금 계산 완료”, “모든 거래 검증 완료”처럼 오해할 수 있는 문구는 사용하지 않는다.
 
 ## 7. API와 비동기 Job
 
-관련 공개 API:
+다음 지갑 관련 공개 API와 비동기 Job은 아직 구현되지 않은 목표 계약이다. Web Backend runtime도 미결정이다. 현재 MetaMask `personal_sign` 이후에는 mock verification ID, Source와 Job을 사용한다.
+
+목표 공개 API:
 
 | 목적 | API |
 | --- | --- |
@@ -326,7 +352,7 @@ MVP 지원 network는 Ethereum이다. 선택 범위의 종료일을 기준으로
 | 수집 시작 | `POST /api/v1/syncs` |
 | Job 진행 조회 | `GET /api/v1/jobs/{id}` |
 
-수집 요청은 즉시 `job_id`를 반환한다. MVP 웹은 Job endpoint를 polling한다.
+목표 구현에서 수집 요청은 즉시 `job_id`를 반환하고 MVP 웹은 Job endpoint를 polling한다.
 
 | 서버 상태 | 사용자 표시 | Polling |
 | --- | --- | --- |
@@ -345,8 +371,8 @@ MVP 지원 network는 Ethereum이다. 선택 범위의 종료일을 기준으로
 | --- | --- | --- |
 | 입력 오류 | provider가 반환한 주소 형식 오류, 지원하지 않는 PDF | 해당 입력 화면에서 수정 |
 | 중복 | 이미 등록된 주소·파일 | 기존 데이터 소스로 이동 |
-| 지갑 연결 거절·provider 오류 | 사용자가 연결을 취소했거나 지갑을 열 수 없음 | 같은 방식으로 재시도하거나 다른 지갑 방식 선택 |
-| 지원하지 않는 network | Ethereum에서만 연결할 수 있음을 안내 | 지갑 network를 Ethereum으로 바꾼 뒤 재시도 |
+| MetaMask 연결 거절·provider 오류 | 사용자가 연결을 취소했거나 확장을 찾을 수 없음 | MetaMask 설치·잠금·사이트 접근 상태를 확인한 뒤 재시도 |
+| 지원하지 않는 network | Ethereum Mainnet에서만 연결할 수 있음을 안내 | MetaMask network를 Ethereum Mainnet으로 바꾼 뒤 재시도 |
 | challenge 만료 | 5분이 지나 메시지를 사용할 수 없음 | 새 challenge 발급 후 다시 서명 |
 | 서명 거절·불일치 | 서명이 취소됐거나 주소·network가 달라짐 | 변경 상태를 확인하고 새 challenge로 재시도 |
 | 일시적 외부 오류 | RPC Rate Limit, Source unavailable | 안내된 시간 이후 재시도 |
@@ -372,8 +398,9 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - refresh와 logout endpoint는 Origin 검증과 CSRF 방어를 적용한다.
 - Public Access JWT를 Go Engine으로 전달하지 않는다.
 - Web Backend가 active Session, 최신 membership, resource ownership을 확인한다.
-- 지갑 challenge는 현재 Session·workspace·Ethereum 주소·network에 결합하고 5분 후 만료하며 한 번만 사용한다.
-- 지갑 signature는 HTTPS request body로만 전달하고 URL, browser storage, log와 분석 이벤트에 남기지 않는다.
+- 목표 Web Backend의 지갑 challenge는 현재 Session·workspace·Ethereum 주소·network에 결합하고 5분 후 만료하며 한 번만 사용한다.
+- 현재 preview의 `personal_sign` message와 signature는 처리 중 메모리에서만 사용하고 서버로 전송하거나 저장하지 않는다.
+- 목표 서버 연동의 signature는 HTTPS request body로만 전달하고 URL, browser storage, log와 분석 이벤트에 남기지 않는다.
 - private key, seed phrase, 쓰기 권한과 출금 권한은 요청하거나 수집하지 않는다.
 - 소유권 서명은 가스비·거래 승인·token allowance·자산 이동을 만들지 않는다.
 - Presigned URL은 짧은 만료 시간과 제한된 object key만 허용한다.
@@ -429,8 +456,12 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - [ ] 기존 데이터 소스가 있는 사용자는 홈으로 이동한다.
 - [ ] 데이터 소스가 없는 사용자는 연결 흐름으로 이동한다.
 - [ ] Upbit 거래내역 PDF 1개와 Ethereum 지갑 1개를 각각 데이터 소스로 등록할 수 있다.
-- [ ] Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나를 선택해 연결할 수 있다.
+- [ ] EIP-6963 우선 탐색과 EIP-1193 fallback으로 MetaMask 브라우저 확장을 연결할 수 있다.
+- [ ] Ethereum Mainnet에서 실제 `personal_sign`을 요청할 수 있다.
+- [ ] `accountsChanged`, `chainChanged`, `disconnect`에서 진행 중 요청과 기존 서명 상태를 무효화한다.
+- [ ] `Other Wallets` 실제 연결을 후속 provider adapter로 제공한다.
 - [ ] 5분 만료 1회용 오프체인 소유권 메시지 서명을 서버가 검증한 뒤에만 Ethereum Source를 저장한다.
+- [ ] mock verification ID, Source와 backfill Job을 실제 Web Backend 응답으로 교체한다.
 - [ ] 지갑 연결은 private key·seed phrase·쓰기·출금 권한, 가스비·거래 승인·자산 이동을 요구하지 않는다.
 - [ ] 가입 중 등록을 미루고 홈에서 다시 시작할 수 있다.
 - [ ] 과세연도 또는 시작일·종료일로 수집 기간을 설정할 수 있다.
@@ -457,7 +488,7 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - 필수·선택 개인정보 항목, 처리 목적과 각 보관 기간
 - 지원할 서비스 계정 인증 방식과 인증 실패·복구 정책
 - 다른 EVM 체인의 지원 순서
-- browser wallet SDK와 WalletConnect(Reown) 설정, `Other Wallets`에 포함할 지갑 범위
+- `Other Wallets`에 포함할 provider 범위와 Rabby, WalletConnect(Reown), Coinbase 지원 순서
 - 소유권 메시지의 정확한 문구·서명 표준과 locale
 - 매일 자동 동기화 시각·timezone, retry와 수동 새로고침 cooldown
 - 연결 해제 시 진행 중 Job 처리와 재연결 UX

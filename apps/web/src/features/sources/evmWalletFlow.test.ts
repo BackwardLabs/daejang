@@ -18,7 +18,7 @@ const connectedWallet: ConnectedWallet = {
   address: '0x1234567890abcdef1234567890abcdef12345678',
   chainId: 'eip155:1',
   network: 'Ethereum',
-  provider: 'rabby',
+  provider: 'metamask',
 }
 
 function advanceToOwnershipReady() {
@@ -44,6 +44,7 @@ function advanceToScopeEditing() {
   })
 
   return evmWalletFlowReducer(state, {
+    proofMode: 'MOCK_PREVIEW',
     type: 'SIGNATURE_SUCCEEDED',
     verificationId: 'verification-1',
   })
@@ -108,7 +109,8 @@ describe('evmWalletFlowReducer', () => {
       jobId: 'job-wallet-1',
       network: 'Ethereum',
       normalizedPeriod: result.normalizedPeriod,
-      provider: 'rabby',
+      proofMode: 'MOCK_PREVIEW',
+      provider: 'metamask',
       sourceId: 'source-wallet-1',
       sourceStatus: 'SOURCE_SAVED',
       status: 'BACKFILLING',
@@ -122,7 +124,7 @@ describe('evmWalletFlowReducer', () => {
     let state: EvmWalletFlowState = evmWalletFlowReducer(
       initialEvmWalletFlowState,
       {
-        provider: 'rabby',
+        provider: 'metamask',
         type: 'PROVIDER_SELECTED',
       },
     )
@@ -134,7 +136,7 @@ describe('evmWalletFlowReducer', () => {
 
     expect(state).toMatchObject({
       error: { code: 'CONNECTION_REJECTED' },
-      provider: 'rabby',
+      provider: 'metamask',
       status: 'SELECTING',
       view: 'select',
     })
@@ -162,6 +164,7 @@ describe('evmWalletFlowReducer', () => {
       type: 'SIGNATURE_STARTED',
     })
     state = evmWalletFlowReducer(state, {
+      proofMode: 'MOCK_PREVIEW',
       type: 'SIGNATURE_SUCCEEDED',
       verificationId: 'verification-retry',
     })
@@ -211,7 +214,7 @@ describe('evmWalletFlowReducer', () => {
     let state: EvmWalletFlowState = evmWalletFlowReducer(
       initialEvmWalletFlowState,
       {
-        provider: 'metamask',
+        provider: 'other',
         type: 'PROVIDER_SELECTED',
       },
     )
@@ -224,7 +227,7 @@ describe('evmWalletFlowReducer', () => {
 
     state = evmWalletFlowReducer(state, { type: 'BACK_REQUESTED' })
     expect(state).toMatchObject({
-      provider: 'metamask',
+      provider: 'other',
       status: 'SELECTING',
       view: 'select',
     })
@@ -255,6 +258,42 @@ describe('evmWalletFlowReducer', () => {
     expect(
       evmWalletFlowReducer(state, { type: 'RESET' }),
     ).toBe(initialEvmWalletFlowState)
+  })
+
+  it('invalidates a signed MetaMask session when its account changes', () => {
+    const state = evmWalletFlowReducer(advanceToScopeEditing(), {
+      error: { code: 'ACCOUNT_CHANGED' },
+      expectedAddress: connectedWallet.address,
+      type: 'SESSION_INVALIDATED',
+    })
+
+    expect(state).toEqual({
+      error: { code: 'ACCOUNT_CHANGED' },
+      provider: 'metamask',
+      status: 'SELECTING',
+      view: 'select',
+    })
+  })
+
+  it('ignores a stale session event for another wallet or an inactive state', () => {
+    const scopeState = advanceToScopeEditing()
+    const staleResult = evmWalletFlowReducer(scopeState, {
+      error: { code: 'ACCOUNT_CHANGED' },
+      expectedAddress:
+        '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+      type: 'SESSION_INVALIDATED',
+    })
+    expect(staleResult).toBe(scopeState)
+
+    const selectResult = evmWalletFlowReducer(
+      initialEvmWalletFlowState,
+      {
+        error: { code: 'PROVIDER_DISCONNECTED' },
+        expectedAddress: connectedWallet.address,
+        type: 'SESSION_INVALIDATED',
+      },
+    )
+    expect(selectResult).toBe(initialEvmWalletFlowState)
   })
 
   it('returns from scope to ownership and clears invalid submission errors when edited', () => {
@@ -415,7 +454,7 @@ describe('EVM wallet flow helpers and mock adapters', () => {
   it('runs the abortable mock connection without retaining a raw signature', async () => {
     const controller = new AbortController()
     const connection = await connectWalletMock({
-      provider: 'walletconnect',
+      provider: 'metamask',
       signal: controller.signal,
     })
     expect(connection).toEqual({
@@ -424,7 +463,7 @@ describe('EVM wallet flow helpers and mock adapters', () => {
         address: connectedWallet.address,
         chainId: 'eip155:1',
         network: 'Ethereum',
-        provider: 'walletconnect',
+        provider: 'metamask',
       },
     })
     if (!connection.ok) {
@@ -437,6 +476,7 @@ describe('EVM wallet flow helpers and mock adapters', () => {
     })
     expect(ownership).toEqual({
       ok: true,
+      proofMode: 'MOCK_PREVIEW',
       verificationId: 'verification_evm_preview',
     })
     expect('signature' in ownership).toBe(false)
@@ -471,7 +511,7 @@ describe('EVM wallet flow helpers and mock adapters', () => {
   it('rejects adapter work when its signal is aborted', async () => {
     const controller = new AbortController()
     const connectionPromise = connectWalletMock({
-      provider: 'coinbase',
+      provider: 'metamask',
       signal: controller.signal,
     })
     controller.abort()

@@ -31,12 +31,14 @@ Go Engine 내부의 계산 모델, 데이터베이스 인덱스, 체인 Reorg, �
 | Internal boundary | 확정 | Web Backend는 private gRPC로 Go Engine 호출 |
 | Long-running work | 확정 | 요청은 즉시 `job_id`를 반환하고 웹은 polling |
 | MVP 입력 | 확정 | Upbit 거래내역 PDF 1개 + 연결한 Ethereum 지갑 1개 |
-| MVP 지갑 연결 | 확정 | Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나를 선택하고 브라우저 지갑에서 1회용 소유권 메시지 서명 |
-| 지갑 수집 | 확정 | 선택 기간의 최근 90일 우선 backfill, 나머지는 background 처리, 이후 매일 자동 동기화와 수동 새로고침 |
+| 현재 지갑 연결 구현 | 초기 구현 | MetaMask 브라우저 확장을 우선 지원한다. EIP-6963으로 provider를 탐색하고 EIP-1193 provider로 연결하며, Ethereum Mainnet에서 실제 `personal_sign`을 요청한다. |
+| 지갑 연결 후속 범위 | 확정 | `Other Wallets`를 포함한 추가 provider 연결은 후속 구현이다. |
+| 현재 지갑 Backend 연동 | 미구현 | 서버 challenge 검증, Source 저장과 실제 backfill은 아직 연결되지 않았으며 Frontend mock preview로만 완료 상태를 확인한다. |
+| 목표 지갑 수집 | 확정 | 선택 기간의 최근 90일 우선 backfill, 나머지는 background 처리, 이후 매일 자동 동기화와 수동 새로고침 |
 | Web Backend runtime | 미결정 | TypeScript/Node 또는 Go |
 | 회원가입 필수 절차 | 확정 | 이용약관·개인정보 처리방침을 각각 확인·동의한 뒤 선택한 서비스 계정 인증 진행 |
 | 로그인 방식 | 미결정 | email, OIDC 또는 지갑 서명 |
-| 첫 지원 체인 | 확정 | Ethereum. 다른 EVM 체인은 후속 확장 |
+| 첫 지원 체인 | 확정 | Ethereum Mainnet. 다른 EVM 체인은 후속 확장 |
 
 Figma 아키텍처 그림에는 Web API 구현으로 Fastify가 표시되어 있지만, Linear 기술 명세의 TS-01은 Web Backend runtime을 아직 결정하지 않았다. 따라서 이 저장소의 React 코드는 Fastify 고유 기능에 의존하지 않는다.
 
@@ -141,6 +143,8 @@ npm run build
 
 React는 화면에서 직접 gRPC 또는 Engine 모델을 사용하지 않는다. 공개 API의 JSON 계약을 통해서만 데이터를 주고받는다.
 
+아래 지갑 관련 endpoint는 목표 API 계약 초안이며 현재 저장소에 Web Backend 구현이 없다. Web Backend runtime도 계속 미결정이다. 현재 Frontend는 실제 MetaMask 연결과 `personal_sign`까지만 수행하고, challenge 검증·Source 저장·backfill 응답은 mock preview adapter를 사용한다.
+
 | 사용자 동작 | Public Web API | 결과 |
 | --- | --- | --- |
 | 로그인 | `POST /api/v1/auth/login` | Access Token 및 Refresh Session 시작 |
@@ -174,7 +178,19 @@ API 계약이 확정되면 OpenAPI 또는 동등한 schema를 source of truth로
 
 ### 6.1 Ethereum 지갑 연결 계약
 
-MVP는 `Rabby`, `MetaMask`, `WalletConnect(Reown)`, `Coinbase`, `Other Wallets` 중 하나를 선택해 브라우저 지갑을 연결한다. Client는 연결된 Ethereum 주소에 대해 Web Backend가 발급한 1회용 소유권 메시지 서명을 요청한다.
+현재 Frontend는 MetaMask 브라우저 확장을 우선 지원한다.
+
+- Client는 `eip6963:requestProvider`와 `eip6963:announceProvider` 이벤트로 MetaMask provider를 탐색한다.
+- EIP-6963 탐색 결과가 없으면 EIP-1193 호환 `window.ethereum`을 fallback으로 사용한다.
+- 연결은 EIP-1193 `eth_requestAccounts`를 사용하며 `eth_chainId`가 Ethereum Mainnet(`0x1`)인지 확인한다.
+- 소유권 확인 화면의 `personal_sign`은 실제 MetaMask 요청이다. 현재 message는 서버 challenge가 아니라 Frontend preview용 메시지다.
+- `accountsChanged`, `chainChanged`, `disconnect`를 구독한다. 주소·chain 변경 또는 연결 해제 시 진행 중 요청과 기존 서명 상태를 무효화하고, Ethereum Mainnet의 현재 계정으로 다시 확인하도록 한다.
+- `Other Wallets`를 포함한 Rabby, WalletConnect(Reown), Coinbase 등 추가 provider 연결은 후속 범위다.
+- 원문 message와 반환된 signature는 처리 중 메모리에서만 사용하고 URL, browser storage, 분석 이벤트와 일반 log에 저장하지 않는다.
+
+현재 `personal_sign` 이후의 검증 ID, Source와 Job 결과는 mock preview다. 서버 challenge 발급·signature 검증, workspace 중복 검사, `source_id` 저장과 실제 backfill은 아직 수행하지 않는다.
+
+목표 Web Backend 계약에서는 연결된 Ethereum 주소에 대해 서버가 발급한 1회용 소유권 메시지 서명을 요청한다.
 
 - challenge는 현재 Session·workspace, Ethereum 주소, network, nonce와 발급 시각에 결합하고 발급 후 5분이 지나면 만료한다.
 - challenge와 서명은 한 번만 사용할 수 있으며 성공·만료·주소 또는 network 변경 후에는 재사용하지 않는다.
@@ -183,7 +199,7 @@ MVP는 `Rabby`, `MetaMask`, `WalletConnect(Reown)`, `Coinbase`, `Other Wallets` 
 - 원본 challenge message와 signature는 URL, browser storage, 분석 이벤트와 일반 log에 남기지 않는다.
 - 서버가 challenge와 signature를 검증하고 workspace 중복·주소 제한을 확인한 뒤에만 `source_id`를 만든다.
 
-초기·수동 수집은 `POST /api/v1/syncs`로 Job을 생성한다. 초기 수집은 선택 범위의 종료일을 기준으로 최근 90일을 먼저 backfill하고, 선택 범위가 더 길면 나머지 과거 구간을 background에서 이어서 처리한다. 이후 서버 scheduler가 매일 checkpoint 이후 범위를 자동 수집하며, 사용자는 같은 Source에 수동 새로고침을 요청할 수 있다. 모든 trigger는 checkpoint와 idempotency key로 동일 거래·Job의 중복 생성을 막는다.
+목표 구현에서 초기·수동 수집은 `POST /api/v1/syncs`로 Job을 생성한다. 초기 수집은 선택 범위의 종료일을 기준으로 최근 90일을 먼저 backfill하고, 선택 범위가 더 길면 나머지 과거 구간을 background에서 이어서 처리한다. 이후 서버 scheduler가 매일 checkpoint 이후 범위를 자동 수집하며, 사용자는 같은 Source에 수동 새로고침을 요청할 수 있다. 모든 trigger는 checkpoint와 idempotency key로 동일 거래·Job의 중복 생성을 막는다. 현재 화면에 표시되는 Source 저장과 backfill 상태는 이 목표 흐름을 검증하는 mock preview이며 실제 서버 작업이 아니다.
 
 연결 해제는 향후 자동 동기화와 수동 새로고침만 중단한다. 이미 수집한 원본·정규화 결과와 보고서 근거는 보존하며, 데이터 삭제는 별도 동작과 정책으로 다룬다.
 
@@ -260,7 +276,8 @@ UI 분기는 HTTP status만이 아니라 안정적인 application error code를 
 ## 10. 데이터와 보안
 
 - 지갑 private key와 seed phrase, 쓰기·출금 권한은 어떤 화면에서도 요청하지 않는다.
-- Ethereum 소유권 서명은 5분 만료 1회용 오프체인 메시지이며 가스비·거래 승인·자산 이동을 발생시키지 않는다.
+- 목표 Web Backend의 Ethereum 소유권 challenge는 5분 만료 1회용 오프체인 메시지이며 가스비·거래 승인·자산 이동을 발생시키지 않는다.
+- 현재 MetaMask preview의 `personal_sign` message와 signature도 URL, browser storage, 분석 이벤트와 일반 log에 저장하지 않는다.
 - 브라우저 지갑은 연결과 소유권 서명에만 사용하고, React가 wallet provider로 수집 RPC를 직접 호출하지 않는다.
 - MVP 거래소 입력은 Upbit 거래내역 PDF이며 API Key·Secret 연결은 후속 범위다.
 - PDF는 짧은 수명의 제한된 Presigned URL로 private Object Storage에 업로드한다.
@@ -321,7 +338,9 @@ End-to-end 핵심 경로:
 - [ ] 이용약관·개인정보 처리방침을 개별 동의하고 동의 버전을 추적할 수 있다.
 - [ ] 선택한 서비스 계정 인증이 성공한 뒤에만 회원가입이 완료된다.
 - [ ] Upbit PDF와 Ethereum 지갑 연결 경로 및 가입 중 나중에 하기 동작이 제공된다.
-- [ ] 다섯 지갑 방식 선택, 브라우저 연결과 5분 만료 1회용 오프체인 소유권 서명이 동작한다.
+- [ ] EIP-6963 우선 탐색과 EIP-1193 fallback으로 MetaMask 브라우저 확장을 연결하고 Ethereum Mainnet에서 `personal_sign`을 요청할 수 있다.
+- [ ] `accountsChanged`, `chainChanged`, `disconnect`에서 진행 중 요청과 기존 소유권 확인 상태를 안전하게 무효화한다.
+- [ ] 서버 challenge 검증, Source 저장과 실제 backfill을 mock preview에서 Web Backend API로 교체한다.
 - [ ] 지갑 연결은 private key·seed phrase·쓰기·출금 권한, 가스비·거래 승인·자산 이동을 요구하지 않는다.
 - [ ] 과세연도 또는 시작일·종료일로 수집 기간을 설정하고 Upbit source coverage 또는 Ethereum RPC 수집 가능 범위를 확인할 수 있다.
 - [ ] 직접 기간은 1년을 넘지 않고 시작일이 종료일보다 늦지 않으며 서버 정규화 결과를 확인한다.
@@ -343,7 +362,7 @@ End-to-end 핵심 경로:
 - 이용약관·개인정보 처리방침 조회, 버전과 동의 기록 API
 - 서비스 계정 인증 방식별 challenge, callback, 만료와 복구 계약
 - Ethereum 주소 validation·정규화와 지원 account 유형의 세부 규칙
-- 각 browser wallet SDK, WalletConnect(Reown) 설정과 `Other Wallets` 탐색 범위
+- `Other Wallets`에 포함할 provider 범위와 Rabby, WalletConnect(Reown), Coinbase 지원 순서
 - 소유권 메시지의 정확한 문구·서명 표준과 locale
 - 매일 자동 동기화 실행 시각·timezone, retry와 수동 새로고침 cooldown
 - 연결 해제 시 이미 실행 중인 Job 처리와 재연결 UX

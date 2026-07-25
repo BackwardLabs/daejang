@@ -20,7 +20,9 @@
 | 등록 화면 진입 | CTA 선택 즉시 새 데이터 소스 유형 선택 화면으로 이동 |
 | CEX | Upbit부터 지원 |
 | Upbit 연결 | API Key가 아니라 거래내역 PDF 문서 업로드 |
-| DEX·개인 지갑 | Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나로 Ethereum 지갑 연결 후 1회용 소유권 메시지 서명 |
+| DEX·개인 지갑 | MetaMask 브라우저 확장을 EIP-6963 우선·EIP-1193 fallback으로 연결하고 Ethereum Mainnet에서 실제 `personal_sign` |
+| 현재 지갑 완료 상태 | 서버 challenge 검증, Source 저장과 backfill은 아직 mock preview |
+| 지갑 후속 범위 | `Other Wallets`와 Rabby, WalletConnect(Reown), Coinbase 실제 연결 |
 | 기간 설정 | 과세연도 preset 또는 시작일·종료일 직접 선택 |
 | 수집 시작 | 등록 정보와 기간 확인 후 비동기 Job 생성 |
 | Ethereum 초기 수집 | 선택 범위의 최근 90일 우선 backfill, 나머지는 background 처리 |
@@ -28,7 +30,7 @@
 
 `데이터 소스 등록`과 `수집 등록`은 같은 동작이 아니다.
 
-- **데이터 소스 등록**: 사용자가 제출한 Upbit 문서 또는 소유권 서명을 검증한 Ethereum 지갑을 서버가 workspace DB에 저장하고 `source_id`를 반환한다.
+- **데이터 소스 등록**: 사용자가 제출한 Upbit 문서 또는 소유권 서명을 검증한 Ethereum 지갑을 서버가 workspace DB에 저장하고 `source_id`를 반환하는 목표 동작이다. 현재 지갑 flow의 `source_id`는 mock preview다.
 - **수집 등록**: 저장된 `source_id`와 이번 작업의 날짜 범위를 연결한다.
 - **수집 시작**: 확정된 설정으로 Job을 만들고 거래 내역 처리를 시작한다.
 
@@ -57,10 +59,10 @@ flowchart TB
   upbitSaved["Upbit source 저장<br/>source_id 반환"]
 
   dex["02-B · DEX / Ethereum 지갑"]
-  walletMethod["Rabby · MetaMask · WalletConnect(Reown)<br/>Coinbase · Other Wallets 선택"]
-  dexInput["브라우저 지갑 연결"]
-  walletSign["5분 만료 1회용<br/>오프체인 소유권 메시지 서명"]
-  dexSaved["지갑 source 저장<br/>source_id 반환"]
+  walletMethod["MetaMask 브라우저 확장<br/>Other Wallets는 후속 지원"]
+  dexInput["EIP-6963 탐색<br/>EIP-1193 연결"]
+  walletSign["Ethereum Mainnet<br/>personal_sign"]
+  dexSaved["현재 · mock source_id 반환<br/>목표 · 서버 검증 후 저장"]
 
   period["03 · 수집 기간 설정<br/>과세연도 또는 시작일·종료일"]
   preview["04 · 수집 전 확인<br/>등록 정보·기간·예상 건수·누락 구간"]
@@ -105,7 +107,7 @@ flowchart TB
   linkStyle default stroke:#758064,stroke-width:1.5px;
 ```
 
-`데이터 수집 등록` CTA는 별도의 사전 판단 없이 `01 · 새 데이터 소스 유형 선택`으로 바로 이동한다. Upbit는 거래내역 PDF를 업로드한다. DEX·개인 지갑은 지원 지갑 방식을 선택해 Ethereum 브라우저 지갑을 연결하고 5분 만료 1회용 오프체인 소유권 메시지에 서명한다. 두 경로는 서버가 `source_id`를 저장해 반환한 뒤 `03 · 수집 기간 설정`에서 합류한다.
+`데이터 수집 등록` CTA는 별도의 사전 판단 없이 `01 · 새 데이터 소스 유형 선택`으로 바로 이동한다. Upbit는 거래내역 PDF를 업로드한다. 현재 DEX·개인 지갑 Frontend는 MetaMask 브라우저 확장을 EIP-6963 우선·EIP-1193 fallback으로 연결하고 Ethereum Mainnet에서 실제 `personal_sign`을 요청한다. 이후 `source_id`와 backfill 상태는 mock preview이며 서버 challenge 검증, Source 저장과 실제 수집은 아직 수행하지 않는다. 목표 서버 연동 후 두 경로는 저장된 `source_id`를 반환받아 `03 · 수집 기간 설정`에서 합류한다.
 
 Frontend 흐름에는 기존 소스 조회·비교와 별도 검증 decision을 두지 않는다. 서버가 등록 요청을 처리하면서 DB 기준으로 중복·형식 오류를 반환하면 `02`에서 수정하고, 기간 오류는 `03`에서 수정한다.
 
@@ -114,7 +116,7 @@ Frontend 흐름에는 기존 소스 조회·비교와 별도 검증 decision을 
 선택지는 다음 두 가지다.
 
 1. `CEX / Upbit`: Upbit 거래내역 PDF 등록으로 이동
-2. `DEX / 개인 지갑`: Ethereum 지갑 방식 선택·연결과 소유권 서명으로 이동
+2. `DEX / 개인 지갑`: MetaMask 브라우저 확장 연결과 Ethereum Mainnet `personal_sign`으로 이동
 
 유형 선택 화면은 DB에 저장된 기존 소스를 불러와 비교하지 않는다. 같은 문서나 주소가 이미 존재하는지는 사용자가 유형별 등록 정보를 제출한 뒤 서버가 판단한다.
 
@@ -159,44 +161,55 @@ MVP의 Upbit 연결은 API Key·Secret을 사용하지 않고 거래내역 PDF �
 
 ## 7. DEX·Ethereum 지갑 등록
 
-MVP 지원 network는 Ethereum이며 다른 EVM 체인은 후속 범위다. 사용자는 다음 방식 중 하나를 선택한다.
+현재 live-connect 지원 범위:
 
-- Rabby
-- MetaMask
-- WalletConnect(Reown)
-- Coinbase
-- Other Wallets
+- MetaMask 브라우저 확장
+- EIP-6963 provider announce/request 탐색 우선
+- EIP-6963 결과가 없을 때 EIP-1193 호환 `window.ethereum` fallback
+- Ethereum Mainnet(`0x1`)
 
-입력·연결 정보:
+`Other Wallets`와 Rabby, WalletConnect(Reown), Coinbase의 실제 연결은 후속 범위다. 선택 UI에 표시되더라도 현재 지원 완료로 보지 않는다.
 
-- 선택한 지갑 방식
+현재 Client 연결 정보:
+
+- 탐색한 MetaMask provider
 - 브라우저 지갑이 반환한 Ethereum 주소와 network
 - 사용자용 별칭(선택)
-- 서버가 발급한 challenge ID
-- 1회용 오프체인 소유권 메시지 signature
+- Frontend preview용 message와 실제 `personal_sign` signature
 
-처리 순서:
+현재 처리 순서:
 
-1. Client가 선택한 browser wallet provider에 연결을 요청한다.
-2. 사용자가 연결을 승인하면 Client가 Ethereum 주소와 network를 확인한다.
-3. Client가 Web API에 현재 Session·workspace·주소·network에 결합된 소유권 challenge를 요청한다.
-4. 서버가 nonce와 발급 시각을 포함한 메시지, challenge ID와 5분 만료 시각을 반환한다.
-5. Client가 이 서명이 가스비·거래 승인·token allowance·자산 이동을 만들지 않는 오프체인 소유권 확인임을 표시한다.
-6. 사용자가 브라우저 지갑에서 메시지 서명을 승인한다.
-7. Client가 challenge ID와 signature를 HTTPS request body로 제출한다.
-8. 서버가 challenge의 Session·workspace·주소·network 일치, 미사용, 5분 TTL과 signature를 검증한다.
-9. 서버가 Ethereum 지원 여부, 주소 형식, 같은 workspace의 중복 여부와 등록 개수 제한을 확인한다.
-10. 검증이 성공한 경우에만 지갑 데이터 소스를 저장하고 `source_id`를 반환한다.
+1. Client가 `eip6963:requestProvider`를 dispatch하고 `eip6963:announceProvider`로 MetaMask provider를 찾는다.
+2. 탐색 결과가 없으면 EIP-1193 호환 `window.ethereum`을 fallback으로 확인한다.
+3. `eth_requestAccounts`로 사용자의 명시적인 연결 승인을 요청한다.
+4. `eth_chainId`가 Ethereum Mainnet(`0x1`)인지 확인하고 다른 chain에서는 진행을 막는다.
+5. Client가 이 서명이 가스비·거래 승인·token allowance·자산 이동을 만들지 않는 오프체인 확인임을 표시한다.
+6. 사용자가 브라우저 지갑에서 실제 `personal_sign`을 승인한다.
+7. Frontend는 mock verification ID로 기간 설정에 진입하고, mock Source와 Job으로 완료·backfill 화면을 preview한다.
 
-Frontend는 기존 주소를 미리 조회해 비교하지 않는다. 연결 중 주소 또는 network가 바뀌면 이전 challenge를 폐기하고 새 challenge부터 다시 시작한다. 성공·실패 여부와 관계없이 사용한 signature와 만료된 challenge는 재사용하지 않는다.
+Client는 `accountsChanged`, `chainChanged`, `disconnect`를 구독한다. 계정 변경, 빈 계정 목록, chain 변경 또는 provider disconnect가 발생하면 진행 중 요청과 기존 서명 상태를 무효화한다. 이후 Ethereum Mainnet의 현재 계정으로 다시 연결하고 서명해야 한다.
 
-private key, seed phrase, 쓰기 권한과 출금 권한은 어떤 단계에서도 요청하거나 수집하지 않는다. 소유권 메시지 서명은 온체인 transaction이 아니므로 가스비, 거래 승인과 자산 이동이 발생하지 않는다. challenge message, signature와 전체 지갑 주소는 browser storage, URL, 분석 이벤트와 일반 log에 남기지 않는다.
+private key, seed phrase, 쓰기 권한과 출금 권한은 어떤 단계에서도 요청하거나 수집하지 않는다. `personal_sign`은 온체인 transaction이 아니므로 가스비, 거래 승인과 자산 이동이 발생하지 않는다. 원문 message, 반환된 signature와 전체 지갑 주소는 browser storage, URL, 분석 이벤트와 일반 log에 남기지 않는다. message와 signature는 요청 처리 중 메모리에서만 사용하며 mock 완료 결과에 포함하지 않는다.
+
+목표 Web Backend 계약은 다음 순서로 mock preview를 교체한다.
+
+1. Client가 현재 Session·workspace·주소·network에 결합된 소유권 challenge를 Web API에 요청한다.
+2. 서버가 nonce와 발급 시각을 포함한 메시지, challenge ID와 5분 만료 시각을 반환한다.
+3. 사용자가 서버 challenge message에 `personal_sign`한다.
+4. Client가 challenge ID와 signature를 HTTPS request body로 제출한다.
+5. 서버가 challenge의 Session·workspace·주소·network 일치, 미사용, 5분 TTL과 signature를 검증한다.
+6. 서버가 Ethereum 지원 여부, 주소 형식, 같은 workspace의 중복 여부와 등록 개수 제한을 확인한다.
+7. 검증이 성공한 경우에만 지갑 데이터 소스를 저장하고 `source_id`를 반환한다.
+
+현재 저장소에는 이 Web Backend 구현이 없고 Web Backend runtime도 미결정이다. API 표와 lifecycle은 구현할 목표 계약이다. Frontend는 기존 주소를 미리 조회해 비교하지 않으며, 목표 서버 연동에서 주소 또는 network가 바뀌면 이전 challenge를 폐기하고 새 challenge부터 다시 시작한다. 사용한 signature와 만료된 challenge는 재사용하지 않는다.
 
 지갑은 문서와 달리 사용자가 선택한 기간을 기준으로 RPC 수집 범위를 계산한다. 시작일·종료일을 블록 범위로 변환하는 기준과 chain reorg 대응은 Engine 계약에서 정의한다. React는 browser wallet provider나 공개 RPC로 거래를 직접 수집하지 않는다.
 
 GIWA가 생성하는 공개 체인 기록이나 온체인 commitment에는 지갑 주소와 거래 원문을 기록하지 않는다.
 
 ### 7.1 Ethereum 수집·동기화 lifecycle
+
+아래 lifecycle은 목표 서버 동작이다. 현재 완료 화면의 Source와 backfill 상태는 mock preview이며 거래를 실제로 수집하지 않는다.
 
 초기 수집은 선택 범위의 종료일을 기준으로 최근 90일 구간을 먼저 backfill한다. 선택 범위가 90일 이하이면 전체 범위를 우선 처리하고, 90일을 초과하면 더 이른 나머지 구간을 background에서 이어서 처리한다.
 
@@ -274,6 +287,8 @@ Ethereum 지갑은 PDF 문서 coverage 대신 서버가 선택 기간을 RPC blo
 
 ## 10. 상태 모델
 
+아래 Source·Job 상태는 목표 서버 계약이다. 현재 MetaMask live-connect는 실제 `personal_sign` 이후 이 상태들을 mock preview로 전이하며 서버에 Source를 저장하거나 Job을 만들지 않는다.
+
 | 상태 | 의미 | 주요 사용자 동작 |
 | --- | --- | --- |
 | `SOURCE_TYPE_SELECTING` | CEX/Upbit 또는 DEX/개인 지갑 선택 | 선택, 취소 |
@@ -301,6 +316,8 @@ Ethereum 지갑은 PDF 문서 coverage 대신 서버가 선택 기간을 RPC blo
 단계별 초안에는 문서 원본, 지갑 전체 주소, challenge message와 signature 같은 민감하거나 불필요한 값을 browser storage에 저장하지 않는다. 서버 초안은 소유 workspace와 만료 시간을 검증한 뒤에만 복구한다. 연결 해제는 진행 중 Job과 과거 데이터를 삭제한 상태로 표시하지 않는다.
 
 ## 11. API 계약 초안
+
+다음 지갑 관련 API는 아직 구현되지 않은 목표 계약이다. 현재 MetaMask `personal_sign` 이후에는 mock verification ID, Source와 Job 응답을 사용하며 실제 서버 challenge 검증·Source 저장·backfill을 수행하지 않는다.
 
 | 목적 | API | 결과 |
 | --- | --- | --- |
@@ -334,7 +351,7 @@ Ethereum 지갑은 PDF 문서 coverage 대신 서버가 선택 기간을 RPC blo
 }
 ```
 
-challenge는 현재 Session·workspace·address·network에 결합하며 5분 뒤 만료한다. 서버는 성공·실패·만료된 challenge의 재사용을 거부하고, signature 검증 성공 후에만 Source를 만든다. 원본 message와 signature는 일반 log나 분석 이벤트에 기록하지 않는다.
+목표 구현에서 challenge는 현재 Session·workspace·address·network에 결합하며 5분 뒤 만료한다. 서버는 성공·실패·만료된 challenge의 재사용을 거부하고, signature 검증 성공 후에만 Source를 만든다. 현재 preview와 목표 구현 모두 원본 message와 signature를 browser storage, URL, 일반 log나 분석 이벤트에 기록하지 않는다.
 
 수집 시작 요청 예시:
 
@@ -355,6 +372,8 @@ challenge는 현재 Session·workspace·address·network에 결합하며 5분 �
 
 ## 12. 오류와 복구
 
+MetaMask provider·계정·network·서명 오류는 현재 Frontend에서 처리한다. challenge, Source 저장, Job과 sync 오류는 Web Backend를 연결한 뒤 적용할 목표 계약이다.
+
 | 오류 | 사용자 안내 | 복구 동작 |
 | --- | --- | --- |
 | 지원하지 않는 문서 | 허용하는 Upbit 문서 종류 안내 | 파일 교체 |
@@ -362,8 +381,8 @@ challenge는 현재 Session·workspace·address·network에 결합하며 5분 �
 | 손상·해독 불가 PDF | 문서를 읽을 수 없는 이유 안내 | 다른 파일로 교체 |
 | 중복 문서·주소 | 서버가 DB 기준으로 이미 등록된 항목임을 안내 | 입력 화면 유지 또는 소스 관리로 이동 |
 | provider 반환 주소 형식 오류 | 연결된 주소를 등록할 수 없는 이유 안내 | 지갑 계정 확인 후 재연결 |
-| 지갑 provider 없음·연결 거절 | 지갑을 열 수 없거나 사용자가 취소했음을 안내 | 같은 방식 재시도 또는 다른 지갑 방식 선택 |
-| Ethereum이 아닌 network | MVP 지원 network 안내 | 지갑을 Ethereum으로 전환 후 재시도 |
+| MetaMask provider 없음·연결 거절 | MetaMask 확장을 찾을 수 없거나 사용자가 취소했음을 안내 | 설치·잠금·사이트 접근 상태를 확인한 뒤 재시도 |
+| Ethereum Mainnet이 아닌 network | 현재 지원 network 안내 | MetaMask를 Ethereum Mainnet으로 전환 후 재시도 |
 | challenge 만료 | 5분 만료와 재사용 불가 안내 | 새 challenge 발급 후 다시 서명 |
 | 서명 거절·검증 실패 | 자산 이동 없는 소유권 서명임을 안내 | 주소·network 확인 후 새 challenge로 재시도 |
 | 연결 중 주소·network 변경 | 이전 challenge가 무효임을 안내 | 변경된 상태로 challenge 재발급 |
@@ -382,7 +401,7 @@ challenge는 현재 Session·workspace·address·network에 결합하며 5분 �
 ## 13. 접근성과 사용성
 
 - PDF 비밀번호 입력에는 지속적으로 보이는 label을 두고, 비밀번호 오류 시 파일은 유지한 채 빈 입력란으로 focus를 이동한다.
-- 지갑 방식 선택, provider 연결, network 전환, challenge 발급과 서명 상태를 화면 읽기 도구에 알린다.
+- 현재는 MetaMask provider 연결, network 확인과 `personal_sign` 상태를 화면 읽기 도구에 알린다. 목표 서버 연동 후 challenge 발급·검증 상태를 추가한다.
 - 서명 전 가스비·거래 승인·자산 이동이 없는 오프체인 소유권 확인임을 텍스트로 제공한다.
 - 날짜 입력에는 지속적으로 보이는 label과 `YYYY-MM-DD` 형식 안내를 둔다.
 - date picker만 강제하지 않고 키보드로 날짜를 직접 입력할 수 있게 한다.
@@ -399,7 +418,8 @@ challenge는 현재 Session·workspace·address·network에 결합하며 5분 �
 - 데이터 수집 등록 CTA 선택
 - 온보딩 중 등록 선택 또는 나중에 하기
 - source 유형 선택
-- 지갑 방식 선택, 연결 성공·거절, challenge 발급·서명 검증 성공/실패
+- MetaMask provider 탐색, 연결 성공·거절, network 확인과 `personal_sign` 성공/실패
+- 목표 서버 challenge 발급·서명 검증 성공/실패
 - Upbit 문서 업로드·등록 성공/실패
 - 지갑 등록 성공/실패
 - 기간 방식 선택과 기간 검증 실패 유형
@@ -419,8 +439,12 @@ challenge는 현재 Session·workspace·address·network에 결합하며 5분 �
 - [ ] 사용자가 CEX/Upbit 또는 DEX/개인 지갑 중 새 source 유형을 선택할 수 있다.
 - [ ] MVP CEX 등록은 Upbit 거래내역 PDF 업로드로 동작하고 API Key·Secret을 요청하지 않는다.
 - [ ] 암호화된 Upbit PDF는 선택 비밀번호로 처리할 수 있고 비밀번호를 저장·로그·URL에 남기지 않는다.
-- [ ] Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나로 Ethereum 지갑을 연결할 수 있다.
+- [ ] EIP-6963 우선 탐색과 EIP-1193 fallback으로 MetaMask 브라우저 확장을 연결할 수 있다.
+- [ ] Ethereum Mainnet에서 실제 `personal_sign`을 요청할 수 있다.
+- [ ] `accountsChanged`, `chainChanged`, `disconnect`에서 진행 중 요청과 기존 서명 상태를 무효화한다.
+- [ ] `Other Wallets` 실제 연결을 후속 provider adapter로 제공한다.
 - [ ] 5분 만료 1회용 오프체인 소유권 message와 signature를 서버가 검증한 뒤에만 Ethereum Source를 저장한다.
+- [ ] mock verification ID, Source와 backfill Job을 실제 Web Backend 응답으로 교체한다.
 - [ ] 지갑 연결은 private key·seed phrase·쓰기·출금 권한, 가스비·거래 승인·자산 이동을 요구하지 않는다.
 - [ ] Upbit 문서와 Ethereum 지갑은 서버 검증 성공 후에만 source로 등록된다.
 - [ ] 사용자가 과세연도 또는 시작일·종료일로 수집 기간을 설정할 수 있다.
@@ -442,7 +466,7 @@ challenge는 현재 Session·workspace·address·network에 결합하며 5분 �
 - PDF 최대 크기, 페이지 수, 언어와 문서 버전
 - 첫 등록에서 PDF 1개만 허용할지 여러 문서로 기간을 보완할지 여부
 - 다른 EVM 체인의 지원 순서와 주소 개수 제한
-- browser wallet SDK와 WalletConnect(Reown) 설정, `Other Wallets` 범위
+- `Other Wallets`에 포함할 provider 범위와 Rabby, WalletConnect(Reown), Coinbase 지원 순서
 - 소유권 message의 정확한 문구·서명 표준과 locale
 - 매일 자동 동기화 실행 시각·timezone, retry와 수동 새로고침 cooldown
 - 연결 해제 시 진행 중 Job 처리와 재연결 UX

@@ -87,12 +87,12 @@ export const sourceMethodDefinitions: Record<
   'evm-wallet': {
     badge: '읽기 전용',
     bullets: [
-      '공개 온체인 거래만 수집',
+      'MetaMask 브라우저 확장 연결 지원',
       '최근 90일 우선 처리 후 선택 범위 전체 backfill',
       '매일 자동 동기화 + 필요할 때 수동 새로고침',
     ],
     description:
-      '브라우저 지갑을 연결해 공개 온체인 거래를 읽기 전용으로 동기화합니다.',
+      'MetaMask를 연결해 공개 온체인 거래를 읽기 전용으로 동기화합니다.',
     href: '/app/sources/new/wallet',
     id: 'evm-wallet',
     intro: {
@@ -108,7 +108,7 @@ export const sourceMethodDefinitions: Record<
       standardsLabel: '연결 기준',
       steps: [
         {
-          description: '브라우저 지갑을 선택하고 소유권 메시지에 서명합니다.',
+          description: 'MetaMask를 연결하고 소유권 메시지에 서명합니다.',
           label: '지갑 연결',
         },
         {
