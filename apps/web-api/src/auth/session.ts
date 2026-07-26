@@ -1,23 +1,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
-export type WorkspaceRole = 'owner' | 'member'
-
-export type WorkspaceMembership = {
-  workspaceId: string
-  workspaceName: string
-  role: WorkspaceRole
-}
-
 export type SessionRecord = {
   id: string
   user: {
     id: string
     displayName: string
   }
-  memberships: readonly WorkspaceMembership[]
-  membershipVersion: number
   sessionEpoch: number
-  activeWorkspaceId: string
   createdAt: Date
   lastSeenAt: Date
   absoluteExpiresAt: Date
@@ -27,7 +16,6 @@ export type SessionRecord = {
 export type NewSession = Omit<
   SessionRecord,
   | 'id'
-  | 'membershipVersion'
   | 'sessionEpoch'
   | 'createdAt'
   | 'lastSeenAt'
@@ -67,7 +55,6 @@ export interface SessionStore {
 export class MemorySessionStore implements SessionStore {
   readonly durable: boolean = false
   readonly #sessions = new Map<string, SessionRecord>()
-  readonly #membershipVersions = new Map<string, number>()
   readonly #sessionEpochs = new Map<string, number>()
 
   async resolveAndTouch({ tokenHash, now, idleTtlMilliseconds }: SessionTransition) {
@@ -77,7 +64,6 @@ export class MemorySessionStore implements SessionStore {
     }
 
     if (
-      session.membershipVersion !== this.#currentMembershipVersion(session.user.id) ||
       session.sessionEpoch !== this.#currentSessionEpoch(session.user.id) ||
       session.absoluteExpiresAt.getTime() <= now.getTime() ||
       session.idleExpiresAt.getTime() <= now.getTime()
@@ -103,7 +89,6 @@ export class MemorySessionStore implements SessionStore {
   async set(tokenHash: string, session: SessionRecord) {
     const stored = {
       ...session,
-      membershipVersion: this.#currentMembershipVersion(session.user.id),
       sessionEpoch: this.#currentSessionEpoch(session.user.id),
     }
     this.#sessions.set(tokenHash, stored)
@@ -124,7 +109,6 @@ export class MemorySessionStore implements SessionStore {
     const session = this.#sessions.get(tokenHash)
     if (
       !session ||
-      session.membershipVersion !== this.#currentMembershipVersion(session.user.id) ||
       session.sessionEpoch !== this.#currentSessionEpoch(session.user.id) ||
       session.absoluteExpiresAt.getTime() <= now.getTime() ||
       session.idleExpiresAt.getTime() <= now.getTime()
@@ -182,16 +166,6 @@ export class MemorySessionStore implements SessionStore {
     return deleted
   }
 
-  bumpMembershipVersion(userId: string) {
-    const next = this.#currentMembershipVersion(userId) + 1
-    this.#membershipVersions.set(userId, next)
-    return next
-  }
-
-  #currentMembershipVersion(userId: string) {
-    return this.#membershipVersions.get(userId) ?? 1
-  }
-
   #currentSessionEpoch(userId: string) {
     return this.#sessionEpochs.get(userId) ?? 1
   }
@@ -199,12 +173,6 @@ export class MemorySessionStore implements SessionStore {
 
 const hashToken = (token: string) =>
   createHash('sha256').update(token).digest('base64url')
-
-const assertActiveWorkspaceMembership = (input: NewSession) => {
-  if (!input.memberships.some(({ workspaceId }) => workspaceId === input.activeWorkspaceId)) {
-    throw new Error('The active workspace must be present in the session memberships')
-  }
-}
 
 export class SessionService {
   constructor(
@@ -215,13 +183,11 @@ export class SessionService {
   ) {}
 
   async create(input: NewSession) {
-    assertActiveWorkspaceMembership(input)
     const now = this.now()
     const token = randomBytes(32).toString('base64url')
     const session: SessionRecord = {
       ...input,
       id: randomUUID(),
-      membershipVersion: 0,
       sessionEpoch: 0,
       createdAt: now,
       lastSeenAt: now,
@@ -263,13 +229,11 @@ export class SessionService {
   }
 
   async replaceAfterAuthentication(currentToken: string | undefined, input: NewSession) {
-    assertActiveWorkspaceMembership(input)
     const now = this.now()
     const token = randomBytes(32).toString('base64url')
     const replacement: SessionRecord = {
       ...input,
       id: randomUUID(),
-      membershipVersion: 0,
       sessionEpoch: 0,
       createdAt: now,
       lastSeenAt: now,

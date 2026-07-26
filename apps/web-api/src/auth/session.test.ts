@@ -2,16 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import { MemorySessionStore, SessionService } from './session.js'
 
-const newSession = (userId = 'user-kim') => ({
+const USER_ID = '00000000-0000-4000-8000-000000000001'
+const OTHER_USER_ID = '00000000-0000-4000-8000-000000000002'
+const PREVIOUS_USER_ID = '00000000-0000-4000-8000-000000000003'
+
+const newSession = (userId = USER_ID) => ({
   user: { id: userId, displayName: '김대장' },
-  activeWorkspaceId: 'workspace-main',
-  memberships: [
-    {
-      workspaceId: 'workspace-main',
-      workspaceName: '김대장의 장부',
-      role: 'owner' as const,
-    },
-  ],
 })
 
 describe('SessionService', () => {
@@ -85,9 +81,9 @@ describe('SessionService', () => {
     const service = new SessionService(new MemorySessionStore(), 100, 20)
     const first = await service.create(newSession())
     const second = await service.create(newSession())
-    const other = await service.create(newSession('user-other'))
+    const other = await service.create(newSession(OTHER_USER_ID))
 
-    expect(await service.revokeUser('user-kim')).toBe(2)
+    expect(await service.revokeUser(USER_ID)).toBe(2)
     expect(await service.resolve(first.token)).toBeUndefined()
     expect(await service.resolve(second.token)).toBeUndefined()
     expect(await service.resolve(other.token)).toBeDefined()
@@ -96,36 +92,26 @@ describe('SessionService', () => {
     expect(replacement.session.sessionEpoch).toBe(2)
   })
 
-  it('invalidates an existing session when membership authorization changes', async () => {
-    const store = new MemorySessionStore()
-    const service = new SessionService(store, 100, 20)
-    const { token, session } = await service.create(newSession())
-
-    expect(session.membershipVersion).toBe(1)
-    expect(store.bumpMembershipVersion('user-kim')).toBe(2)
-    expect(await service.resolve(token)).toBeUndefined()
-  })
-
   it('destroys a previous browser session before issuing an authenticated session', async () => {
     const service = new SessionService(new MemorySessionStore(), 100, 20)
-    const previous = await service.create(newSession('anonymous-user'))
+    const previous = await service.create(newSession(PREVIOUS_USER_ID))
 
     const authenticated = await service.replaceAfterAuthentication(
       previous.token,
-      newSession('user-kim'),
+      newSession(USER_ID),
     )
 
     expect(await service.resolve(previous.token)).toBeUndefined()
-    expect(authenticated?.session.user.id).toBe('user-kim')
+    expect(authenticated?.session.user.id).toBe(USER_ID)
   })
 
   it('allows only one authenticated replacement for the same previous token', async () => {
     const service = new SessionService(new MemorySessionStore(), 100, 20)
-    const previous = await service.create(newSession('anonymous-user'))
+    const previous = await service.create(newSession(PREVIOUS_USER_ID))
 
     const [first, second] = await Promise.all([
-      service.replaceAfterAuthentication(previous.token, newSession('user-kim')),
-      service.replaceAfterAuthentication(previous.token, newSession('user-kim')),
+      service.replaceAfterAuthentication(previous.token, newSession(USER_ID)),
+      service.replaceAfterAuthentication(previous.token, newSession(USER_ID)),
     ])
 
     expect([first, second].filter(Boolean)).toHaveLength(1)

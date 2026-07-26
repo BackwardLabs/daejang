@@ -13,7 +13,6 @@ import type { AppConfig } from './config.js'
 import { ApiError } from './errors.js'
 import { createLogger } from './logger.js'
 import { registerAuthRoutes } from './routes/auth.js'
-import { registerWorkspaceRoutes } from './routes/workspaces.js'
 import { registerSecurityPolicy } from './security.js'
 
 type BuildAppOptions = {
@@ -144,10 +143,6 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     authRateLimiter,
     authenticate: authHooks.authenticate,
     clearSessionCookie: authHooks.clearSessionCookie,
-  })
-  await registerWorkspaceRoutes(app, {
-    authenticate: authHooks.authenticate,
-    requireWorkspace: authHooks.requireWorkspace,
   })
   return { app, config, sessionService, loginCompletionService }
 }

@@ -26,7 +26,7 @@
 
 `데이터 소스 등록`과 `수집 등록`은 같은 동작이 아니다.
 
-- **데이터 소스 등록**: 사용자가 제출한 Upbit 문서 또는 지갑 주소를 서버가 workspace DB에 저장하고 `source_id`를 반환한다.
+- **데이터 소스 등록**: 사용자가 제출한 Upbit 문서 또는 지갑 주소를 서버가 해당 사용자 소유로 저장하고 `source_id`를 반환한다.
 - **수집 등록**: 저장된 `source_id`와 이번 작업의 날짜 범위를 연결한다.
 - **수집 시작**: 확정된 설정으로 Job을 만들고 거래 내역 처리를 시작한다.
 
@@ -40,7 +40,7 @@
 
 회원가입의 `나중에 등록하기`는 등록 CTA를 누르기 전에 선택하는 별도 이탈 동작이다. 사용자가 등록 CTA를 선택한 뒤에는 중간 진입 화면이나 기존 소스 비교 화면을 거치지 않는다.
 
-기존 소스 존재 여부, 중복 주소와 중복 문서는 Frontend가 미리 판단하지 않는다. 유형별 등록 정보를 제출하면 서버가 인증된 workspace와 DB의 unique 조건을 기준으로 저장·충돌 여부를 결정한다. Frontend는 서버 결과를 표시할 뿐 별도의 “소스 검증 성공?” 단계를 만들지 않는다.
+기존 소스 존재 여부, 중복 주소와 중복 문서는 Frontend가 미리 판단하지 않는다. 유형별 등록 정보를 제출하면 서버가 Session에서 확인한 사용자 UUID와 DB의 unique 조건을 기준으로 저장·충돌 여부를 결정한다. Frontend는 서버 결과를 표시할 뿐 별도의 “소스 검증 성공?” 단계를 만들지 않는다.
 
 ## 4. 개념 흐름
 
@@ -142,7 +142,7 @@ MVP의 Upbit 연결은 API Key·Secret을 사용하지 않고 거래내역 PDF �
 | 문서 | 암호화·손상 여부, 지원하는 Upbit 문서 종류와 버전 |
 | 내용 | 거래 레코드 파싱 가능 여부, 필수 값과 날짜 형식 |
 | 기간 | 문서에서 확인한 최초·최종 거래일 또는 명시된 조회 기간 |
-| 중복 | 같은 workspace에서 동일 checksum 또는 동일 원본의 재등록 여부 |
+| 중복 | 같은 사용자가 동일 checksum 또는 동일 원본을 재등록했는지 여부 |
 
 원본 파일은 같은 object key로 덮어쓰지 않는다. 파일명, PDF 본문과 추출한 거래 내역은 분석 이벤트나 일반 애플리케이션 로그에 기록하지 않는다.
 
@@ -155,7 +155,7 @@ MVP는 Reown AppKit의 Ethers adapter를 사용해 Ethereum mainnet 지갑을 �
 - Project ID: `VITE_REOWN_PROJECT_ID`
 - metadata URL: 실행 중인 `window.location.origin`과 동일하게 설정
 
-연결된 provider는 공개 주소와 network 확인, 5분 만료 오프체인 소유권 메시지 서명에만 사용한다. 이 서명은 가스비, 거래 승인 또는 자산 이동을 발생시키지 않는다. Client는 서명에서 주소를 복구해 현재 연결 주소와 일치하는지 확인하고, Web Backend는 Session·workspace·주소·network에 결합한 challenge를 최종 검증한 뒤에만 `source_id`를 만든다.
+연결된 provider는 공개 주소와 network 확인, 5분 만료 오프체인 소유권 메시지 서명에만 사용한다. 이 서명은 가스비, 거래 승인 또는 자산 이동을 발생시키지 않는다. Client는 서명에서 주소를 복구해 현재 연결 주소와 일치하는지 확인한다. Web Backend는 Session의 사용자 UUID·주소·network에 결합한 challenge를 최종 검증하고, 지원 체인·주소 형식·같은 사용자의 중복 여부·등록 개수 제한을 확인한 뒤에만 `source_id`를 만든다.
 
 Project ID가 없거나 provider를 사용할 수 없으면 mock 연결로 우회하지 않고 설정 오류를 표시한다. private key, seed phrase, 원본 서명과 전체 주소는 browser storage, URL, 분석 이벤트와 일반 log에 남기지 않는다.
 
@@ -178,7 +178,7 @@ Project ID가 없거나 provider를 사용할 수 없으면 mock 연결로 우�
 - `tax_year`: 과세연도 방식에서 사용
 - `start_date`: `YYYY-MM-DD`
 - `end_date`: `YYYY-MM-DD`
-- `timezone`: workspace의 보고 기준 timezone
+- `timezone`: 사용자의 보고 기준 timezone
 
 ### 8.2 날짜 의미와 검증
 
@@ -188,7 +188,7 @@ Project ID가 없거나 provider를 사용할 수 없으면 mock 연결로 우�
 - MVP의 과거 거래 수집에서는 미래 날짜를 선택할 수 없다.
 - 허용 가능한 최대 기간과 가장 이른 시작일은 데이터 소스·Engine 제한이 확정된 뒤 서버 설정으로 제공한다.
 - Client는 날짜를 임의로 보정하지 않고 서버가 검증한 정규화 기간을 확인 화면에 다시 표시한다.
-- workspace timezone은 기간 화면에 명시하며, 변경이 필요하면 별도의 workspace 설정으로 이동한다.
+- 보고 기준 timezone은 기간 화면에 명시하며, 변경이 필요하면 사용자 설정으로 이동한다.
 
 ### 8.3 소스 포함 기간과 불일치
 
@@ -232,7 +232,7 @@ Upbit 문서에서 추출한 포함 기간이 선택 기간 전체를 덮는지 
 | `CREATING_JOB` | 중복 제출을 막고 Job 생성 중 | 대기 |
 | `JOB_CREATED` | Job 생성 완료 | 홈에서 진행 확인 |
 
-단계별 초안에는 문서 원본, 지갑 전체 주소 같은 민감하거나 불필요한 값을 browser storage에 저장하지 않는다. 서버 초안은 소유 workspace와 만료 시간을 검증한 뒤에만 복구한다.
+단계별 초안에는 문서 원본, 지갑 전체 주소 같은 민감하거나 불필요한 값을 browser storage에 저장하지 않는다. 서버 초안은 소유 사용자와 만료 시간을 검증한 뒤에만 복구한다.
 
 ## 11. API 계약 초안
 
@@ -259,7 +259,7 @@ Upbit 문서에서 추출한 포함 기간이 선택 기간 전체를 덮는지 
 }
 ```
 
-`source_id`가 현재 workspace 소유인지 서버가 다시 확인한다. 날짜 검증과 정규화 결과는 Client 입력을 그대로 신뢰하지 않는다. source 등록과 수집 mutation은 각각 idempotency key를 받아 동일한 제출이 중복 Source·Job을 만들지 않게 한다.
+`source_id`가 현재 Session 사용자 소유인지 서버가 다시 확인한다. 날짜 검증과 정규화 결과는 Client 입력을 그대로 신뢰하지 않는다. source 등록과 수집 mutation은 각각 idempotency key를 받아 동일한 제출이 중복 Source·Job을 만들지 않게 한다.
 
 ## 12. 오류와 복구
 
@@ -275,7 +275,7 @@ Upbit 문서에서 추출한 포함 기간이 선택 기간 전체를 덮는지 
 | Job 생성 충돌 | 최신 Job 상태 표시 | 기존 Job으로 이동 |
 | Session 만료 | 로그인 필요 안내 | 재로그인 후 서버 초안 복구 |
 
-오류 응답에는 안정적인 application error code와 `request_id`를 포함하되 PDF 내용, 전체 지갑 주소, 내부 stack trace와 다른 workspace 리소스 존재 여부를 노출하지 않는다.
+오류 응답에는 안정적인 application error code와 `request_id`를 포함하되 PDF 내용, 전체 지갑 주소, 내부 stack trace와 다른 사용자 리소스 존재 여부를 노출하지 않는다.
 
 ## 13. 접근성과 사용성
 
@@ -316,8 +316,8 @@ Upbit 문서에서 추출한 포함 기간이 선택 기간 전체를 덮는지 
 - [ ] 문서 coverage가 부족하면 누락 구간을 표시하고 잘못된 수집 시작을 막는다.
 - [ ] 수집 요청은 즉시 `job_id`를 반환하고 홈에서 진행 상태를 복구한다.
 - [ ] 중복 제출이 source 또는 Job을 중복 생성하지 않는다.
-- [ ] 중복·형식·workspace 검사는 등록 요청을 받은 서버가 DB 기준으로 수행한다.
-- [ ] 다른 workspace의 source를 수집에 포함할 수 없다.
+- [ ] 중복·형식·사용자 소유권 검사는 등록 요청을 받은 서버가 DB 기준으로 수행한다.
+- [ ] 다른 사용자의 source를 수집에 포함할 수 없다.
 
 ## 16. 미결정 사항
 
@@ -326,7 +326,7 @@ Upbit 문서에서 추출한 포함 기간이 선택 기간 전체를 덮는지 
 - 첫 등록에서 PDF 1개만 허용할지 여러 문서로 기간을 보완할지 여부
 - 지원할 첫 EVM 체인과 주소 개수 제한
 - 선택할 수 있는 가장 이른 날짜와 최대 수집 기간
-- 과세연도의 기준과 workspace timezone 변경 정책
+- 과세연도의 기준과 사용자 보고 timezone 변경 정책
 - 예상 거래 건수 preview의 정확도와 timeout 기준
 - coverage 부족 시 추가 문서 업로드를 같은 flow에서 허용할지 여부
 - 중단된 업로드와 등록 초안의 만료·삭제 정책
