@@ -50,7 +50,7 @@ export function SourceFlowLayout({
   }
 
   return (
-    <div className="source-page">
+    <div className="product-shell source-page">
       <AppSidebar
         activePage="sources"
         year={selectedYear}
