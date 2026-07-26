@@ -26,12 +26,12 @@ describe('source flow pages', () => {
 
     const period = screen.getByRole('combobox', { name: '조회 기간' })
     expect(period).toHaveValue('2027')
-    expect(screen.getByText('2027 과세연도')).toBeInTheDocument()
+    expect(screen.queryByText('2027 과세연도')).not.toBeInTheDocument()
 
     fireEvent.change(period, { target: { value: '2026' } })
 
     expect(period).toHaveValue('2026')
-    expect(screen.getByText('2026 과세연도')).toBeInTheDocument()
+    expect(screen.queryByText('2026 과세연도')).not.toBeInTheDocument()
 
     unmount()
     render(<SourceTypeSelectionPage />)
@@ -39,7 +39,7 @@ describe('source flow pages', () => {
     expect(screen.getByRole('combobox', { name: '조회 기간' })).toHaveValue(
       '2026',
     )
-    expect(screen.getByText('2026 과세연도')).toBeInTheDocument()
+    expect(screen.queryByText('2026 과세연도')).not.toBeInTheDocument()
   })
 
   it('offers only the documented Upbit PDF and EVM public-address methods', () => {

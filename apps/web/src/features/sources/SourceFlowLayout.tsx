@@ -7,16 +7,10 @@ import {
 import { PageHeader } from '../../components/PageHeader.tsx'
 import './source-flow.css'
 
-type SourceHeaderBadge =
-  | {
-      tone: 'neutral'
-      type: 'year'
-    }
-  | {
-      label: string
-      tone: 'evm' | 'upbit'
-      type: 'flow'
-    }
+type SourceHeaderBadge = {
+  label: string
+  tone: 'evm' | 'upbit'
+}
 
 const sourceFlowYearStorageKey = 'source-flow-year.v1'
 
@@ -27,7 +21,7 @@ function readSourceFlowYear(): AppYear {
 }
 
 export function SourceFlowLayout({
-  badge = { tone: 'neutral', type: 'year' },
+  badge,
   children,
   description,
   eyebrow = 'DATA SOURCES',
@@ -41,8 +35,6 @@ export function SourceFlowLayout({
 }) {
   const [selectedYear, setSelectedYear] =
     useState<AppYear>(readSourceFlowYear)
-  const badgeLabel =
-    badge.type === 'year' ? `${selectedYear} 과세연도` : badge.label
 
   function handleYearChange(year: AppYear) {
     window.sessionStorage.setItem(sourceFlowYearStorageKey, year)
@@ -59,13 +51,13 @@ export function SourceFlowLayout({
 
       <main className="source-main">
         <PageHeader
-          actions={
+          actions={badge ? (
             <span
               className={`source-header-badge source-header-badge--${badge.tone}`}
             >
-              {badgeLabel}
+              {badge.label}
             </span>
-          }
+          ) : undefined}
           description={description}
           eyebrow={eyebrow}
           title={title}

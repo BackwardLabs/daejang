@@ -16,7 +16,7 @@ export function SourceMethodIntroPage({
 
   return (
     <SourceFlowLayout
-      badge={{ label: method.intro.badge, tone: method.tone, type: 'flow' }}
+      badge={{ label: method.intro.badge, tone: method.tone }}
       description={method.intro.subtitle}
       eyebrow={method.intro.eyebrow}
       title={methodId === 'upbit-pdf' ? 'Upbit PDF 등록' : 'EVM 공개 주소 등록'}
