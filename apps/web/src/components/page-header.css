@@ -1,23 +1,23 @@
 .page-header {
-  --page-header-accent: #e8622a;
-  --page-header-ink: #1a1a1a;
-  --page-header-muted: #6e6a65;
+  --page-header-accent: var(--product-accent, #e8622a);
+  --page-header-ink: var(--product-text, #1a1a1a);
+  --page-header-muted: var(--product-text-secondary, #5f6368);
   --page-header-eyebrow-color: var(--page-header-accent);
   --page-header-eyebrow-size: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 32px;
-  min-height: 126px;
-  padding: 8px 0 24px;
-  border-bottom: 1px solid #eceef1;
+  min-height: 112px;
+  padding: 8px 0 20px;
+  border-bottom: 1px solid var(--product-border-subtle, #eceef1);
   color: var(--page-header-ink);
   background: #fff;
 }
 
 .page-header__copy {
   display: grid;
-  grid-template-rows: 20px 48px 22px;
+  gap: 4px;
   align-content: start;
   min-width: 0;
 }
@@ -31,24 +31,24 @@
 .page-header__copy > p {
   color: var(--page-header-eyebrow-color);
   font-size: var(--page-header-eyebrow-size);
-  font-weight: 800;
-  line-height: 20px;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0.04em;
 }
 
 .page-header__copy > h1 {
   align-self: center;
-  font-size: clamp(32px, 2.6vw, 42px);
-  font-weight: 800;
-  line-height: 48px;
-  letter-spacing: -0.055em;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 36px;
+  letter-spacing: -0.02em;
 }
 
 .page-header__copy > span {
   align-self: end;
   color: var(--page-header-muted);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .page-header__actions {
@@ -88,7 +88,7 @@
   line-height: 20px;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 767px) {
   .page-header {
     align-items: flex-start;
     flex-direction: column;
@@ -103,5 +103,15 @@
   .page-header--source .page-header__copy {
     grid-template-rows: auto auto auto;
     gap: 4px;
+  }
+
+  .page-header__copy > h1 {
+    font-size: 20px;
+    line-height: 28px;
+  }
+
+  .page-header--source .page-header__copy > h1 {
+    font-size: 20px;
+    line-height: 28px;
   }
 }

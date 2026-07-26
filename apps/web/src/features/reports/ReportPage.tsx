@@ -469,7 +469,7 @@ export function ReportPage() {
   }
 
   return (
-    <div className="ledger-page report-page">
+    <div className="ledger-page report-page product-shell">
       <AppSidebar
         activePage="reports"
         onYearChange={(year) => {

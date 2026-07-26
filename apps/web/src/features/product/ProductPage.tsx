@@ -13,7 +13,7 @@ export function ProductPage({ kind }: { kind: ProductPageKind }) {
   const [selectedYear, setSelectedYear] = useState<AppYear>('2027')
 
   return (
-    <div className="ledger-page product-page">
+    <div className="ledger-page product-page product-shell">
       <AppSidebar
         activePage={kind}
         year={selectedYear}

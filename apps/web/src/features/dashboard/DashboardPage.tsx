@@ -137,7 +137,7 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="dashboard-page">
+    <div className="dashboard-page product-shell">
       <AppSidebar
         activePage="dashboard"
         year={selectedYear}
