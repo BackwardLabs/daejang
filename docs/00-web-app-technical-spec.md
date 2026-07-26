@@ -30,13 +30,15 @@ Go Engine 내부의 계산 모델, 데이터베이스 인덱스, 체인 Reorg, �
 | Public boundary | 확정 | React는 Web Backend의 HTTPS/JSON API만 호출 |
 | Internal boundary | 확정 | Web Backend는 private gRPC로 Go Engine 호출 |
 | Long-running work | 확정 | 요청은 즉시 `job_id`를 반환하고 웹은 polling |
-| MVP 입력 | 확정 | Upbit 거래내역 PDF 1개 + 등록 EVM 주소 1개 |
+| MVP 입력 | 확정 | Upbit 거래내역 PDF 1개 + 연결한 Ethereum 지갑 1개 |
+| MVP 지갑 연결 | 확정 | Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나를 선택하고 브라우저 지갑에서 1회용 소유권 메시지 서명 |
+| 지갑 수집 | 확정 | 선택 기간의 최근 90일 우선 backfill, 나머지는 background 처리, 이후 매일 자동 동기화와 수동 새로고침 |
 | Web Backend runtime | 확정 | Node.js + TypeScript + Fastify 5 BFF |
 | Web session | 확정 | 서버 저장 opaque session + `HttpOnly` host-only cookie |
 | Web API deployment | 확정 | private gRPC 연결이 가능한 Node container/service |
 | 회원가입 필수 절차 | 확정 | 이용약관·개인정보 처리방침을 각각 확인·동의한 뒤 선택한 서비스 계정 인증 진행 |
 | 로그인 방식 | 미결정 | email, OIDC 또는 지갑 서명 |
-| 첫 지원 체인 | 미결정 | Golden Dataset을 기준으로 결정 |
+| 첫 지원 체인 | 확정 | Ethereum. 다른 EVM 체인은 후속 확장 |
 
 TS-01은 Fastify 기반 BFF로 확정한다. React는 계속 공개 HTTPS/JSON 계약에만 의존하며 Fastify 내부 구현이나 Engine gRPC 모델을 직접 사용하지 않는다.
 
@@ -158,7 +160,9 @@ React는 화면에서 직접 gRPC 또는 Engine 모델을 사용하지 않는다
 | 로그아웃 | `POST /api/v1/auth/logout` | Session 폐기 |
 | 현재 사용자 확인 | `GET /api/v1/me` | identity와 현재 workspace 상태 |
 | workspace 확인 | `GET /api/v1/workspaces/{workspaceId}` | 서버 membership에 포함된 workspace만 반환 |
-| 지갑 등록 | `POST /api/v1/sources/wallets` | 등록된 데이터 소스 |
+| 지갑 소유권 challenge 생성 | `POST /api/v1/sources/wallets/challenges` | 5분 만료 1회용 오프체인 서명 메시지 |
+| 지갑 등록 | `POST /api/v1/sources/wallets` | 서명 검증 후 저장된 Ethereum 지갑 데이터 소스 |
+| 데이터 소스 연결 해제 | `POST /api/v1/sources/{id}/disconnect` | 향후 자동·수동 수집 중단, 기존 데이터 보존 |
 | 업로드 세션 생성 | `POST /api/v1/uploads` | 제한된 Presigned URL |
 | 업로드 확정 | `POST /api/v1/uploads/{id}/confirm` | 검증된 데이터 소스 |
 | 수집 preview | `POST /api/v1/collection-previews` | 데이터 소스별 기간·예상 건수·경고 |
@@ -180,6 +184,26 @@ React는 화면에서 직접 gRPC 또는 Engine 모델을 사용하지 않는다
 - Job 취소 API 지원 여부
 
 API 계약이 확정되면 OpenAPI 또는 동등한 schema를 source of truth로 두고, 프런트 타입을 수동으로 중복 작성하지 않는다.
+
+### 6.1 Ethereum 지갑 연결 계약
+
+MVP는 Reown AppKit의 Ethers adapter를 공통 연결 계층으로 사용한다. `MetaMask`, `WalletConnect`, `Coinbase`는 AppKit wallet button으로 직접 연결하고 `Rabby`와 `Other Wallets`는 AppKit 연결 화면에서 선택한다. Client는 연결된 Ethereum 주소에 대해 Web Backend가 발급한 1회용 소유권 메시지 서명을 요청한다.
+
+- Client 설정은 `VITE_REOWN_PROJECT_ID`를 사용한다. Project ID는 공개 식별자이지만 Reown Dashboard에서 production domain allowlist를 설정한다.
+- AppKit metadata URL은 실행 중인 `window.location.origin`과 일치시켜 Verify API의 도메인 판정을 보존한다.
+- 지원 network는 AppKit의 Ethereum mainnet 하나로 제한한다.
+- Project ID가 없으면 가짜 연결을 성공시키지 않고 provider 설정 오류를 표시한다.
+
+- challenge는 현재 Session·workspace, Ethereum 주소, network, nonce와 발급 시각에 결합하고 발급 후 5분이 지나면 만료한다.
+- challenge와 서명은 한 번만 사용할 수 있으며 성공·만료·주소 또는 network 변경 후에는 재사용하지 않는다.
+- 서명은 오프체인 소유권 확인이다. 가스비, 거래 승인, token allowance, 자산 이동 또는 온체인 transaction을 만들지 않는다.
+- Client와 Web Backend는 private key, seed phrase, 쓰기 권한과 출금 권한을 요청하거나 전달받지 않는다.
+- 원본 challenge message와 signature는 URL, browser storage, 분석 이벤트와 일반 log에 남기지 않는다.
+- 서버가 challenge와 signature를 검증하고 workspace 중복·주소 제한을 확인한 뒤에만 `source_id`를 만든다.
+
+초기·수동 수집은 `POST /api/v1/syncs`로 Job을 생성한다. 초기 수집은 선택 범위의 종료일을 기준으로 최근 90일을 먼저 backfill하고, 선택 범위가 더 길면 나머지 과거 구간을 background에서 이어서 처리한다. 이후 서버 scheduler가 매일 checkpoint 이후 범위를 자동 수집하며, 사용자는 같은 Source에 수동 새로고침을 요청할 수 있다. 모든 trigger는 checkpoint와 idempotency key로 동일 거래·Job의 중복 생성을 막는다.
+
+연결 해제는 향후 자동 동기화와 수동 새로고침만 중단한다. 이미 수집한 원본·정규화 결과와 보고서 근거는 보존하며, 데이터 삭제는 별도 동작과 정책으로 다룬다.
 
 ## 7. 인증과 세션
 
@@ -262,6 +286,8 @@ Polling 규칙:
 - `429`는 `Retry-After`를 우선하고 `503/504`는 제한된 backoff를 적용한다.
 - 새로고침 후에도 데이터 소스의 활성 Job을 다시 조회할 수 있어야 한다.
 - 같은 mutation을 재시도할 때 동일 idempotency key를 유지해 중복 생성을 막는다.
+- Ethereum 지갑 Job은 `INITIAL`, `DAILY`, `MANUAL` trigger를 구분하되 동일한 Job 상태 계약을 사용한다.
+- 최근 90일 우선 backfill과 나머지 background backfill의 진행 상태를 구분해 표시하고, 완료 checkpoint 이후부터 자동·수동 증분 수집을 재개한다.
 
 ## 9. 오류 계약
 
@@ -292,11 +318,14 @@ UI 분기는 HTTP status만이 아니라 안정적인 application error code를 
 
 ## 10. 데이터와 보안
 
-- 지갑 private key와 seed phrase는 어떤 화면에서도 요청하지 않는다.
+- 지갑 private key와 seed phrase, 쓰기·출금 권한은 어떤 화면에서도 요청하지 않는다.
+- Ethereum 소유권 서명은 5분 만료 1회용 오프체인 메시지이며 가스비·거래 승인·자산 이동을 발생시키지 않는다.
+- 브라우저 지갑은 연결과 소유권 서명에만 사용하고, React가 wallet provider로 수집 RPC를 직접 호출하지 않는다.
 - MVP 거래소 입력은 Upbit 거래내역 PDF이며 API Key·Secret 연결은 후속 범위다.
 - PDF는 짧은 수명의 제한된 Presigned URL로 private Object Storage에 업로드한다.
 - 서버가 크기, MIME type, checksum과 파일 구조를 검증하기 전에는 수집을 시작하지 않는다.
 - 브라우저 로그·분석 이벤트·오류 추적에 토큰, PDF 내용, 전체 지갑 주소, 거래 금액을 보내지 않는다.
+- GIWA가 생성하는 공개 체인 기록이나 온체인 commitment에는 지갑 주소와 거래 원문을 기록하지 않는다.
 - 다운로드 산출물은 private object의 short-lived URL로만 제공한다.
 - 다른 workspace의 리소스에 접근할 수 없음을 통합 테스트한다.
 
@@ -316,7 +345,8 @@ Frontend 단위·컴포넌트 테스트:
 - 이용약관·개인정보 처리방침 개별 동의와 미동의 상태의 다음 단계 차단
 - 서비스 계정 인증 방식 선택, 성공, 실패와 재시도 상태
 - Session 만료와 logout 상태 정리
-- 데이터 소스 선택, Upbit PDF, 지갑과 수집 기간 입력 검증
+- 데이터 소스 선택, Upbit PDF, 지갑 방식 선택·연결·소유권 서명과 수집 기간 입력 검증
+- 5분 challenge 만료, 사용자 서명 거절, 주소·network 변경과 재시도 상태
 - 모든 Job 상태·stage·오류 code 렌더링
 - keyboard, focus, label과 오류 연결
 - Session Token을 Web Storage나 JavaScript 상태에 저장하지 않는지 확인
@@ -333,6 +363,8 @@ Frontend 단위·컴포넌트 테스트:
 - 상태 변경 요청의 Origin·Fetch Metadata 조합별 허용·거부
 - API cache 금지, 보안 헤더와 Cookie·Authorization 로그 redaction
 - mutation 재시도 시 데이터 소스나 Job이 중복 생성되지 않음
+- 지갑 등록·초기 backfill·매일 자동 동기화·수동 새로고침이 checkpoint와 idempotency를 지킴
+- 연결 해제 후 새 수집은 중단되지만 기존 수집 데이터는 유지됨
 - Presigned URL 만료, PDF MIME, 크기, checksum과 source coverage 검증
 
 End-to-end 핵심 경로:
@@ -340,10 +372,12 @@ End-to-end 핵심 경로:
 1. 신규 사용자가 이용약관과 개인정보 처리방침을 각각 확인·동의
 2. 서비스 계정 인증 방식 선택과 인증 성공
 3. 회원가입 완료 후 데이터 소스 등록 또는 나중에 하기
-4. Upbit PDF 또는 EVM 주소 선택과 수집 기간 설정
+4. Upbit PDF 또는 Ethereum 지갑 방식 선택·연결·1회용 오프체인 서명과 수집 기간 설정
 5. 수집 Job 생성과 홈 이동
-6. Job 성공·실패·검토 필요 상태 확인
-7. 새로고침 이후 진행 상태 복구
+6. Ethereum 선택 범위의 최근 90일 우선 backfill과 나머지 background 진행 확인
+7. Job 성공·실패·검토 필요 상태와 매일 자동·수동 수집 확인
+8. 새로고침 이후 진행 상태 복구
+9. 지갑 연결 해제 후 기존 데이터 보존과 향후 수집 중단 확인
 
 ## 12. 웹 완료 기준
 
@@ -351,12 +385,19 @@ End-to-end 핵심 경로:
 - [ ] Session Token이 Web Storage, bundle, log에 남지 않는다.
 - [ ] 이용약관·개인정보 처리방침을 개별 동의하고 동의 버전을 추적할 수 있다.
 - [ ] 선택한 서비스 계정 인증이 성공한 뒤에만 회원가입이 완료된다.
-- [ ] Upbit PDF와 EVM 주소 등록 경로 및 가입 중 나중에 하기 동작이 제공된다.
-- [ ] 과세연도 또는 시작일·종료일로 수집 기간을 설정하고 source coverage를 확인할 수 있다.
+- [ ] Upbit PDF와 Ethereum 지갑 연결 경로 및 가입 중 나중에 하기 동작이 제공된다.
+- [ ] 다섯 지갑 방식 선택, 브라우저 연결과 5분 만료 1회용 오프체인 소유권 서명이 동작한다.
+- [ ] 지갑 연결은 private key·seed phrase·쓰기·출금 권한, 가스비·거래 승인·자산 이동을 요구하지 않는다.
+- [ ] 과세연도 또는 시작일·종료일로 수집 기간을 설정하고 Upbit source coverage 또는 Ethereum RPC 수집 가능 범위를 확인할 수 있다.
+- [ ] 직접 기간은 1년을 넘지 않고 시작일이 종료일보다 늦지 않으며 서버 정규화 결과를 확인한다.
+- [ ] Ethereum 선택 범위의 최근 90일을 우선 backfill하고 나머지를 background에서 처리한다.
+- [ ] Ethereum Source는 매일 자동 동기화되고 사용자가 수동 새로고침할 수 있다.
 - [ ] 장시간 요청은 `job_id`로 추적하고 terminal 상태에서 polling을 중지한다.
 - [ ] 여섯 Job 상태와 주요 오류를 명시적으로 표현한다.
 - [ ] 새로고침 후 진행 중 작업을 복구한다.
 - [ ] 중복 제출이 중복 Source·Event·Job을 만들지 않는다.
+- [ ] 연결 해제는 향후 수집만 중단하고 기존 데이터를 보존하며 데이터 삭제와 구분된다.
+- [ ] 지갑 주소와 거래 원문을 공개 체인에 기록하지 않는다.
 - [ ] 다른 workspace 데이터 접근 차단 테스트가 통과한다.
 - [ ] 절대·유휴 만료, Token 회전, CSRF matrix와 민감 로그 redaction 테스트가 통과한다.
 - [ ] PostgreSQL membership version 변경과 공급자 rate limit 통합 테스트가 통과한다.
@@ -368,10 +409,14 @@ End-to-end 핵심 경로:
 - 로그인·회원가입 방식과 endpoint
 - 이용약관·개인정보 처리방침 조회, 버전과 동의 기록 API
 - 서비스 계정 인증 방식별 challenge, callback, 만료와 복구 계약
-- 첫 EVM 체인과 주소 validation 규칙
+- Ethereum 주소 validation·정규화와 지원 account 유형의 세부 규칙
+- Reown Dashboard production project와 domain allowlist 운영 주체
+- 소유권 메시지의 정확한 문구·서명 표준과 locale
+- 매일 자동 동기화 실행 시각·timezone, retry와 수동 새로고침 cooldown
+- 연결 해제 시 이미 실행 중인 Job 처리와 재연결 UX
 - 데이터 소스 목록 및 onboarding status API
 - Upbit PDF 문서 종류, 최대 크기, 페이지 수와 파싱 제한
-- 수집 기간의 최대 범위, timezone과 source coverage 정책
+- 선택할 수 있는 가장 이른 날짜, timezone과 Upbit source coverage 정책
 - 표준 API envelope와 field error schema
 - Idempotency key의 header, TTL과 재사용 규칙
 - Polling 주기, background 정책과 진행률 신뢰 수준

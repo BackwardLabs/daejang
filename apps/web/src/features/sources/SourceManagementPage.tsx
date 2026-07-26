@@ -28,13 +28,13 @@ export function SourceManagementPage() {
         </div>
         <h2 id="source-empty-title">아직 연결된 데이터 소스가 없어요</h2>
         <p>
-          Upbit 거래내역서 PDF를 등록하거나 EVM 공개 주소를 연결하면
+          Upbit 거래내역서 PDF를 등록하거나 EVM Wallet을 연결하면
           <br />
           선택한 조회 기간의 거래 수집을 시작할 수 있습니다.
         </p>
         <div className="source-method-chips" aria-label="지원 데이터 소스">
           <span className="source-chip source-chip--upbit">Upbit PDF</span>
-          <span className="source-chip source-chip--evm">EVM Address</span>
+          <span className="source-chip source-chip--evm">EVM Wallet</span>
         </div>
         <a className="source-primary-action" href="/sources/new">
           데이터 소스 추가 <span aria-hidden="true">→</span>

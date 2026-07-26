@@ -146,17 +146,20 @@ MVP의 Upbit 연결은 API Key·Secret을 사용하지 않고 거래내역 PDF �
 
 원본 파일은 같은 object key로 덮어쓰지 않는다. 파일명, PDF 본문과 추출한 거래 내역은 분석 이벤트나 일반 애플리케이션 로그에 기록하지 않는다.
 
-## 7. DEX·개인 지갑 등록
+## 7. DEX·Ethereum 지갑 등록
 
-필드:
+MVP는 Reown AppKit의 Ethers adapter를 사용해 Ethereum mainnet 지갑을 연결한다.
 
-- 지원 체인
-- 지갑 공개 주소
-- 사용자용 별칭(선택)
+- MetaMask, WalletConnect, Coinbase: AppKit wallet button으로 직접 연결
+- Rabby, Other Wallets: AppKit 연결 화면에서 선택
+- Project ID: `VITE_REOWN_PROJECT_ID`
+- metadata URL: 실행 중인 `window.location.origin`과 동일하게 설정
 
-서버는 등록 요청을 받을 때 체인 지원 여부, 주소 형식, 같은 workspace 안의 중복 여부와 등록 개수 제한을 검사한다. Frontend는 기존 주소를 미리 조회해 비교하지 않는다. MVP에서는 공개 주소만 입력하며 private key, seed phrase 또는 불필요한 지갑 서명을 요청하지 않는다.
+연결된 provider는 공개 주소와 network 확인, 5분 만료 오프체인 소유권 메시지 서명에만 사용한다. 이 서명은 가스비, 거래 승인 또는 자산 이동을 발생시키지 않는다. Client는 서명에서 주소를 복구해 현재 연결 주소와 일치하는지 확인하고, Web Backend는 Session·workspace·주소·network에 결합한 challenge를 최종 검증한 뒤에만 `source_id`를 만든다.
 
-지갑은 문서와 달리 사용자가 선택한 기간을 기준으로 RPC 수집 범위를 계산한다. 시작일·종료일을 블록 범위로 변환하는 기준과 체인 reorg 대응은 Engine 계약에서 정의한다.
+Project ID가 없거나 provider를 사용할 수 없으면 mock 연결로 우회하지 않고 설정 오류를 표시한다. private key, seed phrase, 원본 서명과 전체 주소는 browser storage, URL, 분석 이벤트와 일반 log에 남기지 않는다.
+
+지갑은 문서와 달리 사용자가 선택한 기간을 기준으로 RPC 수집 범위를 계산한다. 시작일·종료일을 블록 범위로 변환하는 기준과 chain reorg 대응은 Engine 계약에서 정의한다. React는 wallet provider로 거래를 직접 수집하지 않는다.
 
 ## 8. 수집 기간 설정
 
