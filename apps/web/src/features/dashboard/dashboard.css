@@ -359,28 +359,30 @@
 
 .dashboard-chart {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  align-items: end;
-  gap: 12px;
-  height: 150px;
+  grid-template-columns: repeat(12, minmax(0, 46px));
+  align-items: start;
+  justify-content: space-between;
+  box-sizing: border-box;
+  height: 146px;
   margin-top: 8px;
-  padding: 14px 18px 10px;
+  padding: 16px 16px 12px;
   border-radius: 8px;
   background: var(--dashboard-subtle);
 }
 
 .dashboard-chart > div {
   display: grid;
+  grid-template-rows: 103px 11px;
   justify-items: center;
-  align-items: end;
-  gap: 5px;
-  height: 100%;
+  gap: 4px;
+  width: 46px;
+  height: 118px;
 }
 
 .dashboard-chart > div i {
+  align-self: end;
   display: block;
   width: 28px;
-  max-width: 100%;
   border-radius: 5px;
   background: #91969e;
 }
@@ -390,6 +392,7 @@
 }
 
 .dashboard-chart > div span {
+  line-height: 11px;
   color: var(--dashboard-faint);
   font-size: 11px;
   white-space: nowrap;
@@ -658,8 +661,14 @@
   }
 
   .dashboard-chart {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    justify-content: stretch;
     gap: 6px;
     padding-inline: 10px;
+  }
+
+  .dashboard-chart > div {
+    width: auto;
   }
 
   .dashboard-chart > div i {

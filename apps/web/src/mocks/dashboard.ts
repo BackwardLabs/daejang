@@ -158,7 +158,7 @@ export const dashboardSnapshots: Record<'2026' | '2027', DashboardSnapshot> = {
     totalAssets: '₩84,270,000',
     dailyChange: '⌃ +4.6% · ₩2,910,000',
     lastSynced: '2027-08-04 10:20',
-    bars: [42, 61, 54, 80, 68, 92, 74, 99, 85, 108, 89, 116],
+    bars: [31, 47, 41, 63, 54, 75, 60, 80, 67, 86, 73, 92],
     allocations: [
       { symbol: 'BTC', percent: 32, amount: '₩21,158,000', color: '#f7931a' },
       { symbol: 'ETH', percent: 30, amount: '₩19,923,000', color: '#627eea' },
@@ -174,7 +174,7 @@ export const dashboardSnapshots: Record<'2026' | '2027', DashboardSnapshot> = {
     totalAssets: '₩71,640,000',
     dailyChange: '⌃ +1.9% · ₩982,000',
     lastSynced: '2026-12-31 18:20',
-    bars: [34, 48, 44, 63, 57, 75, 66, 82, 73, 91, 84, 96],
+    bars: [27, 39, 36, 51, 46, 61, 54, 67, 59, 74, 68, 78],
     allocations: [
       { symbol: 'BTC', percent: 34, amount: '₩17,945,000', color: '#f7931a' },
       { symbol: 'ETH', percent: 31, amount: '₩16,362,000', color: '#627eea' },
