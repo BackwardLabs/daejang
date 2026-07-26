@@ -103,7 +103,7 @@ flowchart TB
 
 ### 5.1 앱 진입과 세션 확인
 
-앱 진입 직후 브라우저에 값이 있다는 이유만으로 로그인 상태를 판단하지 않는다. Web API가 Session과 최신 workspace membership을 확인한 뒤 이동 경로를 결정한다.
+앱 진입 직후 브라우저에 값이 있다는 이유만으로 로그인 상태를 판단하지 않는다. Web API가 Session과 활성 사용자 상태를 확인한 뒤 이동 경로를 결정한다.
 
 | 상태 | 화면 동작 |
 | --- | --- |
@@ -145,7 +145,7 @@ flowchart TB
 
 | 기록 항목 | 기준 |
 | --- | --- |
-| 동의 주체 | 계정 생성 전에는 만료 시간이 있는 `signup_session_id`, 생성 후에는 해당 `user_id`와 연결 |
+| 동의 주체 | 가입 시작 시 서버가 생성한 `pending` 사용자 UUID. 인증 성공 후에도 같은 `user_id` 유지 |
 | 문서 식별자 | 문서 종류와 서버가 발급한 고유 ID |
 | 문서 버전 | 사용자가 실제 확인한 버전과 필요 시 내용 무결성을 확인할 수 있는 hash |
 | 동의 상태 | 필수 항목별 동의 결과. 선택 동의는 별도 항목으로 저장 |
@@ -160,7 +160,7 @@ IP 주소나 User-Agent처럼 추가 개인정보가 될 수 있는 값은 단�
 2. 사용자가 내용을 확인하고 개인정보 항목에 직접 동의한다.
 3. Client가 문서 ID와 버전, 동의 결과, idempotency key를 제출한다.
 4. 서버가 현재 유효한 버전인지 확인하고 동의 기록을 한 번만 생성한다.
-5. 계정 생성 전 기록은 signup session에 임시 연결하고, 인증 성공 후 생성된 사용자에게 원자적으로 귀속한다.
+5. 공급자 인증이 성공하면 identity를 같은 사용자 UUID에 연결하고, 필수 동의가 현재 버전인지 확인한 뒤 사용자를 `active`로 전환한다.
 6. 제출 중 문서 버전이 바뀌었다면 이전 버전을 자동 동의 처리하지 않고 최신 내용을 다시 보여 준다.
 7. 저장 실패 시 회원가입을 완료한 것처럼 표시하지 않고 같은 화면에서 안전하게 재시도한다.
 
@@ -197,7 +197,7 @@ UI 상태:
 - Rate Limit
 - 성공
 
-로그인 이후 서버가 확인한 기본 workspace를 기준으로 데이터 소스 존재 여부를 조회한다. 브라우저가 전달한 `workspace_id`, role 또는 permission은 신뢰하지 않는다.
+로그인 이후 서버 Session에서 확인한 사용자 UUID를 기준으로 데이터 소스 존재 여부를 조회한다. 브라우저가 전달한 `user_id`, role 또는 permission은 신뢰하지 않는다.
 
 ### 5.3 데이터 소스 상태 확인
 
@@ -233,7 +233,7 @@ MVP 선택지:
 | 로그인 | 등록된 인증 방식에 필요한 입력 | 형식과 필수값 | identity, rate limit, session 생성 |
 | 데이터 소스 선택 | `Upbit 문서` 또는 `Ethereum 지갑` | 하나 선택 | 지원 source type |
 | Upbit PDF | 파일 1개 | 확장자, 크기 사전 안내 | MIME, 크기, checksum, 문서 구조, 거래 기간 |
-| Ethereum 지갑 | 지갑 방식, 연결된 주소, network, 선택 별칭, 소유권 signature | 지원 방식 선택, provider 연결 상태와 Ethereum network | 5분 TTL·1회용 challenge, signature와 주소 일치, workspace 중복, 개수 제한 |
+| Ethereum 지갑 | 지갑 방식, 연결된 주소, network, 선택 별칭, 소유권 signature | 지원 방식 선택, provider 연결 상태와 Ethereum network | 5분 TTL·1회용 challenge, signature와 주소 일치, 사용자별 중복, 개수 제한 |
 | 수집 기간 | 과세연도 또는 시작일·종료일 | 필수값, 시작일≤종료일, 직접 기간 최대 1년 | timezone, 허용 범위, Upbit source coverage 또는 Ethereum RPC 수집 가능 범위 |
 
 브라우저 검증은 빠른 피드백을 위한 보조 수단이며 서버 검증을 최종 기준으로 한다.
@@ -278,7 +278,7 @@ MVP 선택지:
 - 사용자가 선택한 지갑 방식
 - 브라우저 지갑이 반환한 Ethereum 주소와 network
 - 사용자용 별칭(선택)
-- 현재 Session·workspace·주소·network에 결합된 challenge ID
+- 현재 Session의 사용자 UUID·주소·network에 결합된 challenge ID
 - challenge message에 대한 signature
 
 처리 순서:
@@ -288,8 +288,8 @@ MVP 선택지:
 3. 서버는 nonce와 발급 시각을 포함한 1회용 오프체인 메시지와 5분 만료 시각을 반환한다.
 4. Client는 메시지가 가스비·거래 승인·자산 이동을 만들지 않는 소유권 확인임을 표시한 뒤 지갑 서명을 요청한다.
 5. Client는 challenge ID와 signature를 HTTPS request body로 제출한다.
-6. 서버는 challenge가 미사용·미만료 상태이고 현재 Session·workspace·주소·network에 일치하는지 확인한 뒤 signature를 검증한다.
-7. 서버가 같은 workspace의 중복 주소와 개수 제한을 확인하고, 성공한 경우에만 데이터 소스를 저장해 `source_id`를 반환한다.
+6. 서버는 challenge가 미사용·미만료 상태이고 현재 Session의 사용자 UUID·주소·network에 일치하는지 확인한 뒤 signature를 검증한다.
+7. 서버가 같은 사용자의 중복 주소와 개수 제한을 확인하고, 성공한 경우에만 데이터 소스를 저장해 `source_id`를 반환한다.
 8. 사용자가 과세연도 전체 또는 최대 1년의 직접 기간을 확인하면 초기 수집 Job을 만든다.
 
 소유권 메시지 서명은 온체인 transaction이 아니다. 가스비, 거래 승인, token allowance와 자산 이동이 발생하지 않으며 private key, seed phrase, 쓰기 권한과 출금 권한을 요청하거나 수집하지 않는다. challenge message와 signature는 browser storage, URL, 분석 이벤트나 일반 log에 남기지 않고 한 번 사용하거나 5분이 지나면 폐기한다. 주소 또는 network가 바뀌면 기존 challenge를 버리고 처음부터 다시 요청한다.
@@ -317,7 +317,7 @@ MVP 지원 network는 Ethereum이다. 선택 범위의 종료일을 기준으로
 
 | 목적 | API |
 | --- | --- |
-| 현재 사용자·workspace 확인 | `GET /api/v1/me` |
+| 현재 사용자 확인 | `GET /api/v1/me` |
 | 지갑 소유권 challenge 생성 | `POST /api/v1/sources/wallets/challenges` |
 | 지갑 등록 | `POST /api/v1/sources/wallets` |
 | 데이터 소스 연결 해제 | `POST /api/v1/sources/{id}/disconnect` |
@@ -362,7 +362,7 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - RPC 원문과 원본 PDF 내용
 - Access·Refresh Token
 - API Key·Secret
-- 다른 workspace 리소스의 존재 여부
+- 다른 사용자 리소스의 존재 여부
 
 ## 9. 보안 고려사항
 
@@ -371,8 +371,8 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - 두 Token을 `localStorage`와 `sessionStorage`에 저장하지 않는다.
 - refresh와 logout endpoint는 Origin 검증과 CSRF 방어를 적용한다.
 - Public Access JWT를 Go Engine으로 전달하지 않는다.
-- Web Backend가 active Session, 최신 membership, resource ownership을 확인한다.
-- 지갑 challenge는 현재 Session·workspace·Ethereum 주소·network에 결합하고 5분 후 만료하며 한 번만 사용한다.
+- Web Backend가 active Session, 활성 사용자 상태와 resource ownership을 확인한다.
+- 지갑 challenge는 현재 Session의 사용자 UUID·Ethereum 주소·network에 결합하고 5분 후 만료하며 한 번만 사용한다.
 - 지갑 signature는 HTTPS request body로만 전달하고 URL, browser storage, log와 분석 이벤트에 남기지 않는다.
 - private key, seed phrase, 쓰기 권한과 출금 권한은 요청하거나 수집하지 않는다.
 - 소유권 서명은 가스비·거래 승인·token allowance·자산 이동을 만들지 않는다.
@@ -442,7 +442,7 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - [ ] 새로고침 후에도 진행 중인 Job을 복구한다.
 - [ ] 중복 제출이 데이터 소스나 Job을 중복 생성하지 않는다.
 - [ ] Token과 자격증명이 browser storage, bundle, log, 분석 이벤트에 남지 않는다.
-- [ ] 다른 workspace의 데이터 소스와 Job에 접근할 수 없다.
+- [ ] 다른 사용자의 데이터 소스와 Job에 접근할 수 없다.
 - [ ] 연결 해제 후 향후 자동·수동 수집은 중단되지만 기존 데이터는 유지된다.
 - [ ] 지갑 주소와 거래 원문을 공개 체인에 기록하지 않는다.
 

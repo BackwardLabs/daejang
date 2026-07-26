@@ -48,12 +48,13 @@ Web API는 다음 보안 경계를 기본으로 적용합니다.
 - opaque host-only Session cookie와 절대·유휴 만료
 - 상태 변경 `/api/*` 요청의 Origin·Fetch Metadata 검증
 - API 응답 cache 금지, 보안 헤더와 민감 로그 redaction
-- 서버 Session에 없는 workspace 접근 차단
-- PostgreSQL SessionStore와 membership version 기반 즉시 권한 무효화
+- 서버 Session에서 확인한 단일 사용자 UUID만 신뢰
+- PostgreSQL SessionStore와 사용자 상태·session epoch 기반 즉시 Session 무효화
+- 버전별 이용약관·개인정보 처리방침과 append-only 사용자 동의 이력
 - 공급자별 PostgreSQL 로그인 rate limit과 Session Token 회전
 - Engine private gRPC client certificate mTLS preflight
 
-메모리 SessionStore와 rate-limit store는 로컬 개발과 테스트 전용입니다. 운영 모드는 `DATABASE_URL`, 32 byte 이상의 `RATE_LIMIT_HMAC_SECRET`, Engine CA·client certificate·private key 설정이 없으면 시작하지 않습니다. Web schema는 `daejang-db/migrations/000008_create_web_auth_persistence.sql`이 소유하고, ingress 기준은 [`deploy/nginx`](deploy/nginx/README.md)에 있습니다.
+메모리 SessionStore와 rate-limit store는 로컬 개발과 테스트 전용입니다. 운영 모드는 `DATABASE_URL`, 32 byte 이상의 `RATE_LIMIT_HMAC_SECRET`, Engine CA·client certificate·private key 설정이 없으면 시작하지 않습니다. Web schema는 `daejang-db`의 `000008`과 단일 사용자 모델로 전환하는 `000009` migration이 소유하고, ingress 기준은 [`deploy/nginx`](deploy/nginx/README.md)에 있습니다.
 
 ## 검증 명령
 
@@ -79,6 +80,7 @@ Go Engine, proto, migration은 각 소유 저장소의 계약을 따르며 이 �
 
 - [대장 Flow](https://www.figma.com/board/9rt2FVwNe1Dfv9DXLThXok/%EB%8C%80%EC%9E%A5-flow?node-id=58-145)
 - [Technical Spec — GIWA MVP v0.1](https://linear.app/giwa-daejang/document/technical-spec-giwa-mvp-v01-18d511232c66)
+- [인증·Session Sequence](docs/auth-session-sequences.md)
 
 ## 협업
 

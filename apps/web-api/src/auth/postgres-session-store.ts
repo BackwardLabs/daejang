@@ -1,11 +1,6 @@
 import type { Pool, PoolClient } from 'pg'
 
-import type {
-  SessionRecord,
-  SessionStore,
-  WorkspaceMembership,
-  WorkspaceRole,
-} from './session.js'
+import type { SessionRecord, SessionStore } from './session.js'
 
 type SessionTransition = Parameters<SessionStore['resolveAndTouch']>[0]
 type RotateSessionTransition = Parameters<SessionStore['rotate']>[0]
@@ -14,10 +9,7 @@ type SessionRow = {
   id: string
   user_id: string
   display_name: string
-  membership_version: string
   session_epoch: string
-  active_workspace_id: string
-  memberships: WorkspaceMembership[]
   created_at: Date
   last_seen_at: Date
   absolute_expires_at: Date
@@ -32,16 +24,21 @@ const parsePositiveInteger = (value: string, field: string) => {
   return parsed
 }
 
+const parseNonNegativeInteger = (value: string | undefined, field: string) => {
+  if (value === undefined) {
+    throw new Error(`PostgreSQL did not return ${field}`)
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${field} is outside the JavaScript safe integer range`)
+  }
+  return parsed
+}
+
 const toSessionRecord = (row: SessionRow): SessionRecord => ({
   id: row.id,
   user: { id: row.user_id, displayName: row.display_name },
-  memberships: row.memberships,
-  membershipVersion: parsePositiveInteger(
-    row.membership_version,
-    'membership_version',
-  ),
   sessionEpoch: parsePositiveInteger(row.session_epoch, 'session_epoch'),
-  activeWorkspaceId: row.active_workspace_id,
   createdAt: row.created_at,
   lastSeenAt: row.last_seen_at,
   absoluteExpiresAt: row.absolute_expires_at,
@@ -55,10 +52,7 @@ const loadSession = async (client: PoolClient, sessionId: string) => {
         s.id,
         s.user_id,
         u.display_name,
-        s.membership_version,
         s.session_epoch,
-        s.active_workspace_id,
-        membership_list.memberships,
         s.created_at,
         s.last_seen_at,
         s.absolute_expires_at,
@@ -66,22 +60,9 @@ const loadSession = async (client: PoolClient, sessionId: string) => {
       FROM web_private.sessions s
       JOIN web_private.users u
         ON u.id = s.user_id
-        AND u.membership_version = s.membership_version
+        AND u.status = 'active'
         AND u.session_epoch = s.session_epoch
-      CROSS JOIN LATERAL (
-        SELECT jsonb_agg(
-          jsonb_build_object(
-            'workspaceId', workspace.id,
-            'workspaceName', workspace.name,
-            'role', membership.role
-          ) ORDER BY workspace.id
-        ) AS memberships
-        FROM web_private.workspace_memberships membership
-        JOIN web_private.workspaces workspace ON workspace.id = membership.workspace_id
-        WHERE membership.user_id = s.user_id
-      ) membership_list
       WHERE s.id = $1
-        AND membership_list.memberships IS NOT NULL
     `,
     [sessionId],
   )
@@ -109,7 +90,7 @@ export class PostgresSessionStore implements SessionStore {
           FROM web_private.users u
           WHERE s.token_hash = $1
             AND u.id = s.user_id
-            AND u.membership_version = s.membership_version
+            AND u.status = 'active'
             AND u.session_epoch = s.session_epoch
             AND s.absolute_expires_at > $2
             AND s.idle_expires_at > $2
@@ -159,24 +140,18 @@ export class PostgresSessionStore implements SessionStore {
   }
 
   async #insertSession(client: PoolClient, tokenHash: string, session: SessionRecord) {
-    const user = await client.query<{
-      membership_version: string
-      session_epoch: string
-    }>(
+    const user = await client.query<{ session_epoch: string }>(
       `
-        SELECT u.membership_version, u.session_epoch
-        FROM web_private.users u
-        JOIN web_private.workspace_memberships membership
-          ON membership.user_id = u.id
-          AND membership.workspace_id = $2
-        WHERE u.id = $1
-        FOR UPDATE OF u
+        SELECT session_epoch
+        FROM web_private.users
+        WHERE id = $1 AND status = 'active'
+        FOR UPDATE
       `,
-      [session.user.id, session.activeWorkspaceId],
+      [session.user.id],
     )
     const userRow = user.rows[0]
     if (!userRow) {
-      throw new Error('Session user or active workspace membership does not exist')
+      throw new Error('Active session user does not exist')
     }
 
     await client.query(
@@ -185,22 +160,18 @@ export class PostgresSessionStore implements SessionStore {
           id,
           token_hash,
           user_id,
-          membership_version,
           session_epoch,
-          active_workspace_id,
           created_at,
           last_seen_at,
           absolute_expires_at,
           idle_expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `,
       [
         session.id,
         tokenHash,
         session.user.id,
-        userRow.membership_version,
         userRow.session_epoch,
-        session.activeWorkspaceId,
         session.createdAt,
         session.lastSeenAt,
         session.absoluteExpiresAt,
@@ -237,7 +208,7 @@ export class PostgresSessionStore implements SessionStore {
           FROM web_private.users u
           WHERE s.token_hash = $1
             AND u.id = s.user_id
-            AND u.membership_version = s.membership_version
+            AND u.status = 'active'
             AND u.session_epoch = s.session_epoch
             AND s.absolute_expires_at > $4
             AND s.idle_expires_at > $4
@@ -269,32 +240,15 @@ export class PostgresSessionStore implements SessionStore {
   }
 
   async delete(tokenHash: string) {
-    await this.pool.query('DELETE FROM web_private.sessions WHERE token_hash = $1', [
-      tokenHash,
-    ])
+    await this.pool.query('DELETE FROM web_private.sessions WHERE token_hash = $1', [tokenHash])
   }
 
   async deleteByUserId(userId: string) {
-    return this.#transaction(async (client) => {
-      const updated = await client.query(
-        `
-          UPDATE web_private.users
-          SET session_epoch = session_epoch + 1, updated_at = clock_timestamp()
-          WHERE id = $1
-          RETURNING id
-        `,
-        [userId],
-      )
-      if (updated.rowCount !== 1) {
-        return 0
-      }
-
-      const deleted = await client.query(
-        'DELETE FROM web_private.sessions WHERE user_id = $1',
-        [userId],
-      )
-      return deleted.rowCount ?? 0
-    })
+    const result = await this.pool.query<{ deleted_count: string }>(
+      'SELECT web_private.revoke_user_sessions($1::uuid)::text AS deleted_count',
+      [userId],
+    )
+    return parseNonNegativeInteger(result.rows[0]?.deleted_count, 'deleted_count')
   }
 
   async #transaction<T>(operation: (client: PoolClient) => Promise<T>) {
@@ -310,59 +264,5 @@ export class PostgresSessionStore implements SessionStore {
     } finally {
       client.release()
     }
-  }
-}
-
-export class PostgresMembershipStore {
-  constructor(private readonly pool: Pool) {}
-
-  async upsertUser(user: { id: string; displayName: string }) {
-    await this.pool.query(
-      `
-        INSERT INTO web_private.users (id, display_name)
-        VALUES ($1, $2)
-        ON CONFLICT (id) DO UPDATE
-        SET display_name = EXCLUDED.display_name, updated_at = clock_timestamp()
-      `,
-      [user.id, user.displayName],
-    )
-  }
-
-  async upsertWorkspace(workspace: { id: string; name: string }) {
-    await this.pool.query(
-      `
-        INSERT INTO web_private.workspaces (id, name)
-        VALUES ($1, $2)
-        ON CONFLICT (id) DO UPDATE
-        SET name = EXCLUDED.name, updated_at = clock_timestamp()
-      `,
-      [workspace.id, workspace.name],
-    )
-  }
-
-  async setMembership(input: {
-    userId: string
-    workspaceId: string
-    role: WorkspaceRole
-  }) {
-    await this.pool.query(
-      `
-        INSERT INTO web_private.workspace_memberships (user_id, workspace_id, role)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (user_id, workspace_id) DO UPDATE
-        SET role = EXCLUDED.role, updated_at = clock_timestamp()
-      `,
-      [input.userId, input.workspaceId, input.role],
-    )
-  }
-
-  async removeMembership(userId: string, workspaceId: string) {
-    await this.pool.query(
-      `
-        DELETE FROM web_private.workspace_memberships
-        WHERE user_id = $1 AND workspace_id = $2
-      `,
-      [userId, workspaceId],
-    )
   }
 }

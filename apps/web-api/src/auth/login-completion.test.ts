@@ -6,15 +6,10 @@ import { MemorySessionStore, SessionService } from './session.js'
 
 const sessionInput = (userId: string) => ({
   user: { id: userId, displayName: '김대장' },
-  activeWorkspaceId: 'workspace-main',
-  memberships: [
-    {
-      workspaceId: 'workspace-main',
-      workspaceName: '김대장의 장부',
-      role: 'owner' as const,
-    },
-  ],
 })
+
+const USER_ID = '00000000-0000-4000-8000-000000000001'
+const PREVIOUS_USER_ID = '00000000-0000-4000-8000-000000000003'
 
 describe('LoginCompletionService', () => {
   it('rate-limits by provider before replacing the previous session token', async () => {
@@ -23,18 +18,18 @@ describe('LoginCompletionService', () => {
       new AuthRateLimiter(new MemoryRateLimitStore(), 'test-secret'),
       sessions,
     )
-    const anonymous = await sessions.create(sessionInput('anonymous'))
+    const previous = await sessions.create(sessionInput(PREVIOUS_USER_ID))
 
     const authenticated = await service.complete({
       provider: 'siwe',
       ip: '203.0.113.10',
       providerIdentity: '0xabc',
-      currentSessionToken: anonymous.token,
-      verifyProvider: async () => sessionInput('user-kim'),
+      currentSessionToken: previous.token,
+      verifyProvider: async () => sessionInput(USER_ID),
     })
 
-    expect(await sessions.resolve(anonymous.token)).toBeUndefined()
-    expect(authenticated.session.user.id).toBe('user-kim')
+    expect(await sessions.resolve(previous.token)).toBeUndefined()
+    expect(authenticated.session.user.id).toBe(USER_ID)
     expect(authenticated.rateLimit.allowed).toBe(true)
   })
 
@@ -52,7 +47,7 @@ describe('LoginCompletionService', () => {
       currentSessionToken: undefined,
       verifyProvider: async () => {
         verificationCalls += 1
-        return sessionInput('user-kim')
+        return sessionInput(USER_ID)
       },
     }
 

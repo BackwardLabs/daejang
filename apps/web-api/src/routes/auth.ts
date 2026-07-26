@@ -28,29 +28,15 @@ export const registerAuthRoutes = async (
           200: {
             type: 'object',
             additionalProperties: false,
-            required: ['user', 'activeWorkspaceId', 'workspaces'],
+            required: ['user'],
             properties: {
               user: {
                 type: 'object',
                 additionalProperties: false,
                 required: ['id', 'displayName'],
                 properties: {
-                  id: { type: 'string' },
+                  id: { type: 'string', format: 'uuid' },
                   displayName: { type: 'string' },
-                },
-              },
-              activeWorkspaceId: { type: 'string' },
-              workspaces: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: ['workspaceId', 'workspaceName', 'role'],
-                  properties: {
-                    workspaceId: { type: 'string' },
-                    workspaceName: { type: 'string' },
-                    role: { type: 'string', enum: ['owner', 'member'] },
-                  },
                 },
               },
             },
@@ -66,8 +52,6 @@ export const registerAuthRoutes = async (
 
       return {
         user: session.user,
-        activeWorkspaceId: session.activeWorkspaceId,
-        workspaces: session.memberships,
       }
     },
   )

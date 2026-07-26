@@ -5,6 +5,8 @@ import { MemorySessionStore } from './auth/session.js'
 import { MemoryRateLimitStore } from './auth/rate-limit.js'
 import type { AppConfig } from './config.js'
 
+const USER_ID = '00000000-0000-4000-8000-000000000001'
+
 const config: AppConfig = {
   runtimeMode: 'test',
   host: '127.0.0.1',
@@ -44,15 +46,7 @@ describe('web api authentication boundary', () => {
 
   const createSession = async () => {
     const session = {
-      user: { id: 'user-kim', displayName: '김대장' },
-      activeWorkspaceId: 'workspace-main',
-      memberships: [
-        {
-          workspaceId: 'workspace-main',
-          workspaceName: '김대장의 장부',
-          role: 'owner',
-        },
-      ],
+      user: { id: USER_ID, displayName: '김대장' },
     } as const
 
     return context.sessionService.create(session)
@@ -74,7 +68,7 @@ describe('web api authentication boundary', () => {
     })
   })
 
-  it('resolves identity and memberships from the server session', async () => {
+  it('returns only the identity resolved from the server session', async () => {
     const { token } = await createSession()
 
     const response = await context.app.inject({
@@ -82,36 +76,27 @@ describe('web api authentication boundary', () => {
       url: '/api/v1/me',
       headers: {
         cookie: `${config.sessionCookieName}=${token}`,
-        'x-workspace-id': 'workspace-attacker',
-        'x-user-id': 'user-attacker',
+        'x-user-id': '00000000-0000-4000-8000-000000000099',
       },
     })
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
-      user: { id: 'user-kim', displayName: '김대장' },
-      activeWorkspaceId: 'workspace-main',
-      workspaces: [
-        {
-          workspaceId: 'workspace-main',
-          workspaceName: '김대장의 장부',
-          role: 'owner',
-        },
-      ],
+      user: { id: USER_ID, displayName: '김대장' },
     })
   })
 
-  it('hides workspaces outside the authenticated membership', async () => {
+  it('does not expose a workspace API', async () => {
     const { token } = await createSession()
 
     const response = await context.app.inject({
       method: 'GET',
-      url: '/api/v1/workspaces/workspace-other',
+      url: '/api/v1/workspaces/00000000-0000-4000-8000-000000000099',
       headers: { cookie: `${config.sessionCookieName}=${token}` },
     })
 
     expect(response.statusCode).toBe(404)
-    expect(response.json()).toMatchObject({ error: { code: 'RESOURCE_NOT_FOUND' } })
+    expect(response.json()).toMatchObject({ message: 'Route GET:/api/v1/workspaces/00000000-0000-4000-8000-000000000099 not found' })
   })
 
   it('rejects idle-expired sessions and clears their cookie', async () => {

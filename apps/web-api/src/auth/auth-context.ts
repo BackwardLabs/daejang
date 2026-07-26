@@ -1,7 +1,7 @@
 import type { FastifyReply, preHandlerHookHandler } from 'fastify'
 
 import type { AppConfig } from '../config.js'
-import { resourceNotFound, unauthorized } from '../errors.js'
+import { unauthorized } from '../errors.js'
 import type { SessionRecord, SessionService } from './session.js'
 
 declare module 'fastify' {
@@ -51,20 +51,5 @@ export const createAuthHooks = (sessionService: SessionService, config: AppConfi
     request.sessionToken = token
   }
 
-  const requireWorkspace = (): preHandlerHookHandler => async (request) => {
-    const session = request.authSession
-    if (!session) {
-      throw unauthorized()
-    }
-
-    const { workspaceId } = request.params as { workspaceId?: unknown }
-    if (
-      typeof workspaceId !== 'string' ||
-      !session.memberships.some((membership) => membership.workspaceId === workspaceId)
-    ) {
-      throw resourceNotFound()
-    }
-  }
-
-  return { authenticate, requireWorkspace, clearSessionCookie }
+  return { authenticate, clearSessionCookie }
 }
