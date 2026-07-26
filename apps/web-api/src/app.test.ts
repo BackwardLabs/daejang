@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Wallet } from 'ethers'
 
 import { buildApp } from './app.js'
 import { MemorySessionStore } from './auth/session.js'
 import { MemoryRateLimitStore } from './auth/rate-limit.js'
 import type { AppConfig } from './config.js'
+import { MemoryWalletSourceStore } from './sources/wallet-source-store.js'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 
@@ -28,6 +30,10 @@ class TestDurableSessionStore extends MemorySessionStore {
 }
 
 class TestDurableRateLimitStore extends MemoryRateLimitStore {
+  override readonly durable = true
+}
+
+class TestDurableWalletSourceStore extends MemoryWalletSourceStore {
   override readonly durable = true
 }
 
@@ -66,6 +72,46 @@ describe('web api authentication boundary', () => {
     expect(response.json()).toMatchObject({
       error: { code: 'AUTHENTICATION_REQUIRED' },
     })
+  })
+
+  it('issues a real session for the configured development test user', async () => {
+    await context.app.close()
+    const developmentUserStore = {
+      upsertUser: vi.fn(async () => undefined),
+      setStatus: vi.fn(async () => undefined),
+    }
+    context = await buildApp({
+      config: {
+        ...config,
+        runtimeMode: 'development',
+        devBootstrapUser: { id: USER_ID, displayName: '김대장' },
+      },
+      logger: false,
+      developmentUserStore,
+      now: () => now,
+    })
+
+    const bootstrap = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/dev/session',
+      headers: { origin: config.publicOrigin },
+    })
+    expect(bootstrap.statusCode).toBe(201)
+    expect(developmentUserStore.upsertUser).toHaveBeenCalledWith({
+      id: USER_ID,
+      displayName: '김대장',
+    })
+    expect(developmentUserStore.setStatus).toHaveBeenCalledWith(USER_ID, 'active')
+
+    const setCookie = bootstrap.headers['set-cookie']
+    const cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)?.split(';')[0]
+    const me = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/me',
+      headers: { cookie },
+    })
+    expect(me.statusCode).toBe(200)
+    expect(me.json()).toEqual({ user: { id: USER_ID, displayName: '김대장' } })
   })
 
   it('returns only the identity resolved from the server session', async () => {
@@ -166,6 +212,128 @@ describe('web api authentication boundary', () => {
       headers: { cookie: `${config.sessionCookieName}=${token}` },
     })
     expect(rejected.statusCode).toBe(401)
+  })
+
+  it('registers, lists, and disconnects a server-verified wallet source', async () => {
+    const { token } = await createSession()
+    const wallet = Wallet.createRandom()
+    const request = async (
+      method: 'GET' | 'POST',
+      url: string,
+      payload?: Record<string, unknown>,
+    ) => {
+      const requestOptions = {
+        method,
+        url,
+        headers: {
+          cookie: `${config.sessionCookieName}=${token}`,
+          ...(method === 'POST' ? { origin: config.publicOrigin } : {}),
+        },
+      } as const
+      return payload === undefined
+        ? context.app.inject(requestOptions)
+        : context.app.inject({ ...requestOptions, payload })
+    }
+
+    const challengeResponse = await request(
+      'POST',
+      '/api/v1/sources/wallets/challenges',
+      { address: wallet.address, chainId: 'eip155:1' },
+    )
+    expect(challengeResponse.statusCode).toBe(201)
+    const challenge = challengeResponse.json<{
+      challengeId: string
+      message: string
+    }>()
+    const signature = await wallet.signMessage(challenge.message)
+
+    const registration = await request('POST', '/api/v1/sources/wallets', {
+      challengeId: challenge.challengeId,
+      signature,
+      chainIds: ['eip155:1', 'eip155:8453'],
+      label: '세무 지갑',
+    })
+    expect(registration.statusCode).toBe(201)
+    const source = registration.json<{ id: string; address: string }>()
+    expect(source.address).toBe(wallet.address.toLowerCase())
+
+    const replay = await request('POST', '/api/v1/sources/wallets', {
+      challengeId: challenge.challengeId,
+      signature,
+      chainIds: ['eip155:1'],
+    })
+    expect(replay.statusCode).toBe(409)
+    expect(replay.json()).toMatchObject({
+      error: { code: 'WALLET_CHALLENGE_INVALID' },
+    })
+
+    const list = await request('GET', '/api/v1/sources')
+    expect(list.statusCode).toBe(200)
+    expect(list.json()).toMatchObject({
+      items: [
+        {
+          id: source.id,
+          address: wallet.address.toLowerCase(),
+          status: 'ACTIVE',
+          chainScopes: [
+            { chainId: 'eip155:1', status: 'ACTIVE' },
+            { chainId: 'eip155:8453', status: 'ACTIVE' },
+          ],
+        },
+      ],
+    })
+
+    const disconnected = await request(
+      'POST',
+      `/api/v1/sources/${source.id}/disconnect`,
+    )
+    expect(disconnected.statusCode).toBe(200)
+    expect(disconnected.json()).toMatchObject({
+      id: source.id,
+      status: 'DISCONNECTED',
+      chainScopes: [
+        { chainId: 'eip155:1', status: 'DISABLED' },
+        { chainId: 'eip155:8453', status: 'DISABLED' },
+      ],
+    })
+  })
+
+  it('rejects a signature from a different wallet', async () => {
+    const { token } = await createSession()
+    const expectedWallet = Wallet.createRandom()
+    const attackerWallet = Wallet.createRandom()
+    const challengeResponse = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets/challenges',
+      headers: {
+        cookie: `${config.sessionCookieName}=${token}`,
+        origin: config.publicOrigin,
+      },
+      payload: { address: expectedWallet.address, chainId: 'eip155:1' },
+    })
+    const challenge = challengeResponse.json<{
+      challengeId: string
+      message: string
+    }>()
+
+    const response = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets',
+      headers: {
+        cookie: `${config.sessionCookieName}=${token}`,
+        origin: config.publicOrigin,
+      },
+      payload: {
+        challengeId: challenge.challengeId,
+        signature: await attackerWallet.signMessage(challenge.message),
+        chainIds: ['eip155:1'],
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({
+      error: { code: 'WALLET_SIGNATURE_INVALID' },
+    })
   })
 
   it('does not clear the winning cookie when concurrent rotation loses', async () => {
@@ -336,6 +504,7 @@ describe('web api authentication boundary', () => {
       logger: false,
       sessionStore: new TestDurableSessionStore(),
       rateLimitStore: new TestDurableRateLimitStore(),
+      walletSourceStore: new TestDurableWalletSourceStore(),
     })
     const health = await productionContext.app.inject('/healthz')
     expect(health.headers['strict-transport-security']).toBe(

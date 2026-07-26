@@ -80,4 +80,32 @@ describe('web api configuration', () => {
   it('rejects unknown runtime modes', () => {
     expect(() => loadConfig({ NODE_ENV: 'staging' })).toThrow('NODE_ENV')
   })
+
+  it('loads the development bootstrap user only when both values are present', () => {
+    expect(
+      loadConfig({
+        DEV_BOOTSTRAP_USER_ID: '00000000-0000-4000-8000-000000000001',
+        DEV_BOOTSTRAP_DISPLAY_NAME: '김대장',
+      }).devBootstrapUser,
+    ).toEqual({
+      id: '00000000-0000-4000-8000-000000000001',
+      displayName: '김대장',
+    })
+
+    expect(() =>
+      loadConfig({ DEV_BOOTSTRAP_DISPLAY_NAME: '김대장' }),
+    ).toThrow('configured together')
+  })
+
+  it('rejects development session bootstrap in production', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
+        DATABASE_URL: 'postgresql://example.invalid/daejang',
+        DEV_BOOTSTRAP_USER_ID: '00000000-0000-4000-8000-000000000001',
+        DEV_BOOTSTRAP_DISPLAY_NAME: '김대장',
+      }),
+    ).toThrow('must not be enabled in production')
+  })
 })

@@ -12,6 +12,10 @@ export type AppConfig = {
   databaseUrl: string | undefined
   rateLimitHmacSecret: string
   engineMtls: EngineMtlsConfig | undefined
+  devBootstrapUser?: {
+    id: string
+    displayName: string
+  }
 }
 
 export type EngineMtlsConfig = {
@@ -107,6 +111,31 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   if (production && environment.DATABASE_URL === undefined) {
     throw new Error('DATABASE_URL is required in production')
   }
+  if (
+    production &&
+    (environment.DEV_BOOTSTRAP_USER_ID || environment.DEV_BOOTSTRAP_DISPLAY_NAME)
+  ) {
+    throw new Error('Development session bootstrap must not be enabled in production')
+  }
+
+  const devBootstrapUserId = environment.DEV_BOOTSTRAP_USER_ID
+  const devBootstrapDisplayName = environment.DEV_BOOTSTRAP_DISPLAY_NAME
+  if (
+    (devBootstrapUserId === undefined) !==
+    (devBootstrapDisplayName === undefined)
+  ) {
+    throw new Error(
+      'DEV_BOOTSTRAP_USER_ID and DEV_BOOTSTRAP_DISPLAY_NAME must be configured together',
+    )
+  }
+  if (
+    devBootstrapUserId &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      devBootstrapUserId,
+    )
+  ) {
+    throw new Error('DEV_BOOTSTRAP_USER_ID must be a UUID')
+  }
 
   const rateLimitHmacSecret =
     environment.RATE_LIMIT_HMAC_SECRET ?? 'development-only-rate-limit-secret'
@@ -150,5 +179,13 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     databaseUrl: environment.DATABASE_URL,
     rateLimitHmacSecret,
     engineMtls: loadEngineMtlsConfig(environment, production),
+    ...(devBootstrapUserId && devBootstrapDisplayName
+      ? {
+          devBootstrapUser: {
+            id: devBootstrapUserId,
+            displayName: devBootstrapDisplayName,
+          },
+        }
+      : {}),
   }
 }

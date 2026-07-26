@@ -70,4 +70,40 @@ export const assertWebAuthSchema = async (pool: Pool) => {
   ) {
     throw new Error('web_private authentication migration contract is invalid')
   }
+
+  const walletSource = await pool.query<{
+    wallet_sources_table: string | null
+    wallet_chain_scopes_table: string | null
+    wallet_challenges_table: string | null
+    contract_version: string | null
+    migration_version: string | null
+  }>(
+    `
+      SELECT
+        to_regclass('source_private.wallet_sources')::text AS wallet_sources_table,
+        to_regclass('source_private.wallet_chain_scopes')::text AS wallet_chain_scopes_table,
+        to_regclass('source_private.wallet_ownership_challenges')::text AS wallet_challenges_table,
+        (
+          SELECT contract_version
+          FROM daejang_meta.schema_contract
+          WHERE component = 'wallet-source-persistence'
+        ) AS contract_version,
+        (
+          SELECT migration_version
+          FROM daejang_meta.schema_contract
+          WHERE component = 'wallet-source-persistence'
+        ) AS migration_version
+    `,
+  )
+  const walletRow = walletSource.rows[0]
+  if (
+    walletRow?.wallet_sources_table !== 'source_private.wallet_sources' ||
+    walletRow.wallet_chain_scopes_table !== 'source_private.wallet_chain_scopes' ||
+    walletRow.wallet_challenges_table !==
+      'source_private.wallet_ownership_challenges' ||
+    walletRow.contract_version !== '2' ||
+    walletRow.migration_version !== '10'
+  ) {
+    throw new Error('source_private wallet migration contract is invalid')
+  }
 }

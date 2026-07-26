@@ -3,9 +3,11 @@ import { Pool } from 'pg'
 import { buildApp } from './app.js'
 import { PostgresRateLimitStore } from './auth/rate-limit.js'
 import { PostgresSessionStore } from './auth/postgres-session-store.js'
+import { PostgresUserStore } from './auth/postgres-user-store.js'
 import { loadConfig } from './config.js'
 import { assertWebAuthSchema } from './database/preflight.js'
 import { EngineMtlsClient } from './engine/mtls-client.js'
+import { PostgresWalletSourceStore } from './sources/postgres-wallet-source-store.js'
 
 const config = loadConfig()
 const pool = config.databaseUrl
@@ -33,6 +35,10 @@ const { app } = await buildApp({
     ? {
         sessionStore: new PostgresSessionStore(pool),
         rateLimitStore: new PostgresRateLimitStore(pool),
+        walletSourceStore: new PostgresWalletSourceStore(pool),
+        ...(config.devBootstrapUser
+          ? { developmentUserStore: new PostgresUserStore(pool) }
+          : {}),
       }
     : {}),
 })

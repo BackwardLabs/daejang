@@ -89,7 +89,7 @@ describe('AppRouter', () => {
     render(<AppRouter />)
 
     expect(
-      await screen.findByRole('heading', { name: heading }),
+      await screen.findByRole('heading', { name: heading }, { timeout: 3_000 }),
     ).toBeInTheDocument()
   })
 

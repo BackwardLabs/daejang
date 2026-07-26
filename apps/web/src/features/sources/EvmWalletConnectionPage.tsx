@@ -802,21 +802,36 @@ function formatPeriodLabel(period: NormalizedEvmWalletPeriod) {
   return `${period.startDate} ~ ${period.endDate}`
 }
 
-function CompletionAside() {
+function CompletionAside({
+  syncStatus,
+}: {
+  syncStatus: 'BACKFILLING' | 'REGISTERED'
+}) {
   return (
     <aside className="wallet-flow-aside" aria-label="연결 이후 동기화와 데이터 관리">
       <section className="wallet-flow-aside__card">
-        <span className="wallet-flow-aside__eyebrow">ONGOING SYNC</span>
-        <h2>이후 동기화</h2>
+        <span className="wallet-flow-aside__eyebrow">
+          {syncStatus === 'BACKFILLING' ? 'ONGOING SYNC' : 'NEXT STEP'}
+        </span>
+        <h2>{syncStatus === 'BACKFILLING' ? '이후 동기화' : '수집 준비 상태'}</h2>
         <ul className="wallet-completion-list">
-          <li>
-            <strong>매일 자동</strong>
-            <span>마지막 정상 체크포인트 이후의 신규 거래를 가져옵니다.</span>
-          </li>
-          <li>
-            <strong>수동 새로고침</strong>
-            <span>재실행해도 같은 거래를 중복 생성하지 않습니다.</span>
-          </li>
+          {syncStatus === 'BACKFILLING' ? (
+            <>
+              <li>
+                <strong>매일 자동</strong>
+                <span>마지막 정상 체크포인트 이후의 신규 거래를 가져옵니다.</span>
+              </li>
+              <li>
+                <strong>수동 새로고침</strong>
+                <span>재실행해도 같은 거래를 중복 생성하지 않습니다.</span>
+              </li>
+            </>
+          ) : (
+            <li>
+              <strong>지갑 소스 등록 완료</strong>
+              <span>처리 엔진 연동 전까지 거래 수집은 시작되지 않습니다.</span>
+            </li>
+          )}
         </ul>
       </section>
 
@@ -851,12 +866,15 @@ function CompletionStep({
   network,
   normalizedPeriod,
   onReset,
+  syncStatus,
 }: {
   addressPreview: string
   network: string
   normalizedPeriod: NormalizedEvmWalletPeriod
   onReset: () => void
+  syncStatus: 'BACKFILLING' | 'REGISTERED'
 }) {
+  const isBackfilling = syncStatus === 'BACKFILLING'
   return (
     <div className="wallet-flow-grid">
       <section className="wallet-flow-card" aria-labelledby="wallet-complete-title">
@@ -869,19 +887,25 @@ function CompletionStep({
             <h2 id="wallet-complete-title" tabIndex={-1}>
               지갑 연결이 완료됐어요
             </h2>
-            <p>최근 90일 거래부터 우선 수집하고 있습니다.</p>
+            <p>
+              {isBackfilling
+                ? '최근 90일 거래부터 우선 수집하고 있습니다.'
+                : '지갑 주소와 선택한 수집 범위를 저장했습니다.'}
+            </p>
           </div>
         </div>
 
         <div className="wallet-backfill-status" role="status">
           <div>
             <span>현재 동기화 상태</span>
-            <strong>최근 90일 수집 중</strong>
+            <strong>{isBackfilling ? '최근 90일 수집 중' : '수집 대기'}</strong>
           </div>
-          <b>BACKFILLING</b>
+          <b>{syncStatus}</b>
         </div>
         <p className="wallet-signature-expiry">
-          연결은 완료됐으며 나머지 기간은 백그라운드에서 이어집니다.
+          {isBackfilling
+            ? '연결은 완료됐으며 나머지 기간은 백그라운드에서 이어집니다.'
+            : '처리 엔진이 연결되면 저장한 범위로 거래 수집을 시작합니다.'}
         </p>
 
         <dl className="wallet-completion-details">
@@ -907,16 +931,19 @@ function CompletionStep({
           >
             <span aria-hidden="true">←</span> 다른 지갑 연결
           </button>
-          <a className="source-primary-action" href="/dashboard">
-            수집 진행 상태 보기 <span aria-hidden="true">→</span>
+          <a className="source-primary-action" href={isBackfilling ? '/dashboard' : '/sources'}>
+            {isBackfilling ? '수집 진행 상태 보기' : '연결된 소스 보기'}{' '}
+            <span aria-hidden="true">→</span>
           </a>
         </div>
         <p className="source-footer-note">
-          페이지를 닫아도 backfill은 계속됩니다.
+          {isBackfilling
+            ? '페이지를 닫아도 backfill은 계속됩니다.'
+            : '등록한 지갑은 데이터 소스 관리에서 확인할 수 있습니다.'}
         </p>
       </section>
 
-      <CompletionAside />
+      <CompletionAside syncStatus={syncStatus} />
     </div>
   )
 }
@@ -924,7 +951,10 @@ function CompletionStep({
 function getPageCopy(state: EvmWalletFlowState) {
   if (state.view === 'complete') {
     return {
-      description: '지갑이 연결되고 최초 backfill이 시작됐습니다.',
+      description:
+        state.status === 'BACKFILLING'
+          ? '지갑이 연결되고 최초 backfill이 시작됐습니다.'
+          : '지갑 소유권 확인과 데이터 소스 등록을 완료했습니다.',
       title: 'EVM Wallet 연결 완료',
     }
   }
@@ -1251,6 +1281,7 @@ export function EvmWalletConnectionPage({
             network={state.network}
             normalizedPeriod={state.normalizedPeriod}
             onReset={() => dispatch({ type: 'RESET' })}
+            syncStatus={state.status}
           />
         ) : null}
       </div>

@@ -13,13 +13,24 @@ import type { AppConfig } from './config.js'
 import { ApiError } from './errors.js'
 import { createLogger } from './logger.js'
 import { registerAuthRoutes } from './routes/auth.js'
+import {
+  registerDevelopmentRoutes,
+  type DevelopmentUserStore,
+} from './routes/development.js'
+import { registerSourceRoutes } from './routes/sources.js'
 import { registerSecurityPolicy } from './security.js'
+import {
+  MemoryWalletSourceStore,
+  type WalletSourceStore,
+} from './sources/wallet-source-store.js'
 
 type BuildAppOptions = {
   config?: AppConfig
   logger?: false | FastifyBaseLogger
   sessionStore?: SessionStore
   rateLimitStore?: RateLimitStore
+  walletSourceStore?: WalletSourceStore
+  developmentUserStore?: DevelopmentUserStore
   now?: () => Date
 }
 
@@ -39,6 +50,12 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   }
   if (config.runtimeMode === 'production' && options.rateLimitStore?.durable !== true) {
     throw new Error('A durable RateLimitStore is required in production')
+  }
+  if (config.runtimeMode === 'production' && options.walletSourceStore?.durable !== true) {
+    throw new Error('A durable WalletSourceStore is required in production')
+  }
+  if (config.devBootstrapUser && !options.developmentUserStore) {
+    throw new Error('A DevelopmentUserStore is required for development bootstrap')
   }
 
   const app =
@@ -66,6 +83,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     options.now,
   )
   const loginCompletionService = new LoginCompletionService(authRateLimiter, sessionService)
+  const walletSourceStore = options.walletSourceStore ?? new MemoryWalletSourceStore()
 
   await app.register(cookie)
   app.decorateRequest('authSession', undefined)
@@ -109,6 +127,17 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       })
     }
 
+    if (hasStatusCode(error) && error.statusCode === 400) {
+      return reply.status(400).send({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: '요청 값을 확인해 주세요.',
+          requestId: request.id,
+          fieldErrors: [],
+        },
+      })
+    }
+
     request.log.error({ err: error }, 'request failed')
     return reply.status(500).send({
       error: {
@@ -144,5 +173,19 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     authenticate: authHooks.authenticate,
     clearSessionCookie: authHooks.clearSessionCookie,
   })
+  await registerSourceRoutes(app, {
+    config,
+    walletSourceStore,
+    authRateLimiter,
+    authenticate: authHooks.authenticate,
+    ...(options.now ? { now: options.now } : {}),
+  })
+  if (options.developmentUserStore) {
+    await registerDevelopmentRoutes(app, {
+      config,
+      sessionService,
+      userStore: options.developmentUserStore,
+    })
+  }
   return { app, config, sessionService, loginCompletionService }
 }
