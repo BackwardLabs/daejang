@@ -102,7 +102,7 @@
 - Desktop: `236px` sidebar + fluid main, main 내부 최대 본문 폭 `1200px`
 - Tablet: `72px` 축소 sidebar + 8-column content grid
 - Mobile: top app bar + bottom navigation + single-column content
-- Top utility 영역: breadcrumb, 동기화 상태, 과세연도, profile처럼 화면 전반에 영향을 주는 정보
+- 전역 정보는 sidebar를 기준으로 표시한다. 과세연도와 profile을 page 상단에 반복하지 않으며, 동기화처럼 화면별로 필요한 동작은 해당 page header의 보조 action으로 둔다.
 - Page header: eyebrow, 제목, 한 줄 설명, 중립 보조 action과 주홍색 주요 action 1개
 
 라우팅과 실제 메뉴 노출은 권한과 API 계약이 정해진 뒤 구현한다. 존재하지 않는 route를 디자인만으로 확정하지 않는다.

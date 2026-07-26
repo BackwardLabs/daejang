@@ -143,32 +143,6 @@ export function DashboardPage() {
       />
 
       <main className="dashboard-main">
-        <header className="dashboard-topbar">
-          <nav aria-label="현재 위치" className="dashboard-breadcrumb">
-            <a href="/">Daejang</a>
-            <span aria-hidden="true">/</span>
-            <strong>대시보드</strong>
-          </nav>
-          <div className="dashboard-topbar__actions">
-            <button
-              type="button"
-              className="dashboard-sync-status"
-              disabled={isSyncing || selectedYear !== dashboardCurrentYear}
-              title={`${snapshot.lastSynced} 기준`}
-              onClick={handleSync}
-            >
-              <i aria-hidden="true" />
-              {isSyncing
-                ? '동기화 중…'
-                : selectedYear === dashboardCurrentYear
-                  ? '방금 동기화'
-                  : '마감된 연도'}
-            </button>
-            <span className="dashboard-year-chip">{selectedYear} 과세연도</span>
-            <span className="dashboard-topbar__avatar" aria-hidden="true" />
-          </div>
-        </header>
-
         <div className="dashboard-content">
           <section className="dashboard-intro" aria-labelledby="dashboard-title">
             <div>
@@ -177,6 +151,20 @@ export function DashboardPage() {
               <span>연결한 거래 기록을 검토하고 신고 준비 상태를 확인합니다.</span>
             </div>
             <div className="dashboard-intro__actions">
+              <button
+                type="button"
+                className="dashboard-action dashboard-action--sync"
+                disabled={isSyncing || selectedYear !== dashboardCurrentYear}
+                title={`${snapshot.lastSynced} 기준`}
+                onClick={handleSync}
+              >
+                <i aria-hidden="true" />
+                {isSyncing
+                  ? '동기화 중…'
+                  : selectedYear === dashboardCurrentYear
+                    ? '방금 동기화'
+                    : '마감된 연도'}
+              </button>
               <a href="/app/reports" className="dashboard-action dashboard-action--outline">
                 보고서 보기
               </a>

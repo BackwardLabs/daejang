@@ -40,85 +40,12 @@
   background: var(--dashboard-paper);
 }
 
-.dashboard-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  height: 72px;
-  padding: 0 32px;
-  border-bottom: 1px solid var(--dashboard-line);
-}
-
-.dashboard-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-}
-
-.dashboard-breadcrumb a {
-  color: var(--dashboard-faint);
-  text-decoration: none;
-}
-
-.dashboard-breadcrumb span {
-  color: var(--dashboard-line-strong);
-}
-
-.dashboard-breadcrumb strong {
-  font-weight: 700;
-}
-
-.dashboard-topbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.dashboard-sync-status,
-.dashboard-year-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 999px;
-  color: var(--dashboard-muted);
-  background: var(--dashboard-subtle);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.dashboard-sync-status {
-  gap: 7px;
-  cursor: pointer;
-}
-
-.dashboard-sync-status:disabled {
-  cursor: default;
-}
-
-.dashboard-sync-status i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--dashboard-positive);
-}
-
-.dashboard-topbar__avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--dashboard-ink);
-}
-
 .dashboard-content {
   display: grid;
   gap: 20px;
   width: min(1204px, 100%);
   margin-inline: auto;
-  padding: 24px 32px 32px;
+  padding: 32px;
 }
 
 .dashboard-intro {
@@ -178,6 +105,26 @@
   border-color: var(--dashboard-ink);
   color: #fff;
   background: var(--dashboard-ink);
+}
+
+.dashboard-action--sync {
+  gap: 8px;
+  color: var(--dashboard-muted);
+  background: var(--dashboard-subtle);
+  border-color: transparent;
+  cursor: pointer;
+}
+
+.dashboard-action--sync:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.dashboard-action--sync i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dashboard-positive);
 }
 
 .dashboard-year-notice,
@@ -539,7 +486,6 @@
 }
 
 .dashboard-action:focus-visible,
-.dashboard-sync-status:focus-visible,
 .dashboard-review-alert a:focus-visible,
 .dashboard-review-queue a:focus-visible,
 .dashboard-recent button:focus-visible {
@@ -552,7 +498,6 @@
     grid-template-columns: 72px minmax(0, 1fr);
   }
 
-  .dashboard-topbar,
   .dashboard-content {
     padding-inline: 24px;
   }
@@ -581,21 +526,6 @@
 
   .dashboard-main {
     padding-bottom: 64px;
-  }
-
-  .dashboard-topbar {
-    height: 56px;
-    padding-inline: 20px;
-  }
-
-  .dashboard-breadcrumb,
-  .dashboard-year-chip {
-    display: none;
-  }
-
-  .dashboard-topbar__actions {
-    width: 100%;
-    justify-content: space-between;
   }
 
   .dashboard-content {
