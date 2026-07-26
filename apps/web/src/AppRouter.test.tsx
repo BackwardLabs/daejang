@@ -62,14 +62,38 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
+  it('renders the source management page', () => {
+    window.history.pushState({}, '', '/sources')
+
+    render(<AppRouter />)
+
+    expect(
+      screen.getByRole('heading', { name: '데이터 소스 관리' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', {
+        name: '아직 연결된 데이터 소스가 없어요',
+      }),
+    ).toBeInTheDocument()
+  })
+
   it.each([
-    ['/sources', '데이터 소스'],
-    ['/settings', '설정'],
-  ])('renders the product page at %s', (path, heading) => {
+    ['/sources/new', '데이터 소스 추가'],
+    ['/sources/new/upbit', 'Upbit PDF 등록'],
+    ['/sources/new/wallet', 'EVM 공개 주소 등록'],
+  ])('renders the source flow page at %s', (path, heading) => {
     window.history.pushState({}, '', path)
 
     render(<AppRouter />)
 
     expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
+  })
+
+  it('renders the settings product page', () => {
+    window.history.pushState({}, '', '/settings')
+
+    render(<AppRouter />)
+
+    expect(screen.getByRole('heading', { name: '설정' })).toBeInTheDocument()
   })
 })
