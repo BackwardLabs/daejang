@@ -138,7 +138,12 @@
   display: grid;
   gap: 18px;
   max-width: 720px;
+  margin-top: 24px;
   padding: 34px;
+}
+
+.product-main > .product-settings-card {
+  margin-inline: 0;
 }
 
 .product-settings-card h2 {
