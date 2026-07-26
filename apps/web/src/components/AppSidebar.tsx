@@ -1,4 +1,3 @@
-import daejangLogo from '../assets/dashboard/daejang-logo.svg'
 import navDashboard from '../assets/dashboard/nav-dashboard.svg'
 import navLedger from '../assets/dashboard/nav-ledger.svg'
 import navReport from '../assets/dashboard/nav-report.svg'
@@ -87,7 +86,7 @@ export function AppSidebar({
   return (
     <aside className="app-sidebar">
       <a className="app-sidebar__brand" href="/" aria-label="Daejang 소개 페이지로 이동">
-        <img src={daejangLogo} alt="" />
+        <img src="/daejang-logo.svg" alt="" />
         <span>Daejang</span>
       </a>
 
