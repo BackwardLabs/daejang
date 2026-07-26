@@ -13,7 +13,7 @@ describe('AppRouter', () => {
     render(<AppRouter />)
 
     expect(
-      screen.getByRole('heading', { name: '흩어진 거래 기록을검토 가능한 장부로' }),
+      screen.getByRole('heading', { name: /흩어진 디지털 자산 기록/ }),
     ).toBeInTheDocument()
   })
 
@@ -59,12 +59,12 @@ describe('AppRouter', () => {
     window.history.pushState({}, '', '/app/dashboard')
     render(<AppRouter />)
 
-    fireEvent.click(screen.getByRole('button', { name: /김지우/ }))
+    fireEvent.click(screen.getByRole('button', { name: /김대장/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: '로그아웃' }))
 
     expect(window.location.pathname).toBe('/')
     expect(
-      screen.getByRole('heading', { name: '흩어진 거래 기록을검토 가능한 장부로' }),
+      screen.getByRole('heading', { name: /흩어진 디지털 자산 기록/ }),
     ).toBeInTheDocument()
   })
 

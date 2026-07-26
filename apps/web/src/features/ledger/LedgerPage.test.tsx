@@ -211,7 +211,7 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
 
     const ledgerLink = screen.getByRole('link', { name: '장부 작업' })
-    expect(screen.getByText('김지우')).toBeInTheDocument()
+    expect(screen.getByText('김대장')).toBeInTheDocument()
     expect(ledgerLink).toHaveAttribute('aria-current', 'page')
     expect(ledgerLink.closest('li')?.nextElementSibling).toContainElement(
       screen.getByRole('navigation', { name: '장부 작업 메뉴' }),

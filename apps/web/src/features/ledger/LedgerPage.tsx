@@ -1466,7 +1466,7 @@ export function LedgerPage() {
   }
 
   return (
-    <div className="ledger-page">
+    <div className="ledger-page product-shell">
       <LedgerSidebar
         currentState={state}
         holdCount={holdCount}

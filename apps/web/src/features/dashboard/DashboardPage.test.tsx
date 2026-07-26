@@ -10,7 +10,7 @@ describe('DashboardPage', () => {
   it('renders the Figma portfolio summary, sources, and holdings', () => {
     render(<DashboardPage />)
 
-    expect(screen.getByText('김지우')).toBeInTheDocument()
+    expect(screen.getByText('김대장')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '대시보드' })).toHaveAttribute(
       'aria-current',
       'page',

@@ -79,9 +79,9 @@ export function AppSidebar({
 
   return (
     <aside className="app-sidebar">
-      <a className="app-sidebar__brand" href="/" aria-label="대장 소개 페이지로 이동">
+      <a className="app-sidebar__brand" href="/" aria-label="Daejang 소개 페이지로 이동">
         <img src={daejangLogo} alt="" />
-        <span>대장</span>
+        <span>Daejang</span>
       </a>
 
       <label className="app-sidebar__period">

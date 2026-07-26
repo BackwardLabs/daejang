@@ -1,25 +1,24 @@
 .dashboard-page {
-  --dashboard-text-primary: #1a1a1a;
-  --dashboard-text-secondary: #5f6368;
-  --dashboard-text-muted: #8a8f98;
-  --dashboard-surface: #fff;
-  --dashboard-subtle: #f3f4f6;
-  --dashboard-border: #d9dce1;
-  --dashboard-border-subtle: #eceef1;
-  --dashboard-inverse: #1a1a1a;
-  --dashboard-accent: #e8622a;
-  --dashboard-positive: #16794c;
-  --dashboard-negative: #dc2626;
+  --dashboard-text-primary: var(--product-text);
+  --dashboard-text-secondary: var(--product-text-secondary);
+  --dashboard-text-muted: var(--product-text-muted);
+  --dashboard-surface: var(--product-surface);
+  --dashboard-subtle: var(--product-subtle);
+  --dashboard-border: var(--product-border);
+  --dashboard-border-subtle: var(--product-border-subtle);
+  --dashboard-inverse: var(--product-inverse);
+  --dashboard-accent: var(--product-accent);
+  --dashboard-positive: var(--product-positive);
+  --dashboard-negative: var(--product-negative);
   display: grid;
-  grid-template-columns: 256px minmax(0, 1fr);
-  min-width: 1180px;
+  grid-template-columns: 236px minmax(0, 1fr);
+  min-width: 0;
   min-height: 100vh;
   color: var(--dashboard-text-primary);
   background: var(--dashboard-surface);
-  font-family:
-    "Noto Sans KR", Pretendard, Inter, ui-sans-serif, system-ui, sans-serif;
-  font-size: 14px;
-  letter-spacing: -0.01em;
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0;
 }
 
 .dashboard-page button,
@@ -169,9 +168,14 @@
   max-width: none;
   min-height: 100vh;
   margin: 0;
-  padding: 28px 32px 22px;
+  padding: 32px;
   overflow: hidden;
   background: var(--dashboard-surface);
+}
+
+.dashboard-main > * {
+  width: min(1200px, 100%);
+  margin-inline: auto;
 }
 
 .dashboard-main > .page-header .page-header__actions > span {
@@ -205,9 +209,9 @@
 }
 
 .dashboard-button--primary {
-  border-color: var(--dashboard-inverse);
+  border-color: var(--dashboard-accent);
   color: white;
-  background: var(--dashboard-inverse);
+  background: var(--dashboard-accent);
 }
 
 .dashboard-sync-message {
@@ -221,7 +225,7 @@
   border-radius: 12px;
   color: white;
   background: var(--dashboard-inverse);
-  box-shadow: 0 12px 32px rgb(26 26 26 / 18%);
+  box-shadow: 0 8px 24px rgb(26 26 26 / 12%);
   font-size: 12px;
   font-weight: 700;
 }
@@ -251,7 +255,7 @@
 .dashboard-allocation-card {
   min-width: 0;
   height: 220px;
-  border-radius: 28px;
+  border-radius: 16px;
 }
 
 .dashboard-total-card {
@@ -603,7 +607,7 @@
 
 .dashboard-disclaimer {
   color: var(--dashboard-text-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 16px;
 }
 
@@ -619,10 +623,10 @@
   border: 0;
 }
 
-@media (max-width: 1180px) {
+@media (min-width: 768px) and (max-width: 1279px) {
   .dashboard-page {
-    min-width: 1024px;
-    grid-template-columns: 224px minmax(0, 1fr);
+    min-width: 0;
+    grid-template-columns: 72px minmax(0, 1fr);
   }
 
   .dashboard-sidebar {
@@ -638,39 +642,59 @@
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .dashboard-page {
-    min-width: 760px;
-    grid-template-columns: 88px minmax(0, 1fr);
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .dashboard-sidebar {
-    align-items: center;
-    padding-inline: 12px;
-  }
-
-  .dashboard-brand span,
-  .dashboard-period,
-  .dashboard-navigation span,
-  .dashboard-user span {
-    display: none;
-  }
-
-  .dashboard-navigation li {
-    width: 60px;
-  }
-
-  .dashboard-navigation a {
-    justify-content: center;
-    padding: 0;
-  }
-
-  .dashboard-user {
-    justify-content: center;
-    width: 52px;
+  .dashboard-main {
+    padding: 20px 20px 88px;
   }
 
   .dashboard-main > .page-header .page-header__actions > span {
     display: none;
+  }
+
+  .dashboard-summary {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .dashboard-total-card,
+  .dashboard-allocation-card {
+    height: auto;
+    min-height: 220px;
+  }
+
+  .dashboard-total-card__metric {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    height: auto;
+  }
+
+  .dashboard-total-card__metric strong {
+    font-size: 34px;
+    line-height: 42px;
+  }
+
+  .dashboard-source-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-source-card {
+    height: auto;
+    min-height: 210px;
+  }
+
+  .dashboard-holdings {
+    height: auto;
+    min-height: 300px;
+  }
+
+  .dashboard-sync-message {
+    right: 20px;
+    bottom: 84px;
+    left: 20px;
   }
 }
