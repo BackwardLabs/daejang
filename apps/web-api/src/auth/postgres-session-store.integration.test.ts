@@ -41,10 +41,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       );
     `)
 
-    for (const filename of [
-      '000008_create_web_auth_persistence.sql',
-      '000009_create_single_user_auth_model.sql',
-    ]) {
+    for (const filename of ['000008_create_web_auth_persistence.sql']) {
       const migrationUrl = process.env.WEB_AUTH_MIGRATION_DIRECTORY
         ? pathToFileURL(resolve(process.env.WEB_AUTH_MIGRATION_DIRECTORY, filename))
         : new URL(`../../../../../daejang-db/migrations/${filename}`, import.meta.url)
