@@ -1,0 +1,154 @@
+export type AppConfig = {
+  runtimeMode: 'development' | 'test' | 'production'
+  host: string
+  port: number
+  publicOrigin: string
+  sessionCookieName: string
+  sessionAbsoluteTtlSeconds: number
+  sessionIdleTtlSeconds: number
+  bodyLimitBytes: number
+  secureCookies: boolean
+  trustProxyHops: number
+  databaseUrl: string | undefined
+  rateLimitHmacSecret: string
+  engineMtls: EngineMtlsConfig | undefined
+}
+
+export type EngineMtlsConfig = {
+  target: string
+  caPath: string
+  certPath: string
+  keyPath: string
+  serverNameOverride: string | undefined
+}
+
+const parsePositiveInteger = (value: string | undefined, fallback: number, name: string) => {
+  if (value === undefined) {
+    return fallback
+  }
+
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+
+  return parsed
+}
+
+const parseOrigin = (value: string) => {
+  const url = new URL(value)
+  if (url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('PUBLIC_ORIGIN must contain only scheme, host, and optional port')
+  }
+
+  return url.origin
+}
+
+const parseNonNegativeInteger = (
+  value: string | undefined,
+  fallback: number,
+  name: string,
+) => {
+  if (value === undefined) {
+    return fallback
+  }
+
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer`)
+  }
+  return parsed
+}
+
+const loadEngineMtlsConfig = (
+  environment: NodeJS.ProcessEnv,
+  required: boolean,
+): EngineMtlsConfig | undefined => {
+  const entries = [
+    ['ENGINE_GRPC_TARGET', environment.ENGINE_GRPC_TARGET],
+    ['ENGINE_GRPC_CA_PATH', environment.ENGINE_GRPC_CA_PATH],
+    ['ENGINE_GRPC_CERT_PATH', environment.ENGINE_GRPC_CERT_PATH],
+    ['ENGINE_GRPC_KEY_PATH', environment.ENGINE_GRPC_KEY_PATH],
+  ] as const
+  const configured = entries.some(([, value]) => value !== undefined)
+  if (!configured && !required) {
+    return undefined
+  }
+
+  for (const [name, value] of entries) {
+    if (!value) {
+      throw new Error(`${name} is required`)
+    }
+  }
+
+  if (environment.ENGINE_GRPC_TARGET?.includes('://')) {
+    throw new Error('ENGINE_GRPC_TARGET must be a gRPC authority without an HTTP scheme')
+  }
+
+  return {
+    target: environment.ENGINE_GRPC_TARGET as string,
+    caPath: environment.ENGINE_GRPC_CA_PATH as string,
+    certPath: environment.ENGINE_GRPC_CERT_PATH as string,
+    keyPath: environment.ENGINE_GRPC_KEY_PATH as string,
+    serverNameOverride: environment.ENGINE_GRPC_SERVER_NAME,
+  }
+}
+
+export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppConfig => {
+  const runtimeMode = environment.NODE_ENV ?? 'development'
+  if (!['development', 'test', 'production'].includes(runtimeMode)) {
+    throw new Error('NODE_ENV must be development, test, or production')
+  }
+
+  const production = runtimeMode === 'production'
+  if (production && environment.PUBLIC_ORIGIN === undefined) {
+    throw new Error('PUBLIC_ORIGIN is required in production')
+  }
+  if (production && environment.DATABASE_URL === undefined) {
+    throw new Error('DATABASE_URL is required in production')
+  }
+
+  const rateLimitHmacSecret =
+    environment.RATE_LIMIT_HMAC_SECRET ?? 'development-only-rate-limit-secret'
+  if (production && Buffer.byteLength(rateLimitHmacSecret, 'utf8') < 32) {
+    throw new Error('RATE_LIMIT_HMAC_SECRET must contain at least 32 bytes in production')
+  }
+
+  const sessionAbsoluteTtlSeconds = parsePositiveInteger(
+    environment.SESSION_ABSOLUTE_TTL_SECONDS,
+    60 * 60 * 24 * 7,
+    'SESSION_ABSOLUTE_TTL_SECONDS',
+  )
+  const sessionIdleTtlSeconds = parsePositiveInteger(
+    environment.SESSION_IDLE_TTL_SECONDS,
+    60 * 60 * 12,
+    'SESSION_IDLE_TTL_SECONDS',
+  )
+  if (sessionIdleTtlSeconds > sessionAbsoluteTtlSeconds) {
+    throw new Error('SESSION_IDLE_TTL_SECONDS must not exceed SESSION_ABSOLUTE_TTL_SECONDS')
+  }
+
+  return {
+    runtimeMode: runtimeMode as AppConfig['runtimeMode'],
+    host: environment.HOST ?? '127.0.0.1',
+    port: parsePositiveInteger(environment.PORT, 3000, 'PORT'),
+    publicOrigin: parseOrigin(environment.PUBLIC_ORIGIN ?? 'http://localhost:5173'),
+    sessionCookieName: production ? '__Host-daejang_session' : 'daejang_session',
+    sessionAbsoluteTtlSeconds,
+    sessionIdleTtlSeconds,
+    bodyLimitBytes: parsePositiveInteger(
+      environment.BODY_LIMIT_BYTES,
+      1024 * 1024,
+      'BODY_LIMIT_BYTES',
+    ),
+    secureCookies: production,
+    trustProxyHops: parseNonNegativeInteger(
+      environment.TRUST_PROXY_HOPS,
+      production ? 1 : 0,
+      'TRUST_PROXY_HOPS',
+    ),
+    databaseUrl: environment.DATABASE_URL,
+    rateLimitHmacSecret,
+    engineMtls: loadEngineMtlsConfig(environment, production),
+  }
+}

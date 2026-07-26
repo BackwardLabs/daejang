@@ -4,9 +4,10 @@
 
 ## 현재 범위
 
-이 저장소는 GIWA MVP의 웹 애플리케이션과 이후 Web API·Go Engine을 함께 수용할 기본 구조를 제공합니다. 현재 구현된 범위는 `apps/web`의 React 초기 틀과 웹 기술·온보딩 문서입니다.
+이 저장소는 GIWA MVP의 웹 애플리케이션과 Web API를 제공합니다. 현재 `apps/web`의 React 화면과 `apps/web-api`의 Fastify BFF 골격이 구현되어 있으며, 계산을 담당하는 Go Engine은 private gRPC 경계 뒤의 별도 서비스로 연결합니다.
 
 - Frontend: React 19, TypeScript 6, Vite 8
+- Web API: Fastify 5, TypeScript, 서버 세션 기반 BFF
 - Package manager: npm workspaces
 - Quality: Oxlint, TypeScript, Vitest, Testing Library
 - MVP 데이터 소스: Upbit 거래내역 PDF 1개, EVM 지갑 주소 1개
@@ -27,6 +28,33 @@ npm run dev
 
 개발 서버는 기본적으로 `http://localhost:5173`에서 실행됩니다.
 
+Web API는 별도 터미널에서 실행합니다.
+
+```bash
+npm run dev:api
+```
+
+Web API의 기본 주소는 `http://127.0.0.1:3000`입니다. 설정 가능한 환경 변수는 [`apps/web-api/.env.example`](apps/web-api/.env.example)에서 확인할 수 있습니다.
+
+운영 DB에는 Web API를 시작하기 전에 `daejang-db`의 중앙 migration을 적용합니다.
+
+```bash
+cd ../daejang-db
+DATABASE_URL='postgresql://...' make migrate-up
+```
+
+Web API는 다음 보안 경계를 기본으로 적용합니다.
+
+- opaque host-only Session cookie와 절대·유휴 만료
+- 상태 변경 `/api/*` 요청의 Origin·Fetch Metadata 검증
+- API 응답 cache 금지, 보안 헤더와 민감 로그 redaction
+- 서버 Session에 없는 workspace 접근 차단
+- PostgreSQL SessionStore와 membership version 기반 즉시 권한 무효화
+- 공급자별 PostgreSQL 로그인 rate limit과 Session Token 회전
+- Engine private gRPC client certificate mTLS preflight
+
+메모리 SessionStore와 rate-limit store는 로컬 개발과 테스트 전용입니다. 운영 모드는 `DATABASE_URL`, 32 byte 이상의 `RATE_LIMIT_HMAC_SECRET`, Engine CA·client certificate·private key 설정이 없으면 시작하지 않습니다. Web schema는 `daejang-db/migrations/000008_create_web_auth_persistence.sql`이 소유하고, ingress 기준은 [`deploy/nginx`](deploy/nginx/README.md)에 있습니다.
+
 ## 검증 명령
 
 ```bash
@@ -41,10 +69,11 @@ npm run build
 ```text
 apps/
   web/        React 웹 애플리케이션
+  web-api/    Fastify Web API / BFF
 docs/         제품 흐름과 웹 기술 명세
 ```
 
-기술 명세의 목표 구조에는 `apps/web-api`, `services/engine`, `proto`, `migrations`, `fixtures`가 포함되지만, 해당 구현이 시작되기 전까지 빈 디렉터리는 만들지 않습니다.
+Go Engine, proto, migration은 각 소유 저장소의 계약을 따르며 이 저장소에 빈 디렉터리를 미리 만들지 않습니다.
 
 ## 기준 자료
 
