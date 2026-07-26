@@ -6,7 +6,7 @@
   background: #fff;
 }
 
-.product-main > * {
+.product-content {
   width: min(1200px, 100%);
   margin-inline: auto;
 }
@@ -140,10 +140,6 @@
   max-width: 720px;
   margin-top: 24px;
   padding: 34px;
-}
-
-.product-main > .product-settings-card {
-  margin-inline: 0;
 }
 
 .product-settings-card h2 {
