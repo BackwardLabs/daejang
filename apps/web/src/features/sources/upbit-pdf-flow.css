@@ -3,7 +3,7 @@
   margin-bottom: 20px;
   padding: 24px clamp(24px, 4vw, 56px);
   border: 1px solid var(--source-line);
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
 }
 
@@ -37,7 +37,7 @@
 }
 
 .pdf-registration-stepper__item--complete:not(:last-child)::after {
-  background: #093687;
+  background: var(--product-accent, #e8622a);
 }
 
 .pdf-registration-stepper__marker {
@@ -51,7 +51,7 @@
   height: 38px;
   color: #97938c;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .pdf-registration-stepper__marker > * {
@@ -66,7 +66,7 @@
 
 .pdf-registration-stepper__item--active,
 .pdf-registration-stepper__item--complete {
-  color: #093687;
+  color: var(--product-accent, #e8622a);
 }
 
 .pdf-registration-stepper__item--complete .pdf-registration-stepper__marker {
@@ -95,9 +95,9 @@
   overflow: hidden;
   min-height: 610px;
   border: 1px solid var(--source-line);
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
-  box-shadow: 0 8px 28px rgb(26 26 26 / 3%);
+  box-shadow: none;
 }
 
 .pdf-registration-card {
@@ -122,10 +122,10 @@
   min-height: 24px;
   margin-top: 2px;
   border-radius: 999px;
-  color: #093687;
-  background: #e7ecf4;
+  color: var(--product-accent, #e8622a);
+  background: #f3f4f6;
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.04em;
 }
 
@@ -153,7 +153,7 @@
   padding: 36px 24px;
   border: 1.5px dashed #b9c5d9;
   border-radius: 14px;
-  background: #f8fafc;
+  background: #f7f7f8;
   text-align: center;
   transition:
     border-color 160ms ease,
@@ -162,8 +162,8 @@
 
 .pdf-drop-zone:hover,
 .pdf-drop-zone:focus-within {
-  border-color: #093687;
-  background: #f4f7fb;
+  border-color: var(--product-accent, #e8622a);
+  background: #f7f7f8;
 }
 
 .pdf-drop-zone--error {
@@ -178,8 +178,8 @@
   height: 54px;
   margin-bottom: 18px;
   border-radius: 50%;
-  color: #093687;
-  background: #e7ecf4;
+  color: var(--product-accent, #e8622a);
+  background: #f3f4f6;
   font-size: 24px;
   font-weight: 500;
 }
@@ -187,7 +187,7 @@
 .pdf-drop-zone__label {
   color: #272522;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 22px;
 }
 
@@ -214,14 +214,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 46px;
+  min-height: 44px;
   padding: 0 18px;
   border: 1px solid #d8d5cf;
-  border-radius: 12px;
+  border-radius: 8px;
   color: #383531;
   background: #fff;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
   transition:
     border-color 160ms ease,
@@ -241,8 +241,8 @@
 
 .pdf-drop-zone__button {
   min-width: 112px;
-  border-color: #093687;
-  color: #093687;
+  border-color: var(--product-accent, #e8622a);
+  color: var(--product-accent, #e8622a);
 }
 
 .pdf-selection-resume {
@@ -254,7 +254,7 @@
   padding: 16px;
   border: 1px solid #d7e0ec;
   border-radius: 12px;
-  background: #f7f9fc;
+  background: #f7f7f8;
 }
 
 .pdf-file-summary {
@@ -272,10 +272,10 @@
   height: 48px;
   border: 1px solid #cbd5e4;
   border-radius: 8px 8px 11px 8px;
-  color: #093687;
-  background: #f1f5fa;
+  color: var(--product-accent, #e8622a);
+  background: #f7f7f8;
   font-size: 8px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.04em;
 }
 
@@ -311,7 +311,7 @@
   margin-bottom: 9px;
   color: #77736d;
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.09em;
 }
 
@@ -361,9 +361,9 @@
   height: 34px;
   border-radius: 50%;
   color: #fff;
-  background: #093687;
+  background: var(--product-accent, #e8622a);
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .pdf-registration-aside li strong {
@@ -427,7 +427,7 @@
   color: #9b5a17;
   background: #fff;
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .pdf-registration-aside__password-note strong {
@@ -467,7 +467,7 @@
   color: #fff;
   background: #a84f41;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .pdf-error-notice strong {
@@ -509,7 +509,7 @@
   color: #6b382f;
   background: transparent;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 3px;
   cursor: pointer;
@@ -595,7 +595,7 @@
 .pdf-password-field label {
   color: #272522;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 18px;
 }
 
@@ -623,7 +623,7 @@
 }
 
 .pdf-password-field input:focus-visible {
-  outline-color: color-mix(in srgb, #093687 65%, white);
+  outline-color: color-mix(in srgb, var(--product-accent, #e8622a) 65%, white);
 }
 
 .pdf-password-field input[aria-invalid="true"] {
@@ -668,15 +668,15 @@
   margin-top: 18px;
   padding: 14px 16px;
   border-radius: 12px;
-  color: #3e5374;
-  background: #f0f3f7;
+  color: #5f6368;
+  background: #f3f4f6;
 }
 
 .pdf-submit-status__spinner {
   width: 25px;
   height: 25px;
   border: 2px solid #c5d0e1;
-  border-top-color: #093687;
+  border-top-color: var(--product-accent, #e8622a);
   border-radius: 50%;
   animation: pdf-registration-spin 800ms linear infinite;
 }
@@ -699,9 +699,9 @@
   min-height: 610px;
   padding: 58px clamp(24px, 7vw, 92px) 42px;
   border: 1px solid var(--source-line);
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
-  box-shadow: 0 8px 28px rgb(26 26 26 / 3%);
+  box-shadow: none;
   text-align: center;
 }
 
@@ -727,14 +727,14 @@
 .pdf-completion-card__icon span {
   color: #fff;
   font-size: 24px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .pdf-completion-card__eyebrow {
   margin-bottom: 9px;
   color: #1f7650;
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.11em;
 }
 

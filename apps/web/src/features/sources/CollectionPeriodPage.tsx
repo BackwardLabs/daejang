@@ -40,7 +40,7 @@ const collectionPeriodSteps = [
 const fieldErrorCopy: Record<CollectionPeriodFieldErrorCode, string> = {
   AFTER_LATEST_ALLOWED_DATE: '미래 날짜는 선택할 수 없습니다.',
   INVALID_FORMAT: 'YYYY-MM-DD 형식의 실제 날짜를 입력해 주세요.',
-  NOT_ALLOWED: '현재 Source에서 선택할 수 없는 과세연도입니다.',
+  NOT_ALLOWED: '현재 데이터 소스에서 선택할 수 없는 과세연도입니다.',
   REQUIRED: '필수 입력값입니다.',
   START_AFTER_END: '시작일은 종료일보다 늦을 수 없습니다.',
 }
@@ -53,9 +53,9 @@ export type CollectionPeriodSourceContextInput = {
 
 const warningCopy = {
   ESTIMATED_TRANSACTION_COUNT_UNAVAILABLE:
-    '예상 거래 건수를 아직 계산할 수 없습니다. 실제 수집 전 기간과 Source를 한 번 더 확인해 주세요.',
+    '예상 거래 건수를 아직 계산할 수 없습니다. 실제 수집 전에 기간과 데이터 소스를 한 번 더 확인해 주세요.',
   REVIEW_RECOMMENDED:
-    '수집 시작 전에 선택한 기간과 Source 정보를 한 번 더 확인해 주세요.',
+    '수집 시작 전에 선택한 기간과 데이터 소스 정보를 한 번 더 확인해 주세요.',
 } satisfies Record<
   CollectionPeriodPreviewSuccess['warnings'][number]['code'],
   string
@@ -235,7 +235,7 @@ function CollectionPeriodErrorNotice({
             >
               다른 PDF 등록
             </a>
-            <span>다른 PDF를 등록해도 현재 Source는 삭제되지 않습니다.</span>
+            <span>다른 PDF를 등록해도 현재 데이터 소스는 삭제되지 않습니다.</span>
           </div>
         ) : null}
       </div>
@@ -271,7 +271,7 @@ function SourceSummary({
         <strong>Upbit 거래내역서</strong>
         <span>{sourceId}</span>
       </span>
-      <span className="collection-source-summary__status">SOURCE SAVED</span>
+      <span className="collection-source-summary__status">저장 완료</span>
     </div>
   )
 }
@@ -285,7 +285,7 @@ function CollectionPeriodAside({
     <aside className="collection-period-aside" aria-label="조회 기간 확인 기준">
       <section className="collection-period-aside__card">
         <span className="collection-period-aside__eyebrow">
-          SOURCE COVERAGE
+          문서 포함 범위
         </span>
         <h2>PDF 포함 기간</h2>
         <div className="collection-period-aside__range">
@@ -309,11 +309,11 @@ function CollectionPeriodAside({
       </section>
 
       <section className="collection-period-aside__card collection-period-aside__card--subtle">
-        <span className="collection-period-aside__eyebrow">TIMEZONE</span>
+        <span className="collection-period-aside__eyebrow">기준 시간대</span>
         <h2>{sourceContext.timezone}</h2>
         <p>
-          날짜는 workspace timezone을 기준으로 정규화합니다. timezone 변경은
-          별도 workspace 설정에서 진행합니다.
+          날짜는 서비스 기준 시간대로 정규화합니다. 시간대 변경은 설정에서
+          진행합니다.
         </p>
       </section>
     </aside>
@@ -440,7 +440,7 @@ function CollectionPeriodEditor({
           <dd>{formatRange(sourceContext.coverage)}</dd>
         </div>
         <div>
-          <dt>workspace timezone</dt>
+          <dt>기준 시간대</dt>
           <dd>{sourceContext.timezone}</dd>
         </div>
       </dl>
@@ -585,7 +585,7 @@ function CollectionPeriodEditor({
           <span>
             입력 형식 <strong>YYYY-MM-DD</strong>
           </span>
-          <span>허용 범위와 coverage는 서버가 최종 확인</span>
+          <span>선택 가능 범위와 문서 포함 기간은 서버에서 최종 확인</span>
         </p>
       </div>
 
@@ -601,7 +601,7 @@ function CollectionPeriodEditor({
           />
           <div>
             <strong>조회 범위와 예상 거래 건수를 확인하고 있어요</strong>
-            <p>등록한 Source는 유지되며 아직 수집 Job은 만들지 않습니다.</p>
+            <p>등록한 데이터 소스는 유지되며 아직 수집은 시작되지 않습니다.</p>
           </div>
         </div>
       ) : null}
@@ -679,7 +679,7 @@ function CollectionPeriodReady({
           <dd>{formatRange(preview.normalizedPeriod)}</dd>
         </div>
         <div>
-          <dt>workspace timezone</dt>
+          <dt>기준 시간대</dt>
           <dd>{preview.timezone}</dd>
         </div>
         <div>
@@ -727,7 +727,7 @@ function CollectionPeriodReady({
         </button>
       </div>
       <p id="collection-job-follow-up" className="collection-period-follow-up">
-        수집 Job 생성은 다음 stacked slice에서 연결됩니다.
+        수집 시작 기능은 다음 개발 단계에서 연결됩니다.
       </p>
     </section>
   )
@@ -747,14 +747,14 @@ function CollectionPeriodSourceLoading() {
       />
       <div>
         <span className="collection-period-source-state__eyebrow">
-          SOURCE CHECK
+          데이터 소스 확인
         </span>
         <h2 id="collection-period-source-loading-title">
-          등록한 Source를 확인하고 있어요
+          등록한 데이터 소스를 확인 중입니다
         </h2>
         <p>
-          현재 workspace에서 사용할 수 있는 Source인지 확인한 뒤 조회 기간을
-          보여드립니다.
+          현재 계정에서 사용할 수 있는 데이터 소스인지 확인한 뒤 조회 기간을
+          표시합니다.
         </p>
       </div>
     </section>
@@ -784,7 +784,7 @@ function CollectionPeriodSourceError({
       </span>
       <div>
         <span className="collection-period-source-state__eyebrow">
-          SOURCE UNAVAILABLE
+          데이터 소스 오류
         </span>
         <h2 id="collection-period-source-error-title">
           {isTransient
@@ -793,8 +793,8 @@ function CollectionPeriodSourceError({
         </h2>
         <p>
           {isTransient
-            ? '일시적인 문제로 Source 정보를 불러오지 못했습니다. 잠시 후 다시 확인해 주세요.'
-            : '요청한 Source가 없거나 이 workspace에서 사용할 수 없습니다. 새 데이터 소스를 등록한 뒤 다시 진행해 주세요.'}
+            ? '일시적인 문제로 데이터 소스 정보를 불러오지 못했습니다. 잠시 후 다시 확인해 주세요.'
+            : '요청한 데이터 소스가 없거나 현재 계정에서 사용할 수 없습니다. 새 데이터 소스를 등록한 뒤 다시 진행해 주세요.'}
         </p>
         {error.requestId ? (
           <span className="collection-period-source-state__request">
@@ -807,7 +807,7 @@ function CollectionPeriodSourceError({
             className="source-primary-action"
             onClick={onRetry}
           >
-            Source 다시 확인 <span aria-hidden="true">↻</span>
+            다시 확인 <span aria-hidden="true">↻</span>
           </button>
         ) : (
           <a className="source-primary-action" href="/sources/new">
@@ -1075,7 +1075,7 @@ export function CollectionPeriodPage({
   const pageCopy = isReady
     ? {
         description:
-          '정규화된 조회 기간과 문서 coverage를 수집 전에 확인합니다.',
+          '정규화된 조회 기간과 문서 포함 범위를 수집 전에 확인합니다.',
         title: '수집 전 확인',
       }
     : {
@@ -1089,9 +1089,8 @@ export function CollectionPeriodPage({
       badge={{
         label: resolvedSourceContext
           ? `${currentStep} / 3`
-          : 'Source 확인',
+          : '데이터 소스 확인',
         tone: 'upbit',
-        type: 'flow',
       }}
       description={pageCopy.description}
       eyebrow="DATA SOURCES · UPBIT"

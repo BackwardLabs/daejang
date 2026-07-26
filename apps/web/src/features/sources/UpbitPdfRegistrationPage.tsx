@@ -61,7 +61,7 @@ const registrationErrorCopy: Record<
   }
 > = {
   DUPLICATE_SOURCE: {
-    body: '같은 내용의 PDF가 이미 이 workspace에 등록되어 있습니다. 기존 소스를 확인하거나 다른 파일을 선택해 주세요.',
+    body: '같은 내용의 PDF가 이미 등록되어 있습니다. 기존 데이터 소스를 확인하거나 다른 파일을 선택해 주세요.',
     recovery: 'manage-or-replace',
     title: '이미 등록된 PDF예요',
   },
@@ -536,15 +536,14 @@ function PdfReviewStep({
             <span aria-hidden="true">03</span>
             <div>
               <strong>데이터 소스 저장</strong>
-              <p>모든 확인에 성공한 뒤에만 Source를 생성합니다.</p>
+              <p>모든 확인이 끝난 뒤에만 데이터 소스를 저장합니다.</p>
             </div>
           </li>
         </ol>
         <div className="pdf-registration-aside__note">
-          <strong>아직 수집은 시작되지 않아요</strong>
+          <strong>아직 수집 전 단계입니다</strong>
           <p>
-            조회 기간 연결과 수집 Job 생성은 소스 등록이 끝난 다음 단계에서
-            진행합니다.
+            데이터 소스를 저장한 다음 조회 기간을 설정하고 수집을 시작합니다.
           </p>
         </div>
       </aside>
@@ -569,13 +568,12 @@ function PdfCompletionStep({
         <img src={registrationComplete} alt="" />
         <span aria-hidden="true">✓</span>
       </div>
-      <span className="pdf-completion-card__eyebrow">SOURCE SAVED</span>
+      <span className="pdf-completion-card__eyebrow">등록 완료</span>
       <h2 id="pdf-completion-title" tabIndex={-1}>
         Upbit 데이터 소스를 등록했어요
       </h2>
       <p>
-        PDF 서버 확인과 Source 저장이 완료되었습니다. 조회 기간을 연결하면
-        수집을 시작할 수 있습니다.
+        PDF 확인과 데이터 소스 저장 완료. 다음으로 조회 기간을 설정합니다.
       </p>
 
       <div className="pdf-completion-summary">
@@ -583,7 +581,7 @@ function PdfCompletionStep({
           <span>현재 상태</span>
           <strong className="pdf-source-status">
             <span aria-hidden="true" />
-            {sourceStatus}
+            {sourceStatus === 'SOURCE_SAVED' ? '저장 완료' : sourceStatus}
           </strong>
         </div>
         <div>
@@ -605,7 +603,7 @@ function PdfCompletionStep({
         </button>
       </div>
       <p id="period-follow-up-note" className="pdf-completion-follow-up">
-        등록한 Source는 유지되며, 다음 화면에서 문서 포함 기간을 확인합니다.
+        등록한 데이터 소스는 유지되며, 다음 화면에서 문서 포함 기간을 확인합니다.
       </p>
     </section>
   )
@@ -797,7 +795,7 @@ export function UpbitPdfRegistrationPage({
 
   return (
     <SourceFlowLayout
-      badge={{ label: `${currentStep} / 3`, tone: 'upbit', type: 'flow' }}
+      badge={{ label: `${currentStep} / 3`, tone: 'upbit' }}
       description={pageCopy.description}
       eyebrow="DATA SOURCES · UPBIT"
       title={pageCopy.title}

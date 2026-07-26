@@ -8,8 +8,8 @@ body:has(.source-page) {
   --source-subtle: var(--product-text-muted);
   --source-line: var(--product-border-subtle);
   --source-surface: var(--product-surface-raised);
-  --source-upbit: #093687;
-  --source-upbit-soft: #e7ecf4;
+  --source-upbit: var(--product-accent, #e8622a);
+  --source-upbit-soft: #fff1eb;
   --source-evm: #f0642b;
   --source-evm-soft: #fbede6;
   display: grid;
@@ -107,12 +107,12 @@ body:has(.source-page) {
   align-items: center;
   justify-content: center;
   gap: 18px;
-  min-height: 48px;
+  min-height: 44px;
   padding: 0 18px;
-  border: 1px solid var(--source-ink);
-  border-radius: 10px;
+  border: 1px solid var(--product-accent, #e8622a);
+  border-radius: 8px;
   color: #fff;
-  background: var(--source-ink);
+  background: var(--product-accent, #e8622a);
   font-size: 13px;
   font-weight: 600;
   line-height: 1;
@@ -125,8 +125,8 @@ body:has(.source-page) {
 }
 
 .source-primary-action:hover {
-  border-color: #34312d;
-  background: #34312d;
+  border-color: var(--product-accent-deep, #b64317);
+  background: var(--product-accent-deep, #b64317);
   transform: translateY(-1px);
 }
 

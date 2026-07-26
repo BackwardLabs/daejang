@@ -3,7 +3,7 @@
   margin-bottom: 20px;
   padding: 24px clamp(24px, 4vw, 56px);
   border: 1px solid var(--source-line);
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
 }
 
@@ -51,7 +51,7 @@
   height: 38px;
   color: #9a968e;
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .collection-period-stepper__marker > * {
@@ -101,9 +101,9 @@
 .collection-period-aside__card,
 .collection-period-ready-card {
   border: 1px solid var(--source-line);
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
-  box-shadow: 0 8px 28px rgb(26 26 26 / 3%);
+  box-shadow: none;
 }
 
 .collection-period-card {
@@ -122,7 +122,7 @@
   margin-bottom: 8px;
   color: var(--source-upbit);
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.09em;
 }
 
@@ -159,7 +159,7 @@
   margin-bottom: 18px;
   padding: 15px 18px;
   border-radius: 14px;
-  background: #f0f3f7;
+  background: #f3f4f6;
 }
 
 .collection-source-summary__logo {
@@ -208,7 +208,7 @@
   color: var(--source-upbit);
   background: #fff;
   font-size: 10px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .collection-source-facts {
@@ -234,7 +234,7 @@
   margin: 0;
   color: #272522;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 19px;
   text-align: right;
 }
@@ -284,14 +284,14 @@
   color: #6e6a65;
   background: #fff;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .collection-range-mode:has(input:checked) {
   border-color: var(--source-upbit);
   color: var(--source-upbit);
-  background: #f0f3f7;
+  background: #f3f4f6;
 }
 
 .collection-range-mode input {
@@ -320,7 +320,7 @@
 .collection-period-field label {
   color: #5f5b55;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 16px;
 }
 
@@ -335,7 +335,7 @@
   background: #fff;
   font: inherit;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   outline: none;
   transition:
     border-color 160ms ease,
@@ -379,7 +379,7 @@
 
 .collection-range-panel__footer strong {
   color: #4d4944;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .collection-period-alert {
@@ -403,7 +403,7 @@
   color: #fff;
   background: #b85b45;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .collection-period-alert strong {
@@ -462,8 +462,8 @@
   padding: 14px 16px;
   border: 1px solid #d8e0ec;
   border-radius: 12px;
-  color: #49607f;
-  background: #f5f8fc;
+  color: #5f6368;
+  background: #f7f7f8;
 }
 
 .collection-period-preview-status__spinner {
@@ -478,7 +478,7 @@
 .collection-period-preview-status strong {
   display: block;
   margin-bottom: 2px;
-  color: #273e62;
+  color: #1a1a1a;
   font-size: 11px;
   line-height: 17px;
 }
@@ -513,9 +513,9 @@
   min-height: 320px;
   padding: 48px;
   border: 1px solid var(--source-line);
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
-  box-shadow: 0 8px 28px rgb(26 26 26 / 3%);
+  box-shadow: none;
 }
 
 .collection-period-source-state__spinner,
@@ -537,7 +537,7 @@
   color: #fff;
   background: #b85b45;
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .collection-period-source-state__eyebrow {
@@ -545,7 +545,7 @@
   margin: 1px 0 8px;
   color: var(--source-upbit);
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.09em;
 }
 
@@ -610,7 +610,7 @@
   margin-bottom: 8px;
   color: var(--source-upbit);
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0.08em;
 }
 
@@ -625,18 +625,18 @@
   gap: 5px;
   padding: 15px;
   border-radius: 12px;
-  background: #f0f3f7;
+  background: #f3f4f6;
 }
 
 .collection-period-aside__range span {
-  color: #62718a;
+  color: #5f6368;
   font-size: 9px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 15px;
 }
 
 .collection-period-aside__range strong {
-  color: #273e62;
+  color: #1a1a1a;
   font-size: 12px;
   line-height: 19px;
 }
@@ -665,9 +665,9 @@
   height: 22px;
   border-radius: 50%;
   color: var(--source-upbit);
-  background: #e7ecf4;
+  background: #f3f4f6;
   font-size: 9px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .collection-period-aside__card--subtle p {
@@ -711,7 +711,7 @@
   margin: 0;
   color: #272522;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 19px;
 }
 
@@ -719,8 +719,8 @@
   margin-top: 18px;
   padding: 14px 16px;
   border-radius: 12px;
-  color: #4b607d;
-  background: #f0f3f7;
+  color: #5f6368;
+  background: #f3f4f6;
   font-size: 10px;
   line-height: 18px;
 }
@@ -728,7 +728,7 @@
 .collection-period-ready-note strong {
   display: block;
   margin-bottom: 3px;
-  color: #263d61;
+  color: #1a1a1a;
   font-size: 11px;
 }
 

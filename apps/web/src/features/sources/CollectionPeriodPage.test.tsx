@@ -87,9 +87,9 @@ describe('CollectionPeriodPage', () => {
       screen.getByRole('heading', { name: '조회 기간 설정' }),
     ).toBeInTheDocument()
     expect(screen.getByText('PERIOD EDITING')).toBeInTheDocument()
-    expect(screen.getByText('SOURCE SAVED')).toBeInTheDocument()
-    expect(screen.getByText('SOURCE COVERAGE')).toBeInTheDocument()
-    expect(screen.getByText('TIMEZONE')).toBeInTheDocument()
+    expect(screen.getByText('저장 완료')).toBeInTheDocument()
+    expect(screen.getByText('문서 포함 범위')).toBeInTheDocument()
+    expect(screen.getAllByText('기준 시간대')).toHaveLength(2)
     expect(screen.getByText('source-upbit-persisted')).toBeInTheDocument()
     expect(
       screen.getAllByText('2027.02.01 – 2027.11.30'),
@@ -140,7 +140,7 @@ describe('CollectionPeriodPage', () => {
     expect(screen.getByLabelText('종료일')).toHaveValue('2026-12-31')
   })
 
-  it('does not expose source details until the current workspace source is resolved', async () => {
+  it('does not expose source details until the current account source is resolved', async () => {
     const deferred = createDeferred<LoadCollectionPeriodSourceResult>()
     let submittedSignal: AbortSignal | undefined
     const loadSourceContext: LoadCollectionPeriodSource = vi.fn(
@@ -159,12 +159,12 @@ describe('CollectionPeriodPage', () => {
 
     expect(
       screen.getByRole('heading', {
-        name: '등록한 Source를 확인하고 있어요',
+        name: '등록한 데이터 소스를 확인 중입니다',
       }),
     ).toBeInTheDocument()
-    expect(screen.queryByText('SOURCE SAVED')).not.toBeInTheDocument()
-    expect(screen.queryByText('SOURCE COVERAGE')).not.toBeInTheDocument()
-    expect(screen.getByText('Source 확인')).toBeInTheDocument()
+    expect(screen.queryByText('저장 완료')).not.toBeInTheDocument()
+    expect(screen.queryByText('문서 포함 범위')).not.toBeInTheDocument()
+    expect(screen.getAllByText('데이터 소스 확인')).toHaveLength(2)
     expect(
       screen.queryByRole('navigation', {
         name: '데이터 수집 준비 단계',
@@ -196,8 +196,8 @@ describe('CollectionPeriodPage', () => {
       await deferred.promise
     })
 
-    expect(screen.getByText('SOURCE SAVED')).toBeInTheDocument()
-    expect(screen.getByText('SOURCE COVERAGE')).toBeInTheDocument()
+    expect(screen.getByText('저장 완료')).toBeInTheDocument()
+    expect(screen.getByText('문서 포함 범위')).toBeInTheDocument()
     expect(
       screen.getByRole('navigation', {
         name: '데이터 수집 준비 단계',
@@ -239,14 +239,14 @@ describe('CollectionPeriodPage', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('데이터 소스를 확인할 수 없어요')
     expect(alert).toHaveTextContent(
-      '요청한 Source가 없거나 이 workspace에서 사용할 수 없습니다.',
+      '요청한 데이터 소스가 없거나 현재 계정에서 사용할 수 없습니다.',
     )
     expect(alert).toHaveTextContent('period-source-safe-1')
     expect(
       screen.getByRole('link', { name: '새 데이터 소스 등록' }),
     ).toHaveAttribute('href', '/sources/new')
-    expect(screen.queryByText('SOURCE SAVED')).not.toBeInTheDocument()
-    expect(screen.queryByText('SOURCE COVERAGE')).not.toBeInTheDocument()
+    expect(screen.queryByText('저장 완료')).not.toBeInTheDocument()
+    expect(screen.queryByText('문서 포함 범위')).not.toBeInTheDocument()
     expect(
       screen.queryByRole('navigation', {
         name: '데이터 수집 준비 단계',
@@ -340,7 +340,7 @@ describe('CollectionPeriodPage', () => {
     ).not.toBeInTheDocument()
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Source 다시 확인' }),
+      screen.getByRole('button', { name: '다시 확인' }),
     )
 
     expect(
@@ -620,7 +620,7 @@ describe('CollectionPeriodPage', () => {
       screen.getByRole('link', { name: '다른 PDF 등록' }),
     ).toHaveAttribute('href', '/sources/new/upbit/upload')
     expect(alert).toHaveTextContent(
-      '다른 PDF를 등록해도 현재 Source는 삭제되지 않습니다.',
+      '다른 PDF를 등록해도 현재 데이터 소스는 삭제되지 않습니다.',
     )
     expect(screen.getByText('source-upbit-coverage')).toBeInTheDocument()
     expect(screen.getByLabelText('시작일')).toHaveValue('2026-12-01')
@@ -676,12 +676,12 @@ describe('CollectionPeriodPage', () => {
     expect(screen.getByText('계산 중')).toBeInTheDocument()
     expect(
       screen.getByText(
-        '예상 거래 건수를 아직 계산할 수 없습니다. 실제 수집 전 기간과 Source를 한 번 더 확인해 주세요.',
+        '예상 거래 건수를 아직 계산할 수 없습니다. 실제 수집 전에 기간과 데이터 소스를 한 번 더 확인해 주세요.',
       ),
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        '수집 시작 전에 선택한 기간과 Source 정보를 한 번 더 확인해 주세요.',
+        '수집 시작 전에 선택한 기간과 데이터 소스 정보를 한 번 더 확인해 주세요.',
       ),
     ).toBeInTheDocument()
     expect(window.location.href).not.toContain('1,248')
