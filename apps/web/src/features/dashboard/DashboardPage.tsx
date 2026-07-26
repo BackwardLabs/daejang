@@ -1,111 +1,82 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppSidebar, type AppYear } from '../../components/AppSidebar.tsx'
-import { PageHeader } from '../../components/PageHeader.tsx'
 import {
   createDashboardSyncSnapshot,
   dashboardCurrentYear,
   readDashboardSnapshot,
-  type DashboardHolding,
-  type DashboardSource,
 } from '../../mocks/dashboard.ts'
 import './dashboard.css'
 
-function getSourceHoldings(sources: DashboardSource[]): DashboardHolding[] {
-  return sources.map((source) => ({
-    symbol: source.detail.startsWith('거래소') ? 'CEX' : 'EVM',
-    name: source.name,
-    quantity: `${source.assets.length}개 자산`,
-    price: source.detail,
-    value: source.value,
-    change: source.change,
-    changeTone: source.changeTone,
-    source: source.share,
-  }))
-}
+const monthLabels = [
+  '1월',
+  '2월',
+  '3월',
+  '4월',
+  '5월',
+  '6월',
+  '7월',
+  '8월',
+  '9월',
+  '10월',
+  '11월',
+  '12월',
+]
 
-function SourceCard({ source }: { source: DashboardSource }) {
-  return (
-    <article className="dashboard-source-card">
-      <div className="dashboard-source-card__heading">
-        <div>
-          <h3>{source.name}</h3>
-          <p>{source.detail}</p>
-        </div>
-        <span>{source.share}</span>
-      </div>
+const reviewQueue = [
+  { title: 'ETH 입금', detail: '취득가액 확인', amount: '₩ 1,240,000' },
+  { title: 'Upbit 매도', detail: '거래소 원장 대조', amount: '₩ 860,000' },
+  { title: 'USDC 전송', detail: '지갑 간 이전', amount: '₩ 530,000' },
+]
 
-      <div className="dashboard-source-card__metric">
-        <strong>{source.value}</strong>
-        <span className={`dashboard-tone--${source.changeTone}`}>{source.change}</span>
-      </div>
-
-      <ul aria-label={`${source.name} 보유 자산`}>
-        {source.assets.map((asset) => (
-          <li key={asset.name}>
-            <span className="dashboard-asset-name">
-              <i style={{ backgroundColor: asset.color }} />
-              {asset.name}
-            </span>
-            <span>{asset.amount}</span>
-          </li>
-        ))}
-      </ul>
-    </article>
-  )
-}
-
-function HoldingsTable({
-  rows,
-  view,
-}: {
-  rows: DashboardHolding[]
-  view: 'asset' | 'source'
-}) {
-  return (
-    <div className="dashboard-table-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">{view === 'asset' ? '자산' : '유형'}</th>
-            <th scope="col">{view === 'asset' ? '보유수량' : '연결 정보'}</th>
-            <th scope="col">{view === 'asset' ? '현재가' : '식별 정보'}</th>
-            <th scope="col">평가금액</th>
-            <th scope="col">미실현 손익</th>
-            <th scope="col">{view === 'asset' ? '소스' : '비중'}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((holding) => (
-            <tr key={`${view}-${holding.symbol}-${holding.name}`}>
-              <th scope="row">
-                <strong>{holding.symbol}</strong>
-                <span>{holding.name}</span>
-              </th>
-              <td>{holding.quantity}</td>
-              <td>{holding.price}</td>
-              <td>
-                <strong>{holding.value}</strong>
-              </td>
-              <td className={`dashboard-tone--${holding.changeTone}`}>
-                <strong>{holding.change}</strong>
-              </td>
-              <td>{holding.source}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
+const recentTransactions = [
+  {
+    date: '12.18 14:22',
+    type: '매도',
+    asset: 'ETH',
+    quantity: '0.80',
+    value: '₩ 3,142,000',
+    status: '검토 필요',
+    statusTone: 'review',
+    evidence: '거래소 원장',
+  },
+  {
+    date: '12.17 09:18',
+    type: '입금',
+    asset: 'USDC',
+    quantity: '1,250',
+    value: '₩ 1,710,000',
+    status: '완료',
+    statusTone: 'complete',
+    evidence: '지갑 해시',
+  },
+  {
+    date: '12.15 22:04',
+    type: '스왑',
+    asset: 'ARB → ETH',
+    quantity: '2,100',
+    value: '₩ 2,084,000',
+    status: '완료',
+    statusTone: 'complete',
+    evidence: '온체인',
+  },
+  {
+    date: '12.12 11:37',
+    type: '출금',
+    asset: 'BTC',
+    quantity: '0.021',
+    value: '₩ 2,860,000',
+    status: '검토 필요',
+    statusTone: 'review',
+    evidence: '미연결',
+  },
+] as const
 
 export function DashboardPage() {
-  const [holdingsView, setHoldingsView] = useState<'asset' | 'source'>('asset')
   const [selectedYear, setSelectedYear] = useState<AppYear>('2027')
   const [snapshot, setSnapshot] = useState(() => readDashboardSnapshot('2027'))
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const syncTimerRef = useRef<number | undefined>(undefined)
-  const sourceHoldings = getSourceHoldings(snapshot.sources)
 
   useEffect(
     () => () => {
@@ -124,7 +95,7 @@ export function DashboardPage() {
     if (isSyncing || selectedYear !== dashboardCurrentYear) return
 
     setIsSyncing(true)
-    setSyncMessage('연결된 3개 소스를 동기화하고 있습니다.')
+    setSyncMessage('연결된 거래소와 지갑 기록을 동기화하고 있습니다.')
     window.clearTimeout(syncTimerRef.current)
     syncTimerRef.current = window.setTimeout(() => {
       const syncedSnapshot = createDashboardSyncSnapshot()
@@ -136,6 +107,33 @@ export function DashboardPage() {
     }, 700)
   }
 
+  const metrics = [
+    {
+      label: '전체 거래',
+      value: selectedYear === '2027' ? '1,284건' : '1,097건',
+      detail: selectedYear === '2027' ? '+42건 · 최근 7일' : '마감된 장부',
+      tone: 'positive',
+    },
+    {
+      label: '검토 필요',
+      value: selectedYear === '2027' ? '12건' : '0건',
+      detail: selectedYear === '2027' ? '우선 확인이 필요해요' : '검토 완료',
+      tone: 'review',
+    },
+    {
+      label: '예상 취득가액',
+      value: snapshot.totalAssets,
+      detail: '동기화 기준 추정값',
+      tone: 'neutral',
+    },
+    {
+      label: '근거 연결률',
+      value: selectedYear === '2027' ? '92.4%' : '100%',
+      detail: selectedYear === '2027' ? '+3.1% · 이번 주' : '마감 기준',
+      tone: 'positive',
+    },
+  ] as const
+
   return (
     <div className="dashboard-page product-shell">
       <AppSidebar
@@ -145,147 +143,177 @@ export function DashboardPage() {
       />
 
       <main className="dashboard-main">
-        <PageHeader
-          actions={
-            <>
-              <span>{snapshot.lastSynced} 기준</span>
-              <button
-                type="button"
-                className="dashboard-button dashboard-button--secondary"
-                disabled={isSyncing || selectedYear !== dashboardCurrentYear}
-                title={
-                  selectedYear !== dashboardCurrentYear
-                    ? '지난 과세연도는 동기화할 수 없습니다.'
-                    : undefined
-                }
-                onClick={handleSync}
-              >
-                {isSyncing
-                  ? '동기화 중…'
-                  : selectedYear !== dashboardCurrentYear
-                    ? '동기화 불가'
-                    : '동기화'}
-              </button>
-              <a
-                href="/app/sources"
-                className="dashboard-button dashboard-button--primary"
-              >
-                소스 연결
+        <header className="dashboard-topbar">
+          <nav aria-label="현재 위치" className="dashboard-breadcrumb">
+            <a href="/">Daejang</a>
+            <span aria-hidden="true">/</span>
+            <strong>대시보드</strong>
+          </nav>
+          <div className="dashboard-topbar__actions">
+            <button
+              type="button"
+              className="dashboard-sync-status"
+              disabled={isSyncing || selectedYear !== dashboardCurrentYear}
+              title={`${snapshot.lastSynced} 기준`}
+              onClick={handleSync}
+            >
+              <i aria-hidden="true" />
+              {isSyncing
+                ? '동기화 중…'
+                : selectedYear === dashboardCurrentYear
+                  ? '방금 동기화'
+                  : '마감된 연도'}
+            </button>
+            <span className="dashboard-year-chip">{selectedYear} 과세연도</span>
+            <span className="dashboard-topbar__avatar" aria-hidden="true" />
+          </div>
+        </header>
+
+        <div className="dashboard-content">
+          <section className="dashboard-intro" aria-labelledby="dashboard-title">
+            <div>
+              <p>LEDGER OVERVIEW</p>
+              <h1 id="dashboard-title">세무 장부 요약</h1>
+              <span>연결한 거래 기록을 검토하고 신고 준비 상태를 확인합니다.</span>
+            </div>
+            <div className="dashboard-intro__actions">
+              <a href="/app/reports" className="dashboard-action dashboard-action--outline">
+                보고서 보기
               </a>
-            </>
-          }
-          description="연결한 지갑·거래소의 보유 자산을 한눈에 확인합니다."
-          eyebrow="DASHBOARD"
-          title="대시보드"
-          tone="dashboard"
-        />
-        {selectedYear !== dashboardCurrentYear && (
-          <p className="dashboard-year-notice">
-            {selectedYear}년은 마감된 과세연도입니다. 저장된 snapshot만
-            조회할 수 있으며 새 동기화는 {dashboardCurrentYear}년에서
-            가능합니다.
+              <a href="/app/sources" className="dashboard-action dashboard-action--primary">
+                거래 추가
+              </a>
+            </div>
+          </section>
+
+          {selectedYear !== dashboardCurrentYear && (
+            <p className="dashboard-year-notice">
+              {selectedYear}년은 마감된 과세연도입니다. 저장된 snapshot만 조회할
+              수 있습니다.
+            </p>
+          )}
+
+          <p
+            className="dashboard-sync-message"
+            role="status"
+            aria-live="polite"
+            hidden={!syncMessage}
+          >
+            {syncMessage}
           </p>
-        )}
-        <p className="dashboard-sync-message" role="status" aria-live="polite">
-          {syncMessage}
-        </p>
 
-        <section className="dashboard-summary" aria-label="포트폴리오 요약">
-          <article className="dashboard-total-card">
-            <div className="dashboard-total-card__heading">
-              <h2>총 보유자산 (KRW 환산)</h2>
-              <span>연결 소스 {snapshot.sources.length}곳</span>
-            </div>
-            <div className="dashboard-total-card__metric">
-              <strong>{snapshot.totalAssets}</strong>
-              <span>{snapshot.dailyChange}</span>
-            </div>
-            <p>최근 24시간 · 현재가 기준 평가액</p>
-            <div className="dashboard-value-bars" aria-label="최근 7일 평가금액 상승 추이">
-              {snapshot.bars.map((height, index) => (
-                <i
-                  key={height}
-                  className={index === 6 ? 'is-current' : undefined}
-                  style={{ height }}
-                />
-              ))}
-            </div>
-          </article>
+          <section className="dashboard-review-alert" aria-label="검토 대기 알림">
+            <span aria-hidden="true">!</span>
+            <p>
+              <strong>{selectedYear === '2027' ? '12건' : '0건'}</strong>의 거래가
+              검토를 기다리고 있습니다. 근거를 연결하면 신고 준비도가 올라갑니다.
+            </p>
+            <a href="/app/ledger">검토 필요</a>
+          </section>
 
-          <article className="dashboard-allocation-card">
-            <div className="dashboard-section-heading">
-              <h2>자산 배분</h2>
-              <span>평가금액 기준</span>
-            </div>
-            <div className="dashboard-allocation-bar" aria-hidden="true">
-              {snapshot.allocations.map((asset) => (
-                <i
-                  key={asset.symbol}
-                  style={{ backgroundColor: asset.color, width: `${asset.percent}%` }}
-                />
-              ))}
-            </div>
-            <ul>
-              {snapshot.allocations.map((asset) => (
-                <li key={asset.symbol}>
-                  <span className="dashboard-asset-name">
-                    <i style={{ backgroundColor: asset.color }} />
-                    <strong>{asset.symbol}</strong>
-                  </span>
-                  <span>{asset.percent}%</span>
-                  <span>·</span>
-                  <span>{asset.amount}</span>
-                </li>
-              ))}
-            </ul>
-          </article>
-        </section>
-
-        <section className="dashboard-sources" aria-labelledby="dashboard-sources-title">
-          <div className="dashboard-sources__heading">
-            <h2 id="dashboard-sources-title">소스별 보유 현황</h2>
-            <p>연결한 거래소와 지갑의 평가금액 및 주요 자산</p>
-          </div>
-          <div className="dashboard-source-grid">
-            {snapshot.sources.map((source) => (
-              <SourceCard key={source.name} source={source} />
+          <section className="dashboard-metrics" aria-label="장부 핵심 지표">
+            {metrics.map((metric) => (
+              <article
+                key={metric.label}
+                className={metric.tone === 'review' ? 'is-review' : undefined}
+              >
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
+                <small className={`dashboard-tone--${metric.tone}`}>
+                  {metric.detail}
+                </small>
+              </article>
             ))}
-          </div>
-        </section>
+          </section>
 
-        <section className="dashboard-holdings" aria-labelledby="dashboard-holdings-title">
-          <div className="dashboard-holdings__heading">
-            <h2 id="dashboard-holdings-title">보유 자산</h2>
-            <div className="dashboard-tabs" role="tablist" aria-label="보유 자산 분류">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={holdingsView === 'asset'}
-                onClick={() => setHoldingsView('asset')}
-              >
-                자산별
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={holdingsView === 'source'}
-                onClick={() => setHoldingsView('source')}
-              >
-                소스별
-              </button>
+          <section className="dashboard-workspace" aria-label="거래 흐름과 검토 큐">
+            <article className="dashboard-chart-card">
+              <header>
+                <div>
+                  <h2>월별 거래 흐름</h2>
+                  <p>총 거래액과 검토 완료 추이</p>
+                </div>
+                <div className="dashboard-chart-legend" aria-label="차트 범례">
+                  <span><i className="is-orange" />거래액</span>
+                  <span><i />검토 완료</span>
+                </div>
+              </header>
+              <div className="dashboard-chart" aria-label={`${selectedYear}년 월별 거래 흐름`}>
+                {snapshot.bars.map((height, index) => (
+                  <div key={monthLabels[index]}>
+                    <i
+                      className={index === snapshot.bars.length - 1 ? 'is-current' : undefined}
+                      style={{ height }}
+                    />
+                    <span>{monthLabels[index]}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="dashboard-review-queue">
+              <header>
+                <h2>검토 큐</h2>
+                <a href="/app/ledger">전체 보기 →</a>
+              </header>
+              <ul>
+                {reviewQueue.map((item) => (
+                  <li key={item.title}>
+                    <span>
+                      <strong>{item.title}</strong>
+                      <small>{item.detail}</small>
+                    </span>
+                    <b>{item.amount}</b>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          </section>
+
+          <section className="dashboard-recent" aria-labelledby="dashboard-recent-title">
+            <header>
+              <h2 id="dashboard-recent-title">최근 거래</h2>
+              <div aria-label="거래 필터">
+                <button type="button">전체 자산</button>
+                <button type="button">전체 상태</button>
+                <button type="button">{selectedYear}.01.01–12.31</button>
+                <button type="button">필터</button>
+              </div>
+            </header>
+            <div className="dashboard-table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">일시</th>
+                    <th scope="col">유형</th>
+                    <th scope="col">자산</th>
+                    <th scope="col">수량</th>
+                    <th scope="col">평가액</th>
+                    <th scope="col">상태</th>
+                    <th scope="col">근거</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentTransactions.map((transaction) => (
+                    <tr key={`${transaction.date}-${transaction.asset}`}>
+                      <td>{transaction.date}</td>
+                      <td>{transaction.type}</td>
+                      <td>{transaction.asset}</td>
+                      <td><strong>{transaction.quantity}</strong></td>
+                      <td><strong>{transaction.value}</strong></td>
+                      <td>
+                        <span className={`dashboard-status dashboard-status--${transaction.statusTone}`}>
+                          {transaction.status}
+                        </span>
+                      </td>
+                      <td>{transaction.evidence}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-          <HoldingsTable
-            view={holdingsView}
-            rows={holdingsView === 'asset' ? snapshot.holdings : sourceHoldings}
-          />
-        </section>
-
-        <p className="dashboard-disclaimer">
-          보유 수량·평가금액은 연결한 지갑·거래소 데이터와 현재가 기준 참고
-          수치이며, 예상 손익은 세무 검토용 장부 초안입니다. 최종 신고 전 등록
-          세무대리인의 확인이 필요합니다.
-        </p>
+          </section>
+        </div>
       </main>
     </div>
   )

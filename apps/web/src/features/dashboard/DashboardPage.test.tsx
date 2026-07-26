@@ -7,7 +7,7 @@ afterEach(() => {
 })
 
 describe('DashboardPage', () => {
-  it('renders the Figma portfolio summary, sources, and holdings', () => {
+  it('renders the Figma ledger overview hierarchy', () => {
     render(<DashboardPage />)
 
     expect(screen.getByText('김대장')).toBeInTheDocument()
@@ -15,30 +15,21 @@ describe('DashboardPage', () => {
       'aria-current',
       'page',
     )
-    expect(screen.getByRole('link', { name: '장부 작업' })).not.toHaveAttribute(
-      'aria-current',
-    )
-    expect(screen.getByText('총 보유자산 (KRW 환산)')).toBeInTheDocument()
-    expect(screen.getByText('연결 소스 4곳')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '소스별 보유 현황' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Upbit' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Ethereum 지갑' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Base 지갑' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Bithumb' })).toBeInTheDocument()
-    expect(screen.getByRole('row', { name: /ETHEthereum 4.58 ETH/ })).toBeInTheDocument()
-  })
-
-  it('switches the holdings table to the source view', () => {
-    render(<DashboardPage />)
-
-    fireEvent.click(screen.getByRole('tab', { name: '소스별' }))
-
-    expect(screen.getByRole('tab', { name: '소스별' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    )
-    expect(screen.getByRole('columnheader', { name: '연결 정보' })).toBeInTheDocument()
-    expect(screen.getByRole('row', { name: /CEXUpbit 3개 자산/ })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '세무 장부 요약' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('1,284건')).toBeInTheDocument()
+    expect(screen.getAllByText('12건')).toHaveLength(2)
+    expect(screen.getByText('₩84,270,000')).toBeInTheDocument()
+    expect(screen.getByText('92.4%')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '월별 거래 흐름' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '검토 큐' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '최근 거래' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /12.18 14:22 매도 ETH/ })).toBeInTheDocument()
   })
 
   it('uses mock snapshots for year changes and synchronization', () => {
@@ -49,39 +40,47 @@ describe('DashboardPage', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '조회 기간' }), {
       target: { value: '2026' },
     })
-    expect(screen.getByText('₩52,780,000')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '동기화 불가' })).toBeDisabled()
+    expect(screen.getByText('₩71,640,000')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '마감된 연도' })).toBeDisabled()
     expect(screen.getByText(/2026년은 마감된 과세연도/)).toBeInTheDocument()
 
     fireEvent.change(screen.getByRole('combobox', { name: '조회 기간' }), {
       target: { value: '2027' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '동기화' }))
+    fireEvent.click(screen.getByRole('button', { name: '방금 동기화' }))
     expect(screen.getByRole('button', { name: '동기화 중…' })).toBeDisabled()
 
     act(() => {
       vi.advanceTimersByTime(700)
     })
 
-    expect(screen.getByText('₩66,670,000')).toBeInTheDocument()
+    expect(screen.getByText('₩84,590,000')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('동기화가 완료되었습니다')
-    expect(screen.getByText('2026-07-24 09:07 기준')).toBeInTheDocument()
+    expect(screen.getByTitle('2026-07-24 09:07 기준')).toBeInTheDocument()
 
     unmount()
     render(<DashboardPage />)
 
-    expect(screen.getByText('2026-07-24 09:07 기준')).toBeInTheDocument()
-    expect(screen.getByText('₩66,670,000')).toBeInTheDocument()
+    expect(screen.getByText('₩84,590,000')).toBeInTheDocument()
+    expect(screen.getByTitle('2026-07-24 09:07 기준')).toBeInTheDocument()
   })
 
-  it('links the dashboard actions and sidebar to product routes', () => {
+  it('links dashboard actions and sidebar items to product routes', () => {
     render(<DashboardPage />)
 
     expect(screen.getByRole('link', { name: '장부 작업' })).toHaveAttribute(
       'href',
       '/app/ledger',
     )
-    expect(screen.getByRole('link', { name: '소스 연결' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '보고서 보기' })).toHaveAttribute(
+      'href',
+      '/app/reports',
+    )
+    expect(screen.getByRole('link', { name: '거래 추가' })).toHaveAttribute(
+      'href',
+      '/app/sources',
+    )
+    expect(screen.getByRole('link', { name: '거래소·지갑' })).toHaveAttribute(
       'href',
       '/app/sources',
     )

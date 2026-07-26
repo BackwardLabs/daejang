@@ -24,8 +24,10 @@ describe('AppRouter', () => {
 
       render(<AppRouter />)
 
-      expect(screen.getByRole('heading', { name: '대시보드' })).toBeInTheDocument()
-      expect(screen.getByText('₩66,350,000')).toBeInTheDocument()
+      expect(
+        screen.getByRole('heading', { name: '세무 장부 요약' }),
+      ).toBeInTheDocument()
+      expect(screen.getByText('₩84,270,000')).toBeInTheDocument()
     },
   )
 

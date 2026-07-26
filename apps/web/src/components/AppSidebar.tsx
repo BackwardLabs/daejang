@@ -1,14 +1,15 @@
 import daejangLogo from '../assets/dashboard/daejang-logo.svg'
+import navDashboard from '../assets/dashboard/nav-dashboard.svg'
+import navLedger from '../assets/dashboard/nav-ledger.svg'
+import navReport from '../assets/dashboard/nav-report.svg'
+import navSettings from '../assets/dashboard/nav-settings.svg'
+import navSources from '../assets/dashboard/nav-sources.svg'
 import userAvatar from '../assets/dashboard/user-avatar.svg'
 import {
   logoutMockSession,
   mockAuthenticatedSession,
 } from '../mocks/session.ts'
 import { Fragment, useEffect, useRef, useState } from 'react'
-import {
-  AppNavigationIcon,
-  type AppNavigationIconName,
-} from './AppNavigationIcon.tsx'
 import './app-sidebar.css'
 
 export type AppPage = 'dashboard' | 'ledger' | 'reports' | 'settings' | 'sources'
@@ -25,37 +26,37 @@ export type AppSidebarSecondaryItem = {
 const navigation: Array<{
   badge?: string
   href: string
-  icon: AppNavigationIconName
+  icon: string
   label: string
   page: AppPage
 }> = [
   {
-    icon: 'dashboard',
+    icon: navDashboard,
     label: '대시보드',
     href: '/app/dashboard',
     page: 'dashboard',
   },
   {
     badge: '12',
-    icon: 'ledger',
+    icon: navLedger,
     label: '장부 작업',
     href: '/app/ledger',
     page: 'ledger',
   },
   {
-    icon: 'reports',
+    icon: navReport,
     label: '보고서',
     href: '/app/reports',
     page: 'reports',
   },
   {
-    icon: 'sources',
+    icon: navSources,
     label: '거래소·지갑',
     href: '/app/sources',
     page: 'sources',
   },
   {
-    icon: 'settings',
+    icon: navSettings,
     label: '설정',
     href: '/app/settings',
     page: 'settings',
@@ -132,7 +133,6 @@ export function AppSidebar({
               const isActive = item.page === activePage
               const hasSecondaryItems =
                 item.page === 'ledger' && secondaryItems.length > 0
-
               return (
                 <Fragment key={item.page}>
                   <li className={isActive ? 'is-active' : undefined}>
@@ -141,7 +141,7 @@ export function AppSidebar({
                       aria-current={isActive ? 'page' : undefined}
                       aria-expanded={hasSecondaryItems ? true : undefined}
                     >
-                      <AppNavigationIcon name={item.icon} />
+                      <img src={item.icon} alt="" />
                       <span>{item.label}</span>
                       {item.badge && (
                         <b className="app-sidebar__badge" aria-hidden="true">
