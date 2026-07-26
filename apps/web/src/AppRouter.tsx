@@ -15,37 +15,70 @@ function normalizePath(pathname: string) {
   return normalized || '/'
 }
 
+const routeAliases: Record<string, string> = {
+  '/app/dashboard': '/dashboard',
+  '/app/ledger': '/ledger',
+  '/app/reports': '/reports',
+  '/app/settings': '/settings',
+  '/app/sources': '/sources',
+  '/features/dashboard': '/dashboard',
+  '/features/ledger': '/ledger',
+  '/features/reports': '/reports',
+}
+
+const protectedRoutes = new Set([
+  '/dashboard',
+  '/ledger',
+  '/reports',
+  '/settings',
+  '/sources',
+])
+
+function resolvePath(pathname: string) {
+  const normalized = normalizePath(pathname)
+
+  return routeAliases[normalized] ?? normalized
+}
+
 export function AppRouter() {
-  const [path, setPath] = useState(() => normalizePath(window.location.pathname))
+  const [path, setPath] = useState(() => resolvePath(window.location.pathname))
 
   useEffect(() => {
     function handlePathChange() {
-      setPath(normalizePath(window.location.pathname))
+      const normalized = normalizePath(window.location.pathname)
+      const resolved = resolvePath(normalized)
+
+      if (resolved !== normalized) {
+        window.history.replaceState({}, '', resolved)
+      }
+
+      setPath(resolved)
     }
 
+    handlePathChange()
     window.addEventListener('popstate', handlePathChange)
     return () => window.removeEventListener('popstate', handlePathChange)
   }, [])
 
-  if (path.startsWith('/app/') && !isMockSessionAuthenticated()) {
+  if (protectedRoutes.has(path) && !isMockSessionAuthenticated()) {
     return <App />
   }
 
-  if (path === '/app/dashboard' || path === '/features/dashboard') {
+  if (path === '/dashboard') {
     return <DashboardPage />
   }
 
-  if (path === '/app/ledger' || path === '/features/ledger') {
+  if (path === '/ledger') {
     return <LedgerPage />
   }
 
-  if (path === '/app/reports' || path === '/features/reports') {
+  if (path === '/reports') {
     return <ReportPage />
   }
 
   const productRoutes: Partial<Record<string, ProductPageKind>> = {
-    '/app/settings': 'settings',
-    '/app/sources': 'sources',
+    '/settings': 'settings',
+    '/sources': 'sources',
   }
   const productPage = productRoutes[path]
 

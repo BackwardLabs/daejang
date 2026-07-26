@@ -70,19 +70,19 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('link', { name: '장부 작업' })).toHaveAttribute(
       'href',
-      '/app/ledger',
+      '/ledger',
     )
     expect(screen.getByRole('link', { name: '보고서 보기' })).toHaveAttribute(
       'href',
-      '/app/reports',
+      '/reports',
     )
     expect(screen.getByRole('link', { name: '거래 추가' })).toHaveAttribute(
       'href',
-      '/app/sources',
+      '/sources',
     )
     expect(screen.getByRole('link', { name: '거래소·지갑' })).toHaveAttribute(
       'href',
-      '/app/sources',
+      '/sources',
     )
   })
 })

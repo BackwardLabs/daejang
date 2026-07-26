@@ -486,7 +486,7 @@ export function ReportPage() {
 
       <main className="report-main">
         <PageHeader
-          actions={<a href="/app/ledger">장부 작업으로</a>}
+          actions={<a href="/ledger">장부 작업으로</a>}
           description="발행한 장부와 Evidence Pack, GIWA 무결성 상태를 한 곳에서 확인합니다."
           eyebrow="REPORTS"
           title="보고서"

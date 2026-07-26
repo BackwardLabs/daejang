@@ -17,7 +17,7 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
-  it.each(['/app/dashboard', '/features/dashboard/'])(
+  it.each(['/dashboard', '/app/dashboard', '/features/dashboard/'])(
     'renders the dashboard at %s',
     (path) => {
       window.history.pushState({}, '', path)
@@ -31,7 +31,7 @@ describe('AppRouter', () => {
     },
   )
 
-  it.each(['/app/ledger', '/features/ledger/'])(
+  it.each(['/ledger', '/app/ledger', '/features/ledger/'])(
     'renders the ledger workspace at %s',
     (path) => {
       window.history.pushState({}, '', path)
@@ -48,7 +48,7 @@ describe('AppRouter', () => {
   )
 
   it('renders the data-linked report workspace', () => {
-    window.history.pushState({}, '', '/app/reports')
+    window.history.pushState({}, '', '/reports')
 
     render(<AppRouter />)
 
@@ -58,7 +58,7 @@ describe('AppRouter', () => {
   })
 
   it('logs the mock user out from the shared sidebar', () => {
-    window.history.pushState({}, '', '/app/dashboard')
+    window.history.pushState({}, '', '/dashboard')
     render(<AppRouter />)
 
     fireEvent.click(screen.getByRole('button', { name: /김대장/ }))
@@ -71,13 +71,27 @@ describe('AppRouter', () => {
   })
 
   it.each([
-    ['/app/sources', '데이터 소스'],
-    ['/app/settings', '설정'],
+    ['/sources', '데이터 소스'],
+    ['/settings', '설정'],
   ])('renders the product page at %s', (path, heading) => {
     window.history.pushState({}, '', path)
 
     render(<AppRouter />)
 
     expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['/app/dashboard', '/dashboard'],
+    ['/app/ledger', '/ledger'],
+    ['/app/reports', '/reports'],
+    ['/app/sources', '/sources'],
+    ['/app/settings', '/settings'],
+  ])('redirects the legacy route %s to %s', (legacyPath, canonicalPath) => {
+    window.history.pushState({}, '', legacyPath)
+
+    render(<AppRouter />)
+
+    expect(window.location.pathname).toBe(canonicalPath)
   })
 })

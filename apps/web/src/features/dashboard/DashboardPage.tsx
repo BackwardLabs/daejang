@@ -165,10 +165,10 @@ export function DashboardPage() {
                     ? '방금 동기화'
                     : '마감된 연도'}
               </button>
-              <a href="/app/reports" className="dashboard-action dashboard-action--outline">
+              <a href="/reports" className="dashboard-action dashboard-action--outline">
                 보고서 보기
               </a>
-              <a href="/app/sources" className="dashboard-action dashboard-action--primary">
+              <a href="/sources" className="dashboard-action dashboard-action--primary">
                 거래 추가
               </a>
             </div>
@@ -196,7 +196,7 @@ export function DashboardPage() {
               <strong>{selectedYear === '2027' ? '12건' : '0건'}</strong>의 거래가
               검토를 기다리고 있습니다. 근거를 연결하면 신고 준비도가 올라갑니다.
             </p>
-            <a href="/app/ledger">검토 필요</a>
+            <a href="/ledger">검토 필요</a>
           </section>
 
           <section className="dashboard-metrics" aria-label="장부 핵심 지표">
@@ -242,7 +242,7 @@ export function DashboardPage() {
             <article className="dashboard-review-queue">
               <header>
                 <h2>검토 큐</h2>
-                <a href="/app/ledger">전체 보기 →</a>
+                <a href="/ledger">전체 보기 →</a>
               </header>
               <ul>
                 {reviewQueue.map((item) => (

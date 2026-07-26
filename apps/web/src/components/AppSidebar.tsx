@@ -29,17 +29,17 @@ const navigation: Array<{
   label: string
   page: AppPage
 }> = [
-  { icon: navDashboard, label: '대시보드', href: '/app/dashboard', page: 'dashboard' },
+  { icon: navDashboard, label: '대시보드', href: '/dashboard', page: 'dashboard' },
   {
     badge: '12',
     icon: navLedger,
     label: '장부 작업',
-    href: '/app/ledger',
+    href: '/ledger',
     page: 'ledger',
   },
-  { icon: navReport, label: '보고서', href: '/app/reports', page: 'reports' },
-  { icon: navSources, label: '거래소·지갑', href: '/app/sources', page: 'sources' },
-  { icon: navSettings, label: '설정', href: '/app/settings', page: 'settings' },
+  { icon: navReport, label: '보고서', href: '/reports', page: 'reports' },
+  { icon: navSources, label: '거래소·지갑', href: '/sources', page: 'sources' },
+  { icon: navSettings, label: '설정', href: '/settings', page: 'settings' },
 ]
 
 export function AppSidebar({
@@ -162,7 +162,7 @@ export function AppSidebar({
         </ul>
       </nav>
 
-      <a className="app-sidebar__guide" href="/app/ledger">
+      <a className="app-sidebar__guide" href="/ledger">
         <strong>처음 사용하시나요?</strong>
         <span>장부 만들기 가이드를 확인하세요.</span>
       </a>

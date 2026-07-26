@@ -50,7 +50,7 @@ export function ProductPage({ kind }: { kind: ProductPageKind }) {
                 )}
               </article>
             ))}
-            <a href="/app/ledger">장부 작업으로 이동 →</a>
+            <a href="/ledger">장부 작업으로 이동 →</a>
           </section>
         )}
 
