@@ -144,7 +144,11 @@ export const registerSourceRoutes = async (
       if (!session) {
         throw unauthorized()
       }
-      const sources = await options.walletSourceStore.listWallets(session.user.id)
+      const sources = await options.walletSourceStore.listWallets({
+        requestId: request.id,
+        userId: session.user.id,
+        sessionId: session.id,
+      })
       return { items: sources.map(serializeWalletSource) }
     },
   )
@@ -277,9 +281,13 @@ export const registerSourceRoutes = async (
         challengeId: challenge.id,
         userId: session.user.id,
         recoveredAddress,
+        verificationChainId: challenge.verificationChainId,
         chainIds: request.body.chainIds,
         label: request.body.label,
         now: currentTime,
+        requestId: request.id,
+        sessionId: session.id,
+        idempotencyKey: challenge.id,
       })
       if (!source) {
         throw invalidWalletChallenge()
@@ -308,7 +316,12 @@ export const registerSourceRoutes = async (
         throw unauthorized()
       }
       const source = await options.walletSourceStore.disconnectWallet(
-        session.user.id,
+        {
+          requestId: request.id,
+          userId: session.user.id,
+          sessionId: session.id,
+          idempotencyKey: `disconnect:${request.params.sourceId}`,
+        },
         request.params.sourceId,
         now(),
       )

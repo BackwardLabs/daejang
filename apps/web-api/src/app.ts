@@ -11,6 +11,8 @@ import type { SessionStore } from './auth/session.js'
 import { loadConfig } from './config.js'
 import type { AppConfig } from './config.js'
 import { ApiError } from './errors.js'
+import { EngineRpcError } from './engine/rpc-error.js'
+import { status as grpcStatus } from '@grpc/grpc-js'
 import { createLogger } from './logger.js'
 import { registerAuthRoutes } from './routes/auth.js'
 import {
@@ -99,6 +101,21 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         error: {
           code: error.code,
           message: error.message,
+          requestId: request.id,
+          fieldErrors: [],
+        },
+      })
+    }
+
+    if (error instanceof EngineRpcError) {
+      const timedOut = error.grpcCode === grpcStatus.DEADLINE_EXCEEDED
+      request.log.error({ err: error }, 'engine request failed')
+      return reply.status(timedOut ? 504 : 503).send({
+        error: {
+          code: timedOut ? 'ENGINE_TIMEOUT' : 'ENGINE_UNAVAILABLE',
+          message: timedOut
+            ? '처리 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.'
+            : '데이터 처리 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.',
           requestId: request.id,
           fieldErrors: [],
         },

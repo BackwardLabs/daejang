@@ -48,7 +48,7 @@ TS-01은 Fastify 기반 BFF로 확정한다. React는 계속 공개 HTTPS/JSON �
 flowchart LR
   browser[React Web] -->|Public HTTPS / JSON| webApi[Web Backend / BFF]
   webApi -->|web_private schema| webDb[(PostgreSQL)]
-  webApi -.->|현재 mTLS readiness · 향후 gRPC + RequestContext| engineApi[Go Engine API]
+  webApi -->|mTLS gRPC + RequestContext| engineApi[Go Engine API]
   engineApi --> worker[Go Engine Worker]
   engineApi --> postgres[(PostgreSQL)]
   engineApi --> storage[(Private S3)]
@@ -89,10 +89,14 @@ apps/
   web-api/
     src/
       auth/         PostgreSQL 사용자·Session·동의 저장소와 인증 경계
-      engine/       private gRPC mTLS 연결
+      engine/       private gRPC mTLS client와 SourceService adapter
       routes/       공개 HTTPS/JSON route
       app.ts        Fastify app 조립과 오류 계약
       server.ts     Node 실행 진입점
+proto/
+  giwa/engine/v1/   Web API와 Engine의 canonical protobuf 계약
+services/
+  engine/            SourceService gRPC server와 DB adapter
 docs/
   00-web-app-technical-spec.md
   01-user-onboarding.md
@@ -114,7 +118,8 @@ apps/web/src/
 ```text
 apps/web
 apps/web-api
-별도 Go Engine 저장소
+services/engine (SourceService API)
+별도 장기 실행 Engine worker 저장소
 별도 중앙 DB schema/migration 저장소 (`daejang-db`)
 ```
 
@@ -132,7 +137,7 @@ apps/web-api
 | `@testing-library/react`, `@testing-library/jest-dom` | 사용자 관점의 컴포넌트 검증 |
 | `fastify`, `@fastify/cookie` | Web API runtime, schema와 host-only session cookie 처리 |
 | `pg` | Web Backend 소유 `web_private` schema와 내구성 있는 SessionStore |
-| `@grpc/grpc-js` | Engine private gRPC mTLS channel과 연결 preflight |
+| `@grpc/grpc-js`, `@grpc/proto-loader` | Engine private gRPC mTLS channel과 SourceService 호출 |
 | `tsx` | Web API 로컬 개발 실행 |
 
 라우터, 서버 상태, 폼, 스키마 라이브러리는 실제 route와 API 계약이 정해질 때 추가한다. 초기 틀에 후보 라이브러리를 선반영하지 않는다.
@@ -159,6 +164,7 @@ React는 화면에서 직접 gRPC 또는 Engine 모델을 사용하지 않는다
 | 세션 회전 | `POST /api/v1/auth/session/rotate` | 기존 Token 폐기 후 새 host-only cookie 설정 |
 | 로그아웃 | `POST /api/v1/auth/logout` | Session 폐기 |
 | 현재 사용자 확인 | `GET /api/v1/me` | 서버 Session에서 확인한 사용자 |
+| 데이터 소스 목록 | `GET /api/v1/sources` | 현재 사용자의 등록된 source |
 | 지갑 소유권 challenge 생성 | `POST /api/v1/sources/wallets/challenges` | 5분 만료 1회용 오프체인 서명 메시지 |
 | 지갑 등록 | `POST /api/v1/sources/wallets` | 서명 검증 후 저장된 Ethereum 지갑 데이터 소스 |
 | 데이터 소스 연결 해제 | `POST /api/v1/sources/{id}/disconnect` | 향후 자동·수동 수집 중단, 기존 데이터 보존 |
@@ -193,12 +199,13 @@ MVP는 Reown AppKit의 Ethers adapter를 공통 연결 계층으로 사용한다
 - 지원 network는 AppKit의 Ethereum mainnet 하나로 제한한다.
 - Project ID가 없으면 가짜 연결을 성공시키지 않고 provider 설정 오류를 표시한다.
 
-- challenge는 현재 Session·workspace, Ethereum 주소, network, nonce와 발급 시각에 결합하고 발급 후 5분이 지나면 만료한다.
+- challenge는 현재 Session 사용자, Ethereum 주소, network, nonce와 발급 시각에 결합하고 발급 후 5분이 지나면 만료한다.
 - challenge와 서명은 한 번만 사용할 수 있으며 성공·만료·주소 또는 network 변경 후에는 재사용하지 않는다.
 - 서명은 오프체인 소유권 확인이다. 가스비, 거래 승인, token allowance, 자산 이동 또는 온체인 transaction을 만들지 않는다.
 - Client와 Web Backend는 private key, seed phrase, 쓰기 권한과 출금 권한을 요청하거나 전달받지 않는다.
 - 원본 challenge message와 signature는 URL, browser storage, 분석 이벤트와 일반 log에 남기지 않는다.
-- 서버가 challenge와 signature를 검증하고 workspace 중복·주소 제한을 확인한 뒤에만 `source_id`를 만든다.
+- 서버가 challenge와 signature를 검증하고 사용자별 주소 제한을 확인한 뒤에만 `source_id`를 만든다.
+- Web Backend는 검증된 사용자 UUID, request ID, Session ID와 idempotency key를 `RequestContext`에 담아 SourceService를 호출한다. 브라우저 Session Token은 전달하지 않는다.
 
 초기·수동 수집은 `POST /api/v1/syncs`로 Job을 생성한다. 초기 수집은 선택 범위의 종료일을 기준으로 최근 90일을 먼저 backfill하고, 선택 범위가 더 길면 나머지 과거 구간을 background에서 이어서 처리한다. 이후 서버 scheduler가 매일 checkpoint 이후 범위를 자동 수집하며, 사용자는 같은 Source에 수동 새로고침을 요청할 수 있다. 모든 trigger는 checkpoint와 idempotency key로 동일 거래·Job의 중복 생성을 막는다.
 
@@ -217,7 +224,7 @@ MVP는 Reown AppKit의 Ethers adapter를 공통 연결 계층으로 사용한다
 - Session Token을 `localStorage`, `sessionStorage` 또는 JavaScript 상태에 저장하지 않는다.
 - 앱 시작 시 `/api/v1/me`로 서버 Session과 활성 사용자 상태를 확인한다. 사용자가 정지·삭제되거나 전체 로그아웃을 요청하면 `session_epoch`을 증가시키고 기존 Session을 폐기한다.
 - 사용자 UUID나 소유권 범위를 브라우저 입력, query 또는 임의 header에서 신뢰하지 않는다.
-- 향후 Engine 사용자 RPC를 연결할 때 Web Backend는 서버 Session의 사용자 UUID와 request ID만으로 내부 RequestContext를 만들고 브라우저 Session Token을 Go Engine으로 전달하지 않는다.
+- Web Backend는 서버 Session의 사용자 UUID, request ID와 Session ID로 내부 RequestContext를 만들고 브라우저 Session Token을 Go Engine으로 전달하지 않는다.
 - 모든 `/api/*` `POST`, `PUT`, `PATCH`, `DELETE`는 body parsing 전에 정확한 Origin을 확인한다. `Sec-Fetch-Site`가 있으면 `same-origin`만 허용하고 `same-site`, `cross-site`, `none`과 알 수 없는 값은 거부한다.
 - `/api/*` 응답은 성공·오류와 관계없이 `Cache-Control: no-store`를 적용하고, 전체 응답에 CSP, `nosniff`, frame 차단, referrer·권한 정책을 적용한다. 운영 HTTPS 응답에는 HSTS를 추가한다.
 - Session은 활동 시 유휴 만료만 절대 만료 이내에서 연장한다. 일반 회전은 PostgreSQL의 단일 transaction으로 기존 hash와 Session ID를 교체한다. 로그인 성공·재인증·권한 상승 시에는 `LoginCompletionService`가 공급자별 제한을 먼저 적용하고 기존 브라우저 Session을 폐기한 뒤 새 Token을 발급한다.
@@ -237,7 +244,7 @@ Web 인증 persistence는 다음 경계를 사용한다.
 | `legal_documents` | 이용약관·개인정보 처리방침의 locale·버전·내용 hash·시행일 |
 | `user_consents` | 사용자별 동의·철회 append-only 이력 |
 
-사용자와 Engine 사이에 별도 ledger account ID나 Engine user ID를 만들지 않는다. 향후 Engine row의 `subject_id`에는 같은 UUID의 문자열 표현을 저장하되 DB 간 foreign key는 두지 않는다.
+사용자와 Engine 사이에 별도 ledger account ID나 Engine user ID를 만들지 않는다. Engine row의 `subject_id`에는 같은 UUID의 문자열 표현을 저장한다. 현재 지갑 source는 같은 PostgreSQL의 canonical 사용자 FK를 사용하고, 분리 배포되는 Engine schema는 DB 간 foreign key 없이 같은 식별자 계약을 사용한다.
 
 ### 7.1 가입·인증 완료와 사용자 상태 변경 순서
 
@@ -250,8 +257,11 @@ Web 인증 persistence는 다음 경계를 사용한다.
 - 운영 시작 시 CA, Web API client certificate, private key, Engine target이 모두 없으면 설정 검증에 실패한다.
 - `server.ts`는 공개 listener를 열기 전에 client certificate가 필요한 TLS channel로 Engine 연결 preflight를 수행한다.
 - 인증서의 서버 이름은 기본적으로 Engine target과 일치해야 한다. 별도 이름을 사용할 때만 `ENGINE_GRPC_SERVER_NAME`을 명시한다.
+- 로컬 개발에서는 양쪽 runtime이 명시적으로 허용한 loopback target에만 plaintext gRPC를 사용할 수 있으며 production 설정은 이를 거부한다.
 - 브라우저 Session Token이나 공급자 Token은 Engine으로 전달하지 않는다.
-- 현재 구현은 client certificate 기반 연결 readiness까지만 검증한다. 실제 사용자 RPC를 추가할 때는 모든 사용자 소유 요청에 서버 Session의 UUID를 담고 Engine 저장 row의 `subject_id`와 일치하는지 확인해야 한다.
+- SourceService의 지갑 등록·목록·연결 해제 RPC는 모든 요청에 서버 Session에서 만든 `RequestContext`를 요구한다.
+- Engine은 사용자 UUID 형식과 mutation idempotency key를 검증하고, `daejang_source_app` 역할로 `source_private`만 읽고 쓴다.
+- deadline 초과는 Web API `504`, Engine 연결 실패는 `503`으로 변환한다.
 
 Session이 없거나 만료되어 API가 `401`을 반환하면 클라이언트는 인증 상태와 서버 상태 cache를 제거하고 로그인 화면으로 이동한다. 자동 refresh와 브라우저 보관 Access Token은 사용하지 않는다.
 

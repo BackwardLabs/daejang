@@ -8,7 +8,7 @@
 - 브라우저가 보낸 `user_id`는 인증이나 데이터 소유권 판단에 사용하지 않는다.
 - 별도 workspace, ledger account ID 또는 Engine user ID를 만들지 않는다.
 - Engine의 `subject_id`에는 같은 사용자 UUID의 문자열 표현을 사용한다.
-- 현재 Engine 연동은 mTLS readiness 확인까지만 구현되어 있다. 4번의 사용자 RPC와 소유권 비교는 Engine API를 연결할 때 적용한다.
+- 지갑 source 등록·목록·연결 해제는 mTLS SourceService RPC로 구현되어 있다. 수집 Job, 장부와 보고서 RPC는 같은 경계를 따라 후속 구현한다.
 
 ## 1. 가입 시작과 필수 동의
 
@@ -122,7 +122,7 @@ sequenceDiagram
 
 ## 4. 데이터·장부·보고서 Engine 요청
 
-현재 구현은 client certificate 기반 mTLS 연결 readiness 확인까지다. 실제 Engine 사용자 RPC를 추가할 때 다음 경계를 적용한다.
+지갑 source RPC는 아래 경계를 사용한다. 수집·장부·보고서 RPC도 같은 `RequestContext`와 소유권 규칙을 적용한다.
 
 ```mermaid
 sequenceDiagram
@@ -134,7 +134,7 @@ sequenceDiagram
   participant P as Web PostgreSQL
   participant E as Go Engine
 
-  U->>W: 데이터 처리 요청
+  U->>W: 지갑 source 등록·조회·해제
   W->>B: 보호된 API 요청
 
   B->>P: Session 검증
@@ -147,10 +147,10 @@ sequenceDiagram
   Note right of E: RequestContext<br/>user_id + request_id
 
   E->>E: user_id UUID 형식 확인
-  E->>E: 저장된 subject_id와 비교
+  E->>E: source의 subject_id와 비교
 
   alt 현재 사용자 소유
-    E->>E: 수집·계산·조회 실행
+    E->>E: source 등록·조회·해제 실행
     E-->>B: 처리 결과
     B-->>W: 공개 JSON 응답
     W-->>U: 결과 표시

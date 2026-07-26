@@ -12,6 +12,7 @@ export type AppConfig = {
   databaseUrl: string | undefined
   rateLimitHmacSecret: string
   engineMtls: EngineMtlsConfig | undefined
+  engineInsecureTarget?: string
   devBootstrapUser?: {
     id: string
     displayName: string
@@ -98,6 +99,32 @@ const loadEngineMtlsConfig = (
   }
 }
 
+const loadDevelopmentEngineTarget = (
+  environment: NodeJS.ProcessEnv,
+  production: boolean,
+) => {
+  const target = environment.ENGINE_GRPC_INSECURE_TARGET
+  if (!target) {
+    return undefined
+  }
+  if (production) {
+    throw new Error('ENGINE_GRPC_INSECURE_TARGET is not allowed in production')
+  }
+  if (
+    environment.ENGINE_GRPC_TARGET ||
+    environment.ENGINE_GRPC_CA_PATH ||
+    environment.ENGINE_GRPC_CERT_PATH ||
+    environment.ENGINE_GRPC_KEY_PATH
+  ) {
+    throw new Error('Configure either Engine mTLS or insecure loopback, not both')
+  }
+  const match = /^(?:127\.0\.0\.1|localhost|\[::1\]):([1-9][0-9]{0,4})$/.exec(target)
+  if (!match || Number(match[1]) > 65_535) {
+    throw new Error('ENGINE_GRPC_INSECURE_TARGET must be a loopback gRPC authority')
+  }
+  return target
+}
+
 export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppConfig => {
   const runtimeMode = environment.NODE_ENV ?? 'development'
   if (!['development', 'test', 'production'].includes(runtimeMode)) {
@@ -105,6 +132,10 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   }
 
   const production = runtimeMode === 'production'
+  const engineInsecureTarget = loadDevelopmentEngineTarget(
+    environment,
+    production,
+  )
   if (production && environment.PUBLIC_ORIGIN === undefined) {
     throw new Error('PUBLIC_ORIGIN is required in production')
   }
@@ -179,6 +210,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     databaseUrl: environment.DATABASE_URL,
     rateLimitHmacSecret,
     engineMtls: loadEngineMtlsConfig(environment, production),
+    ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
     ...(devBootstrapUserId && devBootstrapDisplayName
       ? {
           devBootstrapUser: {

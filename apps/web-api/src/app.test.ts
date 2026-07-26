@@ -6,6 +6,8 @@ import { MemorySessionStore } from './auth/session.js'
 import { MemoryRateLimitStore } from './auth/rate-limit.js'
 import type { AppConfig } from './config.js'
 import { MemoryWalletSourceStore } from './sources/wallet-source-store.js'
+import { EngineRpcError } from './engine/rpc-error.js'
+import { status as grpcStatus } from '@grpc/grpc-js'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 
@@ -73,6 +75,37 @@ describe('web api authentication boundary', () => {
       error: { code: 'AUTHENTICATION_REQUIRED' },
     })
   })
+
+  it.each([
+    [grpcStatus.UNAVAILABLE, 503, 'ENGINE_UNAVAILABLE'],
+    [grpcStatus.DEADLINE_EXCEEDED, 504, 'ENGINE_TIMEOUT'],
+  ])(
+    'maps Engine RPC failure %s to an explicit upstream response',
+    async (grpcCode, expectedStatus, expectedCode) => {
+      await context.app.close()
+      class FailingWalletSourceStore extends MemoryWalletSourceStore {
+        override async listWallets(): Promise<never> {
+          throw new EngineRpcError(grpcCode)
+        }
+      }
+      context = await buildApp({
+        config,
+        logger: false,
+        walletSourceStore: new FailingWalletSourceStore(),
+        now: () => now,
+      })
+      const { token } = await createSession()
+
+      const response = await context.app.inject({
+        method: 'GET',
+        url: '/api/v1/sources',
+        headers: { cookie: `${config.sessionCookieName}=${token}` },
+      })
+
+      expect(response.statusCode).toBe(expectedStatus)
+      expect(response.json()).toMatchObject({ error: { code: expectedCode } })
+    },
+  )
 
   it('issues a real session for the configured development test user', async () => {
     await context.app.close()

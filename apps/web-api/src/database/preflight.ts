@@ -34,7 +34,7 @@ export const assertWebAuthSchema = async (pool: Pool) => {
         (
           SELECT migration_version
           FROM daejang_meta.schema_contract
-          WHERE component = 'web-auth-persistence' AND contract_version = 1
+          WHERE component = 'web-auth-persistence' AND contract_version = 2
         ) AS migration_version,
         EXISTS (
           SELECT 1
@@ -64,7 +64,7 @@ export const assertWebAuthSchema = async (pool: Pool) => {
     row.rate_limit_table !== 'web_private.auth_rate_limit_buckets' ||
     row.contract_version !== 1 ||
     row.contract_digest !== webAuthContractDigest ||
-    row.migration_version !== '8' ||
+    row.migration_version !== '11' ||
     row.legal_documents_guard !== true ||
     row.user_consents_guard !== true
   ) {
@@ -72,38 +72,18 @@ export const assertWebAuthSchema = async (pool: Pool) => {
   }
 
   const walletSource = await pool.query<{
-    wallet_sources_table: string | null
-    wallet_chain_scopes_table: string | null
     wallet_challenges_table: string | null
-    contract_version: string | null
-    migration_version: string | null
   }>(
     `
       SELECT
-        to_regclass('source_private.wallet_sources')::text AS wallet_sources_table,
-        to_regclass('source_private.wallet_chain_scopes')::text AS wallet_chain_scopes_table,
-        to_regclass('source_private.wallet_ownership_challenges')::text AS wallet_challenges_table,
-        (
-          SELECT contract_version
-          FROM daejang_meta.schema_contract
-          WHERE component = 'wallet-source-persistence'
-        ) AS contract_version,
-        (
-          SELECT migration_version
-          FROM daejang_meta.schema_contract
-          WHERE component = 'wallet-source-persistence'
-        ) AS migration_version
+        to_regclass('web_private.wallet_ownership_challenges')::text AS wallet_challenges_table
     `,
   )
   const walletRow = walletSource.rows[0]
   if (
-    walletRow?.wallet_sources_table !== 'source_private.wallet_sources' ||
-    walletRow.wallet_chain_scopes_table !== 'source_private.wallet_chain_scopes' ||
-    walletRow.wallet_challenges_table !==
-      'source_private.wallet_ownership_challenges' ||
-    walletRow.contract_version !== '2' ||
-    walletRow.migration_version !== '10'
+    walletRow?.wallet_challenges_table !==
+      'web_private.wallet_ownership_challenges'
   ) {
-    throw new Error('source_private wallet migration contract is invalid')
+    throw new Error('web_private wallet challenge migration contract is invalid')
   }
 }

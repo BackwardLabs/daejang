@@ -11,6 +11,7 @@ import { PostgresSessionStore } from './postgres-session-store.js'
 import { PostgresUserStore } from './postgres-user-store.js'
 import { SessionService } from './session.js'
 import { PostgresWalletSourceStore } from '../sources/postgres-wallet-source-store.js'
+import { MemoryWalletSourceStore } from '../sources/wallet-source-store.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithPostgres = databaseUrl ? describe : describe.skip
@@ -28,7 +29,10 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
   const pool = new Pool({ connectionString: databaseUrl })
   const users = new PostgresUserStore(pool)
   const sessions = new SessionService(new PostgresSessionStore(pool), 3_600, 600)
-  const walletSources = new PostgresWalletSourceStore(pool)
+  const walletSources = new PostgresWalletSourceStore(
+    pool,
+    new MemoryWalletSourceStore(),
+  )
 
   beforeAll(async () => {
     await pool.query('DROP SCHEMA IF EXISTS web_private CASCADE')
@@ -48,6 +52,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       '000008_create_web_auth_persistence.sql',
       '000009_create_wallet_source_persistence.sql',
       '000010_create_wallet_ownership_challenges.sql',
+      '000011_move_wallet_sources_behind_engine.sql',
     ]) {
       const migrationUrl = process.env.WEB_AUTH_MIGRATION_DIRECTORY
         ? pathToFileURL(resolve(process.env.WEB_AUTH_MIGRATION_DIRECTORY, filename))
@@ -80,8 +85,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
 
   beforeEach(async () => {
     await users.setStatus(USER_ID, 'active')
-    await pool.query('DELETE FROM source_private.wallet_ownership_challenges')
-    await pool.query('DELETE FROM source_private.wallet_sources')
+    await pool.query('DELETE FROM web_private.wallet_ownership_challenges')
     await pool.query('DELETE FROM web_private.sessions')
   })
 
@@ -250,9 +254,13 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       challengeId: challenge.id,
       userId: USER_ID,
       recoveredAddress: challenge.address,
+      verificationChainId: challenge.verificationChainId,
       chainIds: ['eip155:1', 'eip155:8453'],
       label: '통합 테스트 지갑',
       now,
+      requestId: 'wallet-register-request',
+      sessionId: 'wallet-register-session',
+      idempotencyKey: challenge.id,
     })
     expect(registered).toMatchObject({
       address: challenge.address,
@@ -267,14 +275,23 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
         challengeId: challenge.id,
         userId: USER_ID,
         recoveredAddress: challenge.address,
+        verificationChainId: challenge.verificationChainId,
         chainIds: ['eip155:1'],
         label: undefined,
         now,
+        requestId: 'wallet-register-replay',
+        sessionId: 'wallet-register-session',
+        idempotencyKey: challenge.id,
       }),
     ).resolves.toBeUndefined()
 
     const disconnected = await walletSources.disconnectWallet(
-      USER_ID,
+      {
+        requestId: 'wallet-disconnect-request',
+        userId: USER_ID,
+        sessionId: 'wallet-register-session',
+        idempotencyKey: `disconnect:${registered?.id ?? ''}`,
+      },
       registered?.id ?? '',
       new Date(now.getTime() + 1_000),
     )

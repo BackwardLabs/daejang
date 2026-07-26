@@ -31,13 +31,35 @@ export type WalletOwnershipChallenge = {
   consumedAt: Date | undefined
 }
 
+export type SourceRequestContext = {
+  requestId: string
+  userId: string
+  sessionId: string
+  idempotencyKey?: string
+}
+
 export type CompleteWalletRegistration = {
   challengeId: string
   userId: string
   recoveredAddress: string
+  verificationChainId: string
   chainIds: string[]
   label: string | undefined
   now: Date
+  requestId: string
+  sessionId: string
+  idempotencyKey: string
+}
+
+export interface WalletSourceRegistry {
+  readonly durable: boolean
+  registerWallet(input: CompleteWalletRegistration): Promise<WalletSource>
+  listWallets(context: SourceRequestContext): Promise<WalletSource[]>
+  disconnectWallet(
+    context: SourceRequestContext,
+    sourceId: string,
+    now: Date,
+  ): Promise<WalletSource | undefined>
 }
 
 export interface WalletSourceStore {
@@ -50,15 +72,17 @@ export interface WalletSourceStore {
   completeRegistration(
     input: CompleteWalletRegistration,
   ): Promise<WalletSource | undefined>
-  listWallets(userId: string): Promise<WalletSource[]>
+  listWallets(context: SourceRequestContext): Promise<WalletSource[]>
   disconnectWallet(
-    userId: string,
+    context: SourceRequestContext,
     sourceId: string,
     now: Date,
   ): Promise<WalletSource | undefined>
 }
 
-export class MemoryWalletSourceStore implements WalletSourceStore {
+export class MemoryWalletSourceStore
+  implements WalletSourceStore, WalletSourceRegistry
+{
   readonly durable: boolean = false
   readonly #challenges = new Map<string, WalletOwnershipChallenge>()
   readonly #sources = new Map<string, WalletSource & { userId: string }>()
@@ -79,22 +103,27 @@ export class MemoryWalletSourceStore implements WalletSourceStore {
       challenge.userId !== input.userId ||
       challenge.consumedAt ||
       challenge.expiresAt.getTime() <= input.now.getTime() ||
-      challenge.address !== input.recoveredAddress
+      challenge.address !== input.recoveredAddress ||
+      challenge.verificationChainId !== input.verificationChainId
     ) {
       return undefined
     }
 
     challenge.consumedAt = input.now
+    return this.registerWallet(input)
+  }
+
+  async registerWallet(input: CompleteWalletRegistration) {
     const existing = [...this.#sources.values()].find(
       (source) =>
-        source.userId === input.userId && source.address === challenge.address,
+        source.userId === input.userId && source.address === input.recoveredAddress,
     )
     const source: WalletSource & { userId: string } = {
       id: existing?.id ?? crypto.randomUUID(),
       userId: input.userId,
-      address: challenge.address,
+      address: input.recoveredAddress,
       accountType: 'EOA',
-      verificationChainId: challenge.verificationChainId,
+      verificationChainId: input.verificationChainId,
       verifiedAt: input.now,
       label: input.label ?? existing?.label,
       status: 'ACTIVE',
@@ -110,16 +139,20 @@ export class MemoryWalletSourceStore implements WalletSourceStore {
     return this.#withoutUserId(source)
   }
 
-  async listWallets(userId: string) {
+  async listWallets(context: SourceRequestContext) {
     return [...this.#sources.values()]
-      .filter((source) => source.userId === userId)
+      .filter((source) => source.userId === context.userId)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
       .map((source) => this.#withoutUserId(source))
   }
 
-  async disconnectWallet(userId: string, sourceId: string, now: Date) {
+  async disconnectWallet(
+    context: SourceRequestContext,
+    sourceId: string,
+    now: Date,
+  ) {
     const source = this.#sources.get(sourceId)
-    if (!source || source.userId !== userId) {
+    if (!source || source.userId !== context.userId) {
       return undefined
     }
 

@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package giwa.engine.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1;enginev1";
+
+service SourceService {
+  rpc RegisterWallet(RegisterWalletRequest) returns (RegisterWalletResponse);
+  rpc ListSources(ListSourcesRequest) returns (ListSourcesResponse);
+  rpc DisconnectSource(DisconnectSourceRequest) returns (DisconnectSourceResponse);
+}
+
+message ActorContext {
+  string user_id = 1;
+  string session_id = 2;
+}
+
+message RequestContext {
+  string request_id = 1;
+  string idempotency_key = 2;
+  ActorContext actor = 3;
+}
+
+message RegisterWalletRequest {
+  RequestContext context = 1;
+  string address = 2;
+  string verification_chain_id = 3;
+  repeated string chain_ids = 4;
+  string label = 5;
+  google.protobuf.Timestamp verified_at = 6;
+}
+
+message ListSourcesRequest {
+  RequestContext context = 1;
+}
+
+message RegisterWalletResponse {
+  WalletSource source = 1;
+}
+
+message DisconnectSourceRequest {
+  RequestContext context = 1;
+  string source_id = 2;
+  google.protobuf.Timestamp disconnected_at = 3;
+}
+
+message DisconnectSourceResponse {
+  WalletSource source = 1;
+}
+
+message WalletChainScope {
+  string chain_id = 1;
+  string status = 2;
+}
+
+message WalletSource {
+  string id = 1;
+  string address = 2;
+  string account_type = 3;
+  string verification_chain_id = 4;
+  google.protobuf.Timestamp verified_at = 5;
+  string label = 6;
+  string status = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  google.protobuf.Timestamp disconnected_at = 10;
+  repeated WalletChainScope chain_scopes = 11;
+}
+
+message ListSourcesResponse {
+  repeated WalletSource items = 1;
+}

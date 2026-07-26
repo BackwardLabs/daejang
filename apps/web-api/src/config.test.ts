@@ -68,6 +68,31 @@ describe('web api configuration', () => {
     ).toThrow('gRPC authority')
   })
 
+  it('allows plaintext Engine transport only on development loopback', () => {
+    expect(
+      loadConfig({
+        NODE_ENV: 'development',
+        ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
+      }).engineInsecureTarget,
+    ).toBe('127.0.0.1:50051')
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'development',
+        ENGINE_GRPC_INSECURE_TARGET: 'engine.internal:50051',
+      }),
+    ).toThrow('loopback')
+  })
+
+  it('rejects plaintext Engine transport in production', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
+      }),
+    ).toThrow('not allowed in production')
+  })
+
   it('rejects idle timeouts longer than the absolute timeout', () => {
     expect(() =>
       loadConfig({

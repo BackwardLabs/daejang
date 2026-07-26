@@ -1,0 +1,12 @@
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: services/engine
+    opt:
+      - paths=import
+      - module=github.com/BackwardLabs/daejang/services/engine
+  - local: protoc-gen-go-grpc
+    out: services/engine
+    opt:
+      - paths=import
+      - module=github.com/BackwardLabs/daejang/services/engine

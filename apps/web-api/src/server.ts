@@ -20,7 +20,9 @@ const pool = config.databaseUrl
   : undefined
 const engineClient = config.engineMtls
   ? await EngineMtlsClient.connect(config.engineMtls)
-  : undefined
+  : config.engineInsecureTarget
+    ? EngineMtlsClient.connectInsecureForDevelopment(config.engineInsecureTarget)
+    : undefined
 
 if (pool) {
   await assertWebAuthSchema(pool)
@@ -35,7 +37,9 @@ const { app } = await buildApp({
     ? {
         sessionStore: new PostgresSessionStore(pool),
         rateLimitStore: new PostgresRateLimitStore(pool),
-        walletSourceStore: new PostgresWalletSourceStore(pool),
+        ...(engineClient
+          ? { walletSourceStore: new PostgresWalletSourceStore(pool, engineClient) }
+          : {}),
         ...(config.devBootstrapUser
           ? { developmentUserStore: new PostgresUserStore(pool) }
           : {}),
