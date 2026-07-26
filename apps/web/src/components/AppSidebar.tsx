@@ -24,15 +24,22 @@ export type AppSidebarSecondaryItem = {
 }
 
 const navigation: Array<{
+  badge?: string
   href: string
   icon: string
   label: string
   page: AppPage
 }> = [
   { icon: navDashboard, label: '대시보드', href: '/app/dashboard', page: 'dashboard' },
-  { icon: navLedger, label: '장부 작업', href: '/app/ledger', page: 'ledger' },
+  {
+    badge: '12',
+    icon: navLedger,
+    label: '장부 작업',
+    href: '/app/ledger',
+    page: 'ledger',
+  },
   { icon: navReport, label: '보고서', href: '/app/reports', page: 'reports' },
-  { icon: navSources, label: '데이터 소스', href: '/app/sources', page: 'sources' },
+  { icon: navSources, label: '거래소·지갑', href: '/app/sources', page: 'sources' },
   { icon: navSettings, label: '설정', href: '/app/settings', page: 'settings' },
 ]
 
@@ -112,6 +119,11 @@ export function AppSidebar({
                   >
                     <img src={item.icon} alt="" />
                     <span>{item.label}</span>
+                    {item.badge && (
+                      <b aria-hidden="true" className="app-sidebar__nav-badge">
+                        {item.badge}
+                      </b>
+                    )}
                   </a>
                 </li>
                 {hasSecondaryItems && (
@@ -151,6 +163,11 @@ export function AppSidebar({
         </ul>
       </nav>
 
+      <a className="app-sidebar__guide" href="/app/ledger">
+        <strong>처음 사용하시나요?</strong>
+        <span>장부 만들기 가이드를 확인하세요.</span>
+      </a>
+
       <div className="app-sidebar__user-area" ref={userMenuRef}>
         {isUserMenuOpen && (
           <div className="app-sidebar__user-menu" role="menu">
@@ -173,7 +190,7 @@ export function AppSidebar({
           <img src={userAvatar} alt="" />
           <span>
             <strong>{user.name}</strong>
-            <small>{user.email}</small>
+            <small>개인 장부</small>
           </span>
           <i aria-hidden="true">⌃</i>
         </button>

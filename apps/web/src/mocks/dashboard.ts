@@ -155,10 +155,10 @@ const holdings2027: DashboardHolding[] = [
 export const dashboardSnapshots: Record<'2026' | '2027', DashboardSnapshot> = {
   '2027': {
     year: '2027',
-    totalAssets: '₩66,350,000',
+    totalAssets: '₩84,270,000',
     dailyChange: '⌃ +4.6% · ₩2,910,000',
     lastSynced: '2027-08-04 10:20',
-    bars: [24, 29, 27, 38, 35, 46, 58],
+    bars: [42, 61, 54, 80, 68, 92, 74, 99, 85, 108, 89, 116],
     allocations: [
       { symbol: 'BTC', percent: 32, amount: '₩21,158,000', color: '#f7931a' },
       { symbol: 'ETH', percent: 30, amount: '₩19,923,000', color: '#627eea' },
@@ -171,10 +171,10 @@ export const dashboardSnapshots: Record<'2026' | '2027', DashboardSnapshot> = {
   },
   '2026': {
     year: '2026',
-    totalAssets: '₩52,780,000',
+    totalAssets: '₩71,640,000',
     dailyChange: '⌃ +1.9% · ₩982,000',
     lastSynced: '2026-12-31 18:20',
-    bars: [18, 20, 19, 24, 27, 29, 32],
+    bars: [34, 48, 44, 63, 57, 75, 66, 82, 73, 91, 84, 96],
     allocations: [
       { symbol: 'BTC', percent: 34, amount: '₩17,945,000', color: '#f7931a' },
       { symbol: 'ETH', percent: 31, amount: '₩16,362,000', color: '#627eea' },
@@ -214,10 +214,10 @@ export const dashboardSnapshots: Record<'2026' | '2027', DashboardSnapshot> = {
 
 export const dashboardSyncResult: DashboardSnapshot = {
   ...dashboardSnapshots['2027'],
-  totalAssets: '₩66,670,000',
+  totalAssets: '₩84,590,000',
   dailyChange: '⌃ +5.1% · ₩3,230,000',
   lastSynced: dashboardSnapshots['2027'].lastSynced,
-  bars: [24, 29, 27, 38, 35, 46, 62],
+  bars: [42, 61, 54, 80, 68, 92, 74, 99, 85, 108, 89, 120],
 }
 
 function cloneDashboardSnapshot(snapshot: DashboardSnapshot): DashboardSnapshot {

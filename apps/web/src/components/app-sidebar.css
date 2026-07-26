@@ -9,7 +9,7 @@
   top: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   width: 236px;
   height: 100vh;
   min-height: 720px;
@@ -91,6 +91,10 @@
   width: 100%;
 }
 
+.app-sidebar > nav {
+  margin-top: 8px;
+}
+
 .app-sidebar__navigation li {
   width: 100%;
   height: 44px;
@@ -133,6 +137,19 @@
 .app-sidebar__navigation img {
   width: 22px;
   height: 22px;
+}
+
+.app-sidebar__nav-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding-inline: 6px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--app-sidebar-accent);
+  font-size: 11px;
 }
 
 .app-sidebar__secondary {
@@ -195,6 +212,28 @@
   color: #fff;
   background: var(--app-sidebar-accent);
   font-size: 11px;
+}
+
+.app-sidebar__guide {
+  display: grid;
+  gap: 2px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: var(--app-sidebar-ink);
+  background: var(--app-sidebar-subtle);
+  text-decoration: none;
+}
+
+.app-sidebar__guide strong {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.app-sidebar__guide span {
+  color: var(--app-sidebar-muted);
+  font-size: 11px;
+  line-height: 16px;
 }
 
 .app-sidebar__user-area {
@@ -304,6 +343,7 @@
 .app-sidebar__brand:focus-visible,
 .app-sidebar__period select:focus-visible,
 .app-sidebar__navigation a:focus-visible,
+.app-sidebar__guide:focus-visible,
 .app-sidebar__secondary button:focus-visible,
 .app-sidebar__user:focus-visible,
 .app-sidebar__user-menu button:focus-visible {
@@ -321,7 +361,9 @@
   .app-sidebar__brand span,
   .app-sidebar__period,
   .app-sidebar__navigation span,
+  .app-sidebar__nav-badge,
   .app-sidebar__secondary,
+  .app-sidebar__guide,
   .app-sidebar__user > span,
   .app-sidebar__user > i {
     display: none;
@@ -368,6 +410,10 @@
     backdrop-filter: blur(12px);
   }
 
+  .app-sidebar__guide {
+    display: none;
+  }
+
   .app-sidebar__brand,
   .app-sidebar__period,
   .app-sidebar__secondary-row,
@@ -379,6 +425,7 @@
   .app-sidebar__navigation {
     width: 100%;
     height: 100%;
+    margin-top: 0;
   }
 
   .app-sidebar__navigation {
