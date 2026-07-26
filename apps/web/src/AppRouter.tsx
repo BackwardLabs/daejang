@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { App } from './App.tsx'
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx'
 import { LedgerPage } from './features/ledger/LedgerPage.tsx'
@@ -12,6 +12,14 @@ import {
   type ProductPageKind,
 } from './features/product/ProductPage.tsx'
 import { isMockSessionAuthenticated } from './mocks/session.ts'
+
+const ReownEvmWalletConnectionRoute = lazy(async () => {
+  const module = await import(
+    './features/sources/ReownEvmWalletConnectionRoute.tsx'
+  )
+
+  return { default: module.ReownEvmWalletConnectionRoute }
+})
 
 function normalizePath(pathname: string) {
   const normalized = pathname.replace(/\/+$/, '')
@@ -75,7 +83,15 @@ export function AppRouter() {
   }
 
   if (path === '/sources/new/wallet') {
-    return <SourceMethodIntroPage methodId="evm-address" />
+    return <SourceMethodIntroPage methodId="evm-wallet" />
+  }
+
+  if (path === '/sources/new/wallet/connect') {
+    return (
+      <Suspense fallback={<p role="status">지갑 연결 화면을 준비하고 있습니다.</p>}>
+        <ReownEvmWalletConnectionRoute />
+      </Suspense>
+    )
   }
 
   const productRoutes: Partial<Record<string, ProductPageKind>> = {

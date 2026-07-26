@@ -46,10 +46,12 @@ flowchart TB
 
   selectType --> accountType{데이터 소스 유형은?}
   accountType -->|거래소| cexInput[거래소 선택<br/>API Key·Secret 입력]
-  accountType -->|개인 지갑| walletInput[지갑 주소 입력<br/>또는 연결]
+  accountType -->|개인 지갑| walletMethod[Rabby · MetaMask · WalletConnect(Reown)<br/>Coinbase · Other Wallets 선택]
+  walletMethod --> walletConnect[브라우저 지갑 연결]
+  walletConnect --> walletSign[5분 만료 1회용<br/>오프체인 소유권 메시지 서명]
 
   cexInput --> verify{연동 검증 성공?}
-  walletInput --> verify
+  walletSign --> verify
 
   verify -->|예| complete[데이터 소스 연동 완료<br/>거래 내역 수집 시작]
   verify -->|아니오| error[오류 안내 후<br/>정보 재입력]
@@ -63,19 +65,19 @@ flowchart TB
 
   class start entry;
   class loggedIn,hasAccount,consented,authVerified,linked,accountType,verify decision;
-  class login,signup,terms,privacy,selectAuth,accountAuth,selectType,cexInput,walletInput action;
+  class login,signup,terms,privacy,selectAuth,accountAuth,selectType,cexInput,walletMethod,walletConnect,walletSign action;
   class consentError,authError,error warning;
   class accountReady,signupComplete,complete,home success;
 ```
 
-이 Mermaid는 목표 사용자 흐름을 표현한다. 오류 안내 노드에서는 직전 입력 단계로 돌아가 재시도한다. 역방향 선이 전체 흐름을 밀어내지 않도록 재시도 경로는 다이어그램에서 생략했다. MVP에서는 거래소 API Key·Secret 대신 Upbit 거래내역 PDF를 받고, 브라우저 지갑 연결 대신 EVM 공개 주소를 직접 입력한다.
+이 Mermaid는 목표 사용자 흐름을 표현한다. 오류 안내 노드에서는 직전 입력 단계로 돌아가 재시도한다. 역방향 선이 전체 흐름을 밀어내지 않도록 재시도 경로는 다이어그램에서 생략했다. MVP에서는 거래소 API Key·Secret 대신 Upbit 거래내역 PDF를 받고, 개인 지갑은 Ethereum에서 지원하는 지갑 방식을 선택해 브라우저 지갑을 연결한 뒤 5분 만료 1회용 오프체인 소유권 메시지에 서명한다.
 
 ## 3. 용어
 
 - **서비스 계정**: 사용자가 대장에 로그인하기 위한 identity와 session
 - **필수 동의**: 회원가입 전에 각각 내용을 확인하고 동의해야 하는 이용약관과 개인정보 처리방침
 - **서비스 계정 인증 방식**: email, OIDC, 지갑 서명 등 사용자가 계정을 생성하고 로그인할 때 선택하는 인증 수단
-- **데이터 소스**: Upbit 거래내역 PDF, EVM 지갑 주소처럼 거래 기록을 가져오는 출처
+- **데이터 소스**: Upbit 거래내역 PDF, 소유권 확인을 마친 Ethereum 지갑처럼 거래 기록을 가져오는 출처
 - **데이터 소스 등록**: 입력 형식과 접근 가능 여부를 확인해 소스를 저장한 상태
 - **수집 Job**: 등록된 소스의 원본을 비동기로 가져오고 처리하는 작업
 - **수집 완료**: Job이 원본 수집과 초기 처리를 마친 상태
@@ -89,9 +91,9 @@ flowchart TB
 | 회원가입 동의 | 이용약관·개인정보 처리방침 각각 확인 및 동의 | 선택 동의 항목과 동의 관리 화면 |
 | 서비스 계정 인증 | 지원 방식 중 하나를 선택해 인증 완료 | 인증 방식 추가·변경·복구 |
 | 거래소 연결 | Upbit 거래내역 PDF 업로드 | 거래소 API Key·Secret 연결 |
-| 개인 지갑 | EVM 주소 1개 직접 입력 | 브라우저 지갑 연결과 서명 |
-| 연동 검증 | 파일·주소 검증과 데이터 소스 등록 | 실시간 계정 권한 검사 |
-| 거래 수집 | 등록 주소 기반 on-demand 수집 | 상시 자동 동기화 |
+| 개인 지갑 | Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나로 Ethereum 지갑 연결 | 다른 EVM 체인과 지갑 방식 확장 |
+| 연동 검증 | 브라우저 지갑 연결과 5분 만료 1회용 오프체인 소유권 메시지 서명 | 추가 소유권 증명 방식 |
+| 거래 수집 | 최근 90일 우선 backfill, 나머지 background 처리, 매일 자동 동기화와 수동 새로고침 | 사용자별 상세 schedule 설정 |
 | 진행 상태 | Web API polling | 실시간 streaming 알림 |
 | 완료 후 이동 | 홈에서 Job 진행 상태 표시 | 고급 알림·백그라운드 동기화 설정 |
 
@@ -113,7 +115,7 @@ flowchart TB
 
 ### 5.2 로그인과 회원가입
 
-로그인 방식은 email, OIDC, 지갑 서명 중 아직 결정되지 않았다. 로그인용 지갑과 거래 수집용 지갑은 서로 다른 개념이다.
+로그인 방식은 email, OIDC, 지갑 서명 중 아직 결정되지 않았다. 로그인용 지갑과 거래 수집용 지갑은 서로 다른 개념이다. 데이터 소스 연결 중의 서명은 서비스 로그인이나 Session 생성이 아니라 현재 workspace에 등록할 Ethereum 주소의 소유권을 한 번 확인하는 절차다.
 
 #### 회원가입 동의
 
@@ -204,10 +206,12 @@ UI 상태:
 - 없음
 - 등록됨
 - 수집 대기
-- 수집 중
+- 수집 중(최근 90일 우선 backfill 또는 나머지 과거 구간 background 처리)
+- 활성(매일 자동 동기화·수동 새로고침 가능)
 - 사용자 검토 필요
 - 수집 완료
 - 수집 실패
+- 연결 해제됨(향후 수집 중단·기존 데이터 보존)
 
 등록된 소스가 있으면 Job이 진행 중이거나 일부 실패한 상태여도 홈으로 이동한다. 진행 상황과 복구 동작은 홈에서 제공한다.
 
@@ -216,7 +220,7 @@ UI 상태:
 MVP 선택지:
 
 1. Upbit 거래내역 PDF 업로드
-2. EVM 지갑 주소 입력
+2. Ethereum 지갑 방식 선택·연결과 1회용 소유권 메시지 서명
 
 권장 정책은 첫 소스 하나를 정상 등록하면 홈 진입을 허용하고, 홈의 “데이터 소스 추가”에서 두 번째 소스를 연결하는 방식이다. 두 소스를 모두 필수로 할지는 제품 결정이 필요하다.
 
@@ -227,10 +231,10 @@ MVP 선택지:
 | 회원가입 동의 | 이용약관 동의, 개인정보 처리방침 동의 | 두 항목 개별 확인과 필수 동의 | 문서 종류·버전, 동의 시각, 사용자 연결 |
 | 서비스 계정 인증 | 인증 방식, 방식별 인증 입력 | 지원 방식 선택과 필수값 | challenge, identity, rate limit, session 생성 |
 | 로그인 | 등록된 인증 방식에 필요한 입력 | 형식과 필수값 | identity, rate limit, session 생성 |
-| 데이터 소스 선택 | `Upbit 문서` 또는 `EVM 지갑` | 하나 선택 | 지원 source type |
+| 데이터 소스 선택 | `Upbit 문서` 또는 `Ethereum 지갑` | 하나 선택 | 지원 source type |
 | Upbit PDF | 파일 1개 | 확장자, 크기 사전 안내 | MIME, 크기, checksum, 문서 구조, 거래 기간 |
-| EVM 지갑 | 체인, 공개 주소, 선택 별칭 | 필수값과 기본 주소 형식 | 지원 체인, 주소 형식, workspace 중복, 개수 제한 |
-| 수집 기간 | 과세연도 또는 시작일·종료일 | 필수값, 날짜 순서 | timezone, 허용 범위, source coverage |
+| Ethereum 지갑 | 지갑 방식, 연결된 주소, network, 선택 별칭, 소유권 signature | 지원 방식 선택, provider 연결 상태와 Ethereum network | 5분 TTL·1회용 challenge, signature와 주소 일치, workspace 중복, 개수 제한 |
+| 수집 기간 | 과세연도 또는 시작일·종료일 | 필수값, 시작일≤종료일, 직접 기간 최대 1년 | timezone, 허용 범위, Upbit source coverage 또는 Ethereum RPC 수집 가능 범위 |
 
 브라우저 검증은 빠른 피드백을 위한 보조 수단이며 서버 검증을 최종 기준으로 한다.
 
@@ -259,32 +263,51 @@ MVP 선택지:
 
 원본은 같은 object key로 덮어쓰지 않는다. 파일명과 PDF 내용은 분석 이벤트나 일반 application log에 기록하지 않는다. 상세 흐름과 날짜 기준은 [데이터 소스 등록 및 수집 기간 설정](02-data-source-collection.md)을 따른다.
 
-### 6.2 EVM 지갑 주소
+### 6.2 Ethereum 지갑 연결
 
-필드:
+지원 방식:
 
-- 체인
-- 지갑 공개 주소
+- Rabby
+- MetaMask
+- WalletConnect(Reown)
+- Coinbase
+- Other Wallets
+
+필드와 서버 확인 정보:
+
+- 사용자가 선택한 지갑 방식
+- 브라우저 지갑이 반환한 Ethereum 주소와 network
 - 사용자용 별칭(선택)
+- 현재 Session·workspace·주소·network에 결합된 challenge ID
+- challenge message에 대한 signature
 
-검증 고려사항:
+처리 순서:
 
-- 지원 체인인지 확인
-- EVM 주소 형식과 빈 값
-- 같은 workspace 안의 중복 주소
-- MVP 주소 개수 제한
-- 등록 mutation의 idempotency
+1. 사용자가 지원 지갑 방식을 선택하고 브라우저 지갑 연결을 승인한다.
+2. Client는 연결된 주소와 Ethereum network를 확인하고 Web Backend에 소유권 challenge를 요청한다.
+3. 서버는 nonce와 발급 시각을 포함한 1회용 오프체인 메시지와 5분 만료 시각을 반환한다.
+4. Client는 메시지가 가스비·거래 승인·자산 이동을 만들지 않는 소유권 확인임을 표시한 뒤 지갑 서명을 요청한다.
+5. Client는 challenge ID와 signature를 HTTPS request body로 제출한다.
+6. 서버는 challenge가 미사용·미만료 상태이고 현재 Session·workspace·주소·network에 일치하는지 확인한 뒤 signature를 검증한다.
+7. 서버가 같은 workspace의 중복 주소와 개수 제한을 확인하고, 성공한 경우에만 데이터 소스를 저장해 `source_id`를 반환한다.
+8. 사용자가 과세연도 전체 또는 최대 1년의 직접 기간을 확인하면 초기 수집 Job을 만든다.
 
-지갑 private key와 seed phrase는 어떤 경우에도 요청하지 않는다. 공개 주소 등록만으로 가능한 작업에 불필요한 서명이나 지갑 연결을 요구하지 않는다.
+소유권 메시지 서명은 온체인 transaction이 아니다. 가스비, 거래 승인, token allowance와 자산 이동이 발생하지 않으며 private key, seed phrase, 쓰기 권한과 출금 권한을 요청하거나 수집하지 않는다. challenge message와 signature는 browser storage, URL, 분석 이벤트나 일반 log에 남기지 않고 한 번 사용하거나 5분이 지나면 폐기한다. 주소 또는 network가 바뀌면 기존 challenge를 버리고 처음부터 다시 요청한다.
+
+MVP 지원 network는 Ethereum이다. 선택 범위의 종료일을 기준으로 최근 90일을 먼저 backfill하고, 더 이른 구간은 background에서 이어서 처리한다. 초기 수집 뒤에는 서버 checkpoint부터 매일 자동 동기화하며 사용자는 수동 새로고침을 요청할 수 있다. 자동·수동 Job은 idempotency key와 checkpoint로 중복 거래와 중복 Job을 막는다.
+
+연결 해제는 향후 자동 동기화와 수동 새로고침을 중단하지만 이미 수집한 거래와 계산 근거를 삭제하지 않는다. 데이터 삭제는 별도 동작과 정책으로 제공한다.
 
 ### 6.3 등록 완료
 
 완료 화면은 다음을 분명히 전달한다.
 
 - 데이터 소스 등록이 완료됨
-- 거래 내역 수집은 background에서 시작됨
+- 기간 확인 후 거래 내역 수집 Job이 생성됨
 - 화면을 닫거나 새로고침해도 서버 작업은 계속됨
 - 진행 상태는 홈에서 확인할 수 있음
+- Ethereum은 선택 범위의 최근 90일을 우선 처리하고 나머지를 background에서 이어서 처리함
+- Ethereum은 초기 수집 뒤 매일 자동 동기화되며 수동 새로고침도 제공됨
 
 “분석 완료”, “세금 계산 완료”, “모든 거래 검증 완료”처럼 오해할 수 있는 문구는 사용하지 않는다.
 
@@ -295,7 +318,9 @@ MVP 선택지:
 | 목적 | API |
 | --- | --- |
 | 현재 사용자·workspace 확인 | `GET /api/v1/me` |
+| 지갑 소유권 challenge 생성 | `POST /api/v1/sources/wallets/challenges` |
 | 지갑 등록 | `POST /api/v1/sources/wallets` |
+| 데이터 소스 연결 해제 | `POST /api/v1/sources/{id}/disconnect` |
 | 업로드 세션 생성 | `POST /api/v1/uploads` |
 | 업로드 확정 | `POST /api/v1/uploads/{id}/confirm` |
 | 수집 시작 | `POST /api/v1/syncs` |
@@ -318,8 +343,12 @@ MVP 선택지:
 
 | 유형 | 예시 | 사용자 동작 |
 | --- | --- | --- |
-| 입력 오류 | 잘못된 주소, 지원하지 않는 PDF | 해당 입력 화면에서 수정 |
+| 입력 오류 | provider가 반환한 주소 형식 오류, 지원하지 않는 PDF | 해당 입력 화면에서 수정 |
 | 중복 | 이미 등록된 주소·파일 | 기존 데이터 소스로 이동 |
+| 지갑 연결 거절·provider 오류 | 사용자가 연결을 취소했거나 지갑을 열 수 없음 | 같은 방식으로 재시도하거나 다른 지갑 방식 선택 |
+| 지원하지 않는 network | Ethereum에서만 연결할 수 있음을 안내 | 지갑 network를 Ethereum으로 바꾼 뒤 재시도 |
+| challenge 만료 | 5분이 지나 메시지를 사용할 수 없음 | 새 challenge 발급 후 다시 서명 |
+| 서명 거절·불일치 | 서명이 취소됐거나 주소·network가 달라짐 | 변경 상태를 확인하고 새 challenge로 재시도 |
 | 일시적 외부 오류 | RPC Rate Limit, Source unavailable | 안내된 시간 이후 재시도 |
 | 인증 오류 | Session 만료 | 재로그인 후 진행 상태 복구 |
 | 처리 오류 | 정규화·대사 실패 | 홈에서 상태와 지원 경로 확인 |
@@ -343,9 +372,14 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - refresh와 logout endpoint는 Origin 검증과 CSRF 방어를 적용한다.
 - Public Access JWT를 Go Engine으로 전달하지 않는다.
 - Web Backend가 active Session, 최신 membership, resource ownership을 확인한다.
+- 지갑 challenge는 현재 Session·workspace·Ethereum 주소·network에 결합하고 5분 후 만료하며 한 번만 사용한다.
+- 지갑 signature는 HTTPS request body로만 전달하고 URL, browser storage, log와 분석 이벤트에 남기지 않는다.
+- private key, seed phrase, 쓰기 권한과 출금 권한은 요청하거나 수집하지 않는다.
+- 소유권 서명은 가스비·거래 승인·token allowance·자산 이동을 만들지 않는다.
 - Presigned URL은 짧은 만료 시간과 제한된 object key만 허용한다.
 - 원본 Object Storage는 private, versioned, encrypted 상태로 유지한다.
 - 지갑 주소도 사용자 데이터로 보고 로그와 분석 이벤트에서 원문을 피한다.
+- 지갑 주소와 거래 원문은 GIWA가 생성하는 공개 체인 기록이나 온체인 commitment에 기록하지 않는다.
 
 ## 10. 접근성과 사용성
 
@@ -353,6 +387,7 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - 오류를 색상만으로 구분하지 않는다.
 - 필드 오류를 해당 입력과 연결하고 화면 읽기 도구에 알린다.
 - 키보드만으로 소스 선택과 파일 업로드를 완료할 수 있게 한다.
+- 키보드와 화면 읽기 도구로 지갑 방식 선택, 연결, 서명 거절·만료와 재시도를 완료할 수 있게 한다.
 - 제출 중 중복 실행을 막고 진행 중임을 명확히 표시한다.
 - 이전 단계로 이동해도 비민감 입력은 유지한다.
 - 모바일 너비에서 CTA와 오류 메시지가 잘리지 않게 한다.
@@ -370,11 +405,14 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - 로그인 또는 회원가입 완료
 - 데이터 소스 유형 선택
 - 데이터 소스 등록 성공·실패
+- 지갑 방식 선택, 연결 성공·거절, challenge 발급·서명 검증 성공/실패
 - 수집 Job 생성
+- 최근 90일·나머지 background backfill, 매일 자동 동기화와 수동 새로고침 성공/실패
+- 지갑 연결 해제
 - 첫 수집 성공·실패
 - 추가 데이터 소스 등록
 
-분석 이벤트에 지갑 주소, 파일명, PDF 내용, API Key, Secret, 오류 원문을 포함하지 않는다. 운영 추적에는 `request_id`, `trace_id`, `job_id`를 사용한다.
+분석 이벤트에 지갑 주소, challenge message, signature, 거래 원문, 파일명, PDF 내용, API Key, Secret, 오류 원문을 포함하지 않는다. 운영 추적에는 `request_id`, `trace_id`, `job_id`를 사용한다.
 
 ## 12. 완료 기준
 
@@ -390,15 +428,23 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - [ ] 동의 문서 종류·버전과 동의 시각을 서버에서 추적할 수 있다.
 - [ ] 기존 데이터 소스가 있는 사용자는 홈으로 이동한다.
 - [ ] 데이터 소스가 없는 사용자는 연결 흐름으로 이동한다.
-- [ ] Upbit 거래내역 PDF 1개와 EVM 주소 1개를 각각 등록할 수 있다.
+- [ ] Upbit 거래내역 PDF 1개와 Ethereum 지갑 1개를 각각 데이터 소스로 등록할 수 있다.
+- [ ] Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나를 선택해 연결할 수 있다.
+- [ ] 5분 만료 1회용 오프체인 소유권 메시지 서명을 서버가 검증한 뒤에만 Ethereum Source를 저장한다.
+- [ ] 지갑 연결은 private key·seed phrase·쓰기·출금 권한, 가스비·거래 승인·자산 이동을 요구하지 않는다.
 - [ ] 가입 중 등록을 미루고 홈에서 다시 시작할 수 있다.
 - [ ] 과세연도 또는 시작일·종료일로 수집 기간을 설정할 수 있다.
 - [ ] 주소·파일 검증 실패 시 수정 가능한 오류를 보여 준다.
 - [ ] 수집 요청은 즉시 `job_id`를 반환한다.
+- [ ] 직접 기간은 최대 1년이고 시작일이 종료일보다 늦지 않다.
+- [ ] Ethereum 선택 범위의 최근 90일을 우선 처리하고 나머지를 background에서 이어서 처리한다.
+- [ ] Ethereum Source는 checkpoint 이후 매일 자동 동기화되며 수동 새로고침도 멱등하게 동작한다.
 - [ ] 새로고침 후에도 진행 중인 Job을 복구한다.
 - [ ] 중복 제출이 데이터 소스나 Job을 중복 생성하지 않는다.
 - [ ] Token과 자격증명이 browser storage, bundle, log, 분석 이벤트에 남지 않는다.
 - [ ] 다른 workspace의 데이터 소스와 Job에 접근할 수 없다.
+- [ ] 연결 해제 후 향후 자동·수동 수집은 중단되지만 기존 데이터는 유지된다.
+- [ ] 지갑 주소와 거래 원문을 공개 체인에 기록하지 않는다.
 
 ## 13. 미결정 사항
 
@@ -410,10 +456,14 @@ Mermaid는 오류 후 데이터 소스 선택으로 돌아가지만 실제 UX는
 - 개인정보 처리방침 확인과 별도 수집·이용 동의를 구분할지 여부
 - 필수·선택 개인정보 항목, 처리 목적과 각 보관 기간
 - 지원할 서비스 계정 인증 방식과 인증 실패·복구 정책
-- 첫 지원 EVM 체인
+- 다른 EVM 체인의 지원 순서
+- Reown Dashboard production project와 domain allowlist 운영 주체
+- 소유권 메시지의 정확한 문구·서명 표준과 locale
+- 매일 자동 동기화 시각·timezone, retry와 수동 새로고침 cooldown
+- 연결 해제 시 진행 중 Job 처리와 재연결 UX
 - 사용자당 주소·파일 개수 제한
 - Upbit PDF 문서 종류, 업로드 크기와 최대 페이지 수
-- 수집 기간의 최대 범위, timezone과 source coverage 정책
+- 선택할 수 있는 가장 이른 날짜, timezone과 Upbit source coverage 정책
 - 실패 Job의 사용자 직접 재시도 정책
 - 데이터 소스 삭제와 원본 보관 기간
 - 거래소 API Key 연결 도입 시점과 지원 권한
