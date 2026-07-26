@@ -64,7 +64,7 @@ export const assertWebAuthSchema = async (pool: Pool) => {
     row.rate_limit_table !== 'web_private.auth_rate_limit_buckets' ||
     row.contract_version !== 1 ||
     row.contract_digest !== webAuthContractDigest ||
-    row.migration_version !== '9' ||
+    row.migration_version !== '8' ||
     row.legal_documents_guard !== true ||
     row.user_consents_guard !== true
   ) {
