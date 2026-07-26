@@ -1,0 +1,29 @@
+{
+  "name": "@daejang/web-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "lint": "oxlint src",
+    "typecheck": "tsc -p tsconfig.json --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@grpc/grpc-js": "^1.14.4",
+    "fastify": "^5.6.2",
+    "pg": "^8.22.0",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/pg": "^8.20.0",
+    "oxlint": "^1.71.0",
+    "tsx": "^4.21.0",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.10"
+  }
+}

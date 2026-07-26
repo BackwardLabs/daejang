@@ -13,10 +13,11 @@
   },
   "scripts": {
     "dev": "npm run dev --workspace @daejang/web",
-    "build": "npm run build --workspace @daejang/web",
-    "lint": "npm run lint --workspace @daejang/web",
-    "typecheck": "npm run typecheck --workspace @daejang/web",
-    "test": "npm run test --workspace @daejang/web",
+    "dev:api": "npm run dev --workspace @daejang/web-api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
     "preview": "npm run preview --workspace @daejang/web"
   }
 }

@@ -33,18 +33,21 @@ Go Engine 내부의 계산 모델, 데이터베이스 인덱스, 체인 Reorg, �
 | MVP 입력 | 확정 | Upbit 거래내역 PDF 1개 + 연결한 Ethereum 지갑 1개 |
 | MVP 지갑 연결 | 확정 | Rabby, MetaMask, WalletConnect(Reown), Coinbase, Other Wallets 중 하나를 선택하고 브라우저 지갑에서 1회용 소유권 메시지 서명 |
 | 지갑 수집 | 확정 | 선택 기간의 최근 90일 우선 backfill, 나머지는 background 처리, 이후 매일 자동 동기화와 수동 새로고침 |
-| Web Backend runtime | 미결정 | TypeScript/Node 또는 Go |
+| Web Backend runtime | 확정 | Node.js + TypeScript + Fastify 5 BFF |
+| Web session | 확정 | 서버 저장 opaque session + `HttpOnly` host-only cookie |
+| Web API deployment | 확정 | private gRPC 연결이 가능한 Node container/service |
 | 회원가입 필수 절차 | 확정 | 이용약관·개인정보 처리방침을 각각 확인·동의한 뒤 선택한 서비스 계정 인증 진행 |
 | 로그인 방식 | 미결정 | email, OIDC 또는 지갑 서명 |
 | 첫 지원 체인 | 확정 | Ethereum. 다른 EVM 체인은 후속 확장 |
 
-Figma 아키텍처 그림에는 Web API 구현으로 Fastify가 표시되어 있지만, Linear 기술 명세의 TS-01은 Web Backend runtime을 아직 결정하지 않았다. 따라서 이 저장소의 React 코드는 Fastify 고유 기능에 의존하지 않는다.
+TS-01은 Fastify 기반 BFF로 확정한다. React는 계속 공개 HTTPS/JSON 계약에만 의존하며 Fastify 내부 구현이나 Engine gRPC 모델을 직접 사용하지 않는다.
 
 ## 3. 시스템 경계
 
 ```mermaid
 flowchart LR
   browser[React Web] -->|Public HTTPS / JSON| webApi[Web Backend / BFF]
+  webApi -->|web_private schema| webDb[(PostgreSQL)]
   webApi -->|Private gRPC + RequestContext| engineApi[Go Engine API]
   engineApi --> worker[Go Engine Worker]
   engineApi --> postgres[(PostgreSQL)]
@@ -67,7 +70,7 @@ flowchart LR
 | 계층 | 담당 | 포함하지 않는 것 |
 | --- | --- | --- |
 | React | 화면, 입력, 세션 UI, API 호출, Job 진행률과 오류 표시 | DB/S3/RPC 자격증명, 도메인 계산, 거래소 Secret 저장 |
-| Web Backend / BFF | JWT·세션·membership 검증, JSON API, 입력 검증, rate limit, gRPC 변환 | Engine DB 직접 조회, 정규화·Lot·정책 계산 |
+| Web Backend / BFF | 서버 세션·membership 검증, JSON API, 입력 검증, CSRF 방어, gRPC 변환 | Engine DB 직접 조회, 정규화·Lot·정책 계산 |
 | Go Engine API | RequestContext·workspace 검증, Job 생성·조회, 도메인 서비스 호출 | Public JWT 신뢰, 화면별 응답 조합 |
 | Go Engine Worker | 수집·파싱·계산·재시도·checkpoint·결과 저장 | 장시간 작업의 동기 HTTP 처리 |
 
@@ -83,6 +86,13 @@ apps/
       test/         테스트 공통 설정
       App.tsx       초기 애플리케이션 셸
       main.tsx      React 진입점
+  web-api/
+    src/
+      auth/         PostgreSQL SessionStore, membership version, 인증·권한 경계
+      engine/       private gRPC mTLS 연결
+      routes/       공개 HTTPS/JSON route
+      app.ts        Fastify app 조립과 오류 계약
+      server.ts     Node 실행 진입점
 docs/
   00-web-app-technical-spec.md
   01-user-onboarding.md
@@ -99,16 +109,13 @@ apps/web/src/
   test/             테스트 설정과 fixture
 ```
 
-상위 기술 명세의 장기 저장소 구조:
+상위 기술 명세의 서비스 구조:
 
 ```text
 apps/web
 apps/web-api
-services/engine
-proto/giwa/engine/v1
-migrations
-fixtures
-docs
+별도 Go Engine 저장소
+별도 중앙 DB schema/migration 저장소 (`daejang-db`)
 ```
 
 ## 5. 패키지와 개발 기준
@@ -123,6 +130,10 @@ docs
 | `oxlint` | 빠른 기본 lint |
 | `vitest`, `jsdom` | 단위·컴포넌트 테스트 runtime |
 | `@testing-library/react`, `@testing-library/jest-dom` | 사용자 관점의 컴포넌트 검증 |
+| `fastify`, `@fastify/cookie` | Web API runtime, schema와 host-only session cookie 처리 |
+| `pg` | Web Backend 소유 `web_private` schema와 내구성 있는 SessionStore |
+| `@grpc/grpc-js` | Engine private gRPC mTLS channel과 연결 preflight |
+| `tsx` | Web API 로컬 개발 실행 |
 
 라우터, 서버 상태, 폼, 스키마 라이브러리는 실제 route와 API 계약이 정해질 때 추가한다. 초기 틀에 후보 라이브러리를 선반영하지 않는다.
 
@@ -131,6 +142,7 @@ docs
 ```bash
 npm install
 npm run dev
+npm run dev:api
 npm run lint
 npm run typecheck
 npm test
@@ -143,10 +155,11 @@ React는 화면에서 직접 gRPC 또는 Engine 모델을 사용하지 않는다
 
 | 사용자 동작 | Public Web API | 결과 |
 | --- | --- | --- |
-| 로그인 | `POST /api/v1/auth/login` | Access Token 및 Refresh Session 시작 |
-| 세션 갱신 | `POST /api/v1/auth/refresh` | 회전된 Refresh Session과 새 Access Token |
+| 로그인 | 인증 방식 확정 후 추가 | 서버 Session 생성 및 host-only cookie 설정 |
+| 세션 회전 | `POST /api/v1/auth/session/rotate` | 기존 Token 폐기 후 새 host-only cookie 설정 |
 | 로그아웃 | `POST /api/v1/auth/logout` | Session 폐기 |
 | 현재 사용자 확인 | `GET /api/v1/me` | identity와 현재 workspace 상태 |
+| workspace 확인 | `GET /api/v1/workspaces/{workspaceId}` | 서버 membership에 포함된 workspace만 반환 |
 | 지갑 소유권 challenge 생성 | `POST /api/v1/sources/wallets/challenges` | 5분 만료 1회용 오프체인 서명 메시지 |
 | 지갑 등록 | `POST /api/v1/sources/wallets` | 서명 검증 후 저장된 Ethereum 지갑 데이터 소스 |
 | 데이터 소스 연결 해제 | `POST /api/v1/sources/{id}/disconnect` | 향후 자동·수동 수집 중단, 기존 데이터 보존 |
@@ -194,21 +207,62 @@ MVP는 Reown AppKit의 Ethers adapter를 공통 연결 계층으로 사용한다
 
 ## 7. 인증과 세션
 
-상위 기술 명세의 웹 인증 기준:
+웹 인증 기준:
 
 - 신규 사용자는 이용약관과 개인정보 처리방침을 각각 확인·동의한 뒤 서비스 계정 인증 방식을 선택한다.
 - Web Backend는 동의 문서 종류·버전, 동의 시각과 사용자를 연결해 기록하며 Client의 동의 여부만 신뢰하지 않는다.
 - 선택한 인증 방식의 서버 검증이 성공한 뒤에만 서비스 계정과 Session을 활성화한다.
-- Access Token은 약 10분 수명의 JWT이며 JavaScript memory에만 둔다.
-- Refresh Token은 임의 문자열이며 `__Host-giwa_rt` 이름의 `HttpOnly; Secure; SameSite=Strict; Path=/` cookie에 둔다.
-- Access Token과 Refresh Token을 `localStorage` 또는 `sessionStorage`에 저장하지 않는다.
-- Access JWT에는 이메일, 지갑 주소, 거래, KYC, API Key·Secret을 넣지 않는다.
-- 앱 시작 시 세션 복구 후 `/api/v1/me`로 최신 membership을 확인한다.
+- 브라우저에는 권한 정보나 Access Token 대신 추측할 수 없는 opaque Session Token만 둔다.
+- Session Token은 운영에서 `__Host-daejang_session` 이름의 `HttpOnly; Secure; SameSite=Lax; Path=/` cookie로 설정한다.
+- 서버 저장소에는 원문 Token이 아니라 SHA-256 hash, 사용자, membership version, session epoch, 활성 workspace, 생성·최근 활동 시각과 절대·유휴 만료 시각을 저장한다.
+- Session Token을 `localStorage`, `sessionStorage` 또는 JavaScript 상태에 저장하지 않는다.
+- 앱 시작 시 `/api/v1/me`로 서버 Session과 현재 membership을 확인한다. `workspace_memberships`가 추가·변경·삭제되면 DB trigger가 사용자 `membership_version`을 증가시키며, 버전이 다른 Session은 다음 조회에서 폐기한다.
 - workspace ID, role, permission을 브라우저 입력이나 임의 header에서 신뢰하지 않는다.
-- Web Backend는 Public JWT 원문을 Go Engine으로 전달하지 않는다.
-- refresh와 logout endpoint는 정확한 Origin 검증과 CSRF 방어를 적용한다.
+- Web Backend가 확인한 사용자·workspace·role·request ID로 내부 RequestContext를 만들고 브라우저 Session Token을 Go Engine으로 전달하지 않는다.
+- 모든 `/api/*` `POST`, `PUT`, `PATCH`, `DELETE`는 body parsing 전에 정확한 Origin을 확인한다. `Sec-Fetch-Site`가 있으면 `same-origin`만 허용하고 `same-site`, `cross-site`, `none`과 알 수 없는 값은 거부한다.
+- `/api/*` 응답은 성공·오류와 관계없이 `Cache-Control: no-store`를 적용하고, 전체 응답에 CSP, `nosniff`, frame 차단, referrer·권한 정책을 적용한다. 운영 HTTPS 응답에는 HSTS를 추가한다.
+- Session은 활동 시 유휴 만료만 절대 만료 이내에서 연장한다. 일반 회전은 PostgreSQL의 단일 transaction으로 기존 hash와 Session ID를 교체한다. 로그인 성공·재인증·권한 상승 시에는 `LoginCompletionService`가 공급자별 제한을 먼저 적용하고 기존 브라우저 Session을 폐기한 뒤 새 Token을 발급한다.
+- 존재 여부 노출을 막기 위해 membership에 없는 workspace 리소스는 `404`로 응답한다.
+- 운영 환경은 PostgreSQL SessionStore와 PostgreSQL rate-limit store 없이는 시작하지 않는다. 메모리 저장소는 로컬 개발과 테스트에만 사용한다.
+- 로그인 공급자 정책은 SIWE, OIDC, email을 분리한다. begin/complete 단계의 IP bucket과 공급자 identity bucket을 각각 소비하고 하나라도 초과하면 거부한다. bucket key는 HMAC으로 저장해 원문 email·지갑 식별자를 DB에 남기지 않는다.
+- 전체 Session 폐기는 사용자 `session_epoch`을 증가시킨 뒤 현재 row를 삭제한다. Session 생성은 사용자 row lock 아래 현재 epoch을 기록하므로 revoke-all과 동시에 발급된 구 epoch Session이 살아남지 않는다.
+- 일반 API와 인증 경로의 1차 제한은 `deploy/nginx` ingress에서 적용하고, PostgreSQL 인증 제한을 우회 방지와 다중 인스턴스 누적 제한으로 함께 사용한다.
 
-동시에 여러 API가 `401`을 반환할 때 refresh 요청은 한 번만 수행하는 single-flight 처리가 필요하다. refresh 성공 후 원래 요청은 한 번만 재시도하고, 실패하면 메모리 인증 상태와 서버 상태 cache를 제거한 뒤 로그인 화면으로 이동한다.
+### 7.1 인증 완료와 권한 변경 순서
+
+```mermaid
+sequenceDiagram
+  participant C as Browser
+  participant I as Ingress
+  participant B as Fastify BFF
+  participant P as PostgreSQL
+
+  C->>I: 공급자 인증 완료 요청
+  I->>I: 공급자 경로별 IP rate limit
+  I->>B: 허용된 요청
+  B->>P: provider별 IP bucket + identity bucket 증가
+  P-->>B: 허용 여부
+  B->>B: 공급자 증명 검증
+  B->>P: 기존 폐기 + 현재 version/epoch로 새 Session atomic replace
+  P-->>B: opaque Session
+  B-->>C: HttpOnly host-only cookie
+
+  Note over P: membership 변경 trigger가 version 증가
+  C->>B: 다음 보호 API 요청
+  B->>P: Token hash + membership_version 대조
+  P-->>B: 불일치 시 Session 폐기·401
+```
+
+인증 공급자별 challenge와 증명 검증 자체는 공급자가 확정된 뒤 추가한다. 공급자 route는 인증 성공 직후 반드시 `LoginCompletionService.complete`를 호출해야 하며 직접 Session을 생성하지 않는다.
+
+### 7.2 Engine mTLS
+
+- 운영 시작 시 CA, Web API client certificate, private key, Engine target이 모두 없으면 설정 검증에 실패한다.
+- `server.ts`는 공개 listener를 열기 전에 client certificate가 필요한 TLS channel로 Engine 연결 preflight를 수행한다.
+- 인증서의 서버 이름은 기본적으로 Engine target과 일치해야 한다. 별도 이름을 사용할 때만 `ENGINE_GRPC_SERVER_NAME`을 명시한다.
+- 브라우저 Session Token이나 공급자 Token은 Engine으로 전달하지 않는다. gRPC 요청의 subject는 BFF가 검증한 서버 세션에서 만든다.
+
+Session이 없거나 만료되어 API가 `401`을 반환하면 클라이언트는 인증 상태와 서버 상태 cache를 제거하고 로그인 화면으로 이동한다. 자동 refresh와 브라우저 보관 Access Token은 사용하지 않는다.
 
 ## 8. 비동기 Job UI 계약
 
@@ -290,18 +344,24 @@ Frontend 단위·컴포넌트 테스트:
 - 세션 확인 중 route 전환과 잘못된 화면 노출 방지
 - 이용약관·개인정보 처리방침 개별 동의와 미동의 상태의 다음 단계 차단
 - 서비스 계정 인증 방식 선택, 성공, 실패와 재시도 상태
-- refresh single-flight와 logout 상태 정리
+- Session 만료와 logout 상태 정리
 - 데이터 소스 선택, Upbit PDF, 지갑 방식 선택·연결·소유권 서명과 수집 기간 입력 검증
 - 5분 challenge 만료, 사용자 서명 거절, 주소·network 변경과 재시도 상태
 - 모든 Job 상태·stage·오류 code 렌더링
 - keyboard, focus, label과 오류 연결
-- Access·Refresh Token을 Web Storage에 저장하지 않는지 확인
+- Session Token을 Web Storage나 JavaScript 상태에 저장하지 않는지 확인
 
 계약·통합 테스트:
 
 - Web API client와 공개 API schema의 호환성
 - 인증·schema·권한 실패 요청이 Engine gRPC에 도달하지 않음
 - 다른 workspace 리소스 접근 차단
+- 절대·유휴 Session 만료, Token 회전과 기존 Token 폐기
+- membership version 변경 후 기존 Session 폐기
+- 공급자별 로그인 bucket과 `429`/`Retry-After`
+- client certificate가 필요한 Engine mTLS handshake
+- 상태 변경 요청의 Origin·Fetch Metadata 조합별 허용·거부
+- API cache 금지, 보안 헤더와 Cookie·Authorization 로그 redaction
 - mutation 재시도 시 데이터 소스나 Job이 중복 생성되지 않음
 - 지갑 등록·초기 backfill·매일 자동 동기화·수동 새로고침이 checkpoint와 idempotency를 지킴
 - 연결 해제 후 새 수집은 중단되지만 기존 수집 데이터는 유지됨
@@ -322,7 +382,7 @@ End-to-end 핵심 경로:
 ## 12. 웹 완료 기준
 
 - [ ] React가 공개 Web API 외의 Engine·DB·S3 endpoint를 알지 못한다.
-- [ ] 인증 토큰이 Web Storage, bundle, log에 남지 않는다.
+- [ ] Session Token이 Web Storage, bundle, log에 남지 않는다.
 - [ ] 이용약관·개인정보 처리방침을 개별 동의하고 동의 버전을 추적할 수 있다.
 - [ ] 선택한 서비스 계정 인증이 성공한 뒤에만 회원가입이 완료된다.
 - [ ] Upbit PDF와 Ethereum 지갑 연결 경로 및 가입 중 나중에 하기 동작이 제공된다.
@@ -339,11 +399,13 @@ End-to-end 핵심 경로:
 - [ ] 연결 해제는 향후 수집만 중단하고 기존 데이터를 보존하며 데이터 삭제와 구분된다.
 - [ ] 지갑 주소와 거래 원문을 공개 체인에 기록하지 않는다.
 - [ ] 다른 workspace 데이터 접근 차단 테스트가 통과한다.
+- [ ] 절대·유휴 만료, Token 회전, CSRF matrix와 민감 로그 redaction 테스트가 통과한다.
+- [ ] PostgreSQL membership version 변경과 공급자 rate limit 통합 테스트가 통과한다.
+- [ ] 배포 환경에서 ingress 설정과 Engine mTLS preflight가 통과한다.
 - [ ] lint, typecheck, component test, production build가 통과한다.
 
 ## 13. 구현 전 결정 항목
 
-- TS-01 Web Backend runtime
 - 로그인·회원가입 방식과 endpoint
 - 이용약관·개인정보 처리방침 조회, 버전과 동의 기록 API
 - 서비스 계정 인증 방식별 challenge, callback, 만료와 복구 계약
@@ -359,7 +421,8 @@ End-to-end 핵심 경로:
 - Idempotency key의 header, TTL과 재사용 규칙
 - Polling 주기, background 정책과 진행률 신뢰 수준
 - Report 다운로드 공개 endpoint
-- 배포 topology, CORS와 CSRF 방식
+- PostgreSQL Session·rate-limit 만료 row의 운영 정리 주기
+- 실제 ingress 플랫폼에서 `deploy/nginx` 기준을 변환·적용하는 방식
 - 원본·보고서 보존·삭제 정책
 - 거래소 API Key 연동 도입 시점과 허용 권한
 
