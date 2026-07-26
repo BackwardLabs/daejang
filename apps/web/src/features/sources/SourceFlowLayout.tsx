@@ -5,6 +5,7 @@ import {
   type AppYear,
 } from '../../components/AppSidebar.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
+import { AppUtilityBar } from '../../components/AppUtilityBar.tsx'
 import './source-flow.css'
 
 type SourceHeaderBadge =
@@ -27,7 +28,7 @@ function readSourceFlowYear(): AppYear {
 }
 
 export function SourceFlowLayout({
-  badge = { tone: 'neutral', type: 'year' },
+  badge,
   children,
   description,
   eyebrow = 'DATA SOURCES',
@@ -41,8 +42,11 @@ export function SourceFlowLayout({
 }) {
   const [selectedYear, setSelectedYear] =
     useState<AppYear>(readSourceFlowYear)
-  const badgeLabel =
-    badge.type === 'year' ? `${selectedYear} 과세연도` : badge.label
+  const badgeLabel = badge
+    ? badge.type === 'year'
+      ? `${selectedYear} 과세연도`
+      : badge.label
+    : null
 
   function handleYearChange(year: AppYear) {
     window.sessionStorage.setItem(sourceFlowYearStorageKey, year)
@@ -58,20 +62,30 @@ export function SourceFlowLayout({
       />
 
       <main className="source-main">
-        <PageHeader
-          actions={
-            <span
-              className={`source-header-badge source-header-badge--${badge.tone}`}
-            >
-              {badgeLabel}
-            </span>
-          }
-          description={description}
-          eyebrow={eyebrow}
-          title={title}
-          tone="source"
+        <AppUtilityBar
+          currentPage="거래소·지갑"
+          syncLabel="동기화 전"
+          syncTone="neutral"
+          year={selectedYear}
         />
-        {children}
+        <div className="source-content">
+          <PageHeader
+            actions={
+              badge && badgeLabel ? (
+                <span
+                  className={`source-header-badge source-header-badge--${badge.tone}`}
+                >
+                  {badgeLabel}
+                </span>
+              ) : undefined
+            }
+            description={description}
+            eyebrow={eyebrow}
+            title={title}
+            tone="source"
+          />
+          {children}
+        </div>
       </main>
     </div>
   )

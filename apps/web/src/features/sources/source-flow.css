@@ -27,15 +27,19 @@ body:has(.source-page) {
   min-width: 0;
   max-width: none;
   margin: 0;
-  padding: 24px 32px 48px;
+  padding: 0;
 }
 
-.source-main > * {
+.source-content {
+  padding: 28px 32px 48px;
+}
+
+.source-content > * {
   width: min(1200px, 100%);
   margin-inline: auto;
 }
 
-.source-main .page-header--source {
+.source-content .page-header--source {
   align-items: flex-start;
   justify-content: flex-start;
   gap: 24px;
@@ -599,6 +603,10 @@ body:has(.source-page) {
   }
 
   .source-main {
+    padding: 0;
+  }
+
+  .source-content {
     padding-inline: 24px;
   }
 
@@ -639,6 +647,10 @@ body:has(.source-page) {
   }
 
   .source-main {
+    padding: 0;
+  }
+
+  .source-content {
     padding: 20px 20px 88px;
   }
 
@@ -663,7 +675,7 @@ body:has(.source-page) {
 }
 
 @media (max-width: 520px) {
-  .source-main {
+  .source-content {
     padding-inline: 14px;
   }
 

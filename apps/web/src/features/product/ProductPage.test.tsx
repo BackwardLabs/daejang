@@ -7,7 +7,7 @@ describe('ProductPage', () => {
     render(<ProductPage kind="sources" />)
 
     expect(screen.getByText('김대장')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '데이터 소스' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '거래소·지갑' })).toHaveAttribute(
       'aria-current',
       'page',
     )

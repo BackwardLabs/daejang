@@ -9,11 +9,10 @@
   top: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
   width: 236px;
   height: 100vh;
   min-height: 720px;
-  padding: 20px 16px;
+  padding: 12px 16px 16px;
   overflow-y: auto;
   scrollbar-width: none;
   border-right: 1px solid var(--app-sidebar-border-soft);
@@ -22,6 +21,13 @@
   font-family: inherit;
   font-size: 14px;
   letter-spacing: 0;
+}
+
+.app-sidebar__primary {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
 }
 
 .app-sidebar::-webkit-scrollbar {
@@ -53,12 +59,12 @@
 .app-sidebar__brand {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 44px;
+  gap: 10px;
+  height: 48px;
   color: #21262b;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 28px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 30px;
   text-decoration: none;
 }
 
@@ -85,27 +91,28 @@
 
 .app-sidebar__period select {
   width: 100%;
-  height: 40px;
-  padding: 0 36px 0 14px;
+  height: 44px;
+  padding: 0 36px 0 12px;
   border: 1px solid var(--app-sidebar-border);
-  border-radius: 8px;
+  border-radius: 10px;
   outline: none;
   color: var(--app-sidebar-ink);
   background: #fff;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   appearance: none;
 }
 
 .app-sidebar__navigation {
   display: grid;
-  gap: 4px;
+  gap: 8px;
   width: 100%;
 }
 
 .app-sidebar__navigation li {
   width: 100%;
   height: 44px;
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--app-sidebar-ink);
   font-weight: 600;
 }
@@ -119,10 +126,10 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
   height: 100%;
-  padding: 0 14px;
+  padding: 0 12px;
   border-radius: inherit;
   color: inherit;
   text-decoration: none;
@@ -136,14 +143,51 @@
   background: var(--app-sidebar-ink);
 }
 
-.app-sidebar__navigation li.is-active > a img {
-  filter: invert(42%) sepia(99%) saturate(1414%) hue-rotate(346deg)
-    brightness(95%) contrast(91%);
+.app-sidebar__navigation li.is-active > a svg {
+  color: var(--app-sidebar-accent);
 }
 
-.app-sidebar__navigation img {
-  width: 22px;
-  height: 22px;
+.app-sidebar__navigation svg {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  color: #9298a3;
+}
+
+.app-sidebar__badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding-inline: 5px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--app-sidebar-accent);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.app-sidebar__help {
+  display: grid;
+  gap: 5px;
+  min-height: 56px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: var(--app-sidebar-ink);
+  background: var(--app-sidebar-subtle);
+  text-decoration: none;
+}
+
+.app-sidebar__help strong {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.app-sidebar__help span {
+  color: var(--product-text-secondary);
+  font-size: 11px;
+  line-height: 14px;
 }
 
 .app-sidebar__secondary {
@@ -218,8 +262,8 @@
   align-items: center;
   gap: 9px;
   width: 100%;
-  min-height: 44px;
-  padding: 7px 10px;
+  min-height: 56px;
+  padding: 10px 12px;
   border: 0;
   border-radius: 8px;
   color: var(--app-sidebar-ink);
@@ -229,8 +273,8 @@
 }
 
 .app-sidebar__user img {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
 }
 
 .app-sidebar__user > span {
@@ -315,6 +359,7 @@
 .app-sidebar__brand:focus-visible,
 .app-sidebar__period select:focus-visible,
 .app-sidebar__navigation a:focus-visible,
+.app-sidebar__help:focus-visible,
 .app-sidebar__secondary button:focus-visible,
 .app-sidebar__user:focus-visible,
 .app-sidebar__user-menu button:focus-visible {
@@ -329,10 +374,16 @@
     padding-inline: 8px;
   }
 
+  .app-sidebar__primary {
+    align-items: center;
+  }
+
   .app-sidebar__brand span,
   .app-sidebar__period,
   .app-sidebar__navigation span,
+  .app-sidebar__badge,
   .app-sidebar__secondary,
+  .app-sidebar__help,
   .app-sidebar__user > span,
   .app-sidebar__user > i {
     display: none;
@@ -381,15 +432,21 @@
 
   .app-sidebar__brand,
   .app-sidebar__period,
+  .app-sidebar__help,
   .app-sidebar__secondary-row,
   .app-sidebar__user-area {
     display: none;
   }
 
-  .app-sidebar > nav,
+  .app-sidebar__primary,
+  .app-sidebar__primary > nav,
   .app-sidebar__navigation {
     width: 100%;
     height: 100%;
+  }
+
+  .app-sidebar__primary {
+    display: block;
   }
 
   .app-sidebar__navigation {
@@ -413,8 +470,12 @@
     line-height: 14px;
   }
 
-  .app-sidebar__navigation img {
+  .app-sidebar__navigation svg {
     width: 20px;
     height: 20px;
+  }
+
+  .app-sidebar__navigation span {
+    white-space: nowrap;
   }
 }

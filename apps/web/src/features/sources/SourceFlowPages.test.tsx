@@ -23,6 +23,20 @@ describe('source flow pages', () => {
     expect(
       screen.getAllByRole('link', { name: '데이터 소스 추가' })[0],
     ).toHaveAttribute('href', '/app/sources/new')
+    expect(
+      screen.getByRole('link', { name: '거래소·지갑' }),
+    ).toHaveAttribute('aria-current', 'page')
+    expect(
+      screen.getByRole('link', {
+        name: '처음 사용하시나요?장부 만들기 가이드를 확인하세요.',
+      }),
+    ).toHaveAttribute('href', 'https://daejang.backwardlabs.io/docs')
+    expect(
+      within(screen.getByRole('navigation', { name: '현재 위치' })).getByText(
+        '거래소·지갑',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '김대장 사용자' })).toBeInTheDocument()
 
     const period = screen.getByRole('combobox', { name: '조회 기간' })
     expect(period).toHaveValue('2027')
