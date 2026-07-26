@@ -99,7 +99,7 @@ describe('UpbitPdfRegistrationPage', () => {
         name: 'Upbit 데이터 소스를 등록했어요',
       }),
     ).toHaveFocus()
-    expect(screen.getByText('UPLOADED')).toBeInTheDocument()
+    expect(screen.getByText('업로드 완료')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '조회 기간 설정' }),
     ).toBeDisabled()
