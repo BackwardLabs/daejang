@@ -96,6 +96,10 @@ function downloadOutput(output: ReportOutput, report: ReportSnapshot) {
   )
 }
 
+function formatReportStatus(status: ReportSnapshot['status']) {
+  return status === 'FINAL' ? '최종 발행' : '예외 포함'
+}
+
 function ReportHistoryItem({
   active,
   isCurrent,
@@ -118,7 +122,7 @@ function ReportHistoryItem({
           {report.year} · {report.revision}
         </strong>
         <b className={`report-status report-status--${report.status.toLowerCase()}`}>
-          {report.status}
+          {formatReportStatus(report.status)}
         </b>
       </span>
       <small className={isCurrent ? 'is-current' : undefined}>
@@ -523,7 +527,7 @@ export function ReportPage() {
                     <b
                       className={`report-status report-status--${selectedReport.status.toLowerCase()}`}
                     >
-                      {selectedReport.status}
+                      {formatReportStatus(selectedReport.status)}
                     </b>
                   </span>
                   <p>
