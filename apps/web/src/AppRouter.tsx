@@ -15,17 +15,6 @@ function normalizePath(pathname: string) {
   return normalized || '/'
 }
 
-const routeAliases: Record<string, string> = {
-  '/app/dashboard': '/dashboard',
-  '/app/ledger': '/ledger',
-  '/app/reports': '/reports',
-  '/app/settings': '/settings',
-  '/app/sources': '/sources',
-  '/features/dashboard': '/dashboard',
-  '/features/ledger': '/ledger',
-  '/features/reports': '/reports',
-}
-
 const protectedRoutes = new Set([
   '/dashboard',
   '/ledger',
@@ -34,28 +23,14 @@ const protectedRoutes = new Set([
   '/sources',
 ])
 
-function resolvePath(pathname: string) {
-  const normalized = normalizePath(pathname)
-
-  return routeAliases[normalized] ?? normalized
-}
-
 export function AppRouter() {
-  const [path, setPath] = useState(() => resolvePath(window.location.pathname))
+  const [path, setPath] = useState(() => normalizePath(window.location.pathname))
 
   useEffect(() => {
     function handlePathChange() {
-      const normalized = normalizePath(window.location.pathname)
-      const resolved = resolvePath(normalized)
-
-      if (resolved !== normalized) {
-        window.history.replaceState({}, '', resolved)
-      }
-
-      setPath(resolved)
+      setPath(normalizePath(window.location.pathname))
     }
 
-    handlePathChange()
     window.addEventListener('popstate', handlePathChange)
     return () => window.removeEventListener('popstate', handlePathChange)
   }, [])

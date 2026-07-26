@@ -17,35 +17,27 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
-  it.each(['/dashboard', '/app/dashboard', '/features/dashboard/'])(
-    'renders the dashboard at %s',
-    (path) => {
-      window.history.pushState({}, '', path)
+  it('renders the dashboard', () => {
+    window.history.pushState({}, '', '/dashboard')
 
-      render(<AppRouter />)
+    render(<AppRouter />)
 
-      expect(
-        screen.getByRole('heading', { name: '세무 장부 요약' }),
-      ).toBeInTheDocument()
-      expect(screen.getByText('₩84,270,000')).toBeInTheDocument()
-    },
-  )
+    expect(
+      screen.getByRole('heading', { name: '세무 장부 요약' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('₩84,270,000')).toBeInTheDocument()
+  })
 
-  it.each(['/ledger', '/app/ledger', '/features/ledger/'])(
-    'renders the ledger workspace at %s',
-    (path) => {
-      window.history.pushState({}, '', path)
+  it('renders the ledger workspace', () => {
+    window.history.pushState({}, '', '/ledger')
 
-      render(<AppRouter />)
+    render(<AppRouter />)
 
-      expect(
-        screen.getByRole('heading', { name: '2027 장부 만들기' }),
-      ).toBeInTheDocument()
-      expect(
-        screen.queryByText('Mock 검증 도구'),
-      ).not.toBeInTheDocument()
-    },
-  )
+    expect(
+      screen.getByRole('heading', { name: '2027 장부 만들기' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Mock 검증 도구')).not.toBeInTheDocument()
+  })
 
   it('renders the data-linked report workspace', () => {
     window.history.pushState({}, '', '/reports')
@@ -79,19 +71,5 @@ describe('AppRouter', () => {
     render(<AppRouter />)
 
     expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
-  })
-
-  it.each([
-    ['/app/dashboard', '/dashboard'],
-    ['/app/ledger', '/ledger'],
-    ['/app/reports', '/reports'],
-    ['/app/sources', '/sources'],
-    ['/app/settings', '/settings'],
-  ])('redirects the legacy route %s to %s', (legacyPath, canonicalPath) => {
-    window.history.pushState({}, '', legacyPath)
-
-    render(<AppRouter />)
-
-    expect(window.location.pathname).toBe(canonicalPath)
   })
 })
