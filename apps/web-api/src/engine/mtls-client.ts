@@ -111,6 +111,10 @@ type QueryServiceClient = Client & {
   createReport: UnaryMethod
   listReports: UnaryMethod
 }
+type ReviewServiceClient = Client & {
+  getReview: UnaryMethod
+  resolveReview: UnaryMethod
+}
 
 const serviceConstructors = () => {
   const definition = loadSync(protoPath, {
@@ -124,6 +128,7 @@ const serviceConstructors = () => {
       SourceService: ServiceClientConstructor
       WorkflowService: ServiceClientConstructor
       QueryService: ServiceClientConstructor
+      ReviewService: ServiceClientConstructor
     } } }
   }
   return loaded.giwa.engine.v1
@@ -179,11 +184,18 @@ export class EngineMtlsClient implements WalletSourceRegistry {
   readonly #client: SourceServiceClient
   readonly #workflowClient: WorkflowServiceClient
   readonly #queryClient: QueryServiceClient
+  readonly #reviewClient: ReviewServiceClient
 
-  private constructor(client: SourceServiceClient, workflowClient: WorkflowServiceClient, queryClient: QueryServiceClient) {
+  private constructor(
+    client: SourceServiceClient,
+    workflowClient: WorkflowServiceClient,
+    queryClient: QueryServiceClient,
+    reviewClient: ReviewServiceClient,
+  ) {
     this.#client = client
     this.#workflowClient = workflowClient
     this.#queryClient = queryClient
+    this.#reviewClient = reviewClient
   }
 
   static async connect(config: EngineMtlsConfig) {
@@ -209,7 +221,7 @@ export class EngineMtlsClient implements WalletSourceRegistry {
       channelOptions['grpc.ssl_target_name_override'] = serverNameOverride
       channelOptions['grpc.default_authority'] = serverNameOverride
     }
-    const { SourceService, WorkflowService, QueryService } = serviceConstructors()
+    const { SourceService, WorkflowService, QueryService, ReviewService } = serviceConstructors()
     return new EngineMtlsClient(
       new SourceService(
         target,
@@ -218,6 +230,7 @@ export class EngineMtlsClient implements WalletSourceRegistry {
       ) as unknown as SourceServiceClient,
       new WorkflowService(target, credentials, channelOptions) as unknown as WorkflowServiceClient,
       new QueryService(target, credentials, channelOptions) as unknown as QueryServiceClient,
+      new ReviewService(target, credentials, channelOptions) as unknown as ReviewServiceClient,
     )
   }
 
@@ -288,9 +301,38 @@ export class EngineMtlsClient implements WalletSourceRegistry {
     return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
   }
 
-  async listReviews(context: SourceRequestContext, limit = 100) {
-    const response = await this.#unaryOn(this.#queryClient, 'listReviews', { context: requestContext(context), limit }) as { items: Array<Record<string, unknown>> }
-    return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
+  async listReviews(context: SourceRequestContext, limit = 100, pageToken = '') {
+    const response = await this.#unaryOn(this.#queryClient, 'listReviews', {
+      context: requestContext(context), limit, pageToken,
+    }) as { items: Array<Record<string, unknown>>; nextPageToken: string }
+    return {
+      items: normalizeProtoValue(response.items) as Array<Record<string, unknown>>,
+      nextPageToken: response.nextPageToken,
+    }
+  }
+
+  async getReview(context: SourceRequestContext, reviewId: string) {
+    const response = await this.#unaryOn(this.#reviewClient, 'getReview', {
+      context: requestContext(context), reviewId,
+    }) as { review: Record<string, unknown> }
+    return normalizeProtoValue(response.review) as Record<string, unknown>
+  }
+
+  async resolveReview(context: SourceRequestContext, input: {
+    reviewId: string
+    expectedRevisionId: string
+    expectedPointerVersion: string
+    resolutionCode: string
+    resolutionNote: string
+  }) {
+    const response = await this.#unaryOn(this.#reviewClient, 'resolveReview', {
+      context: requestContext(context),
+      ...input,
+    }) as { review: Record<string, unknown>; replayed: boolean }
+    return {
+      review: normalizeProtoValue(response.review) as Record<string, unknown>,
+      replayed: response.replayed,
+    }
   }
 
   async createReport(context: SourceRequestContext, taxYear: number) {
@@ -350,6 +392,7 @@ export class EngineMtlsClient implements WalletSourceRegistry {
     this.#client.close()
     this.#workflowClient.close()
     this.#queryClient.close()
+    this.#reviewClient.close()
   }
 
   #documentSource(value: ProtoDocumentSource) {
@@ -385,7 +428,7 @@ export class EngineMtlsClient implements WalletSourceRegistry {
         { deadline: new Date(Date.now() + 10_000) },
         (error, response) => {
           if (error) {
-            reject(new EngineRpcError(error.code))
+            reject(new EngineRpcError(error.code, error.details))
             return
           }
           resolve(response)

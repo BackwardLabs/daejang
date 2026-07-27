@@ -408,7 +408,9 @@ describe('web api authentication boundary', () => {
       listAllSources: vi.fn(async () => ({ wallets: [], documents: [] })),
       getSyncJob: vi.fn(async () => ({})), listSyncJobs: vi.fn(async () => []),
       getDashboard: vi.fn(async () => ({})), listLedgerEvents: vi.fn(async () => []),
-      listReviews: vi.fn(async () => []), createReport: vi.fn(async () => ({})),
+      listReviews: vi.fn(async () => ({ items: [], nextPageToken: '' })), getReview: vi.fn(async () => ({})),
+      resolveReview: vi.fn(async () => ({ review: {}, replayed: false })),
+      createReport: vi.fn(async () => ({})),
       listReports: vi.fn(async () => []),
     } satisfies EngineDataClient
     context = await buildApp({ config, logger: false, now: () => now, uploadStore, engineDataClient })

@@ -1,11 +1,18 @@
 package query
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 	"time"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/BackwardLabs/daejang-db/pkg/readmodelstore"
 	"github.com/BackwardLabs/daejang-db/pkg/reportstore"
@@ -19,7 +26,7 @@ import (
 type ReadStore interface {
 	Dashboard(context.Context, string, int32) (readmodelstore.Dashboard, error)
 	ListLedgerEvents(context.Context, string, int32, int32) ([]readmodelstore.LedgerEvent, error)
-	ListOpenReviews(context.Context, string, int32) ([]readmodelstore.Review, error)
+	ListOpenReviewsPage(context.Context, string, *readmodelstore.OpenReviewCursor, int32) (readmodelstore.OpenReviewPage, error)
 }
 type ReportStore interface {
 	Commit(context.Context, reportstore.CommitParams) (reportstore.Snapshot, error)
@@ -81,15 +88,104 @@ func (s *Service) ListReviews(ctx context.Context, req *enginev1.ListReviewsRequ
 	if limit == 0 {
 		limit = 100
 	}
-	values, err := s.Reads.ListOpenReviews(ctx, subject, limit)
+	if limit < 1 || limit > 200 {
+		return nil, status.Error(codes.InvalidArgument, "review page limit must be between 1 and 200")
+	}
+	cursor, err := decodeReviewPageToken(req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "review page token is invalid")
+	}
+	page, err := s.Reads.ListOpenReviewsPage(ctx, subject, cursor, limit)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "review query failed")
 	}
-	items := make([]*enginev1.ReviewItem, 0, len(values))
-	for _, v := range values {
+	items := make([]*enginev1.ReviewItem, 0, len(page.Reviews))
+	for _, v := range page.Reviews {
 		items = append(items, &enginev1.ReviewItem{Id: v.ID, ExecutionId: v.ExecutionID, RevisionId: v.RevisionID, PointerVersion: v.PointerVersion, Status: v.Status, ReasonCodes: v.ReasonCodes, CreatedAt: timestamppb.New(v.CreatedAt)})
 	}
-	return &enginev1.ListReviewsResponse{Items: items}, nil
+	nextPageToken := ""
+	if page.HasMore {
+		if page.Next == nil {
+			return nil, status.Error(codes.Internal, "review query returned an incomplete page cursor")
+		}
+		nextPageToken, err = encodeReviewPageToken(*page.Next)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "review page token encoding failed")
+		}
+	}
+	return &enginev1.ListReviewsResponse{Items: items, NextPageToken: nextPageToken}, nil
+}
+
+type reviewPageToken struct {
+	Version   int    `json:"v"`
+	CreatedAt string `json:"createdAt"`
+	ReviewID  string `json:"reviewId"`
+}
+
+func encodeReviewPageToken(cursor readmodelstore.OpenReviewCursor) (string, error) {
+	if cursor.CreatedAt.IsZero() || !validReviewPageID(cursor.ReviewID) {
+		return "", fmt.Errorf("review page cursor is incomplete")
+	}
+	value, err := json.Marshal(reviewPageToken{
+		Version:   1,
+		CreatedAt: cursor.CreatedAt.UTC().Format(time.RFC3339Nano),
+		ReviewID:  cursor.ReviewID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal review page cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+func decodeReviewPageToken(token string) (*readmodelstore.OpenReviewCursor, error) {
+	if token == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(token) != token || len(token) > 2048 {
+		return nil, fmt.Errorf("review page token has an invalid shape")
+	}
+	value, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return nil, fmt.Errorf("decode review page token: %w", err)
+	}
+	var parsed reviewPageToken
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("unmarshal review page token: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("review page token contains trailing data")
+	}
+	if parsed.Version != 1 {
+		return nil, fmt.Errorf("review page token version is unsupported")
+	}
+	if !validReviewPageID(parsed.ReviewID) {
+		return nil, fmt.Errorf("review page token has an invalid review ID")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, parsed.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("parse review page token time: %w", err)
+	}
+	if createdAt.IsZero() {
+		return nil, fmt.Errorf("review page token has a zero creation time")
+	}
+	return &readmodelstore.OpenReviewCursor{
+		CreatedAt: createdAt.UTC(),
+		ReviewID:  parsed.ReviewID,
+	}, nil
+}
+
+func validReviewPageID(value string) bool {
+	if strings.TrimSpace(value) == "" ||
+		value != strings.TrimSpace(value) ||
+		!utf8.ValidString(value) ||
+		len(utf16.Encode([]rune(value))) > 256 {
+		return false
+	}
+	return strings.IndexFunc(value, func(r rune) bool {
+		return r < 0x20 || r == 0x7f
+	}) == -1
 }
 
 func (s *Service) CreateReport(ctx context.Context, req *enginev1.CreateReportRequest) (*enginev1.CreateReportResponse, error) {

@@ -27,6 +27,11 @@ service QueryService {
   rpc ListReports(ListReportsRequest) returns (ListReportsResponse);
 }
 
+service ReviewService {
+  rpc GetReview(GetReviewRequest) returns (GetReviewResponse);
+  rpc ResolveReview(ResolveReviewRequest) returns (ResolveReviewResponse);
+}
+
 message ActorContext {
   string user_id = 1;
   string session_id = 2;
@@ -188,7 +193,11 @@ message LedgerEvent {
 }
 message ListLedgerEventsResponse { repeated LedgerEvent items = 1; }
 
-message ListReviewsRequest { RequestContext context = 1; int32 limit = 2; }
+message ListReviewsRequest {
+  RequestContext context = 1;
+  int32 limit = 2;
+  string page_token = 3;
+}
 message ReviewItem {
   string id = 1;
   string execution_id = 2;
@@ -198,7 +207,68 @@ message ReviewItem {
   repeated string reason_codes = 6;
   google.protobuf.Timestamp created_at = 7;
 }
-message ListReviewsResponse { repeated ReviewItem items = 1; }
+message ListReviewsResponse {
+  repeated ReviewItem items = 1;
+  string next_page_token = 2;
+}
+
+message GetReviewRequest {
+  RequestContext context = 1;
+  string review_id = 2;
+}
+message ReviewOption {
+  string code = 1;
+  string label = 2;
+  bool requires_evidence = 3;
+}
+message ReviewObservationReference {
+  string fragment_id = 1;
+  string observation_id = 2;
+  int32 ordinal = 3;
+  string domain = 4;
+  string kind = 5;
+  string native_id = 6;
+  google.protobuf.Timestamp occurred_at = 7;
+  string account_locator = 8;
+  string account_label = 9;
+  string account_chain_id = 10;
+  string asset_symbol = 11;
+  string asset_locator = 12;
+  uint32 asset_decimals = 13;
+  bool has_asset_decimals = 14;
+  string quantity = 15;
+  string origin_kind = 16;
+  string origin_link_id = 17;
+}
+message ReviewDetail {
+  string id = 1;
+  string execution_id = 2;
+  string revision_id = 3;
+  int32 revision_number = 4;
+  int64 pointer_version = 5;
+  string status = 6;
+  string input_digest = 7;
+  repeated string reason_codes = 8;
+  repeated ReviewOption options = 9;
+  repeated ReviewObservationReference observations = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp revision_created_at = 12;
+  string resolution_code = 13;
+  string resolution_note = 14;
+}
+message GetReviewResponse { ReviewDetail review = 1; }
+message ResolveReviewRequest {
+  RequestContext context = 1;
+  string review_id = 2;
+  string expected_revision_id = 3;
+  int64 expected_pointer_version = 4;
+  string resolution_code = 5;
+  string resolution_note = 6;
+}
+message ResolveReviewResponse {
+  ReviewDetail review = 1;
+  bool replayed = 2;
+}
 
 message CreateReportRequest { RequestContext context = 1; int32 tax_year = 2; }
 message ListReportsRequest { RequestContext context = 1; int32 tax_year = 2; int32 limit = 3; }

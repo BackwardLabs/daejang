@@ -34,7 +34,7 @@ export function DashboardPage() {
     setStatus('loading')
     try {
       const [dashboardResult, ledgerResult, reviewResult] = await Promise.all([
-        loadDashboard(year, signal), loadLedger(year, signal), loadReviews(signal),
+        loadDashboard(year, signal), loadLedger(year, signal), loadReviews({ signal }),
       ])
       setDashboard(dashboardResult.dashboard); setEvents(ledgerResult.items); setReviews(reviewResult.items); setStatus('ready')
     } catch (error) {

@@ -1894,6 +1894,7 @@ type ListReviewsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Context       *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
 	Limit         int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	PageToken     string                 `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1940,6 +1941,13 @@ func (x *ListReviewsRequest) GetLimit() int32 {
 		return x.Limit
 	}
 	return 0
+}
+
+func (x *ListReviewsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
 }
 
 type ReviewItem struct {
@@ -2037,6 +2045,7 @@ func (x *ReviewItem) GetCreatedAt() *timestamppb.Timestamp {
 type ListReviewsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Items         []*ReviewItem          `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	NextPageToken string                 `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2078,6 +2087,625 @@ func (x *ListReviewsResponse) GetItems() []*ReviewItem {
 	return nil
 }
 
+func (x *ListReviewsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+type GetReviewRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Context       *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	ReviewId      string                 `protobuf:"bytes,2,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReviewRequest) Reset() {
+	*x = GetReviewRequest{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReviewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReviewRequest) ProtoMessage() {}
+
+func (x *GetReviewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReviewRequest.ProtoReflect.Descriptor instead.
+func (*GetReviewRequest) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *GetReviewRequest) GetContext() *RequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *GetReviewRequest) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+type ReviewOption struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Code             string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	Label            string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	RequiresEvidence bool                   `protobuf:"varint,3,opt,name=requires_evidence,json=requiresEvidence,proto3" json:"requires_evidence,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ReviewOption) Reset() {
+	*x = ReviewOption{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviewOption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviewOption) ProtoMessage() {}
+
+func (x *ReviewOption) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviewOption.ProtoReflect.Descriptor instead.
+func (*ReviewOption) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ReviewOption) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *ReviewOption) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *ReviewOption) GetRequiresEvidence() bool {
+	if x != nil {
+		return x.RequiresEvidence
+	}
+	return false
+}
+
+type ReviewObservationReference struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	FragmentId       string                 `protobuf:"bytes,1,opt,name=fragment_id,json=fragmentId,proto3" json:"fragment_id,omitempty"`
+	ObservationId    string                 `protobuf:"bytes,2,opt,name=observation_id,json=observationId,proto3" json:"observation_id,omitempty"`
+	Ordinal          int32                  `protobuf:"varint,3,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
+	Domain           string                 `protobuf:"bytes,4,opt,name=domain,proto3" json:"domain,omitempty"`
+	Kind             string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	NativeId         string                 `protobuf:"bytes,6,opt,name=native_id,json=nativeId,proto3" json:"native_id,omitempty"`
+	OccurredAt       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
+	AccountLocator   string                 `protobuf:"bytes,8,opt,name=account_locator,json=accountLocator,proto3" json:"account_locator,omitempty"`
+	AccountLabel     string                 `protobuf:"bytes,9,opt,name=account_label,json=accountLabel,proto3" json:"account_label,omitempty"`
+	AccountChainId   string                 `protobuf:"bytes,10,opt,name=account_chain_id,json=accountChainId,proto3" json:"account_chain_id,omitempty"`
+	AssetSymbol      string                 `protobuf:"bytes,11,opt,name=asset_symbol,json=assetSymbol,proto3" json:"asset_symbol,omitempty"`
+	AssetLocator     string                 `protobuf:"bytes,12,opt,name=asset_locator,json=assetLocator,proto3" json:"asset_locator,omitempty"`
+	AssetDecimals    uint32                 `protobuf:"varint,13,opt,name=asset_decimals,json=assetDecimals,proto3" json:"asset_decimals,omitempty"`
+	HasAssetDecimals bool                   `protobuf:"varint,14,opt,name=has_asset_decimals,json=hasAssetDecimals,proto3" json:"has_asset_decimals,omitempty"`
+	Quantity         string                 `protobuf:"bytes,15,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	OriginKind       string                 `protobuf:"bytes,16,opt,name=origin_kind,json=originKind,proto3" json:"origin_kind,omitempty"`
+	OriginLinkId     string                 `protobuf:"bytes,17,opt,name=origin_link_id,json=originLinkId,proto3" json:"origin_link_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ReviewObservationReference) Reset() {
+	*x = ReviewObservationReference{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviewObservationReference) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviewObservationReference) ProtoMessage() {}
+
+func (x *ReviewObservationReference) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviewObservationReference.ProtoReflect.Descriptor instead.
+func (*ReviewObservationReference) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ReviewObservationReference) GetFragmentId() string {
+	if x != nil {
+		return x.FragmentId
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetObservationId() string {
+	if x != nil {
+		return x.ObservationId
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetOrdinal() int32 {
+	if x != nil {
+		return x.Ordinal
+	}
+	return 0
+}
+
+func (x *ReviewObservationReference) GetDomain() string {
+	if x != nil {
+		return x.Domain
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetNativeId() string {
+	if x != nil {
+		return x.NativeId
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetOccurredAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.OccurredAt
+	}
+	return nil
+}
+
+func (x *ReviewObservationReference) GetAccountLocator() string {
+	if x != nil {
+		return x.AccountLocator
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetAccountLabel() string {
+	if x != nil {
+		return x.AccountLabel
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetAccountChainId() string {
+	if x != nil {
+		return x.AccountChainId
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetAssetSymbol() string {
+	if x != nil {
+		return x.AssetSymbol
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetAssetLocator() string {
+	if x != nil {
+		return x.AssetLocator
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetAssetDecimals() uint32 {
+	if x != nil {
+		return x.AssetDecimals
+	}
+	return 0
+}
+
+func (x *ReviewObservationReference) GetHasAssetDecimals() bool {
+	if x != nil {
+		return x.HasAssetDecimals
+	}
+	return false
+}
+
+func (x *ReviewObservationReference) GetQuantity() string {
+	if x != nil {
+		return x.Quantity
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetOriginKind() string {
+	if x != nil {
+		return x.OriginKind
+	}
+	return ""
+}
+
+func (x *ReviewObservationReference) GetOriginLinkId() string {
+	if x != nil {
+		return x.OriginLinkId
+	}
+	return ""
+}
+
+type ReviewDetail struct {
+	state             protoimpl.MessageState        `protogen:"open.v1"`
+	Id                string                        `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ExecutionId       string                        `protobuf:"bytes,2,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	RevisionId        string                        `protobuf:"bytes,3,opt,name=revision_id,json=revisionId,proto3" json:"revision_id,omitempty"`
+	RevisionNumber    int32                         `protobuf:"varint,4,opt,name=revision_number,json=revisionNumber,proto3" json:"revision_number,omitempty"`
+	PointerVersion    int64                         `protobuf:"varint,5,opt,name=pointer_version,json=pointerVersion,proto3" json:"pointer_version,omitempty"`
+	Status            string                        `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`
+	InputDigest       string                        `protobuf:"bytes,7,opt,name=input_digest,json=inputDigest,proto3" json:"input_digest,omitempty"`
+	ReasonCodes       []string                      `protobuf:"bytes,8,rep,name=reason_codes,json=reasonCodes,proto3" json:"reason_codes,omitempty"`
+	Options           []*ReviewOption               `protobuf:"bytes,9,rep,name=options,proto3" json:"options,omitempty"`
+	Observations      []*ReviewObservationReference `protobuf:"bytes,10,rep,name=observations,proto3" json:"observations,omitempty"`
+	CreatedAt         *timestamppb.Timestamp        `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	RevisionCreatedAt *timestamppb.Timestamp        `protobuf:"bytes,12,opt,name=revision_created_at,json=revisionCreatedAt,proto3" json:"revision_created_at,omitempty"`
+	ResolutionCode    string                        `protobuf:"bytes,13,opt,name=resolution_code,json=resolutionCode,proto3" json:"resolution_code,omitempty"`
+	ResolutionNote    string                        `protobuf:"bytes,14,opt,name=resolution_note,json=resolutionNote,proto3" json:"resolution_note,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ReviewDetail) Reset() {
+	*x = ReviewDetail{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviewDetail) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviewDetail) ProtoMessage() {}
+
+func (x *ReviewDetail) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviewDetail.ProtoReflect.Descriptor instead.
+func (*ReviewDetail) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *ReviewDetail) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ReviewDetail) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+func (x *ReviewDetail) GetRevisionId() string {
+	if x != nil {
+		return x.RevisionId
+	}
+	return ""
+}
+
+func (x *ReviewDetail) GetRevisionNumber() int32 {
+	if x != nil {
+		return x.RevisionNumber
+	}
+	return 0
+}
+
+func (x *ReviewDetail) GetPointerVersion() int64 {
+	if x != nil {
+		return x.PointerVersion
+	}
+	return 0
+}
+
+func (x *ReviewDetail) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ReviewDetail) GetInputDigest() string {
+	if x != nil {
+		return x.InputDigest
+	}
+	return ""
+}
+
+func (x *ReviewDetail) GetReasonCodes() []string {
+	if x != nil {
+		return x.ReasonCodes
+	}
+	return nil
+}
+
+func (x *ReviewDetail) GetOptions() []*ReviewOption {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+func (x *ReviewDetail) GetObservations() []*ReviewObservationReference {
+	if x != nil {
+		return x.Observations
+	}
+	return nil
+}
+
+func (x *ReviewDetail) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *ReviewDetail) GetRevisionCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RevisionCreatedAt
+	}
+	return nil
+}
+
+func (x *ReviewDetail) GetResolutionCode() string {
+	if x != nil {
+		return x.ResolutionCode
+	}
+	return ""
+}
+
+func (x *ReviewDetail) GetResolutionNote() string {
+	if x != nil {
+		return x.ResolutionNote
+	}
+	return ""
+}
+
+type GetReviewResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Review        *ReviewDetail          `protobuf:"bytes,1,opt,name=review,proto3" json:"review,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReviewResponse) Reset() {
+	*x = GetReviewResponse{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReviewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReviewResponse) ProtoMessage() {}
+
+func (x *GetReviewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReviewResponse.ProtoReflect.Descriptor instead.
+func (*GetReviewResponse) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *GetReviewResponse) GetReview() *ReviewDetail {
+	if x != nil {
+		return x.Review
+	}
+	return nil
+}
+
+type ResolveReviewRequest struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Context                *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	ReviewId               string                 `protobuf:"bytes,2,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	ExpectedRevisionId     string                 `protobuf:"bytes,3,opt,name=expected_revision_id,json=expectedRevisionId,proto3" json:"expected_revision_id,omitempty"`
+	ExpectedPointerVersion int64                  `protobuf:"varint,4,opt,name=expected_pointer_version,json=expectedPointerVersion,proto3" json:"expected_pointer_version,omitempty"`
+	ResolutionCode         string                 `protobuf:"bytes,5,opt,name=resolution_code,json=resolutionCode,proto3" json:"resolution_code,omitempty"`
+	ResolutionNote         string                 `protobuf:"bytes,6,opt,name=resolution_note,json=resolutionNote,proto3" json:"resolution_note,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *ResolveReviewRequest) Reset() {
+	*x = ResolveReviewRequest{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveReviewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveReviewRequest) ProtoMessage() {}
+
+func (x *ResolveReviewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveReviewRequest.ProtoReflect.Descriptor instead.
+func (*ResolveReviewRequest) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ResolveReviewRequest) GetContext() *RequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *ResolveReviewRequest) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *ResolveReviewRequest) GetExpectedRevisionId() string {
+	if x != nil {
+		return x.ExpectedRevisionId
+	}
+	return ""
+}
+
+func (x *ResolveReviewRequest) GetExpectedPointerVersion() int64 {
+	if x != nil {
+		return x.ExpectedPointerVersion
+	}
+	return 0
+}
+
+func (x *ResolveReviewRequest) GetResolutionCode() string {
+	if x != nil {
+		return x.ResolutionCode
+	}
+	return ""
+}
+
+func (x *ResolveReviewRequest) GetResolutionNote() string {
+	if x != nil {
+		return x.ResolutionNote
+	}
+	return ""
+}
+
+type ResolveReviewResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Review        *ReviewDetail          `protobuf:"bytes,1,opt,name=review,proto3" json:"review,omitempty"`
+	Replayed      bool                   `protobuf:"varint,2,opt,name=replayed,proto3" json:"replayed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveReviewResponse) Reset() {
+	*x = ResolveReviewResponse{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveReviewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveReviewResponse) ProtoMessage() {}
+
+func (x *ResolveReviewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveReviewResponse.ProtoReflect.Descriptor instead.
+func (*ResolveReviewResponse) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *ResolveReviewResponse) GetReview() *ReviewDetail {
+	if x != nil {
+		return x.Review
+	}
+	return nil
+}
+
+func (x *ResolveReviewResponse) GetReplayed() bool {
+	if x != nil {
+		return x.Replayed
+	}
+	return false
+}
+
 type CreateReportRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Context       *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
@@ -2088,7 +2716,7 @@ type CreateReportRequest struct {
 
 func (x *CreateReportRequest) Reset() {
 	*x = CreateReportRequest{}
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[30]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2100,7 +2728,7 @@ func (x *CreateReportRequest) String() string {
 func (*CreateReportRequest) ProtoMessage() {}
 
 func (x *CreateReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[30]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2113,7 +2741,7 @@ func (x *CreateReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateReportRequest.ProtoReflect.Descriptor instead.
 func (*CreateReportRequest) Descriptor() ([]byte, []int) {
-	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{30}
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *CreateReportRequest) GetContext() *RequestContext {
@@ -2141,7 +2769,7 @@ type ListReportsRequest struct {
 
 func (x *ListReportsRequest) Reset() {
 	*x = ListReportsRequest{}
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[31]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2153,7 +2781,7 @@ func (x *ListReportsRequest) String() string {
 func (*ListReportsRequest) ProtoMessage() {}
 
 func (x *ListReportsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[31]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2166,7 +2794,7 @@ func (x *ListReportsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReportsRequest.ProtoReflect.Descriptor instead.
 func (*ListReportsRequest) Descriptor() ([]byte, []int) {
-	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{31}
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ListReportsRequest) GetContext() *RequestContext {
@@ -2212,7 +2840,7 @@ type ReportSnapshot struct {
 
 func (x *ReportSnapshot) Reset() {
 	*x = ReportSnapshot{}
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[32]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2224,7 +2852,7 @@ func (x *ReportSnapshot) String() string {
 func (*ReportSnapshot) ProtoMessage() {}
 
 func (x *ReportSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[32]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2237,7 +2865,7 @@ func (x *ReportSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportSnapshot.ProtoReflect.Descriptor instead.
 func (*ReportSnapshot) Descriptor() ([]byte, []int) {
-	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{32}
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ReportSnapshot) GetId() string {
@@ -2347,7 +2975,7 @@ type CreateReportResponse struct {
 
 func (x *CreateReportResponse) Reset() {
 	*x = CreateReportResponse{}
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[33]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2359,7 +2987,7 @@ func (x *CreateReportResponse) String() string {
 func (*CreateReportResponse) ProtoMessage() {}
 
 func (x *CreateReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[33]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2372,7 +3000,7 @@ func (x *CreateReportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateReportResponse.ProtoReflect.Descriptor instead.
 func (*CreateReportResponse) Descriptor() ([]byte, []int) {
-	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{33}
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *CreateReportResponse) GetReport() *ReportSnapshot {
@@ -2391,7 +3019,7 @@ type ListReportsResponse struct {
 
 func (x *ListReportsResponse) Reset() {
 	*x = ListReportsResponse{}
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[34]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2403,7 +3031,7 @@ func (x *ListReportsResponse) String() string {
 func (*ListReportsResponse) ProtoMessage() {}
 
 func (x *ListReportsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_giwa_engine_v1_engine_proto_msgTypes[34]
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2416,7 +3044,7 @@ func (x *ListReportsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReportsResponse.ProtoReflect.Descriptor instead.
 func (*ListReportsResponse) Descriptor() ([]byte, []int) {
-	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{34}
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ListReportsResponse) GetItems() []*ReportSnapshot {
@@ -2600,10 +3228,12 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\feffective_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\veffectiveAt\x129\n" +
 	"\bpostings\x18\t \x03(\v2\x1d.giwa.engine.v1.LedgerPostingR\bpostings\"M\n" +
 	"\x18ListLedgerEventsResponse\x121\n" +
-	"\x05items\x18\x01 \x03(\v2\x1b.giwa.engine.v1.LedgerEventR\x05items\"d\n" +
+	"\x05items\x18\x01 \x03(\v2\x1b.giwa.engine.v1.LedgerEventR\x05items\"\x83\x01\n" +
 	"\x12ListReviewsRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x14\n" +
-	"\x05limit\x18\x02 \x01(\x05R\x05limit\"\xff\x01\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\xff\x01\n" +
 	"\n" +
 	"ReviewItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
@@ -2614,9 +3244,69 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x06status\x18\x05 \x01(\tR\x06status\x12!\n" +
 	"\freason_codes\x18\x06 \x03(\tR\vreasonCodes\x129\n" +
 	"\n" +
-	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"G\n" +
+	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"o\n" +
 	"\x13ListReviewsResponse\x120\n" +
-	"\x05items\x18\x01 \x03(\v2\x1a.giwa.engine.v1.ReviewItemR\x05items\"j\n" +
+	"\x05items\x18\x01 \x03(\v2\x1a.giwa.engine.v1.ReviewItemR\x05items\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"i\n" +
+	"\x10GetReviewRequest\x128\n" +
+	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x1b\n" +
+	"\treview_id\x18\x02 \x01(\tR\breviewId\"e\n" +
+	"\fReviewOption\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x14\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\x12+\n" +
+	"\x11requires_evidence\x18\x03 \x01(\bR\x10requiresEvidence\"\xfc\x04\n" +
+	"\x1aReviewObservationReference\x12\x1f\n" +
+	"\vfragment_id\x18\x01 \x01(\tR\n" +
+	"fragmentId\x12%\n" +
+	"\x0eobservation_id\x18\x02 \x01(\tR\robservationId\x12\x18\n" +
+	"\aordinal\x18\x03 \x01(\x05R\aordinal\x12\x16\n" +
+	"\x06domain\x18\x04 \x01(\tR\x06domain\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x1b\n" +
+	"\tnative_id\x18\x06 \x01(\tR\bnativeId\x12;\n" +
+	"\voccurred_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"occurredAt\x12'\n" +
+	"\x0faccount_locator\x18\b \x01(\tR\x0eaccountLocator\x12#\n" +
+	"\raccount_label\x18\t \x01(\tR\faccountLabel\x12(\n" +
+	"\x10account_chain_id\x18\n" +
+	" \x01(\tR\x0eaccountChainId\x12!\n" +
+	"\fasset_symbol\x18\v \x01(\tR\vassetSymbol\x12#\n" +
+	"\rasset_locator\x18\f \x01(\tR\fassetLocator\x12%\n" +
+	"\x0easset_decimals\x18\r \x01(\rR\rassetDecimals\x12,\n" +
+	"\x12has_asset_decimals\x18\x0e \x01(\bR\x10hasAssetDecimals\x12\x1a\n" +
+	"\bquantity\x18\x0f \x01(\tR\bquantity\x12\x1f\n" +
+	"\vorigin_kind\x18\x10 \x01(\tR\n" +
+	"originKind\x12$\n" +
+	"\x0eorigin_link_id\x18\x11 \x01(\tR\foriginLinkId\"\xf3\x04\n" +
+	"\fReviewDetail\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fexecution_id\x18\x02 \x01(\tR\vexecutionId\x12\x1f\n" +
+	"\vrevision_id\x18\x03 \x01(\tR\n" +
+	"revisionId\x12'\n" +
+	"\x0frevision_number\x18\x04 \x01(\x05R\x0erevisionNumber\x12'\n" +
+	"\x0fpointer_version\x18\x05 \x01(\x03R\x0epointerVersion\x12\x16\n" +
+	"\x06status\x18\x06 \x01(\tR\x06status\x12!\n" +
+	"\finput_digest\x18\a \x01(\tR\vinputDigest\x12!\n" +
+	"\freason_codes\x18\b \x03(\tR\vreasonCodes\x126\n" +
+	"\aoptions\x18\t \x03(\v2\x1c.giwa.engine.v1.ReviewOptionR\aoptions\x12N\n" +
+	"\fobservations\x18\n" +
+	" \x03(\v2*.giwa.engine.v1.ReviewObservationReferenceR\fobservations\x129\n" +
+	"\n" +
+	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12J\n" +
+	"\x13revision_created_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\x11revisionCreatedAt\x12'\n" +
+	"\x0fresolution_code\x18\r \x01(\tR\x0eresolutionCode\x12'\n" +
+	"\x0fresolution_note\x18\x0e \x01(\tR\x0eresolutionNote\"I\n" +
+	"\x11GetReviewResponse\x124\n" +
+	"\x06review\x18\x01 \x01(\v2\x1c.giwa.engine.v1.ReviewDetailR\x06review\"\xab\x02\n" +
+	"\x14ResolveReviewRequest\x128\n" +
+	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x1b\n" +
+	"\treview_id\x18\x02 \x01(\tR\breviewId\x120\n" +
+	"\x14expected_revision_id\x18\x03 \x01(\tR\x12expectedRevisionId\x128\n" +
+	"\x18expected_pointer_version\x18\x04 \x01(\x03R\x16expectedPointerVersion\x12'\n" +
+	"\x0fresolution_code\x18\x05 \x01(\tR\x0eresolutionCode\x12'\n" +
+	"\x0fresolution_note\x18\x06 \x01(\tR\x0eresolutionNote\"i\n" +
+	"\x15ResolveReviewResponse\x124\n" +
+	"\x06review\x18\x01 \x01(\v2\x1c.giwa.engine.v1.ReviewDetailR\x06review\x12\x1a\n" +
+	"\breplayed\x18\x02 \x01(\bR\breplayed\"j\n" +
 	"\x13CreateReportRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x19\n" +
 	"\btax_year\x18\x02 \x01(\x05R\ataxYear\"\x7f\n" +
@@ -2660,7 +3350,10 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x10ListLedgerEvents\x12'.giwa.engine.v1.ListLedgerEventsRequest\x1a(.giwa.engine.v1.ListLedgerEventsResponse\x12V\n" +
 	"\vListReviews\x12\".giwa.engine.v1.ListReviewsRequest\x1a#.giwa.engine.v1.ListReviewsResponse\x12Y\n" +
 	"\fCreateReport\x12#.giwa.engine.v1.CreateReportRequest\x1a$.giwa.engine.v1.CreateReportResponse\x12V\n" +
-	"\vListReports\x12\".giwa.engine.v1.ListReportsRequest\x1a#.giwa.engine.v1.ListReportsResponseBPZNgithub.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1;enginev1b\x06proto3"
+	"\vListReports\x12\".giwa.engine.v1.ListReportsRequest\x1a#.giwa.engine.v1.ListReportsResponse2\xbf\x01\n" +
+	"\rReviewService\x12P\n" +
+	"\tGetReview\x12 .giwa.engine.v1.GetReviewRequest\x1a!.giwa.engine.v1.GetReviewResponse\x12\\\n" +
+	"\rResolveReview\x12$.giwa.engine.v1.ResolveReviewRequest\x1a%.giwa.engine.v1.ResolveReviewResponseBPZNgithub.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1;enginev1b\x06proto3"
 
 var (
 	file_giwa_engine_v1_engine_proto_rawDescOnce sync.Once
@@ -2674,63 +3367,70 @@ func file_giwa_engine_v1_engine_proto_rawDescGZIP() []byte {
 	return file_giwa_engine_v1_engine_proto_rawDescData
 }
 
-var file_giwa_engine_v1_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_giwa_engine_v1_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_giwa_engine_v1_engine_proto_goTypes = []any{
-	(*ActorContext)(nil),             // 0: giwa.engine.v1.ActorContext
-	(*RequestContext)(nil),           // 1: giwa.engine.v1.RequestContext
-	(*RegisterWalletRequest)(nil),    // 2: giwa.engine.v1.RegisterWalletRequest
-	(*ListSourcesRequest)(nil),       // 3: giwa.engine.v1.ListSourcesRequest
-	(*RegisterWalletResponse)(nil),   // 4: giwa.engine.v1.RegisterWalletResponse
-	(*RegisterDocumentRequest)(nil),  // 5: giwa.engine.v1.RegisterDocumentRequest
-	(*RegisterDocumentResponse)(nil), // 6: giwa.engine.v1.RegisterDocumentResponse
-	(*DisconnectSourceRequest)(nil),  // 7: giwa.engine.v1.DisconnectSourceRequest
-	(*DisconnectSourceResponse)(nil), // 8: giwa.engine.v1.DisconnectSourceResponse
-	(*WalletChainScope)(nil),         // 9: giwa.engine.v1.WalletChainScope
-	(*WalletSource)(nil),             // 10: giwa.engine.v1.WalletSource
-	(*DocumentSource)(nil),           // 11: giwa.engine.v1.DocumentSource
-	(*ListSourcesResponse)(nil),      // 12: giwa.engine.v1.ListSourcesResponse
-	(*EnqueueSyncRequest)(nil),       // 13: giwa.engine.v1.EnqueueSyncRequest
-	(*EnqueueSyncResponse)(nil),      // 14: giwa.engine.v1.EnqueueSyncResponse
-	(*GetSyncJobRequest)(nil),        // 15: giwa.engine.v1.GetSyncJobRequest
-	(*GetSyncJobResponse)(nil),       // 16: giwa.engine.v1.GetSyncJobResponse
-	(*ListSyncJobsRequest)(nil),      // 17: giwa.engine.v1.ListSyncJobsRequest
-	(*ListSyncJobsResponse)(nil),     // 18: giwa.engine.v1.ListSyncJobsResponse
-	(*SyncJob)(nil),                  // 19: giwa.engine.v1.SyncJob
-	(*GetDashboardRequest)(nil),      // 20: giwa.engine.v1.GetDashboardRequest
-	(*Dashboard)(nil),                // 21: giwa.engine.v1.Dashboard
-	(*GetDashboardResponse)(nil),     // 22: giwa.engine.v1.GetDashboardResponse
-	(*ListLedgerEventsRequest)(nil),  // 23: giwa.engine.v1.ListLedgerEventsRequest
-	(*LedgerPosting)(nil),            // 24: giwa.engine.v1.LedgerPosting
-	(*LedgerEvent)(nil),              // 25: giwa.engine.v1.LedgerEvent
-	(*ListLedgerEventsResponse)(nil), // 26: giwa.engine.v1.ListLedgerEventsResponse
-	(*ListReviewsRequest)(nil),       // 27: giwa.engine.v1.ListReviewsRequest
-	(*ReviewItem)(nil),               // 28: giwa.engine.v1.ReviewItem
-	(*ListReviewsResponse)(nil),      // 29: giwa.engine.v1.ListReviewsResponse
-	(*CreateReportRequest)(nil),      // 30: giwa.engine.v1.CreateReportRequest
-	(*ListReportsRequest)(nil),       // 31: giwa.engine.v1.ListReportsRequest
-	(*ReportSnapshot)(nil),           // 32: giwa.engine.v1.ReportSnapshot
-	(*CreateReportResponse)(nil),     // 33: giwa.engine.v1.CreateReportResponse
-	(*ListReportsResponse)(nil),      // 34: giwa.engine.v1.ListReportsResponse
-	(*timestamppb.Timestamp)(nil),    // 35: google.protobuf.Timestamp
+	(*ActorContext)(nil),               // 0: giwa.engine.v1.ActorContext
+	(*RequestContext)(nil),             // 1: giwa.engine.v1.RequestContext
+	(*RegisterWalletRequest)(nil),      // 2: giwa.engine.v1.RegisterWalletRequest
+	(*ListSourcesRequest)(nil),         // 3: giwa.engine.v1.ListSourcesRequest
+	(*RegisterWalletResponse)(nil),     // 4: giwa.engine.v1.RegisterWalletResponse
+	(*RegisterDocumentRequest)(nil),    // 5: giwa.engine.v1.RegisterDocumentRequest
+	(*RegisterDocumentResponse)(nil),   // 6: giwa.engine.v1.RegisterDocumentResponse
+	(*DisconnectSourceRequest)(nil),    // 7: giwa.engine.v1.DisconnectSourceRequest
+	(*DisconnectSourceResponse)(nil),   // 8: giwa.engine.v1.DisconnectSourceResponse
+	(*WalletChainScope)(nil),           // 9: giwa.engine.v1.WalletChainScope
+	(*WalletSource)(nil),               // 10: giwa.engine.v1.WalletSource
+	(*DocumentSource)(nil),             // 11: giwa.engine.v1.DocumentSource
+	(*ListSourcesResponse)(nil),        // 12: giwa.engine.v1.ListSourcesResponse
+	(*EnqueueSyncRequest)(nil),         // 13: giwa.engine.v1.EnqueueSyncRequest
+	(*EnqueueSyncResponse)(nil),        // 14: giwa.engine.v1.EnqueueSyncResponse
+	(*GetSyncJobRequest)(nil),          // 15: giwa.engine.v1.GetSyncJobRequest
+	(*GetSyncJobResponse)(nil),         // 16: giwa.engine.v1.GetSyncJobResponse
+	(*ListSyncJobsRequest)(nil),        // 17: giwa.engine.v1.ListSyncJobsRequest
+	(*ListSyncJobsResponse)(nil),       // 18: giwa.engine.v1.ListSyncJobsResponse
+	(*SyncJob)(nil),                    // 19: giwa.engine.v1.SyncJob
+	(*GetDashboardRequest)(nil),        // 20: giwa.engine.v1.GetDashboardRequest
+	(*Dashboard)(nil),                  // 21: giwa.engine.v1.Dashboard
+	(*GetDashboardResponse)(nil),       // 22: giwa.engine.v1.GetDashboardResponse
+	(*ListLedgerEventsRequest)(nil),    // 23: giwa.engine.v1.ListLedgerEventsRequest
+	(*LedgerPosting)(nil),              // 24: giwa.engine.v1.LedgerPosting
+	(*LedgerEvent)(nil),                // 25: giwa.engine.v1.LedgerEvent
+	(*ListLedgerEventsResponse)(nil),   // 26: giwa.engine.v1.ListLedgerEventsResponse
+	(*ListReviewsRequest)(nil),         // 27: giwa.engine.v1.ListReviewsRequest
+	(*ReviewItem)(nil),                 // 28: giwa.engine.v1.ReviewItem
+	(*ListReviewsResponse)(nil),        // 29: giwa.engine.v1.ListReviewsResponse
+	(*GetReviewRequest)(nil),           // 30: giwa.engine.v1.GetReviewRequest
+	(*ReviewOption)(nil),               // 31: giwa.engine.v1.ReviewOption
+	(*ReviewObservationReference)(nil), // 32: giwa.engine.v1.ReviewObservationReference
+	(*ReviewDetail)(nil),               // 33: giwa.engine.v1.ReviewDetail
+	(*GetReviewResponse)(nil),          // 34: giwa.engine.v1.GetReviewResponse
+	(*ResolveReviewRequest)(nil),       // 35: giwa.engine.v1.ResolveReviewRequest
+	(*ResolveReviewResponse)(nil),      // 36: giwa.engine.v1.ResolveReviewResponse
+	(*CreateReportRequest)(nil),        // 37: giwa.engine.v1.CreateReportRequest
+	(*ListReportsRequest)(nil),         // 38: giwa.engine.v1.ListReportsRequest
+	(*ReportSnapshot)(nil),             // 39: giwa.engine.v1.ReportSnapshot
+	(*CreateReportResponse)(nil),       // 40: giwa.engine.v1.CreateReportResponse
+	(*ListReportsResponse)(nil),        // 41: giwa.engine.v1.ListReportsResponse
+	(*timestamppb.Timestamp)(nil),      // 42: google.protobuf.Timestamp
 }
 var file_giwa_engine_v1_engine_proto_depIdxs = []int32{
 	0,  // 0: giwa.engine.v1.RequestContext.actor:type_name -> giwa.engine.v1.ActorContext
 	1,  // 1: giwa.engine.v1.RegisterWalletRequest.context:type_name -> giwa.engine.v1.RequestContext
-	35, // 2: giwa.engine.v1.RegisterWalletRequest.verified_at:type_name -> google.protobuf.Timestamp
+	42, // 2: giwa.engine.v1.RegisterWalletRequest.verified_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: giwa.engine.v1.ListSourcesRequest.context:type_name -> giwa.engine.v1.RequestContext
 	10, // 4: giwa.engine.v1.RegisterWalletResponse.source:type_name -> giwa.engine.v1.WalletSource
 	1,  // 5: giwa.engine.v1.RegisterDocumentRequest.context:type_name -> giwa.engine.v1.RequestContext
 	11, // 6: giwa.engine.v1.RegisterDocumentResponse.source:type_name -> giwa.engine.v1.DocumentSource
 	1,  // 7: giwa.engine.v1.DisconnectSourceRequest.context:type_name -> giwa.engine.v1.RequestContext
-	35, // 8: giwa.engine.v1.DisconnectSourceRequest.disconnected_at:type_name -> google.protobuf.Timestamp
+	42, // 8: giwa.engine.v1.DisconnectSourceRequest.disconnected_at:type_name -> google.protobuf.Timestamp
 	10, // 9: giwa.engine.v1.DisconnectSourceResponse.source:type_name -> giwa.engine.v1.WalletSource
-	35, // 10: giwa.engine.v1.WalletSource.verified_at:type_name -> google.protobuf.Timestamp
-	35, // 11: giwa.engine.v1.WalletSource.created_at:type_name -> google.protobuf.Timestamp
-	35, // 12: giwa.engine.v1.WalletSource.updated_at:type_name -> google.protobuf.Timestamp
-	35, // 13: giwa.engine.v1.WalletSource.disconnected_at:type_name -> google.protobuf.Timestamp
+	42, // 10: giwa.engine.v1.WalletSource.verified_at:type_name -> google.protobuf.Timestamp
+	42, // 11: giwa.engine.v1.WalletSource.created_at:type_name -> google.protobuf.Timestamp
+	42, // 12: giwa.engine.v1.WalletSource.updated_at:type_name -> google.protobuf.Timestamp
+	42, // 13: giwa.engine.v1.WalletSource.disconnected_at:type_name -> google.protobuf.Timestamp
 	9,  // 14: giwa.engine.v1.WalletSource.chain_scopes:type_name -> giwa.engine.v1.WalletChainScope
-	35, // 15: giwa.engine.v1.DocumentSource.created_at:type_name -> google.protobuf.Timestamp
-	35, // 16: giwa.engine.v1.DocumentSource.updated_at:type_name -> google.protobuf.Timestamp
+	42, // 15: giwa.engine.v1.DocumentSource.created_at:type_name -> google.protobuf.Timestamp
+	42, // 16: giwa.engine.v1.DocumentSource.updated_at:type_name -> google.protobuf.Timestamp
 	10, // 17: giwa.engine.v1.ListSourcesResponse.items:type_name -> giwa.engine.v1.WalletSource
 	11, // 18: giwa.engine.v1.ListSourcesResponse.document_items:type_name -> giwa.engine.v1.DocumentSource
 	1,  // 19: giwa.engine.v1.EnqueueSyncRequest.context:type_name -> giwa.engine.v1.RequestContext
@@ -2739,55 +3439,68 @@ var file_giwa_engine_v1_engine_proto_depIdxs = []int32{
 	19, // 22: giwa.engine.v1.GetSyncJobResponse.job:type_name -> giwa.engine.v1.SyncJob
 	1,  // 23: giwa.engine.v1.ListSyncJobsRequest.context:type_name -> giwa.engine.v1.RequestContext
 	19, // 24: giwa.engine.v1.ListSyncJobsResponse.items:type_name -> giwa.engine.v1.SyncJob
-	35, // 25: giwa.engine.v1.SyncJob.created_at:type_name -> google.protobuf.Timestamp
-	35, // 26: giwa.engine.v1.SyncJob.started_at:type_name -> google.protobuf.Timestamp
-	35, // 27: giwa.engine.v1.SyncJob.completed_at:type_name -> google.protobuf.Timestamp
-	35, // 28: giwa.engine.v1.SyncJob.updated_at:type_name -> google.protobuf.Timestamp
+	42, // 25: giwa.engine.v1.SyncJob.created_at:type_name -> google.protobuf.Timestamp
+	42, // 26: giwa.engine.v1.SyncJob.started_at:type_name -> google.protobuf.Timestamp
+	42, // 27: giwa.engine.v1.SyncJob.completed_at:type_name -> google.protobuf.Timestamp
+	42, // 28: giwa.engine.v1.SyncJob.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 29: giwa.engine.v1.GetDashboardRequest.context:type_name -> giwa.engine.v1.RequestContext
-	35, // 30: giwa.engine.v1.Dashboard.last_sync_updated_at:type_name -> google.protobuf.Timestamp
+	42, // 30: giwa.engine.v1.Dashboard.last_sync_updated_at:type_name -> google.protobuf.Timestamp
 	21, // 31: giwa.engine.v1.GetDashboardResponse.dashboard:type_name -> giwa.engine.v1.Dashboard
 	1,  // 32: giwa.engine.v1.ListLedgerEventsRequest.context:type_name -> giwa.engine.v1.RequestContext
-	35, // 33: giwa.engine.v1.LedgerPosting.occurred_at:type_name -> google.protobuf.Timestamp
-	35, // 34: giwa.engine.v1.LedgerEvent.effective_at:type_name -> google.protobuf.Timestamp
+	42, // 33: giwa.engine.v1.LedgerPosting.occurred_at:type_name -> google.protobuf.Timestamp
+	42, // 34: giwa.engine.v1.LedgerEvent.effective_at:type_name -> google.protobuf.Timestamp
 	24, // 35: giwa.engine.v1.LedgerEvent.postings:type_name -> giwa.engine.v1.LedgerPosting
 	25, // 36: giwa.engine.v1.ListLedgerEventsResponse.items:type_name -> giwa.engine.v1.LedgerEvent
 	1,  // 37: giwa.engine.v1.ListReviewsRequest.context:type_name -> giwa.engine.v1.RequestContext
-	35, // 38: giwa.engine.v1.ReviewItem.created_at:type_name -> google.protobuf.Timestamp
+	42, // 38: giwa.engine.v1.ReviewItem.created_at:type_name -> google.protobuf.Timestamp
 	28, // 39: giwa.engine.v1.ListReviewsResponse.items:type_name -> giwa.engine.v1.ReviewItem
-	1,  // 40: giwa.engine.v1.CreateReportRequest.context:type_name -> giwa.engine.v1.RequestContext
-	1,  // 41: giwa.engine.v1.ListReportsRequest.context:type_name -> giwa.engine.v1.RequestContext
-	35, // 42: giwa.engine.v1.ReportSnapshot.issued_at:type_name -> google.protobuf.Timestamp
-	32, // 43: giwa.engine.v1.CreateReportResponse.report:type_name -> giwa.engine.v1.ReportSnapshot
-	32, // 44: giwa.engine.v1.ListReportsResponse.items:type_name -> giwa.engine.v1.ReportSnapshot
-	2,  // 45: giwa.engine.v1.SourceService.RegisterWallet:input_type -> giwa.engine.v1.RegisterWalletRequest
-	5,  // 46: giwa.engine.v1.SourceService.RegisterDocument:input_type -> giwa.engine.v1.RegisterDocumentRequest
-	3,  // 47: giwa.engine.v1.SourceService.ListSources:input_type -> giwa.engine.v1.ListSourcesRequest
-	7,  // 48: giwa.engine.v1.SourceService.DisconnectSource:input_type -> giwa.engine.v1.DisconnectSourceRequest
-	13, // 49: giwa.engine.v1.WorkflowService.EnqueueSync:input_type -> giwa.engine.v1.EnqueueSyncRequest
-	15, // 50: giwa.engine.v1.WorkflowService.GetSyncJob:input_type -> giwa.engine.v1.GetSyncJobRequest
-	17, // 51: giwa.engine.v1.WorkflowService.ListSyncJobs:input_type -> giwa.engine.v1.ListSyncJobsRequest
-	20, // 52: giwa.engine.v1.QueryService.GetDashboard:input_type -> giwa.engine.v1.GetDashboardRequest
-	23, // 53: giwa.engine.v1.QueryService.ListLedgerEvents:input_type -> giwa.engine.v1.ListLedgerEventsRequest
-	27, // 54: giwa.engine.v1.QueryService.ListReviews:input_type -> giwa.engine.v1.ListReviewsRequest
-	30, // 55: giwa.engine.v1.QueryService.CreateReport:input_type -> giwa.engine.v1.CreateReportRequest
-	31, // 56: giwa.engine.v1.QueryService.ListReports:input_type -> giwa.engine.v1.ListReportsRequest
-	4,  // 57: giwa.engine.v1.SourceService.RegisterWallet:output_type -> giwa.engine.v1.RegisterWalletResponse
-	6,  // 58: giwa.engine.v1.SourceService.RegisterDocument:output_type -> giwa.engine.v1.RegisterDocumentResponse
-	12, // 59: giwa.engine.v1.SourceService.ListSources:output_type -> giwa.engine.v1.ListSourcesResponse
-	8,  // 60: giwa.engine.v1.SourceService.DisconnectSource:output_type -> giwa.engine.v1.DisconnectSourceResponse
-	14, // 61: giwa.engine.v1.WorkflowService.EnqueueSync:output_type -> giwa.engine.v1.EnqueueSyncResponse
-	16, // 62: giwa.engine.v1.WorkflowService.GetSyncJob:output_type -> giwa.engine.v1.GetSyncJobResponse
-	18, // 63: giwa.engine.v1.WorkflowService.ListSyncJobs:output_type -> giwa.engine.v1.ListSyncJobsResponse
-	22, // 64: giwa.engine.v1.QueryService.GetDashboard:output_type -> giwa.engine.v1.GetDashboardResponse
-	26, // 65: giwa.engine.v1.QueryService.ListLedgerEvents:output_type -> giwa.engine.v1.ListLedgerEventsResponse
-	29, // 66: giwa.engine.v1.QueryService.ListReviews:output_type -> giwa.engine.v1.ListReviewsResponse
-	33, // 67: giwa.engine.v1.QueryService.CreateReport:output_type -> giwa.engine.v1.CreateReportResponse
-	34, // 68: giwa.engine.v1.QueryService.ListReports:output_type -> giwa.engine.v1.ListReportsResponse
-	57, // [57:69] is the sub-list for method output_type
-	45, // [45:57] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	1,  // 40: giwa.engine.v1.GetReviewRequest.context:type_name -> giwa.engine.v1.RequestContext
+	42, // 41: giwa.engine.v1.ReviewObservationReference.occurred_at:type_name -> google.protobuf.Timestamp
+	31, // 42: giwa.engine.v1.ReviewDetail.options:type_name -> giwa.engine.v1.ReviewOption
+	32, // 43: giwa.engine.v1.ReviewDetail.observations:type_name -> giwa.engine.v1.ReviewObservationReference
+	42, // 44: giwa.engine.v1.ReviewDetail.created_at:type_name -> google.protobuf.Timestamp
+	42, // 45: giwa.engine.v1.ReviewDetail.revision_created_at:type_name -> google.protobuf.Timestamp
+	33, // 46: giwa.engine.v1.GetReviewResponse.review:type_name -> giwa.engine.v1.ReviewDetail
+	1,  // 47: giwa.engine.v1.ResolveReviewRequest.context:type_name -> giwa.engine.v1.RequestContext
+	33, // 48: giwa.engine.v1.ResolveReviewResponse.review:type_name -> giwa.engine.v1.ReviewDetail
+	1,  // 49: giwa.engine.v1.CreateReportRequest.context:type_name -> giwa.engine.v1.RequestContext
+	1,  // 50: giwa.engine.v1.ListReportsRequest.context:type_name -> giwa.engine.v1.RequestContext
+	42, // 51: giwa.engine.v1.ReportSnapshot.issued_at:type_name -> google.protobuf.Timestamp
+	39, // 52: giwa.engine.v1.CreateReportResponse.report:type_name -> giwa.engine.v1.ReportSnapshot
+	39, // 53: giwa.engine.v1.ListReportsResponse.items:type_name -> giwa.engine.v1.ReportSnapshot
+	2,  // 54: giwa.engine.v1.SourceService.RegisterWallet:input_type -> giwa.engine.v1.RegisterWalletRequest
+	5,  // 55: giwa.engine.v1.SourceService.RegisterDocument:input_type -> giwa.engine.v1.RegisterDocumentRequest
+	3,  // 56: giwa.engine.v1.SourceService.ListSources:input_type -> giwa.engine.v1.ListSourcesRequest
+	7,  // 57: giwa.engine.v1.SourceService.DisconnectSource:input_type -> giwa.engine.v1.DisconnectSourceRequest
+	13, // 58: giwa.engine.v1.WorkflowService.EnqueueSync:input_type -> giwa.engine.v1.EnqueueSyncRequest
+	15, // 59: giwa.engine.v1.WorkflowService.GetSyncJob:input_type -> giwa.engine.v1.GetSyncJobRequest
+	17, // 60: giwa.engine.v1.WorkflowService.ListSyncJobs:input_type -> giwa.engine.v1.ListSyncJobsRequest
+	20, // 61: giwa.engine.v1.QueryService.GetDashboard:input_type -> giwa.engine.v1.GetDashboardRequest
+	23, // 62: giwa.engine.v1.QueryService.ListLedgerEvents:input_type -> giwa.engine.v1.ListLedgerEventsRequest
+	27, // 63: giwa.engine.v1.QueryService.ListReviews:input_type -> giwa.engine.v1.ListReviewsRequest
+	37, // 64: giwa.engine.v1.QueryService.CreateReport:input_type -> giwa.engine.v1.CreateReportRequest
+	38, // 65: giwa.engine.v1.QueryService.ListReports:input_type -> giwa.engine.v1.ListReportsRequest
+	30, // 66: giwa.engine.v1.ReviewService.GetReview:input_type -> giwa.engine.v1.GetReviewRequest
+	35, // 67: giwa.engine.v1.ReviewService.ResolveReview:input_type -> giwa.engine.v1.ResolveReviewRequest
+	4,  // 68: giwa.engine.v1.SourceService.RegisterWallet:output_type -> giwa.engine.v1.RegisterWalletResponse
+	6,  // 69: giwa.engine.v1.SourceService.RegisterDocument:output_type -> giwa.engine.v1.RegisterDocumentResponse
+	12, // 70: giwa.engine.v1.SourceService.ListSources:output_type -> giwa.engine.v1.ListSourcesResponse
+	8,  // 71: giwa.engine.v1.SourceService.DisconnectSource:output_type -> giwa.engine.v1.DisconnectSourceResponse
+	14, // 72: giwa.engine.v1.WorkflowService.EnqueueSync:output_type -> giwa.engine.v1.EnqueueSyncResponse
+	16, // 73: giwa.engine.v1.WorkflowService.GetSyncJob:output_type -> giwa.engine.v1.GetSyncJobResponse
+	18, // 74: giwa.engine.v1.WorkflowService.ListSyncJobs:output_type -> giwa.engine.v1.ListSyncJobsResponse
+	22, // 75: giwa.engine.v1.QueryService.GetDashboard:output_type -> giwa.engine.v1.GetDashboardResponse
+	26, // 76: giwa.engine.v1.QueryService.ListLedgerEvents:output_type -> giwa.engine.v1.ListLedgerEventsResponse
+	29, // 77: giwa.engine.v1.QueryService.ListReviews:output_type -> giwa.engine.v1.ListReviewsResponse
+	40, // 78: giwa.engine.v1.QueryService.CreateReport:output_type -> giwa.engine.v1.CreateReportResponse
+	41, // 79: giwa.engine.v1.QueryService.ListReports:output_type -> giwa.engine.v1.ListReportsResponse
+	34, // 80: giwa.engine.v1.ReviewService.GetReview:output_type -> giwa.engine.v1.GetReviewResponse
+	36, // 81: giwa.engine.v1.ReviewService.ResolveReview:output_type -> giwa.engine.v1.ResolveReviewResponse
+	68, // [68:82] is the sub-list for method output_type
+	54, // [54:68] is the sub-list for method input_type
+	54, // [54:54] is the sub-list for extension type_name
+	54, // [54:54] is the sub-list for extension extendee
+	0,  // [0:54] is the sub-list for field type_name
 }
 
 func init() { file_giwa_engine_v1_engine_proto_init() }
@@ -2801,9 +3514,9 @@ func file_giwa_engine_v1_engine_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_giwa_engine_v1_engine_proto_rawDesc), len(file_giwa_engine_v1_engine_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   42,
 			NumExtensions: 0,
-			NumServices:   3,
+			NumServices:   4,
 		},
 		GoTypes:           file_giwa_engine_v1_engine_proto_goTypes,
 		DependencyIndexes: file_giwa_engine_v1_engine_proto_depIdxs,
