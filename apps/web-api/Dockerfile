@@ -1,6 +1,10 @@
 FROM node:22.13-bookworm-slim AS build
 WORKDIR /app
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends python3 make g++ \
+ && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
+COPY apps/edge/package.json apps/edge/package.json
 COPY apps/web-api/package.json apps/web-api/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci --workspace @daejang/web-api --include-workspace-root

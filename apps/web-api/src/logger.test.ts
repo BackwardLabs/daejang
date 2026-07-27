@@ -15,6 +15,7 @@ describe('API logger redaction', () => {
 
     logger.info({
       req: {
+        url: '/api/v1/auth/oauth/naver/callback?code=oauth-code-sentinel&state=oauth-state-sentinel',
         headers: {
           cookie: 'cookie-secret-sentinel',
           authorization: 'authorization-secret-sentinel',
@@ -32,5 +33,7 @@ describe('API logger redaction', () => {
     expect(output).not.toContain('cookie-secret-sentinel')
     expect(output).not.toContain('authorization-secret-sentinel')
     expect(output).not.toContain('set-cookie-secret-sentinel')
+    expect(output).not.toContain('oauth-code-sentinel')
+    expect(output).not.toContain('oauth-state-sentinel')
   })
 })
