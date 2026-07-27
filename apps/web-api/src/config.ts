@@ -13,6 +13,7 @@ export type AppConfig = {
   rateLimitHmacSecret: string
   engineMtls: EngineMtlsConfig | undefined
   engineInsecureTarget?: string
+  privateObjectRoot?: string
   devBootstrapUser?: {
     id: string
     displayName: string
@@ -142,6 +143,9 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   if (production && environment.DATABASE_URL === undefined) {
     throw new Error('DATABASE_URL is required in production')
   }
+  if (production && environment.PRIVATE_OBJECT_ROOT === undefined) {
+    throw new Error('PRIVATE_OBJECT_ROOT is required in production')
+  }
   if (
     production &&
     (environment.DEV_BOOTSTRAP_USER_ID || environment.DEV_BOOTSTRAP_DISPLAY_NAME)
@@ -210,6 +214,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     databaseUrl: environment.DATABASE_URL,
     rateLimitHmacSecret,
     engineMtls: loadEngineMtlsConfig(environment, production),
+    ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
     ...(devBootstrapUserId && devBootstrapDisplayName
       ? {

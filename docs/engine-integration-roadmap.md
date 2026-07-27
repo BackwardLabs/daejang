@@ -13,36 +13,40 @@
 | 내부 인증 | 구현 | mTLS, 서버 Session 기반 `RequestContext`, mutation idempotency key |
 | 장애 변환 | 구현 | Engine unavailable `503`, deadline `504` |
 | Web의 source DB 접근 차단 | 구현 | migration 권한 검증에서 USAGE·table 권한 부재 확인 |
-| Engine production 배포 | 미구현 | container, mTLS secret, private service와 health probe 필요 |
+| Engine production 패키징 | 구현 | non-root container, mTLS secret mount, private network, gRPC DB health probe |
+| Upbit PDF 업로드 | 구현 | 20 MiB 제한, private object root, PDF magic·size·SHA-256 확인, source·job 원자 경계 |
+| Sync Job | 구현 | durable idempotency, fenced lease, `SKIP LOCKED`, 성공·실패 상태 |
+| Activity·Ledger·Review 조회 | 구현 | Web JSON → QueryService → read-only DB role |
+| Report snapshot | 구현 | immutable digest snapshot, 실제 계산 전 `PARTIAL` 표시 |
+| Upbit 행 추출·정규화 | 후속 | 공식 PDF fixture와 문서 버전 계약 필요 |
+| Ledger 계산·Review 해결·세금 Lot | 후속 | 기존 ledger/review/lot producer 연결 필요 |
+| 운영 환경 배포 | 배포 대기 | DB 변경 commit 배포, 인증서·DSN·Cloudflare `/api/*` route 필요 |
 
-## 다음 구현 순서
+## 현재 실행 흐름
 
 ```mermaid
 flowchart TD
-  source[SourceService 완료] --> deploy[Engine private 배포·mTLS 운영]
-  deploy --> upload[Upbit PDF 업로드·Source 등록]
-  upload --> sync[SyncService·Job 생성]
-  sync --> worker[수집 Worker·checkpoint·재시도]
-  worker --> activity[Activity·원본 증빙 조회]
-  activity --> ledger[Ledger 계산·대사]
-  ledger --> review[Review Item 조회·해결]
-  review --> report[Report 생성·immutable 조회]
+  upload[Upbit PDF 업로드·확정] --> source[Document Source 등록]
+  source --> sync[Durable Sync Job 생성]
+  sync --> worker[Worker lease·PDF 무결성 확인]
+  worker --> parse{지원 문서 parser인가?}
+  parse -->|예| activity[Activity·Ledger producer]
+  parse -->|아니오| fail[명시적 실패 상태]
+  activity --> review[Review read model]
+  review --> report[Immutable Report snapshot]
 ```
 
-1. Engine container, mTLS secret 주입·회전, private service와 health probe를 추가합니다.
-2. Upbit PDF의 제한된 업로드 URL, 확정, source 등록 계약을 추가합니다.
-3. `SyncService`와 durable Job 상태, idempotency, 취소·재시도 규칙을 확정합니다.
-4. Source worker가 checkpoint와 원본 artifact를 남기도록 연결합니다.
-5. Activity 조회 후 Ledger·Review·Report API를 읽기 모델 순서로 추가합니다.
-6. 각 단계마다 BFF가 해당 Engine schema에 직접 접근하지 않는 권한 검사를
-   배포 gate로 유지합니다.
+다음 구현은 지원할 Upbit PDF 실물 fixture를 고정한 뒤 행 추출·정규화 producer를
+worker에 연결하는 작업입니다. 그 결과를 기존 ledger/review/lot 저장 계약으로
+발행한 뒤 Review 해결 mutation과 최종 세금 Report 산출을 활성화합니다. parser가
+없는 문서는 성공한 거래 0건으로 위장하지 않고 지원 불가 실패로 종료해야 합니다.
 
 ## 단계별 완료 조건
 
 - protobuf lint·생성과 Go/TypeScript 타입 검사가 통과합니다.
 - 해당 Engine runtime role만 자기 schema에 접근할 수 있습니다.
 - 동일 idempotency key 재요청이 중복 durable row를 만들지 않습니다.
-- 실제 PostgreSQL과 Engine process를 사용한 등록·조회·상태 변경 통합 테스트가
-  통과합니다.
+- 실제 PostgreSQL에서 migration, 역할 권한, 등록·lease·완료, query, report
+  integration test가 통과합니다.
 - 실패한 Engine 호출은 공개 API에서 안전한 오류 코드로 변환되고 내부 endpoint나
   DB 오류를 노출하지 않습니다.

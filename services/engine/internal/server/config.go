@@ -10,6 +10,8 @@ import (
 type Config struct {
 	Listen                string
 	DatabaseURL           string
+	QueryDatabaseURL      string
+	ReportDatabaseURL     string
 	TLSCertificatePath    string
 	TLSPrivateKeyPath     string
 	TLSClientCAPath       string
@@ -20,6 +22,8 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	result := Config{
 		Listen:             getenv("ENGINE_LISTEN"),
 		DatabaseURL:        getenv("DAEJANG_SOURCE_DATABASE_URL"),
+		QueryDatabaseURL:   getenv("DAEJANG_QUERY_DATABASE_URL"),
+		ReportDatabaseURL:  getenv("DAEJANG_REPORT_DATABASE_URL"),
 		TLSCertificatePath: getenv("ENGINE_TLS_CERT_PATH"),
 		TLSPrivateKeyPath:  getenv("ENGINE_TLS_KEY_PATH"),
 		TLSClientCAPath:    getenv("ENGINE_TLS_CLIENT_CA_PATH"),
@@ -36,6 +40,12 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 	if result.DatabaseURL == "" {
 		return Config{}, errors.New("DAEJANG_SOURCE_DATABASE_URL is required")
+	}
+	if result.QueryDatabaseURL == "" {
+		result.QueryDatabaseURL = result.DatabaseURL
+	}
+	if result.ReportDatabaseURL == "" {
+		result.ReportDatabaseURL = result.QueryDatabaseURL
 	}
 	tlsValues := []string{result.TLSCertificatePath, result.TLSPrivateKeyPath, result.TLSClientCAPath}
 	tlsCount := 0

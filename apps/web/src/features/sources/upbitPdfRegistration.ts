@@ -253,6 +253,8 @@ export type UpbitPdfRegistrationResult =
 export type UpbitPdfRegistrationRequest = {
   file: File
   intentKey: string
+  coverageStart: string
+  coverageEnd: string
   onStageChange: (
     status: 'DOCUMENT_UPLOADING' | 'SOURCE_SUBMITTING',
   ) => void

@@ -35,6 +35,32 @@ type ChainScope struct {
 	Status  string
 }
 
+type DocumentSource struct {
+	ID               string
+	Provider         string
+	OriginalFilename string
+	MediaType        string
+	ByteLength       int64
+	ArtifactDigest   string
+	CoverageStart    time.Time
+	CoverageEnd      time.Time
+	Status           string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type RegisterDocumentParams struct {
+	SubjectID        string
+	UploadID         string
+	ObjectKey        string
+	ArtifactDigest   string
+	OriginalFilename string
+	MediaType        string
+	ByteLength       int64
+	CoverageStart    time.Time
+	CoverageEnd      time.Time
+}
+
 type RegisterWalletParams struct {
 	SubjectID           string
 	Address             string
@@ -48,6 +74,33 @@ type Store interface {
 	RegisterWallet(context.Context, RegisterWalletParams) (WalletSource, error)
 	ListWallets(context.Context, string) ([]WalletSource, error)
 	DisconnectWallet(context.Context, string, string, time.Time) (WalletSource, error)
+	RegisterDocument(context.Context, RegisterDocumentParams) (DocumentSource, error)
+	ListDocuments(context.Context, string) ([]DocumentSource, error)
+}
+
+func (s *Service) RegisterDocument(ctx context.Context, request *enginev1.RegisterDocumentRequest) (*enginev1.RegisterDocumentResponse, error) {
+	subjectID, err := validateContext(request.GetContext(), true)
+	if err != nil {
+		return nil, err
+	}
+	coverageStart, err := parseDate(request.GetCoverageStart(), "coverage_start")
+	if err != nil {
+		return nil, err
+	}
+	coverageEnd, err := parseDate(request.GetCoverageEnd(), "coverage_end")
+	if err != nil {
+		return nil, err
+	}
+	value, err := s.Store.RegisterDocument(ctx, RegisterDocumentParams{
+		SubjectID: subjectID, UploadID: request.GetUploadId(), ObjectKey: request.GetObjectKey(),
+		ArtifactDigest: request.GetArtifactDigest(), OriginalFilename: request.GetOriginalFilename(),
+		MediaType: request.GetMediaType(), ByteLength: request.GetByteLength(),
+		CoverageStart: coverageStart, CoverageEnd: coverageEnd,
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return &enginev1.RegisterDocumentResponse{Source: documentToProto(value)}, nil
 }
 
 type Service struct {
@@ -88,7 +141,23 @@ func (s *Service) ListSources(ctx context.Context, request *enginev1.ListSources
 	for _, value := range sources {
 		items = append(items, toProto(value))
 	}
-	return &enginev1.ListSourcesResponse{Items: items}, nil
+	documents, err := s.Store.ListDocuments(ctx, subjectID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	documentItems := make([]*enginev1.DocumentSource, 0, len(documents))
+	for _, value := range documents {
+		documentItems = append(documentItems, documentToProto(value))
+	}
+	return &enginev1.ListSourcesResponse{Items: items, DocumentItems: documentItems}, nil
+}
+
+func parseDate(value, field string) (time.Time, error) {
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{}, status.Errorf(codes.InvalidArgument, "%s must be an ISO date", field)
+	}
+	return parsed.UTC(), nil
 }
 
 func (s *Service) DisconnectSource(ctx context.Context, request *enginev1.DisconnectSourceRequest) (*enginev1.DisconnectSourceResponse, error) {
@@ -116,6 +185,12 @@ func validateContext(value *enginev1.RequestContext, mutation bool) (string, err
 		return "", status.Error(codes.InvalidArgument, "idempotency key is required")
 	}
 	return value.GetActor().GetUserId(), nil
+}
+
+// ValidateRequestContext is shared by Engine services so actor and idempotency
+// requirements stay identical across domain RPCs.
+func ValidateRequestContext(value *enginev1.RequestContext, mutation bool) (string, error) {
+	return validateContext(value, mutation)
 }
 
 func requiredTime(value *timestamppb.Timestamp, field string) (time.Time, error) {
@@ -147,4 +222,13 @@ func toProto(value WalletSource) *enginev1.WalletSource {
 		result.ChainScopes = append(result.ChainScopes, &enginev1.WalletChainScope{ChainId: scope.ChainID, Status: scope.Status})
 	}
 	return result
+}
+
+func documentToProto(value DocumentSource) *enginev1.DocumentSource {
+	return &enginev1.DocumentSource{
+		Id: value.ID, Provider: value.Provider, OriginalFilename: value.OriginalFilename,
+		MediaType: value.MediaType, ByteLength: value.ByteLength, ArtifactDigest: value.ArtifactDigest,
+		CoverageStart: value.CoverageStart.Format("2006-01-02"), CoverageEnd: value.CoverageEnd.Format("2006-01-02"),
+		Status: value.Status, CreatedAt: timestamppb.New(value.CreatedAt), UpdatedAt: timestamppb.New(value.UpdatedAt),
+	}
 }

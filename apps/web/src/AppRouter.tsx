@@ -1,17 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { App } from './App.tsx'
-import { DashboardPage } from './features/dashboard/DashboardPage.tsx'
-import { LedgerPage } from './features/ledger/LedgerPage.tsx'
-import { ReportPage } from './features/reports/ReportPage.tsx'
-import { SourceManagementPage } from './features/sources/SourceManagementPage.tsx'
-import { SourceMethodIntroPage } from './features/sources/SourceMethodIntroPage.tsx'
-import { SourceTypeSelectionPage } from './features/sources/SourceTypeSelectionPage.tsx'
-import { UpbitPdfRegistrationPage } from './features/sources/UpbitPdfRegistrationPage.tsx'
-import {
-  ProductPage,
-  type ProductPageKind,
-} from './features/product/ProductPage.tsx'
-import { isMockSessionAuthenticated } from './mocks/session.ts'
+import type { ProductPageKind } from './features/product/ProductPage.tsx'
+import { loadCurrentUser } from './api/authApi.ts'
 
 const ReownEvmWalletConnectionRoute = lazy(async () => {
   const module = await import(
@@ -20,6 +10,14 @@ const ReownEvmWalletConnectionRoute = lazy(async () => {
 
   return { default: module.ReownEvmWalletConnectionRoute }
 })
+const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage.tsx').then((module) => ({ default: module.DashboardPage })))
+const LedgerPage = lazy(() => import('./features/ledger/LedgerPage.tsx').then((module) => ({ default: module.LedgerPage })))
+const ReportPage = lazy(() => import('./features/reports/ReportPage.tsx').then((module) => ({ default: module.ReportPage })))
+const SourceManagementPage = lazy(() => import('./features/sources/SourceManagementPage.tsx').then((module) => ({ default: module.SourceManagementPage })))
+const SourceMethodIntroPage = lazy(() => import('./features/sources/SourceMethodIntroPage.tsx').then((module) => ({ default: module.SourceMethodIntroPage })))
+const SourceTypeSelectionPage = lazy(() => import('./features/sources/SourceTypeSelectionPage.tsx').then((module) => ({ default: module.SourceTypeSelectionPage })))
+const UpbitPdfRegistrationPage = lazy(() => import('./features/sources/UpbitPdfRegistrationPage.tsx').then((module) => ({ default: module.UpbitPdfRegistrationPage })))
+const ProductPage = lazy(() => import('./features/product/ProductPage.tsx').then((module) => ({ default: module.ProductPage })))
 
 function normalizePath(pathname: string) {
   const normalized = pathname.replace(/\/+$/, '')
@@ -37,6 +35,7 @@ const protectedRoutes = new Set([
 
 export function AppRouter() {
   const [path, setPath] = useState(() => normalizePath(window.location.pathname))
+  const [authState, setAuthState] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking')
 
   useEffect(() => {
     function handlePathChange() {
@@ -50,40 +49,46 @@ export function AppRouter() {
   const isProtectedRoute =
     protectedRoutes.has(path) || path.startsWith('/sources/')
 
-  if (isProtectedRoute && !isMockSessionAuthenticated()) {
-    return <App />
-  }
+  useEffect(() => {
+    if (!isProtectedRoute) return
+    const controller = new AbortController(); setAuthState('checking')
+    void loadCurrentUser(controller.signal).then(() => setAuthState('authenticated')).catch(() => setAuthState('unauthenticated'))
+    return () => controller.abort()
+  }, [isProtectedRoute, path])
 
-  if (path === '/dashboard') {
-    return <DashboardPage />
-  }
+  if (isProtectedRoute && authState === 'checking') return <p role="status">로그인 상태를 확인하고 있습니다.</p>
+  if (isProtectedRoute && authState === 'unauthenticated') return <App />
+
+  const pending = <p role="status">화면을 준비하고 있습니다.</p>
+
+  if (path === '/dashboard') return <Suspense fallback={pending}><DashboardPage /></Suspense>
 
   if (path === '/ledger') {
-    return <LedgerPage />
+    return <Suspense fallback={pending}><LedgerPage /></Suspense>
   }
 
   if (path === '/reports') {
-    return <ReportPage />
+    return <Suspense fallback={pending}><ReportPage /></Suspense>
   }
 
   if (path === '/sources') {
-    return <SourceManagementPage />
+    return <Suspense fallback={pending}><SourceManagementPage /></Suspense>
   }
 
   if (path === '/sources/new') {
-    return <SourceTypeSelectionPage />
+    return <Suspense fallback={pending}><SourceTypeSelectionPage /></Suspense>
   }
 
   if (path === '/sources/new/upbit') {
-    return <SourceMethodIntroPage methodId="upbit-pdf" />
+    return <Suspense fallback={pending}><SourceMethodIntroPage methodId="upbit-pdf" /></Suspense>
   }
 
   if (path === '/sources/new/upbit/upload') {
-    return <UpbitPdfRegistrationPage />
+    return <Suspense fallback={pending}><UpbitPdfRegistrationPage /></Suspense>
   }
 
   if (path === '/sources/new/wallet') {
-    return <SourceMethodIntroPage methodId="evm-wallet" />
+    return <Suspense fallback={pending}><SourceMethodIntroPage methodId="evm-wallet" /></Suspense>
   }
 
   if (path === '/sources/new/wallet/connect') {
@@ -100,7 +105,7 @@ export function AppRouter() {
   const productPage = productRoutes[path]
 
   if (productPage) {
-    return <ProductPage kind={productPage} />
+    return <Suspense fallback={pending}><ProductPage kind={productPage} /></Suspense>
   }
 
   return <App />

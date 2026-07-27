@@ -304,6 +304,15 @@ body:has(.source-page) {
   color: #6b7280;
 }
 
+.source-list__meta small {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.source-list__meta small[data-job-state='FAILED'] {
+  color: #c2410c;
+}
+
 .source-list__item button {
   padding: 9px 14px;
   border: 1px solid #d1d5db;

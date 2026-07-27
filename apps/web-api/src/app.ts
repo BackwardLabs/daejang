@@ -20,11 +20,13 @@ import {
   type DevelopmentUserStore,
 } from './routes/development.js'
 import { registerSourceRoutes } from './routes/sources.js'
+import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
 import { registerSecurityPolicy } from './security.js'
 import {
   MemoryWalletSourceStore,
   type WalletSourceStore,
 } from './sources/wallet-source-store.js'
+import type { UploadStore } from './uploads/upload-store.js'
 
 type BuildAppOptions = {
   config?: AppConfig
@@ -32,8 +34,11 @@ type BuildAppOptions = {
   sessionStore?: SessionStore
   rateLimitStore?: RateLimitStore
   walletSourceStore?: WalletSourceStore
+  uploadStore?: UploadStore
+  engineDataClient?: EngineDataClient
   developmentUserStore?: DevelopmentUserStore
   now?: () => Date
+  readinessCheck?: () => Promise<void>
 }
 
 const hasValidationErrors = (error: unknown): error is { validation: unknown } =>
@@ -183,6 +188,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     async () => ({ status: 'ok' }),
   )
 
+  app.get('/readyz', async (_request, reply) => {
+    try {
+      await options.readinessCheck?.()
+      return { status: 'ready' }
+    } catch {
+      return reply.status(503).send({ status: 'not-ready' })
+    }
+  })
+
   await registerAuthRoutes(app, {
     config,
     sessionService,
@@ -195,8 +209,17 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     walletSourceStore,
     authRateLimiter,
     authenticate: authHooks.authenticate,
+    ...(options.engineDataClient ? { engineDataClient: options.engineDataClient } : {}),
     ...(options.now ? { now: options.now } : {}),
   })
+  if (options.uploadStore && options.engineDataClient) {
+    await registerDataRoutes(app, {
+      authenticate: authHooks.authenticate,
+      uploadStore: options.uploadStore,
+      engine: options.engineDataClient,
+      ...(options.now ? { now: options.now } : {}),
+    })
+  }
   if (options.developmentUserStore) {
     await registerDevelopmentRoutes(app, {
       config,

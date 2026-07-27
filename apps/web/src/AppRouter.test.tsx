@@ -1,9 +1,21 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppRouter } from './AppRouter.tsx'
 
 afterEach(() => {
   window.history.pushState({}, '', '/')
+})
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const payload = url.endsWith('/me')
+      ? { user: { id: '00000000-0000-4000-8000-000000000001', displayName: '김대장' } }
+      : url.includes('/dashboard')
+        ? { dashboard: { sourceCount: 0, transactionCount: 0, openReviewCount: 0, completedCount: 0, exceptionCount: 0, lastSyncState: '' } }
+        : { items: [] }
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
 })
 
 describe('AppRouter', () => {
@@ -17,58 +29,55 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders the dashboard', () => {
+  it('renders the dashboard', async () => {
     window.history.pushState({}, '', '/dashboard')
 
     render(<AppRouter />)
 
     expect(
-      screen.getByRole('heading', { name: '세무 장부 요약' }),
+      await screen.findByRole('heading', { name: '세무 장부 요약' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('₩84,270,000')).toBeInTheDocument()
   })
 
-  it('renders the ledger workspace', () => {
+  it('renders the ledger workspace', async () => {
     window.history.pushState({}, '', '/ledger')
 
     render(<AppRouter />)
 
     expect(
-      screen.getByRole('heading', { name: '2027 장부 만들기' }),
+      await screen.findByRole('heading', { name: '거래 장부' }),
     ).toBeInTheDocument()
     expect(screen.queryByText('Mock 검증 도구')).not.toBeInTheDocument()
   })
 
-  it('renders the data-linked report workspace', () => {
+  it('renders the data-linked report workspace', async () => {
     window.history.pushState({}, '', '/reports')
 
     render(<AppRouter />)
 
-    expect(screen.getByRole('heading', { name: '보고서' })).toBeInTheDocument()
-    expect(screen.getByText('24건')).toBeInTheDocument()
-    expect(screen.getByText('완전 10 · 예외 14')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '보고서' })).toBeInTheDocument()
   })
 
-  it('logs the mock user out from the shared sidebar', () => {
+  it('logs the mock user out from the shared sidebar', async () => {
     window.history.pushState({}, '', '/dashboard')
     render(<AppRouter />)
 
-    fireEvent.click(screen.getByRole('button', { name: /김대장/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /김대장/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: '로그아웃' }))
 
-    expect(window.location.pathname).toBe('/')
+    await waitFor(() => expect(window.location.pathname).toBe('/'))
     expect(
       screen.getByRole('heading', { name: /흩어진 디지털 자산 기록/ }),
     ).toBeInTheDocument()
   })
 
-  it('renders the source management page', () => {
+  it('renders the source management page', async () => {
     window.history.pushState({}, '', '/sources')
 
     render(<AppRouter />)
 
     expect(
-      screen.getByRole('heading', { name: '데이터 소스 관리' }),
+      await screen.findByRole('heading', { name: '데이터 소스 관리' }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('heading', {
@@ -108,11 +117,11 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders the settings product page', () => {
+  it('renders the settings product page', async () => {
     window.history.pushState({}, '', '/settings')
 
     render(<AppRouter />)
 
-    expect(screen.getByRole('heading', { name: '설정' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '설정' })).toBeInTheDocument()
   })
 })

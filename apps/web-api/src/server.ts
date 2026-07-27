@@ -8,6 +8,7 @@ import { loadConfig } from './config.js'
 import { assertWebAuthSchema } from './database/preflight.js'
 import { EngineMtlsClient } from './engine/mtls-client.js'
 import { PostgresWalletSourceStore } from './sources/postgres-wallet-source-store.js'
+import { assertPrivateObjectRoot, PostgresFileUploadStore } from './uploads/postgres-file-upload-store.js'
 
 const config = loadConfig()
 const pool = config.databaseUrl
@@ -30,6 +31,9 @@ if (pool) {
 if (engineClient) {
   await engineClient.waitForReady(5_000)
 }
+if (config.privateObjectRoot) {
+  await assertPrivateObjectRoot(config.privateObjectRoot)
+}
 
 const { app } = await buildApp({
   config,
@@ -38,11 +42,30 @@ const { app } = await buildApp({
         sessionStore: new PostgresSessionStore(pool),
         rateLimitStore: new PostgresRateLimitStore(pool),
         ...(engineClient
-          ? { walletSourceStore: new PostgresWalletSourceStore(pool, engineClient) }
+          ? {
+              walletSourceStore: new PostgresWalletSourceStore(pool, engineClient),
+              engineDataClient: engineClient,
+              ...(config.privateObjectRoot
+                ? { uploadStore: new PostgresFileUploadStore(pool, config.privateObjectRoot) }
+                : {}),
+            }
           : {}),
         ...(config.devBootstrapUser
           ? { developmentUserStore: new PostgresUserStore(pool) }
           : {}),
+      }
+    : {}),
+  ...(pool && engineClient
+    ? {
+        readinessCheck: async () => {
+          await Promise.all([
+            pool.query('SELECT 1'),
+            engineClient.waitForReady(2_000),
+            ...(config.privateObjectRoot
+              ? [assertPrivateObjectRoot(config.privateObjectRoot)]
+              : []),
+          ])
+        },
       }
     : {}),
 })

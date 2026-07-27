@@ -13,7 +13,17 @@ import (
 
 type recordingStore struct {
 	registered RegisterWalletParams
+	document   RegisterDocumentParams
 	source     WalletSource
+}
+
+func (s *recordingStore) RegisterDocument(_ context.Context, params RegisterDocumentParams) (DocumentSource, error) {
+	s.document = params
+	return DocumentSource{ID: "22222222-2222-4222-8222-222222222222", Provider: "UPBIT", CoverageStart: params.CoverageStart, CoverageEnd: params.CoverageEnd, CreatedAt: time.Now(), UpdatedAt: time.Now()}, nil
+}
+
+func (s *recordingStore) ListDocuments(context.Context, string) ([]DocumentSource, error) {
+	return nil, nil
 }
 
 func (s *recordingStore) RegisterWallet(_ context.Context, params RegisterWalletParams) (WalletSource, error) {

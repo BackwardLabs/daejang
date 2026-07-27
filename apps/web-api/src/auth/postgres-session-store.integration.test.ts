@@ -53,6 +53,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       '000009_create_wallet_source_persistence.sql',
       '000010_create_wallet_ownership_challenges.sql',
       '000011_move_wallet_sources_behind_engine.sql',
+      '000012_create_source_jobs_and_reports.sql',
     ]) {
       const migrationUrl = process.env.WEB_AUTH_MIGRATION_DIRECTORY
         ? pathToFileURL(resolve(process.env.WEB_AUTH_MIGRATION_DIRECTORY, filename))
@@ -86,6 +87,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
   beforeEach(async () => {
     await users.setStatus(USER_ID, 'active')
     await pool.query('DELETE FROM web_private.wallet_ownership_challenges')
+    await pool.query('DELETE FROM web_private.upload_sessions')
     await pool.query('DELETE FROM web_private.sessions')
   })
 

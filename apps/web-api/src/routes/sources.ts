@@ -17,6 +17,7 @@ import type {
   WalletSource,
   WalletSourceStore,
 } from '../sources/wallet-source-store.js'
+import type { EngineDataClient } from './data.js'
 
 type ChallengeBody = {
   address: string
@@ -92,6 +93,19 @@ const sourceResponseSchema = {
   },
 } as const
 
+const documentSourceResponseSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id','type','provider','originalFilename','mediaType','byteLength','artifactDigest','coverageStart','coverageEnd','status','createdAt','updatedAt'],
+  properties: {
+    id: { type: 'string', format: 'uuid' }, type: { type: 'string', const: 'UPBIT_PDF' },
+    provider: { type: 'string', const: 'UPBIT' }, originalFilename: { type: 'string' },
+    mediaType: { type: 'string', const: 'application/pdf' }, byteLength: { type: 'number' },
+    artifactDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+    coverageStart: { type: 'string', format: 'date' }, coverageEnd: { type: 'string', format: 'date' },
+    status: { type: 'string', enum: ['ACTIVE','DISCONNECTED'] }, createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
+  },
+} as const
+
 const createChallengeMessage = (
   config: AppConfig,
   challenge: Pick<
@@ -119,6 +133,7 @@ export const registerSourceRoutes = async (
     walletSourceStore: WalletSourceStore
     authRateLimiter: AuthRateLimiter
     authenticate: preHandlerHookHandler
+    engineDataClient?: EngineDataClient
     now?: () => Date
   },
 ) => {
@@ -134,7 +149,7 @@ export const registerSourceRoutes = async (
             type: 'object',
             additionalProperties: false,
             required: ['items'],
-            properties: { items: { type: 'array', items: sourceResponseSchema } },
+            properties: { items: { type: 'array', items: { anyOf: [sourceResponseSchema, documentSourceResponseSchema] } } },
           },
         },
       },
@@ -144,11 +159,16 @@ export const registerSourceRoutes = async (
       if (!session) {
         throw unauthorized()
       }
-      const sources = await options.walletSourceStore.listWallets({
+      const context = {
         requestId: request.id,
         userId: session.user.id,
         sessionId: session.id,
-      })
+      }
+      if (options.engineDataClient) {
+        const sources = await options.engineDataClient.listAllSources(context)
+        return { items: [...sources.wallets.map((value) => serializeWalletSource(value as WalletSource)), ...sources.documents.map((value) => ({ ...(value as Record<string, unknown>), createdAt: (value as { createdAt: Date }).createdAt.toISOString(), updatedAt: (value as { updatedAt: Date }).updatedAt.toISOString() }))] }
+      }
+      const sources = await options.walletSourceStore.listWallets(context)
       return { items: sources.map(serializeWalletSource) }
     },
   )

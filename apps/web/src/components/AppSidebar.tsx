@@ -4,10 +4,7 @@ import navReport from '../assets/dashboard/nav-report.svg'
 import navSettings from '../assets/dashboard/nav-settings.svg'
 import navSources from '../assets/dashboard/nav-sources.svg'
 import userAvatar from '../assets/dashboard/user-avatar.svg'
-import {
-  logoutMockSession,
-  mockAuthenticatedSession,
-} from '../mocks/session.ts'
+import { loadCurrentUser, logout } from '../api/authApi.ts'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import './app-sidebar.css'
 
@@ -31,7 +28,6 @@ const navigation: Array<{
 }> = [
   { icon: navDashboard, label: '대시보드', href: '/dashboard', page: 'dashboard' },
   {
-    badge: '12',
     icon: navLedger,
     label: '장부 작업',
     href: '/ledger',
@@ -57,7 +53,7 @@ export function AppSidebar({
   secondaryItems?: AppSidebarSecondaryItem[]
   year: AppYear
 }) {
-  const { user } = mockAuthenticatedSession
+  const [userName, setUserName] = useState('계정')
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
 
@@ -77,8 +73,14 @@ export function AppSidebar({
     return () => document.removeEventListener('mousedown', closeUserMenu)
   }, [isUserMenuOpen])
 
-  function handleLogout() {
-    logoutMockSession()
+  useEffect(() => {
+    const controller = new AbortController()
+    void loadCurrentUser(controller.signal).then(({ user }) => setUserName(user.displayName)).catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+
+  async function handleLogout() {
+    try { await logout() } catch { /* expired sessions are already logged out */ }
     window.history.replaceState({}, '', '/')
     window.dispatchEvent(new PopStateEvent('popstate'))
   }
@@ -171,8 +173,8 @@ export function AppSidebar({
         {isUserMenuOpen && (
           <div className="app-sidebar__user-menu" role="menu">
             <div>
-              <strong>{user.name}</strong>
-              <span>Mock 로그인 계정</span>
+              <strong>{userName}</strong>
+              <span>로그인 계정</span>
             </div>
             <button type="button" role="menuitem" onClick={handleLogout}>
               로그아웃
@@ -188,7 +190,7 @@ export function AppSidebar({
         >
           <img src={userAvatar} alt="" />
           <span>
-            <strong>{user.name}</strong>
+            <strong>{userName}</strong>
             <small>개인 장부</small>
           </span>
           <i aria-hidden="true">⌃</i>

@@ -8,6 +8,8 @@ import type { AppConfig } from './config.js'
 import { MemoryWalletSourceStore } from './sources/wallet-source-store.js'
 import { EngineRpcError } from './engine/rpc-error.js'
 import { status as grpcStatus } from '@grpc/grpc-js'
+import type { EngineDataClient } from './routes/data.js'
+import type { CreateUpload, UploadSession, UploadStore } from './uploads/upload-store.js'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 
@@ -367,6 +369,70 @@ describe('web api authentication boundary', () => {
     expect(response.json()).toMatchObject({
       error: { code: 'WALLET_SIGNATURE_INVALID' },
     })
+  })
+
+  it('uploads, confirms, registers, and enqueues an Upbit PDF', async () => {
+    await context.app.close()
+    const uploadId = '00000000-0000-4000-8000-000000000010'
+    const sourceId = '00000000-0000-4000-8000-000000000011'
+    const pdf = Buffer.from('%PDF-test')
+    let session: UploadSession | undefined
+    const uploadStore: UploadStore = {
+      durable: true,
+      create: vi.fn(async (input: CreateUpload) => {
+        session = {
+          id: uploadId, userId: input.userId, provider: 'UPBIT',
+          objectKey: `upbit/${input.userId}/${uploadId}.pdf`,
+          originalFilename: input.originalFilename, mediaType: 'application/pdf',
+          expectedBytes: input.expectedBytes, state: 'PENDING',
+          idempotencyKey: input.idempotencyKey,
+          expiresAt: new Date(input.now.getTime() + 60_000),
+        }
+        return session
+      }),
+      write: vi.fn(async (_userId, _uploadId, contents) => {
+        if (!session || !contents.equals(pdf)) return undefined
+        session = { ...session, state: 'UPLOADED' }
+        return session
+      }),
+      confirm: vi.fn(async () => {
+        if (!session) return undefined
+        session = { ...session, state: 'CONFIRMED', verifiedDigest: 'a'.repeat(64), verifiedBytes: pdf.length }
+        return session
+      }),
+    }
+    const registerDocument = vi.fn(async () => ({ id: sourceId }))
+    const enqueueSync = vi.fn(async () => ({ id: '00000000-0000-4000-8000-000000000012', state: 'QUEUED' }))
+    const engineDataClient = {
+      registerDocument, enqueueSync,
+      listAllSources: vi.fn(async () => ({ wallets: [], documents: [] })),
+      getSyncJob: vi.fn(async () => ({})), listSyncJobs: vi.fn(async () => []),
+      getDashboard: vi.fn(async () => ({})), listLedgerEvents: vi.fn(async () => []),
+      listReviews: vi.fn(async () => []), createReport: vi.fn(async () => ({})),
+      listReports: vi.fn(async () => []),
+    } satisfies EngineDataClient
+    context = await buildApp({ config, logger: false, now: () => now, uploadStore, engineDataClient })
+    const { token } = await createSession()
+    const headers = { cookie: `${config.sessionCookieName}=${token}`, origin: config.publicOrigin }
+
+    const created = await context.app.inject({
+      method: 'POST', url: '/api/v1/uploads', headers,
+      payload: { filename: '거래내역.pdf', mediaType: 'application/pdf', sizeBytes: pdf.length, intentKey: 'upbit-test' },
+    })
+    expect(created.statusCode).toBe(201)
+    expect(created.json()).toMatchObject({ uploadId })
+    const written = await context.app.inject({
+      method: 'PUT', url: `/api/v1/uploads/${uploadId}/content`,
+      headers: { ...headers, 'content-type': 'application/pdf' }, payload: pdf,
+    })
+    expect(written.statusCode).toBe(204)
+    const confirmed = await context.app.inject({
+      method: 'POST', url: `/api/v1/uploads/${uploadId}/confirm`, headers,
+      payload: { coverageStart: '2026-01-01', coverageEnd: '2026-12-31' },
+    })
+    expect(confirmed.statusCode).toBe(201)
+    expect(registerDocument).toHaveBeenCalledWith(expect.objectContaining({ uploadId, byteLength: pdf.length }))
+    expect(enqueueSync).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID }), 'UPBIT_PDF', sourceId)
   })
 
   it('does not clear the winning cookie when concurrent rotation loses', async () => {

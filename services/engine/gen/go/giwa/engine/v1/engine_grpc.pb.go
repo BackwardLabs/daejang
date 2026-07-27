@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	SourceService_RegisterWallet_FullMethodName   = "/giwa.engine.v1.SourceService/RegisterWallet"
+	SourceService_RegisterDocument_FullMethodName = "/giwa.engine.v1.SourceService/RegisterDocument"
 	SourceService_ListSources_FullMethodName      = "/giwa.engine.v1.SourceService/ListSources"
 	SourceService_DisconnectSource_FullMethodName = "/giwa.engine.v1.SourceService/DisconnectSource"
 )
@@ -29,6 +30,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SourceServiceClient interface {
 	RegisterWallet(ctx context.Context, in *RegisterWalletRequest, opts ...grpc.CallOption) (*RegisterWalletResponse, error)
+	RegisterDocument(ctx context.Context, in *RegisterDocumentRequest, opts ...grpc.CallOption) (*RegisterDocumentResponse, error)
 	ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*ListSourcesResponse, error)
 	DisconnectSource(ctx context.Context, in *DisconnectSourceRequest, opts ...grpc.CallOption) (*DisconnectSourceResponse, error)
 }
@@ -45,6 +47,16 @@ func (c *sourceServiceClient) RegisterWallet(ctx context.Context, in *RegisterWa
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegisterWalletResponse)
 	err := c.cc.Invoke(ctx, SourceService_RegisterWallet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sourceServiceClient) RegisterDocument(ctx context.Context, in *RegisterDocumentRequest, opts ...grpc.CallOption) (*RegisterDocumentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterDocumentResponse)
+	err := c.cc.Invoke(ctx, SourceService_RegisterDocument_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +88,7 @@ func (c *sourceServiceClient) DisconnectSource(ctx context.Context, in *Disconne
 // for forward compatibility.
 type SourceServiceServer interface {
 	RegisterWallet(context.Context, *RegisterWalletRequest) (*RegisterWalletResponse, error)
+	RegisterDocument(context.Context, *RegisterDocumentRequest) (*RegisterDocumentResponse, error)
 	ListSources(context.Context, *ListSourcesRequest) (*ListSourcesResponse, error)
 	DisconnectSource(context.Context, *DisconnectSourceRequest) (*DisconnectSourceResponse, error)
 	mustEmbedUnimplementedSourceServiceServer()
@@ -90,6 +103,9 @@ type UnimplementedSourceServiceServer struct{}
 
 func (UnimplementedSourceServiceServer) RegisterWallet(context.Context, *RegisterWalletRequest) (*RegisterWalletResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterWallet not implemented")
+}
+func (UnimplementedSourceServiceServer) RegisterDocument(context.Context, *RegisterDocumentRequest) (*RegisterDocumentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterDocument not implemented")
 }
 func (UnimplementedSourceServiceServer) ListSources(context.Context, *ListSourcesRequest) (*ListSourcesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSources not implemented")
@@ -132,6 +148,24 @@ func _SourceService_RegisterWallet_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SourceServiceServer).RegisterWallet(ctx, req.(*RegisterWalletRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SourceService_RegisterDocument_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterDocumentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SourceServiceServer).RegisterDocument(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SourceService_RegisterDocument_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SourceServiceServer).RegisterDocument(ctx, req.(*RegisterDocumentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -184,12 +218,448 @@ var SourceService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SourceService_RegisterWallet_Handler,
 		},
 		{
+			MethodName: "RegisterDocument",
+			Handler:    _SourceService_RegisterDocument_Handler,
+		},
+		{
 			MethodName: "ListSources",
 			Handler:    _SourceService_ListSources_Handler,
 		},
 		{
 			MethodName: "DisconnectSource",
 			Handler:    _SourceService_DisconnectSource_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "giwa/engine/v1/engine.proto",
+}
+
+const (
+	WorkflowService_EnqueueSync_FullMethodName  = "/giwa.engine.v1.WorkflowService/EnqueueSync"
+	WorkflowService_GetSyncJob_FullMethodName   = "/giwa.engine.v1.WorkflowService/GetSyncJob"
+	WorkflowService_ListSyncJobs_FullMethodName = "/giwa.engine.v1.WorkflowService/ListSyncJobs"
+)
+
+// WorkflowServiceClient is the client API for WorkflowService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type WorkflowServiceClient interface {
+	EnqueueSync(ctx context.Context, in *EnqueueSyncRequest, opts ...grpc.CallOption) (*EnqueueSyncResponse, error)
+	GetSyncJob(ctx context.Context, in *GetSyncJobRequest, opts ...grpc.CallOption) (*GetSyncJobResponse, error)
+	ListSyncJobs(ctx context.Context, in *ListSyncJobsRequest, opts ...grpc.CallOption) (*ListSyncJobsResponse, error)
+}
+
+type workflowServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewWorkflowServiceClient(cc grpc.ClientConnInterface) WorkflowServiceClient {
+	return &workflowServiceClient{cc}
+}
+
+func (c *workflowServiceClient) EnqueueSync(ctx context.Context, in *EnqueueSyncRequest, opts ...grpc.CallOption) (*EnqueueSyncResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnqueueSyncResponse)
+	err := c.cc.Invoke(ctx, WorkflowService_EnqueueSync_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowServiceClient) GetSyncJob(ctx context.Context, in *GetSyncJobRequest, opts ...grpc.CallOption) (*GetSyncJobResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSyncJobResponse)
+	err := c.cc.Invoke(ctx, WorkflowService_GetSyncJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowServiceClient) ListSyncJobs(ctx context.Context, in *ListSyncJobsRequest, opts ...grpc.CallOption) (*ListSyncJobsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSyncJobsResponse)
+	err := c.cc.Invoke(ctx, WorkflowService_ListSyncJobs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// WorkflowServiceServer is the server API for WorkflowService service.
+// All implementations must embed UnimplementedWorkflowServiceServer
+// for forward compatibility.
+type WorkflowServiceServer interface {
+	EnqueueSync(context.Context, *EnqueueSyncRequest) (*EnqueueSyncResponse, error)
+	GetSyncJob(context.Context, *GetSyncJobRequest) (*GetSyncJobResponse, error)
+	ListSyncJobs(context.Context, *ListSyncJobsRequest) (*ListSyncJobsResponse, error)
+	mustEmbedUnimplementedWorkflowServiceServer()
+}
+
+// UnimplementedWorkflowServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedWorkflowServiceServer struct{}
+
+func (UnimplementedWorkflowServiceServer) EnqueueSync(context.Context, *EnqueueSyncRequest) (*EnqueueSyncResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EnqueueSync not implemented")
+}
+func (UnimplementedWorkflowServiceServer) GetSyncJob(context.Context, *GetSyncJobRequest) (*GetSyncJobResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSyncJob not implemented")
+}
+func (UnimplementedWorkflowServiceServer) ListSyncJobs(context.Context, *ListSyncJobsRequest) (*ListSyncJobsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSyncJobs not implemented")
+}
+func (UnimplementedWorkflowServiceServer) mustEmbedUnimplementedWorkflowServiceServer() {}
+func (UnimplementedWorkflowServiceServer) testEmbeddedByValue()                         {}
+
+// UnsafeWorkflowServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to WorkflowServiceServer will
+// result in compilation errors.
+type UnsafeWorkflowServiceServer interface {
+	mustEmbedUnimplementedWorkflowServiceServer()
+}
+
+func RegisterWorkflowServiceServer(s grpc.ServiceRegistrar, srv WorkflowServiceServer) {
+	// If the following call panics, it indicates UnimplementedWorkflowServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&WorkflowService_ServiceDesc, srv)
+}
+
+func _WorkflowService_EnqueueSync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnqueueSyncRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowServiceServer).EnqueueSync(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowService_EnqueueSync_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowServiceServer).EnqueueSync(ctx, req.(*EnqueueSyncRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowService_GetSyncJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSyncJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowServiceServer).GetSyncJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowService_GetSyncJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowServiceServer).GetSyncJob(ctx, req.(*GetSyncJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowService_ListSyncJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSyncJobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowServiceServer).ListSyncJobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowService_ListSyncJobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowServiceServer).ListSyncJobs(ctx, req.(*ListSyncJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// WorkflowService_ServiceDesc is the grpc.ServiceDesc for WorkflowService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var WorkflowService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "giwa.engine.v1.WorkflowService",
+	HandlerType: (*WorkflowServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "EnqueueSync",
+			Handler:    _WorkflowService_EnqueueSync_Handler,
+		},
+		{
+			MethodName: "GetSyncJob",
+			Handler:    _WorkflowService_GetSyncJob_Handler,
+		},
+		{
+			MethodName: "ListSyncJobs",
+			Handler:    _WorkflowService_ListSyncJobs_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "giwa/engine/v1/engine.proto",
+}
+
+const (
+	QueryService_GetDashboard_FullMethodName     = "/giwa.engine.v1.QueryService/GetDashboard"
+	QueryService_ListLedgerEvents_FullMethodName = "/giwa.engine.v1.QueryService/ListLedgerEvents"
+	QueryService_ListReviews_FullMethodName      = "/giwa.engine.v1.QueryService/ListReviews"
+	QueryService_CreateReport_FullMethodName     = "/giwa.engine.v1.QueryService/CreateReport"
+	QueryService_ListReports_FullMethodName      = "/giwa.engine.v1.QueryService/ListReports"
+)
+
+// QueryServiceClient is the client API for QueryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type QueryServiceClient interface {
+	GetDashboard(ctx context.Context, in *GetDashboardRequest, opts ...grpc.CallOption) (*GetDashboardResponse, error)
+	ListLedgerEvents(ctx context.Context, in *ListLedgerEventsRequest, opts ...grpc.CallOption) (*ListLedgerEventsResponse, error)
+	ListReviews(ctx context.Context, in *ListReviewsRequest, opts ...grpc.CallOption) (*ListReviewsResponse, error)
+	CreateReport(ctx context.Context, in *CreateReportRequest, opts ...grpc.CallOption) (*CreateReportResponse, error)
+	ListReports(ctx context.Context, in *ListReportsRequest, opts ...grpc.CallOption) (*ListReportsResponse, error)
+}
+
+type queryServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewQueryServiceClient(cc grpc.ClientConnInterface) QueryServiceClient {
+	return &queryServiceClient{cc}
+}
+
+func (c *queryServiceClient) GetDashboard(ctx context.Context, in *GetDashboardRequest, opts ...grpc.CallOption) (*GetDashboardResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetDashboardResponse)
+	err := c.cc.Invoke(ctx, QueryService_GetDashboard_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) ListLedgerEvents(ctx context.Context, in *ListLedgerEventsRequest, opts ...grpc.CallOption) (*ListLedgerEventsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLedgerEventsResponse)
+	err := c.cc.Invoke(ctx, QueryService_ListLedgerEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) ListReviews(ctx context.Context, in *ListReviewsRequest, opts ...grpc.CallOption) (*ListReviewsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListReviewsResponse)
+	err := c.cc.Invoke(ctx, QueryService_ListReviews_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) CreateReport(ctx context.Context, in *CreateReportRequest, opts ...grpc.CallOption) (*CreateReportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateReportResponse)
+	err := c.cc.Invoke(ctx, QueryService_CreateReport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) ListReports(ctx context.Context, in *ListReportsRequest, opts ...grpc.CallOption) (*ListReportsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListReportsResponse)
+	err := c.cc.Invoke(ctx, QueryService_ListReports_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// QueryServiceServer is the server API for QueryService service.
+// All implementations must embed UnimplementedQueryServiceServer
+// for forward compatibility.
+type QueryServiceServer interface {
+	GetDashboard(context.Context, *GetDashboardRequest) (*GetDashboardResponse, error)
+	ListLedgerEvents(context.Context, *ListLedgerEventsRequest) (*ListLedgerEventsResponse, error)
+	ListReviews(context.Context, *ListReviewsRequest) (*ListReviewsResponse, error)
+	CreateReport(context.Context, *CreateReportRequest) (*CreateReportResponse, error)
+	ListReports(context.Context, *ListReportsRequest) (*ListReportsResponse, error)
+	mustEmbedUnimplementedQueryServiceServer()
+}
+
+// UnimplementedQueryServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedQueryServiceServer struct{}
+
+func (UnimplementedQueryServiceServer) GetDashboard(context.Context, *GetDashboardRequest) (*GetDashboardResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDashboard not implemented")
+}
+func (UnimplementedQueryServiceServer) ListLedgerEvents(context.Context, *ListLedgerEventsRequest) (*ListLedgerEventsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLedgerEvents not implemented")
+}
+func (UnimplementedQueryServiceServer) ListReviews(context.Context, *ListReviewsRequest) (*ListReviewsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListReviews not implemented")
+}
+func (UnimplementedQueryServiceServer) CreateReport(context.Context, *CreateReportRequest) (*CreateReportResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateReport not implemented")
+}
+func (UnimplementedQueryServiceServer) ListReports(context.Context, *ListReportsRequest) (*ListReportsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListReports not implemented")
+}
+func (UnimplementedQueryServiceServer) mustEmbedUnimplementedQueryServiceServer() {}
+func (UnimplementedQueryServiceServer) testEmbeddedByValue()                      {}
+
+// UnsafeQueryServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to QueryServiceServer will
+// result in compilation errors.
+type UnsafeQueryServiceServer interface {
+	mustEmbedUnimplementedQueryServiceServer()
+}
+
+func RegisterQueryServiceServer(s grpc.ServiceRegistrar, srv QueryServiceServer) {
+	// If the following call panics, it indicates UnimplementedQueryServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&QueryService_ServiceDesc, srv)
+}
+
+func _QueryService_GetDashboard_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDashboardRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).GetDashboard(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryService_GetDashboard_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).GetDashboard(ctx, req.(*GetDashboardRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_ListLedgerEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLedgerEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).ListLedgerEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryService_ListLedgerEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).ListLedgerEvents(ctx, req.(*ListLedgerEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_ListReviews_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListReviewsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).ListReviews(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryService_ListReviews_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).ListReviews(ctx, req.(*ListReviewsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_CreateReport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateReportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).CreateReport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryService_CreateReport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).CreateReport(ctx, req.(*CreateReportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_ListReports_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListReportsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).ListReports(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryService_ListReports_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).ListReports(ctx, req.(*ListReportsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// QueryService_ServiceDesc is the grpc.ServiceDesc for QueryService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var QueryService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "giwa.engine.v1.QueryService",
+	HandlerType: (*QueryServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetDashboard",
+			Handler:    _QueryService_GetDashboard_Handler,
+		},
+		{
+			MethodName: "ListLedgerEvents",
+			Handler:    _QueryService_ListLedgerEvents_Handler,
+		},
+		{
+			MethodName: "ListReviews",
+			Handler:    _QueryService_ListReviews_Handler,
+		},
+		{
+			MethodName: "CreateReport",
+			Handler:    _QueryService_CreateReport_Handler,
+		},
+		{
+			MethodName: "ListReports",
+			Handler:    _QueryService_ListReports_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

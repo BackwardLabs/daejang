@@ -73,16 +73,19 @@ export const assertWebAuthSchema = async (pool: Pool) => {
 
   const walletSource = await pool.query<{
     wallet_challenges_table: string | null
+    upload_sessions_table: string | null
   }>(
     `
       SELECT
-        to_regclass('web_private.wallet_ownership_challenges')::text AS wallet_challenges_table
+        to_regclass('web_private.wallet_ownership_challenges')::text AS wallet_challenges_table,
+        to_regclass('web_private.upload_sessions')::text AS upload_sessions_table
     `,
   )
   const walletRow = walletSource.rows[0]
   if (
     walletRow?.wallet_challenges_table !==
-      'web_private.wallet_ownership_challenges'
+      'web_private.wallet_ownership_challenges' ||
+    walletRow.upload_sessions_table !== 'web_private.upload_sessions'
   ) {
     throw new Error('web_private wallet challenge migration contract is invalid')
   }

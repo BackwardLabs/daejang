@@ -18,8 +18,42 @@ export type WalletSourceApiModel = {
   }>
 }
 
+export type DocumentSourceApiModel = {
+  id: string
+  type: 'UPBIT_PDF'
+  provider: 'UPBIT'
+  originalFilename: string
+  mediaType: 'application/pdf'
+  byteLength: number
+  artifactDigest: string
+  coverageStart: string
+  coverageEnd: string
+  status: 'ACTIVE' | 'DISCONNECTED'
+  createdAt: string
+  updatedAt: string
+}
+export type SourceApiModel = WalletSourceApiModel | DocumentSourceApiModel
+
+export type SyncJobApiModel = {
+  id: string
+  sourceId: string
+  sourceKind: 'UPBIT_PDF' | 'EVM_WALLET'
+  state: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+  phase: 'VALIDATE_SOURCE' | 'EXTRACT' | 'NORMALIZE' | 'PUBLISH' | 'COMPLETE'
+  attempts: number | string
+  processedRecords: number | string
+  failureCode?: string
+  failureMessage?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export async function listSources(signal?: AbortSignal) {
-  return requestApi<{ items: WalletSourceApiModel[] }>('/sources', { signal })
+  return requestApi<{ items: SourceApiModel[] }>('/sources', { signal })
+}
+
+export async function listSyncJobs(signal?: AbortSignal) {
+  return requestApi<{ items: SyncJobApiModel[] }>('/jobs', { signal })
 }
 
 export async function createWalletChallenge(input: {

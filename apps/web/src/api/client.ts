@@ -62,6 +62,18 @@ async function send(path: string, init: RequestInit) {
   })
 }
 
+export async function requestRaw(path: string, init: RequestInit = {}) {
+  let response = await send(path, init)
+  if (response.status === 401 && developmentBootstrapEnabled) {
+    await bootstrapDevelopmentSession()
+    response = await send(path, init)
+  }
+  if (!response.ok) {
+    throw await toApiError(response)
+  }
+  return response
+}
+
 export async function requestApi<T>(
   path: string,
   init: RequestInit = {},

@@ -12,6 +12,19 @@
 - 앱 내부의 PostgreSQL 로그인 제한은 ingress 제한을 우회한 요청과 여러 인스턴스 간 누적 시도를 추가로 차단한다.
 - 실제 로그인 경로가 추가되면 `/api/v1/auth/{siwe|oidc|email}/` 접두사를 유지하거나 이 설정도 함께 변경한다.
 
+## Cloudflare 경로 분리
+
+`wrangler deploy`는 `apps/web/dist` 정적 파일만 배포한다. 운영 도메인에서는
+Cloudflare route 또는 Tunnel을 사용해 `daejang.backwardlabs.io/api/*`를 이
+NGINX ingress로 먼저 전달해야 한다. `/docs*`는 기존 문서 서비스가 처리하고,
+나머지 경로만 정적 SPA로 전달한다. 순서가 뒤집히면 API 요청이 JSON 대신
+`index.html`을 받게 된다.
+
+컨테이너 기준 설정은 `deploy/compose.production.yaml`과
+`deploy/production.env.example`에 있다. Engine과 Web API는 host port를
+publish하지 않으며 NGINX만 공개한다. PDF content 경로만 20 MiB를 허용하고
+다른 API 요청은 1 MiB 제한을 유지한다.
+
 구문 확인:
 
 ```bash

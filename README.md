@@ -4,11 +4,11 @@
 
 ## 현재 범위
 
-이 저장소는 GIWA MVP의 웹 애플리케이션, Web API와 Source Engine API를 제공합니다. `apps/web`의 React 화면, `apps/web-api`의 Fastify BFF, `services/engine`의 Go gRPC SourceService가 구현되어 있으며 장기 실행 수집·계산 worker는 private gRPC 경계 뒤에서 후속 연결합니다.
+이 저장소는 GIWA MVP의 웹 애플리케이션, Web API와 Engine을 제공합니다. `apps/web`의 React 화면, `apps/web-api`의 Fastify BFF, `services/engine`의 Go gRPC Source·Workflow·Query 서비스와 durable Sync worker가 구현되어 있습니다.
 
 - Frontend: React 19, TypeScript 6, Vite 8
 - Web API: Fastify 5, TypeScript, 서버 세션 기반 BFF
-- Source Engine API: Go, protobuf, mTLS gRPC, PostgreSQL source store
+- Engine API: Go, protobuf, mTLS gRPC, PostgreSQL source/job/read/report stores
 - Package manager: npm workspaces
 - Quality: Oxlint, TypeScript, Vitest, Testing Library
 - MVP 데이터 소스: Upbit 거래내역 PDF와 여러 EVM 공개 지갑 주소
@@ -58,7 +58,9 @@ Web API는 다음 보안 경계를 기본으로 적용합니다.
 - 버전별 이용약관·개인정보 처리방침과 append-only 사용자 동의 이력
 - 공급자별 PostgreSQL 로그인 rate limit과 Session Token 회전
 - Engine private gRPC client certificate mTLS preflight
-- 서버 Session 기반 SourceService 등록·목록·연결 해제와 503/504 오류 변환
+- 서버 Session 기반 Source·Workflow·Query 호출과 503/504 오류 변환
+- private Upbit PDF 업로드, digest 검증, durable Sync Job lease
+- 실제 DB 기반 Dashboard·Activity·Ledger·Review와 immutable Report snapshot
 
 메모리 SessionStore와 rate-limit store는 로컬 개발과 테스트 전용입니다. 운영 모드는 `DATABASE_URL`, 32 byte 이상의 `RATE_LIMIT_HMAC_SECRET`, Engine CA·client certificate·private key 설정이 없으면 시작하지 않습니다. Web schema는 `daejang-db`의 단일 사용자 baseline `000008` migration이 소유하고, ingress 기준은 [`deploy/nginx`](deploy/nginx/README.md)에 있습니다.
 

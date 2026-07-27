@@ -8,6 +8,7 @@ describe('web api configuration', () => {
       NODE_ENV: 'production',
       PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
       DATABASE_URL: 'postgresql://example.invalid/daejang',
+      PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
       RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
       ENGINE_GRPC_TARGET: 'jit-engine.internal:8443',
       ENGINE_GRPC_CA_PATH: '/run/secrets/engine-ca.pem',
@@ -43,6 +44,7 @@ describe('web api configuration', () => {
         NODE_ENV: 'production',
         PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
         DATABASE_URL: 'postgresql://example.invalid/daejang',
+        PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
         RATE_LIMIT_HMAC_SECRET: 'short',
       }),
     ).toThrow('RATE_LIMIT_HMAC_SECRET')
@@ -52,6 +54,7 @@ describe('web api configuration', () => {
         NODE_ENV: 'production',
         PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
         DATABASE_URL: 'postgresql://example.invalid/daejang',
+        PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
         RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
       }),
     ).toThrow('ENGINE_GRPC_TARGET')
@@ -128,6 +131,7 @@ describe('web api configuration', () => {
         NODE_ENV: 'production',
         PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
         DATABASE_URL: 'postgresql://example.invalid/daejang',
+        PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
         DEV_BOOTSTRAP_USER_ID: '00000000-0000-4000-8000-000000000001',
         DEV_BOOTSTRAP_DISPLAY_NAME: '김대장',
       }),
