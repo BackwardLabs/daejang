@@ -11,16 +11,34 @@ import type { SessionStore } from './auth/session.js'
 import { loadConfig } from './config.js'
 import type { AppConfig } from './config.js'
 import { ApiError } from './errors.js'
+import { EngineRpcError } from './engine/rpc-error.js'
+import { status as grpcStatus } from '@grpc/grpc-js'
 import { createLogger } from './logger.js'
 import { registerAuthRoutes } from './routes/auth.js'
+import {
+  registerDevelopmentRoutes,
+  type DevelopmentUserStore,
+} from './routes/development.js'
+import { registerSourceRoutes } from './routes/sources.js'
+import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
 import { registerSecurityPolicy } from './security.js'
+import {
+  MemoryWalletSourceStore,
+  type WalletSourceStore,
+} from './sources/wallet-source-store.js'
+import type { UploadStore } from './uploads/upload-store.js'
 
 type BuildAppOptions = {
   config?: AppConfig
   logger?: false | FastifyBaseLogger
   sessionStore?: SessionStore
   rateLimitStore?: RateLimitStore
+  walletSourceStore?: WalletSourceStore
+  uploadStore?: UploadStore
+  engineDataClient?: EngineDataClient
+  developmentUserStore?: DevelopmentUserStore
   now?: () => Date
+  readinessCheck?: () => Promise<void>
 }
 
 const hasValidationErrors = (error: unknown): error is { validation: unknown } =>
@@ -39,6 +57,12 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   }
   if (config.runtimeMode === 'production' && options.rateLimitStore?.durable !== true) {
     throw new Error('A durable RateLimitStore is required in production')
+  }
+  if (config.runtimeMode === 'production' && options.walletSourceStore?.durable !== true) {
+    throw new Error('A durable WalletSourceStore is required in production')
+  }
+  if (config.devBootstrapUser && !options.developmentUserStore) {
+    throw new Error('A DevelopmentUserStore is required for development bootstrap')
   }
 
   const app =
@@ -66,6 +90,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     options.now,
   )
   const loginCompletionService = new LoginCompletionService(authRateLimiter, sessionService)
+  const walletSourceStore = options.walletSourceStore ?? new MemoryWalletSourceStore()
 
   await app.register(cookie)
   app.decorateRequest('authSession', undefined)
@@ -81,6 +106,21 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         error: {
           code: error.code,
           message: error.message,
+          requestId: request.id,
+          fieldErrors: [],
+        },
+      })
+    }
+
+    if (error instanceof EngineRpcError) {
+      const timedOut = error.grpcCode === grpcStatus.DEADLINE_EXCEEDED
+      request.log.error({ err: error }, 'engine request failed')
+      return reply.status(timedOut ? 504 : 503).send({
+        error: {
+          code: timedOut ? 'ENGINE_TIMEOUT' : 'ENGINE_UNAVAILABLE',
+          message: timedOut
+            ? '처리 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.'
+            : '데이터 처리 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.',
           requestId: request.id,
           fieldErrors: [],
         },
@@ -103,6 +143,17 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         error: {
           code: 'REQUEST_BODY_TOO_LARGE',
           message: '요청 본문이 허용된 크기를 초과했습니다.',
+          requestId: request.id,
+          fieldErrors: [],
+        },
+      })
+    }
+
+    if (hasStatusCode(error) && error.statusCode === 400) {
+      return reply.status(400).send({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: '요청 값을 확인해 주세요.',
           requestId: request.id,
           fieldErrors: [],
         },
@@ -137,6 +188,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     async () => ({ status: 'ok' }),
   )
 
+  app.get('/readyz', async (_request, reply) => {
+    try {
+      await options.readinessCheck?.()
+      return { status: 'ready' }
+    } catch {
+      return reply.status(503).send({ status: 'not-ready' })
+    }
+  })
+
   await registerAuthRoutes(app, {
     config,
     sessionService,
@@ -144,5 +204,28 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     authenticate: authHooks.authenticate,
     clearSessionCookie: authHooks.clearSessionCookie,
   })
+  await registerSourceRoutes(app, {
+    config,
+    walletSourceStore,
+    authRateLimiter,
+    authenticate: authHooks.authenticate,
+    ...(options.engineDataClient ? { engineDataClient: options.engineDataClient } : {}),
+    ...(options.now ? { now: options.now } : {}),
+  })
+  if (options.uploadStore && options.engineDataClient) {
+    await registerDataRoutes(app, {
+      authenticate: authHooks.authenticate,
+      uploadStore: options.uploadStore,
+      engine: options.engineDataClient,
+      ...(options.now ? { now: options.now } : {}),
+    })
+  }
+  if (options.developmentUserStore) {
+    await registerDevelopmentRoutes(app, {
+      config,
+      sessionService,
+      userStore: options.developmentUserStore,
+    })
+  }
   return { app, config, sessionService, loginCompletionService }
 }

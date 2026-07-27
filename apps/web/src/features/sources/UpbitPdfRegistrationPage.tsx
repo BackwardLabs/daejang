@@ -2,6 +2,7 @@ import {
   useEffect,
   useReducer,
   useRef,
+  useState,
   type ChangeEvent,
   type DragEvent,
 } from 'react'
@@ -15,7 +16,6 @@ import {
   createUpbitPdfIntentKey,
   formatPdfFileSize,
   initialUpbitPdfRegistrationState,
-  registerUpbitPdfMock,
   upbitPdfRegistrationReducer,
   validateUpbitPdfFile,
   type RegisterUpbitPdf,
@@ -25,6 +25,7 @@ import {
   type UpbitPdfSelectionError,
   type UpbitPdfSelectionErrorCode,
 } from './upbitPdfRegistration.ts'
+import { registerUpbitPdfApi } from './upbitPdfApi.ts'
 import './upbit-pdf-flow.css'
 
 const registrationSteps = ['PDF 선택', '등록 정보 확인', '등록 완료'] as const
@@ -343,6 +344,9 @@ function PdfSelectionStep({
 }
 
 function PdfReviewStep({
+
+  coverageEnd,
+  coverageStart,
   error,
   file,
   isSubmitting,
@@ -351,7 +355,11 @@ function PdfReviewStep({
   onReplace,
   onSubmit,
   status,
+  onCoverageEndChange,
+  onCoverageStartChange,
 }: {
+  coverageEnd: string
+  coverageStart: string
   error: UpbitPdfRegistrationError | null
   file: File
   isSubmitting: boolean
@@ -360,6 +368,8 @@ function PdfReviewStep({
   onReplace: () => void
   onSubmit: () => void
   status: 'DOCUMENT_UPLOADING' | 'SOURCE_EDITING' | 'SOURCE_SAVE_FAILED' | 'SOURCE_SUBMITTING'
+  onCoverageEndChange: (value: string) => void
+  onCoverageStartChange: (value: string) => void
 }) {
   const recovery = error ? registrationErrorCopy[error.code].recovery : null
   const canRetry = recovery === 'retry'
@@ -410,6 +420,18 @@ function PdfReviewStep({
             </dd>
           </div>
         </dl>
+
+        <fieldset className="pdf-coverage-fields" disabled={isSubmitting}>
+          <legend>수집 기간</legend>
+          <label>
+            시작일
+            <input type="date" value={coverageStart} max={coverageEnd} onChange={(event) => onCoverageStartChange(event.target.value)} required />
+          </label>
+          <label>
+            종료일
+            <input type="date" value={coverageEnd} min={coverageStart} onChange={(event) => onCoverageEndChange(event.target.value)} required />
+          </label>
+        </fieldset>
 
         {isSubmitting ? (
           <div className="pdf-submit-status" role="status" aria-live="polite">
@@ -559,10 +581,13 @@ function PdfCompletionStep({
 }
 
 export function UpbitPdfRegistrationPage({
-  registerPdf = registerUpbitPdfMock,
+  registerPdf = registerUpbitPdfApi,
 }: {
   registerPdf?: RegisterUpbitPdf
 }) {
+  const today = new Date().toISOString().slice(0, 10)
+  const [coverageStart, setCoverageStart] = useState(`${today.slice(0, 4)}-01-01`)
+  const [coverageEnd, setCoverageEnd] = useState(today)
   const [state, dispatch] = useReducer(
     upbitPdfRegistrationReducer,
     initialUpbitPdfRegistrationState,
@@ -665,6 +690,8 @@ export function UpbitPdfRegistrationPage({
       const result = await registerPdf({
         file,
         intentKey,
+        coverageStart,
+        coverageEnd,
         onStageChange: (status) => {
           if (
             activeRequestRef.current === requestId &&
@@ -750,6 +777,8 @@ export function UpbitPdfRegistrationPage({
 
         {state.view === 'review' ? (
           <PdfReviewStep
+            coverageEnd={coverageEnd}
+            coverageStart={coverageStart}
             error={state.error}
             file={state.file}
             isSubmitting={false}
@@ -758,11 +787,15 @@ export function UpbitPdfRegistrationPage({
             onReplace={handleReplace}
             onSubmit={handleSubmit}
             status={state.status}
+            onCoverageEndChange={setCoverageEnd}
+            onCoverageStartChange={setCoverageStart}
           />
         ) : null}
 
         {state.view === 'submitting' ? (
           <PdfReviewStep
+            coverageEnd={coverageEnd}
+            coverageStart={coverageStart}
             error={null}
             file={state.file}
             isSubmitting
@@ -771,6 +804,8 @@ export function UpbitPdfRegistrationPage({
             onReplace={() => undefined}
             onSubmit={() => undefined}
             status={state.status}
+            onCoverageEndChange={setCoverageEnd}
+            onCoverageStartChange={setCoverageStart}
           />
         ) : null}
 

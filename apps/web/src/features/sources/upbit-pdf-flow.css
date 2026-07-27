@@ -894,3 +894,4 @@
     animation: none;
   }
 }
+.pdf-coverage-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:24px 0;padding:20px;border:1px solid #e4e4e7;border-radius:14px}.pdf-coverage-fields legend{padding:0 8px;font-weight:800}.pdf-coverage-fields label{display:grid;gap:8px;font-size:13px;font-weight:700}.pdf-coverage-fields input{min-height:44px;padding:0 12px;border:1px solid #d4d4d8;border-radius:10px;font:inherit;background:#fff}@media(max-width:640px){.pdf-coverage-fields{grid-template-columns:1fr}}

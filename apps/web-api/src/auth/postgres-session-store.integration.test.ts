@@ -10,6 +10,8 @@ import { AuthRateLimiter, PostgresRateLimitStore } from './rate-limit.js'
 import { PostgresSessionStore } from './postgres-session-store.js'
 import { PostgresUserStore } from './postgres-user-store.js'
 import { SessionService } from './session.js'
+import { PostgresWalletSourceStore } from '../sources/postgres-wallet-source-store.js'
+import { MemoryWalletSourceStore } from '../sources/wallet-source-store.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithPostgres = databaseUrl ? describe : describe.skip
@@ -27,9 +29,14 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
   const pool = new Pool({ connectionString: databaseUrl })
   const users = new PostgresUserStore(pool)
   const sessions = new SessionService(new PostgresSessionStore(pool), 3_600, 600)
+  const walletSources = new PostgresWalletSourceStore(
+    pool,
+    new MemoryWalletSourceStore(),
+  )
 
   beforeAll(async () => {
     await pool.query('DROP SCHEMA IF EXISTS web_private CASCADE')
+    await pool.query('DROP SCHEMA IF EXISTS source_private CASCADE')
     await pool.query('DROP SCHEMA IF EXISTS daejang_meta CASCADE')
     await pool.query(`
       CREATE SCHEMA daejang_meta;
@@ -41,7 +48,13 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       );
     `)
 
-    for (const filename of ['000008_create_web_auth_persistence.sql']) {
+    for (const filename of [
+      '000008_create_web_auth_persistence.sql',
+      '000009_create_wallet_source_persistence.sql',
+      '000010_create_wallet_ownership_challenges.sql',
+      '000011_move_wallet_sources_behind_engine.sql',
+      '000012_create_source_jobs_and_reports.sql',
+    ]) {
       const migrationUrl = process.env.WEB_AUTH_MIGRATION_DIRECTORY
         ? pathToFileURL(resolve(process.env.WEB_AUTH_MIGRATION_DIRECTORY, filename))
         : new URL(`../../../../../daejang-db/migrations/${filename}`, import.meta.url)
@@ -73,11 +86,14 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
 
   beforeEach(async () => {
     await users.setStatus(USER_ID, 'active')
+    await pool.query('DELETE FROM web_private.wallet_ownership_challenges')
+    await pool.query('DELETE FROM web_private.upload_sessions')
     await pool.query('DELETE FROM web_private.sessions')
   })
 
   afterAll(async () => {
     await pool.query('DROP SCHEMA IF EXISTS web_private CASCADE')
+    await pool.query('DROP SCHEMA IF EXISTS source_private CASCADE')
     await pool.query('DROP SCHEMA IF EXISTS daejang_meta CASCADE')
     await pool.end()
   })
@@ -220,6 +236,74 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
         })
       ).allowed,
     ).toBe(false)
+  })
+
+  it('consumes a wallet challenge once and preserves disconnected sources', async () => {
+    const now = new Date('2027-07-20T00:00:00.000Z')
+    const challenge = {
+      id: '00000000-0000-4000-8000-000000000401',
+      userId: USER_ID,
+      address: '0x1234567890abcdef1234567890abcdef12345678',
+      verificationChainId: 'eip155:1',
+      message: 'Daejang wallet integration challenge',
+      issuedAt: now,
+      expiresAt: new Date(now.getTime() + 300_000),
+      consumedAt: undefined,
+    } as const
+    await walletSources.createChallenge(challenge)
+
+    const registered = await walletSources.completeRegistration({
+      challengeId: challenge.id,
+      userId: USER_ID,
+      recoveredAddress: challenge.address,
+      verificationChainId: challenge.verificationChainId,
+      chainIds: ['eip155:1', 'eip155:8453'],
+      label: '통합 테스트 지갑',
+      now,
+      requestId: 'wallet-register-request',
+      sessionId: 'wallet-register-session',
+      idempotencyKey: challenge.id,
+    })
+    expect(registered).toMatchObject({
+      address: challenge.address,
+      status: 'ACTIVE',
+      chainScopes: [
+        { chainId: 'eip155:1', status: 'ACTIVE' },
+        { chainId: 'eip155:8453', status: 'ACTIVE' },
+      ],
+    })
+    await expect(
+      walletSources.completeRegistration({
+        challengeId: challenge.id,
+        userId: USER_ID,
+        recoveredAddress: challenge.address,
+        verificationChainId: challenge.verificationChainId,
+        chainIds: ['eip155:1'],
+        label: undefined,
+        now,
+        requestId: 'wallet-register-replay',
+        sessionId: 'wallet-register-session',
+        idempotencyKey: challenge.id,
+      }),
+    ).resolves.toBeUndefined()
+
+    const disconnected = await walletSources.disconnectWallet(
+      {
+        requestId: 'wallet-disconnect-request',
+        userId: USER_ID,
+        sessionId: 'wallet-register-session',
+        idempotencyKey: `disconnect:${registered?.id ?? ''}`,
+      },
+      registered?.id ?? '',
+      new Date(now.getTime() + 1_000),
+    )
+    expect(disconnected).toMatchObject({
+      status: 'DISCONNECTED',
+      chainScopes: [
+        { chainId: 'eip155:1', status: 'DISABLED' },
+        { chainId: 'eip155:8453', status: 'DISABLED' },
+      ],
+    })
   })
 
   it('increments the session epoch when every user session is revoked', async () => {

@@ -12,6 +12,12 @@ export type AppConfig = {
   databaseUrl: string | undefined
   rateLimitHmacSecret: string
   engineMtls: EngineMtlsConfig | undefined
+  engineInsecureTarget?: string
+  privateObjectRoot?: string
+  devBootstrapUser?: {
+    id: string
+    displayName: string
+  }
 }
 
 export type EngineMtlsConfig = {
@@ -94,6 +100,32 @@ const loadEngineMtlsConfig = (
   }
 }
 
+const loadDevelopmentEngineTarget = (
+  environment: NodeJS.ProcessEnv,
+  production: boolean,
+) => {
+  const target = environment.ENGINE_GRPC_INSECURE_TARGET
+  if (!target) {
+    return undefined
+  }
+  if (production) {
+    throw new Error('ENGINE_GRPC_INSECURE_TARGET is not allowed in production')
+  }
+  if (
+    environment.ENGINE_GRPC_TARGET ||
+    environment.ENGINE_GRPC_CA_PATH ||
+    environment.ENGINE_GRPC_CERT_PATH ||
+    environment.ENGINE_GRPC_KEY_PATH
+  ) {
+    throw new Error('Configure either Engine mTLS or insecure loopback, not both')
+  }
+  const match = /^(?:127\.0\.0\.1|localhost|\[::1\]):([1-9][0-9]{0,4})$/.exec(target)
+  if (!match || Number(match[1]) > 65_535) {
+    throw new Error('ENGINE_GRPC_INSECURE_TARGET must be a loopback gRPC authority')
+  }
+  return target
+}
+
 export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppConfig => {
   const runtimeMode = environment.NODE_ENV ?? 'development'
   if (!['development', 'test', 'production'].includes(runtimeMode)) {
@@ -101,11 +133,43 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   }
 
   const production = runtimeMode === 'production'
+  const engineInsecureTarget = loadDevelopmentEngineTarget(
+    environment,
+    production,
+  )
   if (production && environment.PUBLIC_ORIGIN === undefined) {
     throw new Error('PUBLIC_ORIGIN is required in production')
   }
   if (production && environment.DATABASE_URL === undefined) {
     throw new Error('DATABASE_URL is required in production')
+  }
+  if (production && environment.PRIVATE_OBJECT_ROOT === undefined) {
+    throw new Error('PRIVATE_OBJECT_ROOT is required in production')
+  }
+  if (
+    production &&
+    (environment.DEV_BOOTSTRAP_USER_ID || environment.DEV_BOOTSTRAP_DISPLAY_NAME)
+  ) {
+    throw new Error('Development session bootstrap must not be enabled in production')
+  }
+
+  const devBootstrapUserId = environment.DEV_BOOTSTRAP_USER_ID
+  const devBootstrapDisplayName = environment.DEV_BOOTSTRAP_DISPLAY_NAME
+  if (
+    (devBootstrapUserId === undefined) !==
+    (devBootstrapDisplayName === undefined)
+  ) {
+    throw new Error(
+      'DEV_BOOTSTRAP_USER_ID and DEV_BOOTSTRAP_DISPLAY_NAME must be configured together',
+    )
+  }
+  if (
+    devBootstrapUserId &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      devBootstrapUserId,
+    )
+  ) {
+    throw new Error('DEV_BOOTSTRAP_USER_ID must be a UUID')
   }
 
   const rateLimitHmacSecret =
@@ -150,5 +214,15 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     databaseUrl: environment.DATABASE_URL,
     rateLimitHmacSecret,
     engineMtls: loadEngineMtlsConfig(environment, production),
+    ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
+    ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
+    ...(devBootstrapUserId && devBootstrapDisplayName
+      ? {
+          devBootstrapUser: {
+            id: devBootstrapUserId,
+            displayName: devBootstrapDisplayName,
+          },
+        }
+      : {}),
   }
 }

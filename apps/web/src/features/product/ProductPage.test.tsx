@@ -6,7 +6,7 @@ describe('ProductPage', () => {
   it('connects and disconnects the mock Base source', () => {
     render(<ProductPage kind="sources" />)
 
-    expect(screen.getByText('김대장')).toBeInTheDocument()
+    expect(screen.getByText('계정')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '거래소·지갑' })).toHaveAttribute(
       'aria-current',
       'page',

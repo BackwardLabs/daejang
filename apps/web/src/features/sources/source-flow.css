@@ -244,6 +244,95 @@ body:has(.source-page) {
   text-align: center;
 }
 
+.source-api-notice {
+  margin: 0 0 24px;
+  padding: 14px 16px;
+  border: 1px solid #f2c9b8;
+  border-radius: 10px;
+  color: #9a3412;
+  background: #fff8f4;
+}
+
+.source-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.source-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 24px;
+  padding: 20px 24px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.source-list__identity,
+.source-list__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.source-list__identity img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.source-list__identity div,
+.source-list__meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.source-list__identity span,
+.source-list__meta span {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.source-list__meta b {
+  color: #157347;
+  font-size: 13px;
+}
+
+.source-list__meta b[data-status='DISCONNECTED'] {
+  color: #6b7280;
+}
+
+.source-list__meta small {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.source-list__meta small[data-job-state='FAILED'] {
+  color: #c2410c;
+}
+
+.source-list__item button {
+  padding: 9px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  color: #374151;
+  background: #fff;
+  cursor: pointer;
+}
+
+.source-list__item button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+@media (max-width: 800px) {
+  .source-list__item {
+    grid-template-columns: 1fr;
+  }
+}
+
 .source-mvp-guide {
   display: flex;
   align-items: center;

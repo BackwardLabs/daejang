@@ -1,0 +1,95 @@
+name: daejang
+services:
+  nginx:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    ports: ["${PUBLIC_TLS_PORT:-8443}:8443"]
+    volumes:
+      - ./nginx/web-api.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy_params:/etc/nginx/proxy_params:ro
+      - ${PUBLIC_TLS_CERT_PATH}:/run/secrets/public-tls-cert.pem:ro
+      - ${PUBLIC_TLS_KEY_PATH}:/run/secrets/public-tls-key.pem:ro
+    depends_on:
+      web-api: { condition: service_healthy }
+    networks: [edge]
+
+  web-api:
+    build: { context: .., dockerfile: apps/web-api/Dockerfile }
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+      DATABASE_URL: ${WEB_DATABASE_URL}
+      RATE_LIMIT_HMAC_SECRET: ${RATE_LIMIT_HMAC_SECRET}
+      TRUST_PROXY_HOPS: 1
+      PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+      ENGINE_GRPC_TARGET: engine:50051
+      ENGINE_GRPC_SERVER_NAME: engine.internal
+      ENGINE_GRPC_CA_PATH: /run/secrets/engine-ca.pem
+      ENGINE_GRPC_CERT_PATH: /run/secrets/web-engine-client-cert.pem
+      ENGINE_GRPC_KEY_PATH: /run/secrets/web-engine-client-key.pem
+    volumes:
+      - private_objects:/var/lib/daejang/private
+      - ${ENGINE_CA_PATH}:/run/secrets/engine-ca.pem:ro
+      - ${WEB_ENGINE_CLIENT_CERT_PATH}:/run/secrets/web-engine-client-cert.pem:ro
+      - ${WEB_ENGINE_CLIENT_KEY_PATH}:/run/secrets/web-engine-client-key.pem:ro
+    depends_on:
+      engine: { condition: service_healthy }
+    networks: [edge, backend]
+
+  engine:
+    build:
+      context: ..
+      dockerfile: services/engine/Dockerfile
+      secrets: [github_token]
+    restart: unless-stopped
+    environment:
+      ENGINE_LISTEN: 0.0.0.0:50051
+      DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
+      DAEJANG_QUERY_DATABASE_URL: ${QUERY_DATABASE_URL}
+      DAEJANG_REPORT_DATABASE_URL: ${REPORT_DATABASE_URL}
+      ENGINE_TLS_CERT_PATH: /run/secrets/engine-server-cert.pem
+      ENGINE_TLS_KEY_PATH: /run/secrets/engine-server-key.pem
+      ENGINE_TLS_CLIENT_CA_PATH: /run/secrets/engine-client-ca.pem
+      ENGINE_HEALTH_CA_PATH: /run/secrets/engine-ca.pem
+      ENGINE_HEALTH_CERT_PATH: /run/secrets/probe-client-cert.pem
+      ENGINE_HEALTH_KEY_PATH: /run/secrets/probe-client-key.pem
+      ENGINE_HEALTH_SERVER_NAME: engine.internal
+    volumes:
+      - ${ENGINE_SERVER_CERT_PATH}:/run/secrets/engine-server-cert.pem:ro
+      - ${ENGINE_SERVER_KEY_PATH}:/run/secrets/engine-server-key.pem:ro
+      - ${ENGINE_CLIENT_CA_PATH}:/run/secrets/engine-client-ca.pem:ro
+      - ${ENGINE_CA_PATH}:/run/secrets/engine-ca.pem:ro
+      - ${ENGINE_PROBE_CERT_PATH}:/run/secrets/probe-client-cert.pem:ro
+      - ${ENGINE_PROBE_KEY_PATH}:/run/secrets/probe-client-key.pem:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/engine-healthcheck"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+      start_period: 10s
+    networks: [backend]
+
+  sync-worker:
+    build:
+      context: ..
+      dockerfile: services/engine/Dockerfile
+      secrets: [github_token]
+    entrypoint: ["/usr/local/bin/sync-worker"]
+    restart: unless-stopped
+    environment:
+      DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
+      DAEJANG_PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+    volumes: ["private_objects:/var/lib/daejang/private:ro"]
+    networks: [backend]
+
+networks:
+  edge: {}
+  backend: {}
+volumes:
+  private_objects: {}
+secrets:
+  github_token:
+    environment: GH_PAT

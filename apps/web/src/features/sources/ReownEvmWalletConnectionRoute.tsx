@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import {
   useAppKit,
   type Provider,
@@ -7,14 +7,20 @@ import { useAppKitWallet } from '@reown/appkit-wallet-button/react'
 import { BrowserProvider, verifyMessage } from 'ethers'
 import { EvmWalletConnectionPage } from './EvmWalletConnectionPage.tsx'
 import {
+  type CompleteWalletConnection,
   type ConnectWallet,
   type EvmWalletProviderId,
   type RequestOwnershipSignature,
+  normalizeEvmWalletPeriod,
 } from './evmWalletFlow.ts'
 import {
   isReownAppKitConfigured,
   reownAppKit,
 } from './reownAppKit.ts'
+import {
+  createWalletChallenge,
+  registerWalletSource,
+} from './sourceApi.ts'
 
 const directWalletNames = {
   coinbase: 'coinbase',
@@ -78,23 +84,6 @@ function getDirectWalletName(provider: EvmWalletProviderId) {
   return null
 }
 
-function createOwnershipMessage(address: string) {
-  const issuedAt = new Date()
-  const expiresAt = new Date(issuedAt.getTime() + 5 * 60 * 1000)
-
-  return [
-    'Daejang 지갑 소유권 확인',
-    '',
-    `도메인: ${window.location.host}`,
-    `주소: ${address}`,
-    `Nonce: ${globalThis.crypto.randomUUID()}`,
-    `발급 시각: ${issuedAt.toISOString()}`,
-    `만료 시각: ${expiresAt.toISOString()}`,
-    '',
-    '이 서명은 가스비, 거래 승인 또는 자산 이동을 발생시키지 않습니다.',
-  ].join('\n')
-}
-
 function MissingReownConfigurationRoute() {
   const connectWallet = useCallback<ConnectWallet>(async () => ({
     error: { code: 'PROVIDER_UNAVAILABLE' },
@@ -107,6 +96,7 @@ function MissingReownConfigurationRoute() {
 function ConfiguredReownRoute() {
   const { open } = useAppKit()
   const walletButton = useAppKitWallet({ namespace: 'eip155' })
+  const pendingSignatures = useRef(new Map<string, string>())
 
   const connectWallet = useCallback<ConnectWallet>(
     async ({ provider, signal }) => {
@@ -168,24 +158,29 @@ function ConfiguredReownRoute() {
 
         const provider = new BrowserProvider(walletProvider)
         const signer = await provider.getSigner()
-        const message = createOwnershipMessage(wallet.address)
-        const signature = await signer.signMessage(message)
+        const challenge = await createWalletChallenge({
+          address: wallet.address,
+          chainId: wallet.chainId,
+          signal,
+        })
+        const signature = await signer.signMessage(challenge.message)
 
         if (signal.aborted) {
           throw new DOMException('Wallet signature aborted.', 'AbortError')
         }
 
-        const recoveredAddress = verifyMessage(message, signature)
+        const recoveredAddress = verifyMessage(challenge.message, signature)
         if (recoveredAddress.toLowerCase() !== wallet.address.toLowerCase()) {
           return {
             error: { code: 'SIGNATURE_ADDRESS_MISMATCH' },
             ok: false,
           }
         }
+        pendingSignatures.current.set(challenge.challengeId, signature)
 
         return {
           ok: true,
-          verificationId: `reown_${globalThis.crypto.randomUUID()}`,
+          verificationId: challenge.challengeId,
         }
       } catch (error) {
         if (signal.aborted) {
@@ -205,8 +200,41 @@ function ConfiguredReownRoute() {
     [],
   )
 
+  const completeConnection = useCallback<CompleteWalletConnection>(
+    async ({ period, signal, verificationId, wallet }) => {
+      const signature = pendingSignatures.current.get(verificationId)
+      if (!signature) {
+        return { error: { code: 'SOURCE_SAVE_FAILED' }, ok: false }
+      }
+
+      try {
+        const source = await registerWalletSource({
+          challengeId: verificationId,
+          signature,
+          chainIds: [wallet.chainId],
+          signal,
+        })
+        pendingSignatures.current.delete(verificationId)
+        return {
+          jobStatus: 'REGISTERED',
+          normalizedPeriod: normalizeEvmWalletPeriod(period),
+          ok: true,
+          sourceId: source.id,
+          sourceStatus: 'SOURCE_SAVED',
+        }
+      } catch (error) {
+        if (signal.aborted) {
+          throw error
+        }
+        return { error: { code: 'SOURCE_SAVE_FAILED' }, ok: false }
+      }
+    },
+    [],
+  )
+
   return (
     <EvmWalletConnectionPage
+      completeConnection={completeConnection}
       connectWallet={connectWallet}
       requestSignature={requestSignature}
     />

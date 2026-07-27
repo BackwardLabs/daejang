@@ -34,7 +34,7 @@ export const assertWebAuthSchema = async (pool: Pool) => {
         (
           SELECT migration_version
           FROM daejang_meta.schema_contract
-          WHERE component = 'web-auth-persistence' AND contract_version = 1
+          WHERE component = 'web-auth-persistence' AND contract_version = 2
         ) AS migration_version,
         EXISTS (
           SELECT 1
@@ -64,10 +64,29 @@ export const assertWebAuthSchema = async (pool: Pool) => {
     row.rate_limit_table !== 'web_private.auth_rate_limit_buckets' ||
     row.contract_version !== 1 ||
     row.contract_digest !== webAuthContractDigest ||
-    row.migration_version !== '8' ||
+    row.migration_version !== '11' ||
     row.legal_documents_guard !== true ||
     row.user_consents_guard !== true
   ) {
     throw new Error('web_private authentication migration contract is invalid')
+  }
+
+  const walletSource = await pool.query<{
+    wallet_challenges_table: string | null
+    upload_sessions_table: string | null
+  }>(
+    `
+      SELECT
+        to_regclass('web_private.wallet_ownership_challenges')::text AS wallet_challenges_table,
+        to_regclass('web_private.upload_sessions')::text AS upload_sessions_table
+    `,
+  )
+  const walletRow = walletSource.rows[0]
+  if (
+    walletRow?.wallet_challenges_table !==
+      'web_private.wallet_ownership_challenges' ||
+    walletRow.upload_sessions_table !== 'web_private.upload_sessions'
+  ) {
+    throw new Error('web_private wallet challenge migration contract is invalid')
   }
 }

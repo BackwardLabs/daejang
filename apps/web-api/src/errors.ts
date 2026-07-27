@@ -33,3 +33,17 @@ export const sessionRotationConflict = () =>
     'SESSION_ROTATION_CONFLICT',
     '세션 상태가 변경되었습니다. 현재 로그인 상태를 다시 확인해 주세요.',
   )
+
+export const invalidWalletChallenge = () =>
+  new ApiError(
+    409,
+    'WALLET_CHALLENGE_INVALID',
+    '지갑 서명 요청이 만료되었거나 이미 사용되었습니다.',
+  )
+
+export const invalidWalletSignature = () =>
+  new ApiError(
+    400,
+    'WALLET_SIGNATURE_INVALID',
+    '연결한 지갑의 서명을 확인할 수 없습니다.',
+  )

@@ -1,0 +1,222 @@
+syntax = "proto3";
+
+package giwa.engine.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1;enginev1";
+
+service SourceService {
+  rpc RegisterWallet(RegisterWalletRequest) returns (RegisterWalletResponse);
+  rpc RegisterDocument(RegisterDocumentRequest) returns (RegisterDocumentResponse);
+  rpc ListSources(ListSourcesRequest) returns (ListSourcesResponse);
+  rpc DisconnectSource(DisconnectSourceRequest) returns (DisconnectSourceResponse);
+}
+
+service WorkflowService {
+  rpc EnqueueSync(EnqueueSyncRequest) returns (EnqueueSyncResponse);
+  rpc GetSyncJob(GetSyncJobRequest) returns (GetSyncJobResponse);
+  rpc ListSyncJobs(ListSyncJobsRequest) returns (ListSyncJobsResponse);
+}
+
+service QueryService {
+  rpc GetDashboard(GetDashboardRequest) returns (GetDashboardResponse);
+  rpc ListLedgerEvents(ListLedgerEventsRequest) returns (ListLedgerEventsResponse);
+  rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
+  rpc CreateReport(CreateReportRequest) returns (CreateReportResponse);
+  rpc ListReports(ListReportsRequest) returns (ListReportsResponse);
+}
+
+message ActorContext {
+  string user_id = 1;
+  string session_id = 2;
+}
+
+message RequestContext {
+  string request_id = 1;
+  string idempotency_key = 2;
+  ActorContext actor = 3;
+}
+
+message RegisterWalletRequest {
+  RequestContext context = 1;
+  string address = 2;
+  string verification_chain_id = 3;
+  repeated string chain_ids = 4;
+  string label = 5;
+  google.protobuf.Timestamp verified_at = 6;
+}
+
+message ListSourcesRequest {
+  RequestContext context = 1;
+}
+
+message RegisterWalletResponse {
+  WalletSource source = 1;
+}
+
+message RegisterDocumentRequest {
+  RequestContext context = 1;
+  string upload_id = 2;
+  string object_key = 3;
+  string artifact_digest = 4;
+  string original_filename = 5;
+  string media_type = 6;
+  int64 byte_length = 7;
+  string coverage_start = 8;
+  string coverage_end = 9;
+}
+
+message RegisterDocumentResponse {
+  DocumentSource source = 1;
+}
+
+message DisconnectSourceRequest {
+  RequestContext context = 1;
+  string source_id = 2;
+  google.protobuf.Timestamp disconnected_at = 3;
+}
+
+message DisconnectSourceResponse {
+  WalletSource source = 1;
+}
+
+message WalletChainScope {
+  string chain_id = 1;
+  string status = 2;
+}
+
+message WalletSource {
+  string id = 1;
+  string address = 2;
+  string account_type = 3;
+  string verification_chain_id = 4;
+  google.protobuf.Timestamp verified_at = 5;
+  string label = 6;
+  string status = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  google.protobuf.Timestamp disconnected_at = 10;
+  repeated WalletChainScope chain_scopes = 11;
+}
+
+message DocumentSource {
+  string id = 1;
+  string provider = 2;
+  string original_filename = 3;
+  string media_type = 4;
+  int64 byte_length = 5;
+  string artifact_digest = 6;
+  string coverage_start = 7;
+  string coverage_end = 8;
+  string status = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+message ListSourcesResponse {
+  repeated WalletSource items = 1;
+  repeated DocumentSource document_items = 2;
+}
+
+message EnqueueSyncRequest {
+  RequestContext context = 1;
+  string source_kind = 2;
+  string source_id = 3;
+}
+
+message EnqueueSyncResponse { SyncJob job = 1; }
+message GetSyncJobRequest { RequestContext context = 1; string job_id = 2; }
+message GetSyncJobResponse { SyncJob job = 1; }
+message ListSyncJobsRequest { RequestContext context = 1; int32 limit = 2; }
+message ListSyncJobsResponse { repeated SyncJob items = 1; }
+
+message SyncJob {
+  string id = 1;
+  string source_kind = 2;
+  string source_id = 3;
+  string state = 4;
+  string phase = 5;
+  uint32 attempts = 6;
+  int64 processed_records = 7;
+  int64 total_records = 8;
+  bool has_total_records = 9;
+  string failure_code = 10;
+  string failure_message = 11;
+  string output_fragment_id = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp started_at = 14;
+  google.protobuf.Timestamp completed_at = 15;
+  google.protobuf.Timestamp updated_at = 16;
+}
+
+message GetDashboardRequest { RequestContext context = 1; int32 tax_year = 2; }
+message Dashboard {
+  int64 source_count = 1;
+  int64 transaction_count = 2;
+  int64 open_review_count = 3;
+  int64 completed_count = 4;
+  int64 exception_count = 5;
+  string last_sync_state = 6;
+  google.protobuf.Timestamp last_sync_updated_at = 7;
+}
+message GetDashboardResponse { Dashboard dashboard = 1; }
+
+message ListLedgerEventsRequest { RequestContext context = 1; int32 tax_year = 2; int32 limit = 3; }
+message LedgerPosting {
+  string leg_id = 1;
+  string account_id = 2;
+  string asset_id = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+  string direction = 5;
+  string quantity = 6;
+  string role = 7;
+  string fair_value = 8;
+  string cost_basis = 9;
+  string denomination = 10;
+}
+message LedgerEvent {
+  string event_id = 1;
+  string revision_id = 2;
+  int32 revision_number = 3;
+  string event_type = 4;
+  string flow_shape = 5;
+  string resolution = 6;
+  string interpretation_support = 7;
+  google.protobuf.Timestamp effective_at = 8;
+  repeated LedgerPosting postings = 9;
+}
+message ListLedgerEventsResponse { repeated LedgerEvent items = 1; }
+
+message ListReviewsRequest { RequestContext context = 1; int32 limit = 2; }
+message ReviewItem {
+  string id = 1;
+  string execution_id = 2;
+  string revision_id = 3;
+  int64 pointer_version = 4;
+  string status = 5;
+  repeated string reason_codes = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+message ListReviewsResponse { repeated ReviewItem items = 1; }
+
+message CreateReportRequest { RequestContext context = 1; int32 tax_year = 2; }
+message ListReportsRequest { RequestContext context = 1; int32 tax_year = 2; int32 limit = 3; }
+message ReportSnapshot {
+  string id = 1;
+  int32 tax_year = 2;
+  string status = 3;
+  string input_digest = 4;
+  string result_digest = 5;
+  string schema_digest = 6;
+  int64 transaction_count = 7;
+  int64 complete_count = 8;
+  int64 exception_count = 9;
+  string profit_amount = 10;
+  string denomination = 11;
+  string manifest_digest = 12;
+  string row_digest = 13;
+  google.protobuf.Timestamp issued_at = 14;
+}
+message CreateReportResponse { ReportSnapshot report = 1; }
+message ListReportsResponse { repeated ReportSnapshot items = 1; }

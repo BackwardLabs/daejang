@@ -161,13 +161,13 @@ type ScopeSubmittingState = {
 type CompleteState = {
   addressPreview: string
   chainId: string
-  jobId: string
+  jobId?: string
   network: string
   normalizedPeriod: NormalizedEvmWalletPeriod
   provider: EvmWalletProviderId
   sourceId: string
   sourceStatus: 'SOURCE_SAVED'
-  status: 'BACKFILLING'
+  status: 'BACKFILLING' | 'REGISTERED'
   view: 'complete'
 }
 
@@ -405,8 +405,7 @@ export function evmWalletFlowReducer(
       if (
         state.view !== 'scope' ||
         state.status !== 'SUBMITTING' ||
-        action.result.sourceId.length === 0 ||
-        action.result.jobId.length === 0
+        action.result.sourceId.length === 0
       ) {
         return state
       }
@@ -414,7 +413,7 @@ export function evmWalletFlowReducer(
       return {
         addressPreview: maskEvmAddress(state.wallet.address),
         chainId: state.wallet.chainId,
-        jobId: action.result.jobId,
+        ...(action.result.jobId ? { jobId: action.result.jobId } : {}),
         network: state.wallet.network,
         normalizedPeriod: action.result.normalizedPeriod,
         provider: state.wallet.provider,
@@ -664,8 +663,8 @@ export type CompleteWalletConnectionRequest = {
 }
 
 export type CompleteWalletConnectionSuccess = {
-  jobId: string
-  jobStatus: 'BACKFILLING'
+  jobId?: string
+  jobStatus: 'BACKFILLING' | 'REGISTERED'
   normalizedPeriod: NormalizedEvmWalletPeriod
   ok: true
   sourceId: string

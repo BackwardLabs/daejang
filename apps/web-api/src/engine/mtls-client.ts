@@ -1,13 +1,31 @@
 import { readFile, stat } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 
 import {
   ChannelCredentials,
   Client,
-  type ChannelOptions,
+  credentials as grpcCredentials,
   connectivityState,
+  loadPackageDefinition,
+  status,
+  type ChannelOptions,
+  type ServiceClientConstructor,
+  type ServiceError,
 } from '@grpc/grpc-js'
+import { loadSync } from '@grpc/proto-loader'
 
 import type { EngineMtlsConfig } from '../config.js'
+import type {
+  CompleteWalletRegistration,
+  SourceRequestContext,
+  WalletSource,
+  WalletSourceRegistry,
+} from '../sources/wallet-source-store.js'
+import { EngineRpcError } from './rpc-error.js'
+
+const protoPath = fileURLToPath(
+  new URL('../../../../proto/giwa/engine/v1/engine.proto', import.meta.url),
+)
 
 const readPem = async (path: string, expectedLabels: readonly string[]) => {
   const [contents, metadata] = await Promise.all([readFile(path), stat(path)])
@@ -38,26 +56,169 @@ export const createEngineMtlsCredentials = async (config: EngineMtlsConfig) => {
   )
 }
 
-export class EngineMtlsClient {
-  readonly #client: Client
+type ProtoTimestamp = { seconds: string | number; nanos?: number }
+type ProtoWalletSource = {
+  id: string
+  address: string
+  accountType: 'EOA'
+  verificationChainId: string
+  verifiedAt: ProtoTimestamp
+  label?: string
+  status: 'ACTIVE' | 'DISCONNECTED'
+  createdAt: ProtoTimestamp
+  updatedAt: ProtoTimestamp
+  disconnectedAt?: ProtoTimestamp
+  chainScopes: Array<{
+    chainId: string
+    status: 'ACTIVE' | 'DISABLED'
+  }>
+}
+type ProtoDocumentSource = {
+  id: string
+  provider: 'UPBIT'
+  originalFilename: string
+  mediaType: 'application/pdf'
+  byteLength: string | number
+  artifactDigest: string
+  coverageStart: string
+  coverageEnd: string
+  status: 'ACTIVE' | 'DISCONNECTED'
+  createdAt: ProtoTimestamp
+  updatedAt: ProtoTimestamp
+}
 
-  private constructor(client: Client) {
+type UnaryMethod = (
+  request: Record<string, unknown>,
+  options: { deadline: Date },
+  callback: (error: ServiceError | null, response: unknown) => void,
+) => Client
+
+type SourceServiceClient = Client & {
+  registerWallet: UnaryMethod
+  registerDocument: UnaryMethod
+  listSources: UnaryMethod
+  disconnectSource: UnaryMethod
+}
+type WorkflowServiceClient = Client & {
+  enqueueSync: UnaryMethod
+  getSyncJob: UnaryMethod
+  listSyncJobs: UnaryMethod
+}
+type QueryServiceClient = Client & {
+  getDashboard: UnaryMethod
+  listLedgerEvents: UnaryMethod
+  listReviews: UnaryMethod
+  createReport: UnaryMethod
+  listReports: UnaryMethod
+}
+
+const serviceConstructors = () => {
+  const definition = loadSync(protoPath, {
+    defaults: true,
+    enums: String,
+    longs: String,
+    oneofs: true,
+  })
+  const loaded = loadPackageDefinition(definition) as unknown as {
+    giwa: { engine: { v1: {
+      SourceService: ServiceClientConstructor
+      WorkflowService: ServiceClientConstructor
+      QueryService: ServiceClientConstructor
+    } } }
+  }
+  return loaded.giwa.engine.v1
+}
+
+const toProtoTimestamp = (value: Date): ProtoTimestamp => {
+  const milliseconds = value.getTime()
+  return {
+    seconds: Math.floor(milliseconds / 1_000),
+    nanos: (milliseconds % 1_000) * 1_000_000,
+  }
+}
+
+const fromProtoTimestamp = (value: ProtoTimestamp) =>
+  new Date(Number(value.seconds) * 1_000 + Math.floor((value.nanos ?? 0) / 1_000_000))
+
+const normalizeProtoValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(normalizeProtoValue)
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if ('seconds' in record && Object.keys(record).every((key) => key === 'seconds' || key === 'nanos')) {
+      return fromProtoTimestamp(record as ProtoTimestamp).toISOString()
+    }
+    return Object.fromEntries(Object.entries(record).map(([key, child]) => [key, normalizeProtoValue(child)]))
+  }
+  return value
+}
+
+const toWalletSource = (value: ProtoWalletSource): WalletSource => ({
+  id: value.id,
+  address: value.address,
+  accountType: value.accountType,
+  verificationChainId: value.verificationChainId,
+  verifiedAt: fromProtoTimestamp(value.verifiedAt),
+  label: value.label || undefined,
+  status: value.status,
+  createdAt: fromProtoTimestamp(value.createdAt),
+  updatedAt: fromProtoTimestamp(value.updatedAt),
+  disconnectedAt: value.disconnectedAt
+    ? fromProtoTimestamp(value.disconnectedAt)
+    : undefined,
+  chainScopes: value.chainScopes,
+})
+
+const requestContext = (value: SourceRequestContext) => ({
+  requestId: value.requestId,
+  idempotencyKey: value.idempotencyKey ?? '',
+  actor: { userId: value.userId, sessionId: value.sessionId },
+})
+
+export class EngineMtlsClient implements WalletSourceRegistry {
+  readonly durable = true
+  readonly #client: SourceServiceClient
+  readonly #workflowClient: WorkflowServiceClient
+  readonly #queryClient: QueryServiceClient
+
+  private constructor(client: SourceServiceClient, workflowClient: WorkflowServiceClient, queryClient: QueryServiceClient) {
     this.#client = client
+    this.#workflowClient = workflowClient
+    this.#queryClient = queryClient
   }
 
   static async connect(config: EngineMtlsConfig) {
     const credentials = await createEngineMtlsCredentials(config)
+    return EngineMtlsClient.#create(config.target, credentials, config.serverNameOverride)
+  }
+
+  static connectInsecureForDevelopment(target: string) {
+    return EngineMtlsClient.#create(target, grpcCredentials.createInsecure())
+  }
+
+  static #create(
+    target: string,
+    credentials: ChannelCredentials,
+    serverNameOverride?: string,
+  ) {
     const channelOptions: ChannelOptions = {
       'grpc.keepalive_time_ms': 30_000,
       'grpc.keepalive_timeout_ms': 10_000,
       'grpc.keepalive_permit_without_calls': 0,
     }
-    if (config.serverNameOverride) {
-      channelOptions['grpc.ssl_target_name_override'] = config.serverNameOverride
-      channelOptions['grpc.default_authority'] = config.serverNameOverride
+    if (serverNameOverride) {
+      channelOptions['grpc.ssl_target_name_override'] = serverNameOverride
+      channelOptions['grpc.default_authority'] = serverNameOverride
     }
-
-    return new EngineMtlsClient(new Client(config.target, credentials, channelOptions))
+    const { SourceService, WorkflowService, QueryService } = serviceConstructors()
+    return new EngineMtlsClient(
+      new SourceService(
+        target,
+        credentials,
+        channelOptions,
+      ) as unknown as SourceServiceClient,
+      new WorkflowService(target, credentials, channelOptions) as unknown as WorkflowServiceClient,
+      new QueryService(target, credentials, channelOptions) as unknown as QueryServiceClient,
+    )
   }
 
   async waitForReady(timeoutMilliseconds: number) {
@@ -73,11 +234,163 @@ export class EngineMtlsClient {
     })
   }
 
+  async registerDocument(input: {
+    context: SourceRequestContext
+    uploadId: string
+    objectKey: string
+    artifactDigest: string
+    originalFilename: string
+    mediaType: string
+    byteLength: number
+    coverageStart: string
+    coverageEnd: string
+  }) {
+    const response = (await this.#unaryOn(this.#client, 'registerDocument', {
+      context: requestContext(input.context), uploadId: input.uploadId,
+      objectKey: input.objectKey, artifactDigest: input.artifactDigest,
+      originalFilename: input.originalFilename, mediaType: input.mediaType,
+      byteLength: input.byteLength, coverageStart: input.coverageStart,
+      coverageEnd: input.coverageEnd,
+    })) as { source: ProtoDocumentSource }
+    return this.#documentSource(response.source)
+  }
+
+  async listAllSources(context: SourceRequestContext) {
+    const response = (await this.#unary('listSources', { context: requestContext(context) })) as {
+      items: ProtoWalletSource[]
+      documentItems: ProtoDocumentSource[]
+    }
+    return { wallets: response.items.map(toWalletSource), documents: response.documentItems.map((value) => this.#documentSource(value)) }
+  }
+
+  async enqueueSync(context: SourceRequestContext, sourceKind: string, sourceId: string) {
+    const response = await this.#unaryOn(this.#workflowClient, 'enqueueSync', { context: requestContext(context), sourceKind, sourceId }) as { job: Record<string, unknown> }
+    return normalizeProtoValue(response.job) as Record<string, unknown>
+  }
+
+  async getSyncJob(context: SourceRequestContext, jobId: string) {
+    const response = await this.#unaryOn(this.#workflowClient, 'getSyncJob', { context: requestContext(context), jobId }) as { job: Record<string, unknown> }
+    return normalizeProtoValue(response.job) as Record<string, unknown>
+  }
+
+  async listSyncJobs(context: SourceRequestContext, limit = 20) {
+    const response = await this.#unaryOn(this.#workflowClient, 'listSyncJobs', { context: requestContext(context), limit }) as { items: Array<Record<string, unknown>> }
+    return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
+  }
+
+  async getDashboard(context: SourceRequestContext, taxYear: number) {
+    const response = await this.#unaryOn(this.#queryClient, 'getDashboard', { context: requestContext(context), taxYear }) as { dashboard: Record<string, unknown> }
+    return normalizeProtoValue(response.dashboard) as Record<string, unknown>
+  }
+
+  async listLedgerEvents(context: SourceRequestContext, taxYear: number, limit = 100) {
+    const response = await this.#unaryOn(this.#queryClient, 'listLedgerEvents', { context: requestContext(context), taxYear, limit }) as { items: Array<Record<string, unknown>> }
+    return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
+  }
+
+  async listReviews(context: SourceRequestContext, limit = 100) {
+    const response = await this.#unaryOn(this.#queryClient, 'listReviews', { context: requestContext(context), limit }) as { items: Array<Record<string, unknown>> }
+    return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
+  }
+
+  async createReport(context: SourceRequestContext, taxYear: number) {
+    const response = await this.#unaryOn(this.#queryClient, 'createReport', { context: requestContext(context), taxYear }) as { report: Record<string, unknown> }
+    return normalizeProtoValue(response.report) as Record<string, unknown>
+  }
+
+  async listReports(context: SourceRequestContext, taxYear: number, limit = 20) {
+    const response = await this.#unaryOn(this.#queryClient, 'listReports', { context: requestContext(context), taxYear, limit }) as { items: Array<Record<string, unknown>> }
+    return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
+  }
+
   getConnectivityState() {
     return connectivityState[this.#client.getChannel().getConnectivityState(false)]
   }
 
+  async registerWallet(input: CompleteWalletRegistration) {
+    const response = (await this.#unary('registerWallet', {
+      context: requestContext(input),
+      address: input.recoveredAddress,
+      verificationChainId: input.verificationChainId,
+      chainIds: input.chainIds,
+      label: input.label ?? '',
+      verifiedAt: toProtoTimestamp(input.now),
+    })) as { source: ProtoWalletSource }
+    return toWalletSource(response.source)
+  }
+
+  async listWallets(context: SourceRequestContext) {
+    const response = (await this.#unary('listSources', {
+      context: requestContext(context),
+    })) as { items: ProtoWalletSource[] }
+    return response.items.map(toWalletSource)
+  }
+
+  async disconnectWallet(
+    context: SourceRequestContext,
+    sourceId: string,
+    now: Date,
+  ) {
+    try {
+      const response = (await this.#unary('disconnectSource', {
+        context: requestContext(context),
+        sourceId,
+        disconnectedAt: toProtoTimestamp(now),
+      })) as { source: ProtoWalletSource }
+      return toWalletSource(response.source)
+    } catch (error) {
+      if (error instanceof EngineRpcError && error.grpcCode === status.NOT_FOUND) {
+        return undefined
+      }
+      throw error
+    }
+  }
+
   close() {
     this.#client.close()
+    this.#workflowClient.close()
+    this.#queryClient.close()
+  }
+
+  #documentSource(value: ProtoDocumentSource) {
+    return {
+      id: value.id, type: 'UPBIT_PDF' as const, provider: value.provider,
+      originalFilename: value.originalFilename, mediaType: value.mediaType,
+      byteLength: Number(value.byteLength), artifactDigest: value.artifactDigest,
+      coverageStart: value.coverageStart, coverageEnd: value.coverageEnd,
+      status: value.status, createdAt: fromProtoTimestamp(value.createdAt),
+      updatedAt: fromProtoTimestamp(value.updatedAt),
+    }
+  }
+
+  async #unary(
+    method: keyof Pick<
+      SourceServiceClient,
+      'registerWallet' | 'listSources' | 'disconnectSource'
+    >,
+    request: Record<string, unknown>,
+  ) {
+    return this.#unaryOn(this.#client, method, request)
+  }
+
+  async #unaryOn(
+    client: Client,
+    method: string,
+    request: Record<string, unknown>,
+  ) {
+    return new Promise<unknown>((resolve, reject) => {
+      const unary = (client as unknown as Record<string, UnaryMethod>)[method] as UnaryMethod
+      unary.call(client,
+        request,
+        { deadline: new Date(Date.now() + 10_000) },
+        (error, response) => {
+          if (error) {
+            reject(new EngineRpcError(error.code))
+            return
+          }
+          resolve(response)
+        }
+      )
+    })
   }
 }
