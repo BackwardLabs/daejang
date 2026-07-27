@@ -1,6 +1,12 @@
 import { Brand } from './Brand.tsx'
 
-export function LandingHeader() {
+export function LandingHeader({
+  onLogin,
+  onStart,
+}: {
+  onLogin: () => void
+  onStart: () => void
+}) {
   return (
     <header className="site-header">
       <div className="site-header__inner">
@@ -13,9 +19,20 @@ export function LandingHeader() {
             <a href="#faq">FAQ</a>
             <a href="https://daejang.backwardlabs.io/docs">Docs</a>
           </nav>
-          <a className="button button--primary button--header" href="#get-started">
+          <button
+            className="button button--secondary button--header"
+            type="button"
+            onClick={onLogin}
+          >
+            로그인
+          </button>
+          <button
+            className="button button--primary button--header"
+            type="button"
+            onClick={onStart}
+          >
             시작하기
-          </a>
+          </button>
         </div>
       </div>
     </header>

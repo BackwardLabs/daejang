@@ -1,0 +1,287 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { App } from '../../App.tsx'
+import { OnboardingFlow } from './OnboardingFlow.tsx'
+
+const documents = [
+  {
+    id: 'legal-terms',
+    documentType: 'terms',
+    locale: 'ko-KR',
+    version: '1.0',
+    contentHash: 'hash-terms',
+    content: '# 서비스 이용약관\n\n서버에서 제공한 이용약관 본문입니다',
+    effectiveAt: '2026-07-26T00:00:00.000Z',
+    required: true,
+  },
+  {
+    id: 'legal-privacy',
+    documentType: 'privacy',
+    locale: 'ko-KR',
+    version: '1.0',
+    contentHash: 'hash-privacy',
+    content: '# 개인정보 처리방침\n\n서버에서 제공한 개인정보 처리방침입니다',
+    effectiveAt: '2026-07-26T00:00:00.000Z',
+    required: true,
+  },
+  {
+    id: 'legal-identity',
+    documentType: 'identity_verification',
+    locale: 'ko-KR',
+    version: '1.0',
+    contentHash: 'hash-identity',
+    content: '# 본인확인 안내\n\n서버에서 제공한 본인확인 안내입니다',
+    effectiveAt: '2026-07-26T00:00:00.000Z',
+    required: true,
+  },
+  {
+    id: 'legal-marketing',
+    documentType: 'marketing',
+    locale: 'ko-KR',
+    version: '1.0',
+    contentHash: 'hash-marketing',
+    content: '# 마케팅 수신 안내\n\n서버에서 제공한 선택 동의 안내입니다',
+    effectiveAt: '2026-07-26T00:00:00.000Z',
+    required: false,
+  },
+]
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+beforeEach(() => {
+  window.history.replaceState(null, '', '/')
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+})
+
+describe('authentication flows', () => {
+  it('exposes /login while redirecting direct /signup access to the landing', () => {
+    window.history.replaceState(null, '', '/login')
+    const { unmount } = render(<App />)
+    expect(screen.getByRole('heading', { name: '로그인' })).toBeInTheDocument()
+    unmount()
+
+    window.history.replaceState(null, '', '/signup')
+    render(<App />)
+    expect(window.location.pathname).toBe('/')
+    expect(
+      screen.getByRole('heading', { name: /흩어진 디지털 자산 기록/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('uses real email API operations before showing server-backed terms', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/send-code')) {
+        return jsonResponse(
+          { status: 'accepted', expiresInSeconds: 300, resendAfterSeconds: 60 },
+          202,
+        )
+      }
+      if (url.includes('/verify-code')) {
+        return jsonResponse({ verificationToken: 'verification-token', expiresInSeconds: 300 })
+      }
+      if (url.includes('/email/signup')) {
+        return jsonResponse({ status: 'signup_pending', nextStep: 'terms' }, 201)
+      }
+      if (url.includes('/legal-documents/current')) {
+        return jsonResponse({ documents })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+
+    fireEvent.click(screen.getAllByRole('button', { name: '시작하기' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
+    fireEvent.change(screen.getByLabelText('이메일 주소'), {
+      target: { value: 'user@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '인증번호 보내기' }))
+    expect(await screen.findByText('인증번호를 보냈습니다')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('인증번호'), {
+      target: { value: '123456' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '인증번호 확인' }))
+    expect(await screen.findByText('이메일 확인을 완료했습니다')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('비밀번호'), {
+      target: { value: 'Password1!' },
+    })
+    fireEvent.change(screen.getByLabelText('비밀번호 확인'), {
+      target: { value: 'Password1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '약관 확인하기' }))
+
+    expect(
+      await screen.findByRole('heading', { name: '약관과 개인정보 안내' }),
+    ).toBeInTheDocument()
+    expect(await screen.findByText('[필수] 서비스 이용약관')).toBeInTheDocument()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/email/signup'),
+      expect.objectContaining({
+        body: JSON.stringify({
+          email: 'user@example.com',
+          password: 'Password1!',
+          passwordConfirmation: 'Password1!',
+          verificationToken: 'verification-token',
+        }),
+      }),
+    )
+  })
+
+  it('resumes pending email accounts at the terms step', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/auth/email/login')) {
+          return jsonResponse({
+            status: 'signup_pending',
+            nextPath: '/?onboarding=terms',
+          })
+        }
+        if (url.includes('/legal-documents/current')) {
+          return jsonResponse({ documents })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+    window.history.replaceState(null, '', '/login')
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '이메일로 로그인' }))
+    fireEvent.change(screen.getByLabelText('이메일 주소'), {
+      target: { value: 'pending@example.com' },
+    })
+    fireEvent.change(screen.getByLabelText('비밀번호'), {
+      target: { value: 'Password1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+
+    expect(
+      await screen.findByRole('heading', { name: '약관과 개인정보 안내' }),
+    ).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('clears email credentials after leaving the email signup screen', () => {
+    render(<App />)
+    fireEvent.click(screen.getAllByRole('button', { name: '시작하기' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
+    fireEvent.change(screen.getByLabelText('이메일 주소'), {
+      target: { value: 'private@example.com' },
+    })
+    fireEvent.click(screen.getByRole('link', { name: '고객지원' }))
+    expect(screen.getByRole('heading', { name: '고객지원' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '서비스로 돌아가기' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '시작하기' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
+    expect(screen.getByLabelText('이메일 주소')).toHaveValue('')
+  })
+
+  it('shows policy content above the consent screen in a modal', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ documents })),
+    )
+    window.history.replaceState(null, '', '/?onboarding=terms')
+    render(<App />)
+
+    expect(await screen.findByText('[필수] 서비스 이용약관')).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '내용 보기' })[0]!)
+    const dialog = screen.getByRole('dialog', { name: '서비스 이용약관' })
+    expect(dialog).toBeInTheDocument()
+    expect(dialog).toHaveTextContent('Daejang 서비스 이용에 필요한 기본 조건')
+    expect(dialog).toHaveTextContent('서버에서 제공한 이용약관 본문입니다')
+    fireEvent.click(screen.getByRole('button', { name: '닫기' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('renders the current server policy on the public terms page', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ documents })),
+    )
+    window.history.replaceState(null, '', '/terms')
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: '서비스 이용약관' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText('서버에서 제공한 이용약관 본문입니다'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/버전 1.0/)).toBeInTheDocument()
+  })
+
+  it('uses the authenticated next path after identity verification', async () => {
+    vi.stubEnv('VITE_DEV_IDENTITY_MOCK_ENABLED', 'true')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/legal-documents/current')) {
+          return jsonResponse({ documents })
+        }
+        if (url.includes('/signup/consents')) {
+          return jsonResponse({
+            status: 'accepted',
+            nextStep: 'identity_verification',
+          })
+        }
+        if (url.includes('/identity-verification/mock-complete')) {
+          return jsonResponse({
+            status: 'authenticated',
+            nextPath: '/dashboard',
+          })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+    const onAuthenticated = vi.fn()
+    const onExit = vi.fn()
+
+    render(
+      <OnboardingFlow
+        initialScreen="consent"
+        onAuthenticated={onAuthenticated}
+        onExit={onExit}
+        onLogin={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    )
+
+    await screen.findByText('[필수] 서비스 이용약관')
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: '모두 동의선택 항목을 포함하며 언제든 철회할 수 있어요',
+      }),
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: '본인확인으로 계속하기' }),
+    )
+    fireEvent.click(
+      await screen.findByRole('button', { name: '휴대전화 본인확인' }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: '계정 준비를 마쳤어요' }),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '서비스로 이동' }))
+
+    expect(onAuthenticated).toHaveBeenCalledWith('/dashboard')
+    expect(onExit).not.toHaveBeenCalled()
+  })
+})

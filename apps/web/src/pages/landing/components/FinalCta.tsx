@@ -1,4 +1,4 @@
-export function FinalCta() {
+export function FinalCta({ onStart }: { onStart: () => void }) {
   return (
     <section className="final-cta ruled-section" id="get-started" aria-labelledby="cta-title">
       <div className="final-cta__card">
@@ -14,9 +14,7 @@ export function FinalCta() {
           <button
             className="button button--primary"
             type="button"
-            aria-label="시작하기, 가입 기능 연결 예정"
-            title="가입 기능 연결 예정"
-            disabled
+            onClick={onStart}
           >
             시작하기
           </button>

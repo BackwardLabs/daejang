@@ -1,4 +1,4 @@
-export function HeroSection() {
+export function HeroSection({ onStart }: { onStart: () => void }) {
   return (
     <section className="hero-section" aria-labelledby="hero-title">
       <div className="hero-section__inner">
@@ -16,9 +16,9 @@ export function HeroSection() {
             항목과 계산 근거를 함께 보여줍니다.
           </p>
           <div className="button-row">
-            <a className="button button--primary" href="#get-started">
+            <button className="button button--primary" type="button" onClick={onStart}>
               시작하기
-            </a>
+            </button>
             <a className="button button--secondary" href="#how-it-works">
               작동 방식
             </a>
