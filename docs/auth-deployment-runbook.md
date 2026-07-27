@@ -6,6 +6,8 @@
 - Web API·Edge: [BackwardLabs/daejang#17](https://github.com/BackwardLabs/daejang/pull/17)
 - Frontend: [BackwardLabs/daejang#18](https://github.com/BackwardLabs/daejang/pull/18)
 
+병합 전 로컬 통합 검증은 [계정 인증 로컬 통합 검증](./auth-local-e2e.md)을 따른다.
+
 ## 1. 배포 구조
 
 ```mermaid
@@ -34,25 +36,44 @@ flowchart LR
 
 AI 검증은 위 사람 리뷰를 대신하지 않는다.
 
-## 3. 서버 위치 확인
+## 3. 서버 계정과 실행 환경 확인
 
-아래 명령은 **실제 운영 서버**에서 실행한다. 현재 `ssh giwa`로 확인한 호스트에는 저장소와 Docker가 없었으므로 그 호스트를 운영 서버라고 가정하지 않는다.
+2026-07-28 `ssh -A giwa`로 읽기 전용 점검한 결과는 다음과 같다.
 
-먼저 실제 배포 경로를 한 번 정한다.
+- host: `Backward-Labs.local`
+- 접속 사용자: `wi11y`
+- 저장소 경로:
+  - `/Users/Shared/Projects/01_Daejang/daejang`
+  - `/Users/Shared/Projects/01_Daejang/daejang-db`
+- 저장소 owner/group: `wiimdy:daejang`
+- `.git`과 일부 앱 디렉터리가 owner-only 권한이라 `wi11y`는 HEAD와 dirty 상태를 확인할 수 없음
+- `/opt/homebrew/bin/docker`는 있으나 `wi11y` 세션에서 Compose plugin과 Docker daemon을 사용할 수 없음
+- 공개 `/api/*`는 Web API가 아니라 SPA HTML을 반환함
+
+`ssh -A`는 SSH key를 전달할 뿐 서버 파일 권한이나 Docker 권한을 추가하지 않는다. 실제 배포는 `wiimdy` 또는 저장소와 Docker를 모두 사용할 수 있는 배포 계정으로 진행해야 한다.
+
+권한 있는 계정에서 먼저 다음을 확인한다.
 
 ```bash
-export GIWA_DEPLOY_ROOT=/실제/운영/배포/경로
-test -d "$GIWA_DEPLOY_ROOT" || {
-  echo "GIWA_DEPLOY_ROOT를 실제 운영 경로로 설정해야 합니다"
-  exit 1
-}
+export GIWA_DEPLOY_ROOT=/Users/Shared/Projects/01_Daejang
+
+git -C "$GIWA_DEPLOY_ROOT/daejang" status --short --branch
+git -C "$GIWA_DEPLOY_ROOT/daejang" rev-parse HEAD
+
+git -C "$GIWA_DEPLOY_ROOT/daejang-db" status --short --branch
+git -C "$GIWA_DEPLOY_ROOT/daejang-db" rev-parse HEAD
+
+/opt/homebrew/bin/docker version
+/opt/homebrew/bin/docker compose version
 ```
 
-운영 서버와 경로가 확정되기 전에는 다음 단계를 실행하지 않는다.
+저장소가 dirty하거나 Docker Compose를 사용할 수 없으면 배포를 시작하지 않는다.
 
 ## 4. 서버에서 저장소 준비
 
-두 저장소가 아직 없다면 운영 서버에서 각각 한 번만 clone한다.
+현재 확인된 서버에는 두 저장소가 이미 있다. 삭제하거나 다시 clone하지 않는다.
+
+다른 서버에 처음 설치할 때만 각각 한 번 clone한다.
 
 ```bash
 cd "$GIWA_DEPLOY_ROOT"
