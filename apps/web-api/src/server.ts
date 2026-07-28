@@ -7,9 +7,10 @@ import { PostgresRateLimitStore } from './auth/rate-limit.js'
 import { PostgresSessionStore } from './auth/postgres-session-store.js'
 import { PostgresUserStore } from './auth/postgres-user-store.js'
 import { loadConfig } from './config.js'
-import { assertWebAuthSchema } from './database/preflight.js'
+import { assertTaxReportSchema, assertWebAuthSchema } from './database/preflight.js'
 import { EngineMtlsClient } from './engine/mtls-client.js'
 import { PostgresWalletSourceStore } from './sources/postgres-wallet-source-store.js'
+import { PostgresTaxReportReader } from './tax-report/postgres-tax-report-reader.js'
 import { assertPrivateObjectRoot, PostgresFileUploadStore } from './uploads/postgres-file-upload-store.js'
 
 const config = loadConfig()
@@ -29,6 +30,7 @@ const engineClient = config.engineMtls
 
 if (pool) {
   await assertWebAuthSchema(pool)
+  await assertTaxReportSchema(pool)
 }
 if (engineClient) {
   await engineClient.waitForReady(5_000)
@@ -52,6 +54,7 @@ const { app } = await buildApp({
         sessionStore: new PostgresSessionStore(pool),
         rateLimitStore: new PostgresRateLimitStore(pool),
         accountAuthStore: new PostgresAccountAuthStore(pool),
+        taxReportReader: new PostgresTaxReportReader(pool),
         ...(engineClient
           ? {
               walletSourceStore: new PostgresWalletSourceStore(pool, engineClient),

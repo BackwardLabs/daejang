@@ -190,3 +190,33 @@ export const assertWebAuthSchema = async (pool: Pool) => {
     throw new Error('web_private wallet challenge migration contract is invalid')
   }
 }
+
+export const assertTaxReportSchema = async (pool: Pool) => {
+  const result = await pool.query<{
+    report_table: string | null
+    current_table: string | null
+    inventory_table: string | null
+    estimate_table: string | null
+    contract_version: string | null
+    migration_version: string | null
+  }>(`
+    SELECT
+      to_regclass('reporting.tax_report')::text AS report_table,
+      to_regclass('reporting.current_tax_report')::text AS current_table,
+      to_regclass('tax.inventory_run')::text AS inventory_table,
+      to_regclass('tax.estimate')::text AS estimate_table,
+      (SELECT contract_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS contract_version,
+      (SELECT migration_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS migration_version
+  `)
+  const row = result.rows[0]
+  if (
+    row?.report_table !== 'reporting.tax_report' ||
+    row.current_table !== 'reporting.current_tax_report' ||
+    row.inventory_table !== 'tax.inventory_run' ||
+    row.estimate_table !== 'tax.estimate' ||
+    row.contract_version !== '1' ||
+    row.migration_version !== '24'
+  ) {
+    throw new Error('tax report persistence migration contract is invalid')
+  }
+}
