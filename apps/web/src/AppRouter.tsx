@@ -13,6 +13,7 @@ const ReownEvmWalletConnectionRoute = lazy(async () => {
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage.tsx').then((module) => ({ default: module.DashboardPage })))
 const LedgerPage = lazy(() => import('./features/ledger/LedgerPage.tsx').then((module) => ({ default: module.LedgerPage })))
 const ReportPage = lazy(() => import('./features/reports/ReportPage.tsx').then((module) => ({ default: module.ReportPage })))
+const X402PaymentPage = lazy(() => import('./features/payments/X402PaymentPage.tsx').then((module) => ({ default: module.X402PaymentPage })))
 const SourceManagementPage = lazy(() => import('./features/sources/SourceManagementPage.tsx').then((module) => ({ default: module.SourceManagementPage })))
 const SourceMethodIntroPage = lazy(() => import('./features/sources/SourceMethodIntroPage.tsx').then((module) => ({ default: module.SourceMethodIntroPage })))
 const SourceTypeSelectionPage = lazy(() => import('./features/sources/SourceTypeSelectionPage.tsx').then((module) => ({ default: module.SourceTypeSelectionPage })))
@@ -47,7 +48,7 @@ export function AppRouter() {
   }, [])
 
   const isProtectedRoute =
-    protectedRoutes.has(path) || path.startsWith('/sources/')
+    protectedRoutes.has(path) || path.startsWith('/reports/') || path.startsWith('/sources/')
 
   useEffect(() => {
     if (!isProtectedRoute) return
@@ -69,6 +70,10 @@ export function AppRouter() {
 
   if (path === '/reports') {
     return <Suspense fallback={pending}><ReportPage /></Suspense>
+  }
+
+  if (path === '/reports/x402-payment') {
+    return <Suspense fallback={pending}><X402PaymentPage /></Suspense>
   }
 
   if (path === '/sources') {

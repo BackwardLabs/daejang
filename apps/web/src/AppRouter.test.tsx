@@ -58,6 +58,16 @@ describe('AppRouter', () => {
     expect(await screen.findByRole('heading', { name: '보고서' })).toBeInTheDocument()
   })
 
+  it('renders the x402 payment demo inside the report workspace', async () => {
+    window.history.pushState({}, '', '/reports/x402-payment')
+
+    render(<AppRouter />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'GIWA Sepolia x402 데모' }),
+    ).toBeInTheDocument()
+  })
+
   it('logs the mock user out from the shared sidebar', async () => {
     window.history.pushState({}, '', '/dashboard')
     render(<AppRouter />)
