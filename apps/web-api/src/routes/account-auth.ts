@@ -631,7 +631,7 @@ export const registerAccountAuthRoutes = async (
       locale: string
       decisions: Array<{
         legalDocumentId: string
-        action: 'accepted'
+        action: 'accepted' | 'withdrawn'
       }>
     }
   }>(
@@ -659,7 +659,10 @@ export const registerAccountAuthRoutes = async (
                 required: ['legalDocumentId', 'action'],
                 properties: {
                   legalDocumentId: { type: 'string', format: 'uuid' },
-                  action: { type: 'string', const: 'accepted' },
+                  action: {
+                    type: 'string',
+                    enum: ['accepted', 'withdrawn'],
+                  },
                 },
               },
             },

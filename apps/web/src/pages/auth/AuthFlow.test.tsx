@@ -340,6 +340,83 @@ describe('authentication flows', () => {
     expect(onExit).not.toHaveBeenCalled()
   })
 
+  it('withdraws optional consent when signup returns to the consent step', async () => {
+    const submittedDecisions: unknown[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/legal-documents/current')) {
+          return jsonResponse({ documents })
+        }
+        if (url.includes('/signup/consents')) {
+          submittedDecisions.push(JSON.parse(String(init?.body)).decisions)
+          return jsonResponse({
+            status: 'accepted',
+            nextStep: 'identity_verification',
+          })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+
+    render(
+      <OnboardingFlow
+        initialScreen="consent"
+        onAuthenticated={vi.fn()}
+        onExit={vi.fn()}
+        onLogin={vi.fn()}
+        onNavigate={vi.fn()}
+        signupMethods={signupCapabilities.signup.methods}
+      />,
+    )
+
+    await screen.findByText('[필수] 서비스 이용약관')
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: '모두 동의선택 항목에 동의하지 않아도 가입할 수 있어요',
+      }),
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: '본인확인으로 계속하기' }),
+    )
+    await screen.findByRole('heading', {
+      name: '안전한 이용을 위해 본인확인이 필요해요',
+    })
+    fireEvent.click(screen.getByRole('button', { name: '이전으로' }))
+
+    await screen.findByText('[필수] 서비스 이용약관')
+    for (const name of [
+      '서비스 이용약관',
+      '개인정보 수집·이용 안내',
+      '본인확인 정보 처리 안내',
+    ]) {
+      fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(name) }))
+    }
+    expect(
+      screen.getByRole('checkbox', {
+        name: /서비스 소식 및 마케팅 정보 수신/,
+      }),
+    ).not.toBeChecked()
+    fireEvent.click(
+      screen.getByRole('button', { name: '본인확인으로 계속하기' }),
+    )
+
+    await waitFor(() => expect(submittedDecisions).toHaveLength(2))
+    expect(submittedDecisions[0]).toEqual(
+      documents.map(({ id }) => ({
+        legalDocumentId: id,
+        action: 'accepted',
+      })),
+    )
+    expect(submittedDecisions[1]).toEqual(
+      documents.map(({ id, required }) => ({
+        legalDocumentId: id,
+        action: required ? 'accepted' : 'withdrawn',
+      })),
+    )
+  })
+
   it('fails closed for signup when capability lookup fails while keeping login usable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('capability unavailable')))
     render(<App />)

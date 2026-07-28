@@ -242,7 +242,10 @@ export function getCurrentLegalDocuments() {
 }
 
 export function submitSignupConsents(
-  decisions: Array<{ legalDocumentId: string; action: 'accepted' }>,
+  decisions: Array<{
+    legalDocumentId: string
+    action: 'accepted' | 'withdrawn'
+  }>,
 ) {
   return requestJson<{
     status: 'accepted'

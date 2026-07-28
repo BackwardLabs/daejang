@@ -564,9 +564,10 @@ function ConsentScreen({ onComplete, onBack }: {
     setError('')
     try {
       await submitSignupConsents(
-        documents
-          .filter(({ id }) => accepted[id])
-          .map(({ id }) => ({ legalDocumentId: id, action: 'accepted' as const })),
+        documents.map(({ id }) => ({
+          legalDocumentId: id,
+          action: accepted[id] ? ('accepted' as const) : ('withdrawn' as const),
+        })),
       )
       onComplete()
     } catch (caught) {

@@ -299,11 +299,10 @@ done
 
 ## 10. PR 승인 후
 
-로컬 통합 검증이 끝나도 `local/giwa-40-auth-integration`을 push하지 않는다. 사람 리뷰 후 기존 PR을 다음 순서로 병합한다.
-
-1. `BackwardLabs/daejang-db#15`
-2. `BackwardLabs/daejang#17`
-3. `BackwardLabs/daejang#18`
+로컬 통합 검증이 끝나도 `local/giwa-40-auth-integration`을 push하지 않는다.
+`BackwardLabs/daejang-db#17`의 병합 commit에 Engine을 고정하고 CI를 다시
+통과시킨 뒤 통합 PR `BackwardLabs/daejang#20`만 병합한다. App PR #17, #18,
+#19는 #20에 포함된 superseded PR이므로 별도로 병합하지 않고 닫는다.
 
 서버에서는 두 저장소의 `main`만 `pull --ff-only`로 갱신한다. 서버에서 같은 변경을 다시 commit하거나 push하지 않는다.
 

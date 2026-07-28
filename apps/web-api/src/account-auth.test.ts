@@ -656,12 +656,10 @@ describe('account authentication routes', () => {
       },
       payload: {
         locale: 'ko-KR',
-        decisions: documents
-          .filter(({ documentType }) => documentType !== 'marketing')
-          .map(({ id }) => ({
-            legalDocumentId: id,
-            action: 'accepted',
-          })),
+        decisions: documents.map(({ id, documentType }) => ({
+          legalDocumentId: id,
+          action: documentType === 'marketing' ? 'withdrawn' : 'accepted',
+        })),
       },
     })
     expect(consent.statusCode).toBe(200)

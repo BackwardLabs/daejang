@@ -72,11 +72,14 @@ git -C "$GIWA_DEPLOY_ROOT/daejang-db" checkout main
 git -C "$GIWA_DEPLOY_ROOT/daejang-db" pull --ff-only origin main
 
 git -C "$GIWA_DEPLOY_ROOT/daejang-db" rev-parse HEAD
-shasum -a 256 "$GIWA_DEPLOY_ROOT"/daejang-db/migrations/0000{15,16,17,18}_*.sql
+shasum -a 256 "$GIWA_DEPLOY_ROOT"/daejang-db/migrations/0000{15,16,17,18,19}_*.sql
 ```
 
 기록한 DB 병합 커밋으로 Engine module을 갱신하고 PR #20의 검증을 다시 실행한다.
 병합 전 임시 커밋이나 `replace` directive를 남기지 않는다.
+현재 검증된 pin은 DB merge commit
+`aadb1eabf98e0848276f8d7d95bfc19d9d48b6c5`의 pseudo-version
+`v0.0.0-20260728124403-aadb1eabf98e`다.
 
 ```bash
 cd /PR-20-작업-checkout/services/engine
@@ -93,7 +96,7 @@ go build ./...
 
 ## 5. 기존 운영 DB migration 17 cutover
 
-새 DB는 migration 15-18을 순서대로 적용하면 된다. 기존 데이터가 있는 DB는
+새 DB는 migration 15-19를 순서대로 적용하면 된다. 기존 데이터가 있는 DB는
 migration 17이 OPEN Review를 발견하면 의도적으로 중단하므로 아래 순서를 지킨다.
 
 1. Review를 새로 만드는 writer와 Review 해결 API를 maintenance 상태로 전환한다.
@@ -115,12 +118,12 @@ WHERE revision.status = 'OPEN'
 ORDER BY item.subject_id, item.review_id;
 ```
 
-4. 조회 결과가 0건이면 migration 17과 18을 적용한다.
+4. 조회 결과가 0건이면 migration 17, 18과 19를 적용한다.
 5. 1건 이상이면 **여기서 배포를 중단한다.** DB PR #17의 migration-16
    `ResolveV2` 기반은 commit
    `596d51603a0d4e2d7fe14cc702ae49ca46ec38bc`에 있지만, 그 계약으로
    Review를 해결하는 버전된 cutover 명령·바이너리는 PR #20에 존재하지
-   않는다. 현재 Engine pin `38f2b4d0b82ff3632350b184f57ceafe9b8274a6`은
+   않는다. PR #20의 Engine pin `aadb1eabf98e0848276f8d7d95bfc19d9d48b6c5`은
    migration 17을 요구하므로 pre-17 resolver로 사용하지 않는다.
 6. OPEN Review가 있는 운영 DB를 전환하려면 별도 후속 변경으로 다음을
    먼저 제공하고 동료 리뷰를 받는다.
@@ -131,7 +134,7 @@ ORDER BY item.subject_id, item.review_id;
    - migration 16 복제 DB에서 같은 manifest로 검증한 통합 테스트
 7. 승인된 명령으로 해결한 뒤 위 SQL이 0건임을 독립적으로 재확인한다.
    자동 삭제, 상태 강제 변경, 검증되지 않은 SQL 수정은 하지 않는다.
-8. migration 17·18, runtime role, Review evidence query 검증을 실행한다.
+8. migration 17·18·19, runtime role, Review evidence query 검증을 실행한다.
 9. 병합 DB commit으로 pin한 Engine을 배포한 뒤 writer를 다시 연다.
 
 운영 데이터가 기록된 migration을 down하지 않는다. 실패는 새 migration으로
@@ -170,7 +173,7 @@ make database-verify
 docker compose ps
 ```
 
-성공 기준은 PostgreSQL `healthy`, migrations 15-18 적용, runtime role 검증과
+성공 기준은 PostgreSQL `healthy`, migrations 15-19 적용, runtime role 검증과
 Review evidence access 검증 성공이다.
 
 ## 7. App 운영 환경

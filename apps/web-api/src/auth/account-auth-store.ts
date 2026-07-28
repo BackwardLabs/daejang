@@ -135,7 +135,7 @@ export interface AccountAuthStore {
     decisions: ReadonlyArray<{
       id: string
       legalDocumentId: string
-      action: 'accepted'
+      action: 'accepted' | 'withdrawn'
     }>
     now: Date
   }): Promise<void>
@@ -824,7 +824,7 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
     decisions: ReadonlyArray<{
       id: string
       legalDocumentId: string
-      action: 'accepted'
+      action: 'accepted' | 'withdrawn'
     }>
     now: Date
   }) {
@@ -854,12 +854,22 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
         current.rows.map((document) => [document.id, document.document_type]),
       )
       const acceptedTypes = new Set<LegalDocumentType>()
+      const decidedDocumentIds = new Set<string>()
       for (const decision of input.decisions) {
         const type = currentById.get(decision.legalDocumentId)
         if (!type) {
           throw new Error('Consent references a non-current legal document')
         }
-        acceptedTypes.add(type)
+        if (decidedDocumentIds.has(decision.legalDocumentId)) {
+          throw new Error('Consent contains duplicate legal document decisions')
+        }
+        decidedDocumentIds.add(decision.legalDocumentId)
+        if (decision.action === 'accepted') {
+          acceptedTypes.add(type)
+        }
+      }
+      if (decidedDocumentIds.size !== currentById.size) {
+        throw new Error('Consent must decide every current legal document')
       }
       for (const required of [
         'terms',
@@ -1086,7 +1096,7 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
   readonly #consents: Array<{
     userId: string
     legalDocumentId: string
-    action: 'accepted'
+    action: 'accepted' | 'withdrawn'
   }> = []
 
   async createOAuthTransaction(record: OAuthTransactionRecord) {
@@ -1338,7 +1348,7 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
     decisions: ReadonlyArray<{
       id: string
       legalDocumentId: string
-      action: 'accepted'
+      action: 'accepted' | 'withdrawn'
     }>
     now: Date
   }) {
@@ -1346,9 +1356,24 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
     const currentById = new Map(
       current.map((document) => [document.id, document.documentType]),
     )
-    const accepted = new Set(
-      input.decisions.map((decision) => currentById.get(decision.legalDocumentId)),
-    )
+    const accepted = new Set<LegalDocumentType>()
+    const decidedDocumentIds = new Set<string>()
+    for (const decision of input.decisions) {
+      const type = currentById.get(decision.legalDocumentId)
+      if (!type) {
+        throw new Error('Consent references a non-current legal document')
+      }
+      if (decidedDocumentIds.has(decision.legalDocumentId)) {
+        throw new Error('Consent contains duplicate legal document decisions')
+      }
+      decidedDocumentIds.add(decision.legalDocumentId)
+      if (decision.action === 'accepted') {
+        accepted.add(type)
+      }
+    }
+    if (decidedDocumentIds.size !== currentById.size) {
+      throw new Error('Consent must decide every current legal document')
+    }
     for (const required of [
       'terms',
       'privacy',
