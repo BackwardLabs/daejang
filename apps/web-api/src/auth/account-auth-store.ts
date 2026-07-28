@@ -296,7 +296,7 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
     return this.#transaction(async (client) => {
       await client.query(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-        [`${input.provider}\0${input.providerSubject}`],
+        [JSON.stringify([input.provider, input.providerSubject])],
       )
       const existing = await this.#findIdentityUser(
         client,
@@ -1022,7 +1022,6 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
         JOIN web_private.users u ON u.id = identity_record.user_id
         WHERE identity_record.provider = $1
           AND identity_record.provider_subject = $2
-        FOR UPDATE OF identity_record, u
       `,
       [provider, providerSubject],
     )

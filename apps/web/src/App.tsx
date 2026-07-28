@@ -42,7 +42,7 @@ export function App() {
   const [authCapabilities, setAuthCapabilities] = useState<AuthCapabilities>()
   const [onboardingVisible, setOnboardingVisible] = useState(false)
   const [onboardingScreen, setOnboardingScreen] = useState<OnboardingScreen>(
-    returnedFromSignup ? 'consent' : 'method',
+    returnedFromSignup ? 'consent' : 'entry',
   )
   const [onboardingKey, setOnboardingKey] = useState(0)
   const signupAvailable = authCapabilities ? canSignup(authCapabilities) : false
@@ -86,11 +86,13 @@ export function App() {
 
   useEffect(() => {
     document.title = onboardingVisible
-      ? '계정 만들기 | Daejang'
+      ? onboardingScreen === 'entry'
+        ? '시작하기 | Daejang'
+        : '계정 만들기 | Daejang'
       : path
         ? pageTitles[path]
         : '페이지를 찾을 수 없음 | Daejang'
-  }, [onboardingVisible, path])
+  }, [onboardingScreen, onboardingVisible, path])
 
   const navigatePublic = (nextPath: PublicPath) => {
     navigateTo(nextPath)
@@ -111,6 +113,14 @@ export function App() {
     setOnboardingKey((current) => current + 1)
     navigateTo('/')
     setPath('/')
+  }
+
+  const openAuthChoice = () => {
+    navigateTo('/')
+    setPath('/')
+    setOnboardingScreen('entry')
+    setOnboardingKey((current) => current + 1)
+    setOnboardingVisible(true)
   }
 
   const startOnboarding = () => {
@@ -181,8 +191,7 @@ export function App() {
       <NotFoundPage onHome={exitOnboarding} onNavigate={navigatePublic} />
     ) : (
       <LandingPage
-        onLogin={openLogin}
-        onStart={startOnboarding}
+        onStart={openAuthChoice}
         onNavigate={navigatePublic}
         signupAvailable={signupAvailable}
       />

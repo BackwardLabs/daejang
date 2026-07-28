@@ -205,6 +205,10 @@ export class EmailAuthService {
   async sendSignupCode(rawEmail: string) {
     const email = normalizeEmail(rawEmail)
     const now = this.now()
+    const existingCredential = await this.store.findEmailCredential(email)
+    if (existingCredential) {
+      throw accountAlreadyExists()
+    }
     const latest = await this.store.getEligibleEmailChallenge(
       email,
       'signup',
@@ -225,10 +229,7 @@ export class EmailAuthService {
 
     const pending = await this.store.findOrCreatePendingDirectEmail(email)
     if (pending.loginEnabled) {
-      return {
-        expiresInSeconds: this.config.verificationTtlSeconds,
-        resendAfterSeconds: this.config.resendAfterSeconds,
-      }
+      throw accountAlreadyExists()
     }
     const challengeId = randomUUID()
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0')

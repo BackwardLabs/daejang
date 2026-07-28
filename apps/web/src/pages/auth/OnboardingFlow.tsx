@@ -22,8 +22,8 @@ import { AuthShell } from './AuthShell.tsx'
 import './auth-pages.css'
 
 export type OnboardingScreen =
+  | 'entry'
   | 'method'
-  | 'social'
   | 'email'
   | 'consent'
   | 'identity'
@@ -51,30 +51,22 @@ const providerInfo: Record<
     name: string
     label: string
     icon: string
-    identity: string
-    requested: string
   }
 > = {
   kakao: {
     name: '카카오',
     label: '카카오로 시작하기',
     icon: '/onboarding/kakao.svg',
-    identity: '카카오 앱별 회원번호',
-    requested: '이메일',
   },
   naver: {
     name: '네이버',
     label: '네이버로 시작하기',
     icon: '/onboarding/naver.svg',
-    identity: '네이버 애플리케이션별 고유 id',
-    requested: '이메일',
   },
   google: {
     name: 'Google',
     label: '구글로 시작하기',
     icon: '/onboarding/google.svg',
-    identity: 'Google 계정의 변경되지 않는 sub',
-    requested: '이메일과 이메일 확인 상태',
   },
 }
 
@@ -112,6 +104,10 @@ function stepForScreen(screen: OnboardingScreen) {
 
 function errorMessage(caught: unknown, fallback: string) {
   return caught instanceof WebApiError ? caught.message : fallback
+}
+
+function inlineErrorMessage(caught: unknown, fallback: string) {
+  return errorMessage(caught, fallback).replace(/\.$/u, '')
 }
 
 function StepSidebar({ activeStep }: { activeStep: number }) {
@@ -230,21 +226,36 @@ function Dialog({
 
 function MethodScreen({
   onEmail,
-  onSocial,
   onLogin,
+  onBack,
   signupMethods,
 }: {
   onEmail: () => void
-  onSocial: (provider: SocialProvider) => void
   onLogin: () => void
+  onBack: () => void
   signupMethods: SignupMethods
 }) {
   const socialProviders = signupMethods.oauthProviders.filter(
     (provider) => provider in providerInfo,
   )
   const hasSocialProvider = socialProviders.length > 0
+  const socialRedirectStartedRef = useRef(false)
+  const [redirectingProvider, setRedirectingProvider] =
+    useState<SocialProvider | null>(null)
+
+  const redirectToSocialSignup = (provider: SocialProvider) => {
+    if (socialRedirectStartedRef.current) return
+
+    socialRedirectStartedRef.current = true
+    setRedirectingProvider(provider)
+    startSocialAuth(provider, 'signup')
+  }
+
   return (
     <article className="auth-card">
+      <button className="auth-back-button" type="button" onClick={onBack}>
+        ← 로그인 또는 회원가입 선택
+      </button>
       <StepBadge step={1} label="계정" />
       <h2>Daejang 계정 만들기</h2>
       <p className="auth-lead">회원정보를 만들 방법을 선택해 주세요</p>
@@ -255,13 +266,16 @@ function MethodScreen({
             <button
               className={`auth-provider auth-provider--${provider}`}
               type="button"
-              onClick={() => onSocial(provider)}
+              disabled={redirectingProvider !== null}
+              onClick={() => redirectToSocialSignup(provider)}
               key={provider}
             >
               <span aria-hidden="true">
                 <img src={item.icon} alt="" width="24" height="24" />
               </span>
-              {item.label}
+              {redirectingProvider === provider
+                ? `${item.name}로 이동 중`
+                : item.label}
             </button>
           )
         })}
@@ -285,53 +299,34 @@ function MethodScreen({
   )
 }
 
-function SocialScreen({
-  provider,
-  onBack,
+function EntryScreen({
+  onLogin,
+  onSignup,
 }: {
-  provider: SocialProvider
-  onBack: () => void
+  onLogin: () => void
+  onSignup: () => void
 }) {
-  const info = providerInfo[provider]
   return (
-    <article className="auth-card">
-      <button className="auth-back-button" type="button" onClick={onBack}>
-        ← 다른 가입 방법
-      </button>
-      <StepBadge step={1} label="계정" />
-      <h2>{info.name} 회원정보로 가입</h2>
-      <p className="auth-lead">
-        {info.name}에서 동의한 정보를 받아 Daejang 회원정보와 로그인 수단을 만듭니다
-      </p>
-      <dl className="auth-detail-list">
-        <div>
-          <dt>계정을 구분하는 기준</dt>
-          <dd>{info.identity}</dd>
-        </div>
-        <div>
-          <dt>제공을 요청하는 정보</dt>
-          <dd>{info.requested}</dd>
-        </div>
-        <div>
-          <dt>이용 목적</dt>
-          <dd>Daejang 회원정보 생성과 로그인 수단 등록</dd>
-        </div>
-      </dl>
-      <ul className="auth-rule-list">
-        <li>하나의 소셜 계정은 하나의 Daejang 계정에만 연결합니다</li>
-        <li>이메일이나 이름이 같아도 계정을 자동으로 합치지 않습니다</li>
-        <li>추가 연결에는 기존 계정과 새 소셜 계정 인증이 모두 필요합니다</li>
-      </ul>
-      <button
-        className="auth-primary-button"
-        type="button"
-        onClick={() => startSocialAuth(provider, 'signup')}
-      >
-        {info.name} 로그인 화면으로 이동
-      </button>
-      <button className="auth-secondary-button" type="button" onClick={onBack}>
-        다른 가입 방법 선택
-      </button>
+    <article className="auth-card auth-entry-card">
+      <p className="auth-eyebrow">DAEJANG ACCOUNT</p>
+      <h1>Daejang 시작하기</h1>
+      <p className="auth-lead">계정이 있다면 로그인하고, 처음이라면 새 계정을 만들어 주세요</p>
+      <div className="auth-entry-options">
+        <button type="button" onClick={onLogin}>
+          <span>
+            <strong>로그인</strong>
+            <small>기존 Daejang 계정으로 계속하기</small>
+          </span>
+          <b aria-hidden="true">→</b>
+        </button>
+        <button type="button" onClick={onSignup}>
+          <span>
+            <strong>회원가입</strong>
+            <small>새 Daejang 계정 만들기</small>
+          </span>
+          <b aria-hidden="true">→</b>
+        </button>
+      </div>
     </article>
   )
 }
@@ -348,8 +343,17 @@ function EmailScreen({ onComplete, onBack }: {
   const [expiresAt, setExpiresAt] = useState(0)
   const [remaining, setRemaining] = useState(0)
   const [busy, setBusy] = useState<'send' | 'verify' | 'signup' | null>(null)
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
+  const [emailFeedback, setEmailFeedback] = useState<{
+    kind: 'success' | 'error'
+    text: string
+  } | null>(null)
+  const [codeFeedback, setCodeFeedback] = useState<{
+    kind: 'success' | 'error'
+    text: string
+  } | null>(null)
+  const [passwordError, setPasswordError] = useState('')
+  const [confirmationError, setConfirmationError] = useState('')
+  const [submitError, setSubmitError] = useState('')
 
   useEffect(() => {
     if (!expiresAt) return
@@ -361,16 +365,32 @@ function EmailScreen({ onComplete, onBack }: {
 
   const sendCode = async () => {
     setBusy('send')
-    setError('')
-    setMessage('')
+    setEmailFeedback(null)
+    setCodeFeedback(null)
+    setSubmitError('')
     try {
       const response = await sendEmailCode(email.trim())
       setExpiresAt(Date.now() + response.expiresInSeconds * 1000)
       setCode('')
       setVerificationToken('')
-      setMessage('인증번호를 보냈습니다')
+      setEmailFeedback({
+        kind: 'success',
+        text: '인증번호를 보냈습니다',
+      })
     } catch (caught) {
-      setError(errorMessage(caught, '인증번호를 보내지 못했습니다'))
+      if (
+        caught instanceof WebApiError &&
+        caught.code === 'ACCOUNT_ALREADY_EXISTS'
+      ) {
+        setExpiresAt(0)
+        setRemaining(0)
+        setCode('')
+        setVerificationToken('')
+      }
+      setEmailFeedback({
+        kind: 'error',
+        text: inlineErrorMessage(caught, '인증번호를 보내지 못했습니다'),
+      })
     } finally {
       setBusy(null)
     }
@@ -378,13 +398,21 @@ function EmailScreen({ onComplete, onBack }: {
 
   const verifyCode = async () => {
     setBusy('verify')
-    setError('')
+    setEmailFeedback(null)
+    setCodeFeedback(null)
+    setSubmitError('')
     try {
       const response = await verifyEmailCode(email.trim(), code)
       setVerificationToken(response.verificationToken)
-      setMessage('이메일 확인을 완료했습니다')
+      setCodeFeedback({
+        kind: 'success',
+        text: '이메일 확인을 완료했습니다',
+      })
     } catch (caught) {
-      setError(errorMessage(caught, '인증번호를 확인하지 못했습니다'))
+      setCodeFeedback({
+        kind: 'error',
+        text: inlineErrorMessage(caught, '인증번호를 확인하지 못했습니다'),
+      })
     } finally {
       setBusy(null)
     }
@@ -392,16 +420,18 @@ function EmailScreen({ onComplete, onBack }: {
 
   const createAccount = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    setPasswordError('')
+    setConfirmationError('')
+    setSubmitError('')
     if (!isPasswordValid(password)) {
-      setError('비밀번호 요건을 모두 충족해 주세요')
+      setPasswordError('비밀번호 요건을 모두 충족해 주세요')
       return
     }
     if (password !== confirmation) {
-      setError('비밀번호가 일치하지 않습니다')
+      setConfirmationError('비밀번호가 일치하지 않습니다')
       return
     }
     setBusy('signup')
-    setError('')
     try {
       await createEmailAccount({
         email: email.trim(),
@@ -411,7 +441,7 @@ function EmailScreen({ onComplete, onBack }: {
       })
       onComplete()
     } catch (caught) {
-      setError(errorMessage(caught, '계정을 만들지 못했습니다'))
+      setSubmitError(inlineErrorMessage(caught, '계정을 만들지 못했습니다'))
     } finally {
       setBusy(null)
     }
@@ -441,9 +471,19 @@ function EmailScreen({ onComplete, onBack }: {
               readOnly={Boolean(verificationToken)}
               placeholder="name@example.com"
               value={email}
+              aria-invalid={emailFeedback?.kind === 'error'}
+              aria-describedby={
+                emailFeedback ? 'signup-email-feedback' : undefined
+              }
               onChange={(event) => {
                 setEmail(event.target.value)
-                setError('')
+                setExpiresAt(0)
+                setRemaining(0)
+                setCode('')
+                setVerificationToken('')
+                setEmailFeedback(null)
+                setCodeFeedback(null)
+                setSubmitError('')
               }}
             />
             <button
@@ -454,6 +494,15 @@ function EmailScreen({ onComplete, onBack }: {
               {busy === 'send' ? '전송 중' : codeSent ? '다시 보내기' : '인증번호 보내기'}
             </button>
           </div>
+          {emailFeedback ? (
+            <p
+              id="signup-email-feedback"
+              className={`auth-alert auth-alert--${emailFeedback.kind}`}
+              role={emailFeedback.kind === 'error' ? 'alert' : 'status'}
+            >
+              {emailFeedback.text}
+            </p>
+          ) : null}
         </div>
         {codeSent ? (
           <div className="auth-field">
@@ -470,9 +519,14 @@ function EmailScreen({ onComplete, onBack }: {
                 readOnly={Boolean(verificationToken)}
                 placeholder="6자리 숫자"
                 value={code}
+                aria-invalid={codeFeedback?.kind === 'error'}
+                aria-describedby={
+                  codeFeedback ? 'signup-code-feedback' : undefined
+                }
                 onChange={(event) => {
                   setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
-                  setError('')
+                  setCodeFeedback(null)
+                  setSubmitError('')
                 }}
               />
               <button
@@ -483,6 +537,15 @@ function EmailScreen({ onComplete, onBack }: {
                 {busy === 'verify' ? '확인 중' : verificationToken ? '확인됨' : '인증번호 확인'}
               </button>
             </div>
+            {codeFeedback ? (
+              <p
+                id="signup-code-feedback"
+                className={`auth-alert auth-alert--${codeFeedback.kind}`}
+                role={codeFeedback.kind === 'error' ? 'alert' : 'status'}
+              >
+                {codeFeedback.text}
+              </p>
+            ) : null}
           </div>
         ) : null}
         <PasswordInput
@@ -492,12 +555,27 @@ function EmailScreen({ onComplete, onBack }: {
           required
           placeholder="영문, 숫자, 특수문자를 조합해 8자 이상 입력"
           value={password}
+          aria-invalid={Boolean(passwordError)}
+          aria-describedby={
+            passwordError ? 'signup-password-feedback' : undefined
+          }
           onChange={(value) => {
             setPassword(value)
-            setError('')
+            setPasswordError('')
+            setConfirmationError('')
+            setSubmitError('')
           }}
           showRequirements
         />
+        {passwordError ? (
+          <p
+            id="signup-password-feedback"
+            className="auth-alert auth-alert--error"
+            role="alert"
+          >
+            {passwordError}
+          </p>
+        ) : null}
         <PasswordInput
           id="signup-password-confirm"
           label="비밀번호 확인"
@@ -507,12 +585,31 @@ function EmailScreen({ onComplete, onBack }: {
           value={confirmation}
           onChange={(value) => {
             setConfirmation(value)
-            setError('')
+            setConfirmationError('')
+            setSubmitError('')
           }}
-          aria-invalid={Boolean(confirmation) && password !== confirmation}
+          aria-invalid={
+            Boolean(confirmationError) ||
+            (Boolean(confirmation) && password !== confirmation)
+          }
+          aria-describedby={
+            confirmationError ? 'signup-confirmation-feedback' : undefined
+          }
         />
-        {message ? <p className="auth-alert auth-alert--success" role="status">{message}</p> : null}
-        {error ? <p className="auth-alert auth-alert--error" role="alert">{error}</p> : null}
+        {confirmationError ? (
+          <p
+            id="signup-confirmation-feedback"
+            className="auth-alert auth-alert--error"
+            role="alert"
+          >
+            {confirmationError}
+          </p>
+        ) : null}
+        {submitError ? (
+          <p className="auth-alert auth-alert--error" role="alert">
+            {submitError}
+          </p>
+        ) : null}
         <button
           className="auth-primary-button"
           type="submit"
@@ -771,7 +868,7 @@ function CompleteScreen({ onExit }: { onExit: () => void }) {
 }
 
 export function OnboardingFlow({
-  initialScreen = 'method',
+  initialScreen = 'entry',
   onAuthenticated,
   onExit,
   onLogin,
@@ -779,7 +876,6 @@ export function OnboardingFlow({
   signupMethods,
 }: OnboardingFlowProps) {
   const [screen, setScreen] = useState<OnboardingScreen>(initialScreen)
-  const [provider, setProvider] = useState<SocialProvider | null>(null)
   const [completionPath, setCompletionPath] = useState('/dashboard')
   const regionRef = useRef<HTMLDivElement>(null)
   const activeStep = useMemo(() => stepForScreen(screen), [screen])
@@ -794,8 +890,13 @@ export function OnboardingFlow({
   }
 
   let content: ReactNode
-  if (screen === 'social' && provider) {
-    content = <SocialScreen provider={provider} onBack={() => setScreen('method')} />
+  if (screen === 'entry') {
+    content = (
+      <EntryScreen
+        onLogin={onLogin}
+        onSignup={() => setScreen('method')}
+      />
+    )
   } else if (screen === 'email') {
     content = (
       <EmailScreen
@@ -828,11 +929,8 @@ export function OnboardingFlow({
     content = (
       <MethodScreen
         onEmail={() => setScreen('email')}
-        onSocial={(selected) => {
-          setProvider(selected)
-          setScreen('social')
-        }}
         onLogin={onLogin}
+        onBack={() => setScreen('entry')}
         signupMethods={signupMethods}
       />
     )
@@ -846,15 +944,21 @@ export function OnboardingFlow({
           : onExit
       }
       onNavigate={navigate}
-      sidebar={<StepSidebar activeStep={activeStep} />}
+      sidebar={
+        screen === 'entry'
+          ? undefined
+          : <StepSidebar activeStep={activeStep} />
+      }
       headerAction={
         <div className="auth-header-actions">
           <button type="button" className="auth-link-button" onClick={() => navigate('/support')}>
             도움말
           </button>
-          <button type="button" className="auth-outline-button" onClick={onLogin}>
-            로그인
-          </button>
+          {screen === 'entry' ? null : (
+            <button type="button" className="auth-outline-button" onClick={onLogin}>
+              로그인
+            </button>
+          )}
         </div>
       }
     >
@@ -862,7 +966,7 @@ export function OnboardingFlow({
         ref={regionRef}
         className="auth-screen-region"
         role="region"
-        aria-label="회원가입"
+        aria-label={screen === 'entry' ? '로그인 또는 회원가입' : '회원가입'}
         tabIndex={-1}
       >
         {content}

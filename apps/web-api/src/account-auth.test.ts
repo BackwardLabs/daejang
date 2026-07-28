@@ -169,6 +169,40 @@ describe('account authentication routes', () => {
     expect(firstUser?.id).not.toBe(secondUser?.id)
   })
 
+  it('creates a platform account during social signup and reuses it for social login', async () => {
+    const signupStart = await startOAuth('signup')
+    const signup = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/auth/oauth/naver/callback?code=returning-subject&state=${signupStart.state}`,
+      headers: { cookie: signupStart.cookie },
+    })
+
+    expect(signup.statusCode).toBe(302)
+    expect(signup.headers.location).toBe('/?onboarding=terms')
+    const created = await store.findUserByIdentity(
+      'naver',
+      'returning-subject',
+    )
+    expect(created).toMatchObject({ status: 'pending' })
+
+    store.setUserStatus(created?.id as string, 'active')
+    const loginStart = await startOAuth('login')
+    const login = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/auth/oauth/naver/callback?code=returning-subject&state=${loginStart.state}`,
+      headers: { cookie: loginStart.cookie },
+    })
+
+    expect(login.statusCode).toBe(302)
+    expect(login.headers.location).toBe('/dashboard')
+    expect(cookieHeaderText(login.headers['set-cookie'])).toContain(
+      'daejang_session=',
+    )
+    expect(
+      await store.findUserByIdentity('naver', 'returning-subject'),
+    ).toMatchObject({ id: created?.id, status: 'active' })
+  })
+
   it('does not create a user for login intent when the provider identity is unknown', async () => {
     const start = await startOAuth('login')
     const response = await context.app.inject({
@@ -365,15 +399,16 @@ describe('account authentication routes', () => {
       await context.sessionService.resolve(previousSession.token),
     ).toBeUndefined()
 
-    now = new Date(now.getTime() + 61_000)
-    const genericExisting = await context.app.inject({
+    const existingSignup = await context.app.inject({
       method: 'POST',
       url: '/api/v1/auth/email/send-code',
       headers: originHeaders,
       payload: { email: 'user@example.com', intent: 'signup' },
     })
-    expect(genericExisting.statusCode).toBe(202)
-    expect(genericExisting.json()).toMatchObject({ status: 'accepted' })
+    expect(existingSignup.statusCode).toBe(409)
+    expect(existingSignup.json()).toMatchObject({
+      error: { code: 'ACCOUNT_ALREADY_EXISTS' },
+    })
     expect(sender.calls).toBe(1)
   })
 

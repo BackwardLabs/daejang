@@ -74,4 +74,42 @@ describe('PostgresAccountAuthStore', () => {
     expect(statements.some((sql) => /\bDELETE\b/u.test(sql))).toBe(false)
     expect(statements.at(-1)).toBe('COMMIT')
   })
+
+  it('uses a PostgreSQL-safe advisory lock key when creating a social user', async () => {
+    const calls: Array<{ sql: string; values: unknown[] | undefined }> = []
+    const query = vi.fn(async (sql: string, values?: unknown[]) => {
+      calls.push({ sql, values })
+      return queryResult([])
+    })
+    const client = {
+      query,
+      release: vi.fn(),
+    } as unknown as PoolClient
+    const pool = {
+      connect: vi.fn().mockResolvedValue(client),
+    } as unknown as Pool
+    const store = new PostgresAccountAuthStore(pool)
+
+    await expect(
+      store.createPendingOAuthUser({
+        userId: '00000000-0000-4000-8000-000000000001',
+        identityId: '00000000-0000-4000-8000-000000000002',
+        provider: 'google',
+        providerSubject: 'provider-subject',
+        verifiedAt: new Date('2027-07-20T00:00:00.000Z'),
+      }),
+    ).resolves.toMatchObject({ status: 'pending' })
+
+    const advisoryLock = calls.find(({ sql }) =>
+      sql.includes('pg_advisory_xact_lock'),
+    )
+    expect(advisoryLock?.values).toEqual([
+      JSON.stringify(['google', 'provider-subject']),
+    ])
+    expect(String(advisoryLock?.values?.[0])).not.toContain('\0')
+    expect(
+      calls.some(({ sql }) => sql.includes('FOR UPDATE OF identity_record')),
+    ).toBe(false)
+    expect(calls.at(-1)?.sql).toBe('COMMIT')
+  })
 })

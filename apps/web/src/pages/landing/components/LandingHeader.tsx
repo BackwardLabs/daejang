@@ -1,11 +1,9 @@
 import { Brand } from './Brand.tsx'
 
 export function LandingHeader({
-  onLogin,
   onStart,
   signupAvailable,
 }: {
-  onLogin: () => void
   onStart: () => void
   signupAvailable: boolean
 }) {
@@ -21,13 +19,6 @@ export function LandingHeader({
             <a href="#faq">FAQ</a>
             <a href="https://daejang.backwardlabs.io/docs">Docs</a>
           </nav>
-          <button
-            className="button button--secondary button--header"
-            type="button"
-            onClick={onLogin}
-          >
-            로그인
-          </button>
           <button
             className="button button--primary button--header"
             type="button"

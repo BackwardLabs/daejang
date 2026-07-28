@@ -15,19 +15,20 @@ const collectActions = [
 ] as const
 
 export function LandingPage({
-  onLogin,
   onStart,
   onNavigate,
   signupAvailable,
 }: {
-  onLogin: () => void
   onStart: () => void
   onNavigate: (path: PublicPath) => void
   signupAvailable: boolean
 }) {
   return (
     <div className="landing-page" id="top">
-      <LandingHeader onLogin={onLogin} onStart={onStart} signupAvailable={signupAvailable} />
+      <LandingHeader
+        onStart={onStart}
+        signupAvailable={signupAvailable}
+      />
       <main>
         <HeroSection onStart={onStart} signupAvailable={signupAvailable} />
         <SourceJourney />
