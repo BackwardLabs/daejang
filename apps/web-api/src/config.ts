@@ -4,13 +4,19 @@ export type AppConfig = {
   port: number
   publicOrigin: string
   sessionCookieName: string
+  signupSessionCookieName: string
   sessionAbsoluteTtlSeconds: number
   sessionIdleTtlSeconds: number
+  signupSessionTtlSeconds: number
   bodyLimitBytes: number
   secureCookies: boolean
   trustProxyHops: number
   databaseUrl: string | undefined
   rateLimitHmacSecret: string
+  oauth: OAuthConfig
+  emailAuth: EmailAuthConfig
+  signup: SignupCapability
+  identityVerificationMode: 'disabled' | 'mock'
   engineMtls: EngineMtlsConfig | undefined
   engineInsecureTarget?: string
   privateObjectRoot?: string
@@ -18,6 +24,39 @@ export type AppConfig = {
     id: string
     displayName: string
   }
+}
+
+export type SignupCapability = {
+  enabled: boolean
+  methods: {
+    email: boolean
+    oauthProviders: ReadonlyArray<OAuthProviderName>
+  }
+}
+
+export type OAuthProviderName = 'naver' | 'google' | 'kakao'
+
+export type OAuthProviderConfig = {
+  clientId: string
+  clientSecret: string | undefined
+}
+
+export type OAuthConfig = {
+  enabledProviders: ReadonlySet<OAuthProviderName>
+  transactionTtlSeconds: number
+  stateHmacSecret: string
+  transactionEncryptionKey: Buffer
+  providers: Partial<Record<OAuthProviderName, OAuthProviderConfig>>
+}
+
+export type EmailAuthConfig = {
+  enabled: boolean
+  resendApiKey: string | undefined
+  from: string | undefined
+  verificationHmacSecret: string
+  verificationTtlSeconds: number
+  verificationTokenTtlSeconds: number
+  resendAfterSeconds: number
 }
 
 export type EngineMtlsConfig = {
@@ -64,6 +103,163 @@ const parseNonNegativeInteger = (
     throw new Error(`${name} must be a non-negative integer`)
   }
   return parsed
+}
+
+const parseBoolean = (value: string | undefined, fallback: boolean, name: string) => {
+  if (value === undefined) {
+    return fallback
+  }
+  if (value === 'true') {
+    return true
+  }
+  if (value === 'false') {
+    return false
+  }
+  throw new Error(`${name} must be true or false`)
+}
+
+const parseIdentityVerificationMode = (
+  value: string | undefined,
+  production: boolean,
+) => {
+  const mode = value ?? 'disabled'
+  if (!['disabled', 'mock'].includes(mode)) {
+    throw new Error('IDENTITY_VERIFICATION_MODE must be disabled or mock')
+  }
+  if (production && mode === 'mock') {
+    throw new Error('IDENTITY_VERIFICATION_MODE=mock is not allowed in production')
+  }
+  return mode as AppConfig['identityVerificationMode']
+}
+
+const oauthProviderNames = ['naver', 'google', 'kakao'] as const
+
+const parseEnabledOAuthProviders = (value: string | undefined) => {
+  const providers = new Set<OAuthProviderName>()
+  for (const rawProvider of value?.split(',') ?? []) {
+    const provider = rawProvider.trim()
+    if (!provider) {
+      continue
+    }
+    if (!oauthProviderNames.includes(provider as OAuthProviderName)) {
+      throw new Error(`OAUTH_ENABLED_PROVIDERS contains unsupported provider: ${provider}`)
+    }
+    providers.add(provider as OAuthProviderName)
+  }
+  return providers
+}
+
+const parseEncryptionKey = (
+  value: string | undefined,
+  required: boolean,
+): Buffer => {
+  if (!value) {
+    if (required) {
+      throw new Error('OAUTH_TRANSACTION_ENCRYPTION_KEY is required')
+    }
+    return Buffer.alloc(32)
+  }
+
+  const key = Buffer.from(value, 'base64')
+  if (key.length !== 32 || key.toString('base64').replace(/=+$/, '') !== value.replace(/=+$/, '')) {
+    throw new Error('OAUTH_TRANSACTION_ENCRYPTION_KEY must be a base64-encoded 32-byte key')
+  }
+  return key
+}
+
+const loadOAuthConfig = (
+  environment: NodeJS.ProcessEnv,
+  production: boolean,
+): OAuthConfig => {
+  const enabledProviders = parseEnabledOAuthProviders(
+    environment.OAUTH_ENABLED_PROVIDERS,
+  )
+  const enabled = enabledProviders.size > 0
+  const productionSecretsRequired = production && enabled
+  const stateHmacSecret =
+    environment.OAUTH_STATE_HMAC_SECRET ?? 'development-only-oauth-state-secret'
+  if (
+    productionSecretsRequired &&
+    Buffer.byteLength(stateHmacSecret, 'utf8') < 32
+  ) {
+    throw new Error('OAUTH_STATE_HMAC_SECRET must contain at least 32 bytes in production')
+  }
+
+  const providers: Partial<Record<OAuthProviderName, OAuthProviderConfig>> = {}
+  for (const provider of enabledProviders) {
+    const prefix = provider.toUpperCase()
+    const clientId = environment[`${prefix}_CLIENT_ID`]
+    const clientSecret = environment[`${prefix}_CLIENT_SECRET`]
+    if (!clientId) {
+      throw new Error(`${prefix}_CLIENT_ID is required when ${provider} OAuth is enabled`)
+    }
+    if (!clientSecret) {
+      throw new Error(`${prefix}_CLIENT_SECRET is required when ${provider} OAuth is enabled`)
+    }
+    providers[provider] = { clientId, clientSecret }
+  }
+
+  return {
+    enabledProviders,
+    transactionTtlSeconds: parsePositiveInteger(
+      environment.OAUTH_TRANSACTION_TTL_SECONDS,
+      600,
+      'OAUTH_TRANSACTION_TTL_SECONDS',
+    ),
+    stateHmacSecret,
+    transactionEncryptionKey: parseEncryptionKey(
+      environment.OAUTH_TRANSACTION_ENCRYPTION_KEY,
+      enabled,
+    ),
+    providers,
+  }
+}
+
+const loadEmailAuthConfig = (
+  environment: NodeJS.ProcessEnv,
+  production: boolean,
+): EmailAuthConfig => {
+  const enabled = parseBoolean(environment.EMAIL_AUTH_ENABLED, false, 'EMAIL_AUTH_ENABLED')
+  const verificationHmacSecret =
+    environment.EMAIL_VERIFICATION_HMAC_SECRET ??
+    'development-only-email-verification-secret'
+  if (
+    production &&
+    enabled &&
+    Buffer.byteLength(verificationHmacSecret, 'utf8') < 32
+  ) {
+    throw new Error(
+      'EMAIL_VERIFICATION_HMAC_SECRET must contain at least 32 bytes in production',
+    )
+  }
+  if (enabled && !environment.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY is required when email authentication is enabled')
+  }
+  if (enabled && !environment.EMAIL_FROM) {
+    throw new Error('EMAIL_FROM is required when email authentication is enabled')
+  }
+
+  return {
+    enabled,
+    resendApiKey: environment.RESEND_API_KEY,
+    from: environment.EMAIL_FROM,
+    verificationHmacSecret,
+    verificationTtlSeconds: parsePositiveInteger(
+      environment.EMAIL_VERIFICATION_TTL_SECONDS,
+      300,
+      'EMAIL_VERIFICATION_TTL_SECONDS',
+    ),
+    verificationTokenTtlSeconds: parsePositiveInteger(
+      environment.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS,
+      600,
+      'EMAIL_VERIFICATION_TOKEN_TTL_SECONDS',
+    ),
+    resendAfterSeconds: parsePositiveInteger(
+      environment.EMAIL_VERIFICATION_RESEND_AFTER_SECONDS,
+      60,
+      'EMAIL_VERIFICATION_RESEND_AFTER_SECONDS',
+    ),
+  }
 }
 
 const loadEngineMtlsConfig = (
@@ -133,12 +329,52 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   }
 
   const production = runtimeMode === 'production'
+  const oauth = loadOAuthConfig(environment, production)
+  const emailAuth = loadEmailAuthConfig(environment, production)
+  const identityVerificationMode = parseIdentityVerificationMode(
+    environment.IDENTITY_VERIFICATION_MODE,
+    production,
+  )
+  const signupRequested = parseBoolean(
+    environment.SIGNUP_ENABLED,
+    false,
+    'SIGNUP_ENABLED',
+  )
+  const signupMethods = {
+    email: emailAuth.enabled,
+    oauthProviders: [...oauth.enabledProviders],
+  }
+  if (
+    signupRequested &&
+    !signupMethods.email &&
+    signupMethods.oauthProviders.length === 0
+  ) {
+    throw new Error('SIGNUP_ENABLED=true requires at least one configured signup method')
+  }
+  if (signupRequested && (production || identityVerificationMode !== 'mock')) {
+    throw new Error(
+      'SIGNUP_ENABLED=true requires a completion-capable identity verifier',
+    )
+  }
+  const signup: SignupCapability = signupRequested
+    ? { enabled: true, methods: signupMethods }
+    : {
+        enabled: false,
+        methods: { email: false, oauthProviders: [] },
+      }
   const engineInsecureTarget = loadDevelopmentEngineTarget(
     environment,
     production,
   )
   if (production && environment.PUBLIC_ORIGIN === undefined) {
     throw new Error('PUBLIC_ORIGIN is required in production')
+  }
+  if (
+    production &&
+    environment.PUBLIC_ORIGIN !== undefined &&
+    new URL(environment.PUBLIC_ORIGIN).protocol !== 'https:'
+  ) {
+    throw new Error('PUBLIC_ORIGIN must use https in production')
   }
   if (production && environment.DATABASE_URL === undefined) {
     throw new Error('DATABASE_URL is required in production')
@@ -198,8 +434,16 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     port: parsePositiveInteger(environment.PORT, 3000, 'PORT'),
     publicOrigin: parseOrigin(environment.PUBLIC_ORIGIN ?? 'http://localhost:5173'),
     sessionCookieName: production ? '__Host-daejang_session' : 'daejang_session',
+    signupSessionCookieName: production
+      ? '__Host-daejang_signup'
+      : 'daejang_signup',
     sessionAbsoluteTtlSeconds,
     sessionIdleTtlSeconds,
+    signupSessionTtlSeconds: parsePositiveInteger(
+      environment.SIGNUP_SESSION_TTL_SECONDS,
+      60 * 60,
+      'SIGNUP_SESSION_TTL_SECONDS',
+    ),
     bodyLimitBytes: parsePositiveInteger(
       environment.BODY_LIMIT_BYTES,
       1024 * 1024,
@@ -213,6 +457,10 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     ),
     databaseUrl: environment.DATABASE_URL,
     rateLimitHmacSecret,
+    oauth,
+    emailAuth,
+    signup,
+    identityVerificationMode,
     engineMtls: loadEngineMtlsConfig(environment, production),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),

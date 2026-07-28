@@ -7,6 +7,7 @@ CLAUDE.local.md
 .env
 .env.*
 !.env.example
+deploy/web-api.env
 
 # Node.js 및 빌드 산출물
 node_modules/
@@ -17,6 +18,10 @@ coverage/
 # 도구 캐시와 로그
 .vite/
 .cache/
+.wrangler/
+.wrangler-dist/
+**/.dev.vars
+apps/edge/.wrangler-dist/
 *.log
 npm-debug.log*
 

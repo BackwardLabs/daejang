@@ -35,7 +35,7 @@ describe('AuthRateLimiter', () => {
     const input = { phase: 'complete' as const, ip: '203.0.113.10', identity: 'kim' }
 
     expect((await limiter.consume({ ...input, provider: 'siwe' })).allowed).toBe(true)
-    expect((await limiter.consume({ ...input, provider: 'oidc' })).allowed).toBe(true)
+    expect((await limiter.consume({ ...input, provider: 'oauth' })).allowed).toBe(true)
   })
 
   it('blocks the same identity across rotating IP addresses', async () => {

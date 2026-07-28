@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Wallet } from 'ethers'
 
 import { buildApp } from './app.js'
+import { MemoryAccountAuthStore } from './auth/account-auth-store.js'
 import { MemorySessionStore } from './auth/session.js'
 import { MemoryRateLimitStore } from './auth/rate-limit.js'
 import type { AppConfig } from './config.js'
@@ -19,13 +20,36 @@ const config: AppConfig = {
   port: 3000,
   publicOrigin: 'http://localhost:5173',
   sessionCookieName: 'daejang_session',
+  signupSessionCookieName: 'daejang_signup',
   sessionAbsoluteTtlSeconds: 3_600,
   sessionIdleTtlSeconds: 600,
+  signupSessionTtlSeconds: 3_600,
   bodyLimitBytes: 1_024,
   secureCookies: false,
   trustProxyHops: 0,
   databaseUrl: undefined,
   rateLimitHmacSecret: 'test-rate-limit-secret',
+  oauth: {
+    enabledProviders: new Set(),
+    transactionTtlSeconds: 600,
+    stateHmacSecret: 'test-oauth-state-secret',
+    transactionEncryptionKey: Buffer.alloc(32, 1),
+    providers: {},
+  },
+  emailAuth: {
+    enabled: false,
+    resendApiKey: undefined,
+    from: undefined,
+    verificationHmacSecret: 'test-email-verification-secret',
+    verificationTtlSeconds: 300,
+    verificationTokenTtlSeconds: 600,
+    resendAfterSeconds: 60,
+  },
+  signup: {
+    enabled: false,
+    methods: { email: false, oauthProviders: [] },
+  },
+  identityVerificationMode: 'disabled',
   engineMtls: undefined,
 }
 
@@ -38,6 +62,10 @@ class TestDurableRateLimitStore extends MemoryRateLimitStore {
 }
 
 class TestDurableWalletSourceStore extends MemoryWalletSourceStore {
+  override readonly durable = true
+}
+
+class TestDurableAccountAuthStore extends MemoryAccountAuthStore {
   override readonly durable = true
 }
 
@@ -408,7 +436,9 @@ describe('web api authentication boundary', () => {
       listAllSources: vi.fn(async () => ({ wallets: [], documents: [] })),
       getSyncJob: vi.fn(async () => ({})), listSyncJobs: vi.fn(async () => []),
       getDashboard: vi.fn(async () => ({})), listLedgerEvents: vi.fn(async () => []),
-      listReviews: vi.fn(async () => []), createReport: vi.fn(async () => ({})),
+      listReviews: vi.fn(async () => ({ items: [], nextPageToken: '' })), getReview: vi.fn(async () => ({})),
+      resolveReview: vi.fn(async () => ({ review: {}, replayed: false })),
+      createReport: vi.fn(async () => ({})),
       listReports: vi.fn(async () => []),
     } satisfies EngineDataClient
     context = await buildApp({ config, logger: false, now: () => now, uploadStore, engineDataClient })
@@ -604,6 +634,7 @@ describe('web api authentication boundary', () => {
       sessionStore: new TestDurableSessionStore(),
       rateLimitStore: new TestDurableRateLimitStore(),
       walletSourceStore: new TestDurableWalletSourceStore(),
+      accountAuthStore: new TestDurableAccountAuthStore(),
     })
     const health = await productionContext.app.inject('/healthz')
     expect(health.headers['strict-transport-security']).toBe(

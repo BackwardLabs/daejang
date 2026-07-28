@@ -1,5 +1,6 @@
 .git
 .github
+.worktrees
 .env
 .env.*
 !.env.example
@@ -12,4 +13,5 @@ node_modules
 secrets
 **/*.pem
 **/*.key
-
+*.log
+.DS_Store

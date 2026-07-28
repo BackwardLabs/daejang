@@ -1,6 +1,14 @@
 import { Brand } from './Brand.tsx'
 
-export function LandingHeader() {
+export function LandingHeader({
+  onLogin,
+  onStart,
+  signupAvailable,
+}: {
+  onLogin: () => void
+  onStart: () => void
+  signupAvailable: boolean
+}) {
   return (
     <header className="site-header">
       <div className="site-header__inner">
@@ -13,9 +21,21 @@ export function LandingHeader() {
             <a href="#faq">FAQ</a>
             <a href="https://daejang.backwardlabs.io/docs">Docs</a>
           </nav>
-          <a className="button button--primary button--header" href="#get-started">
-            시작하기
-          </a>
+          <button
+            className="button button--secondary button--header"
+            type="button"
+            onClick={onLogin}
+          >
+            로그인
+          </button>
+          <button
+            className="button button--primary button--header"
+            type="button"
+            onClick={onStart}
+            disabled={!signupAvailable}
+          >
+            {signupAvailable ? '시작하기' : '가입 준비 중'}
+          </button>
         </div>
       </div>
     </header>

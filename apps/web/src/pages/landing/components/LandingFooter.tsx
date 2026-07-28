@@ -1,6 +1,17 @@
+import type { MouseEvent } from 'react'
+import type { PublicPath } from '../../../auth/navigation.ts'
 import { Brand } from './Brand.tsx'
 
-export function LandingFooter() {
+export function LandingFooter({
+  onNavigate,
+}: {
+  onNavigate: (path: PublicPath) => void
+}) {
+  const navigate = (event: MouseEvent<HTMLAnchorElement>, path: PublicPath) => {
+    event.preventDefault()
+    onNavigate(path)
+  }
+
   return (
     <footer className="site-footer">
       <div className="site-footer__pattern" aria-hidden="true" />
@@ -18,8 +29,9 @@ export function LandingFooter() {
       <div className="site-footer__bottom">
         <p>© Backward Labs</p>
         <div className="site-footer__policies" aria-label="정책">
-          <span>이용약관</span>
-          <span>개인정보 처리방침</span>
+          <a href="/terms" onClick={(event) => navigate(event, '/terms')}>이용약관</a>
+          <a href="/privacy" onClick={(event) => navigate(event, '/privacy')}>개인정보 처리방침</a>
+          <a href="/support" onClick={(event) => navigate(event, '/support')}>고객지원</a>
         </div>
       </div>
     </footer>

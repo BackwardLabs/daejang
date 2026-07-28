@@ -1,8 +1,38 @@
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import { loadConfig } from './config.js'
 
 describe('web api configuration', () => {
+  it('documents every setting needed to activate signup and email authentication', () => {
+    const example = readFileSync(
+      new URL('../.env.example', import.meta.url),
+      'utf8',
+    )
+    const documentedKeys = new Set(
+      example
+        .split(/\r?\n/u)
+        .map((line) => /^([A-Z0-9_]+)=/u.exec(line)?.[1])
+        .filter((key): key is string => key !== undefined),
+    )
+
+    expect([...documentedKeys]).toEqual(
+      expect.arrayContaining([
+        'SIGNUP_SESSION_TTL_SECONDS',
+        'SIGNUP_ENABLED',
+        'EMAIL_AUTH_ENABLED',
+        'RESEND_API_KEY',
+        'EMAIL_FROM',
+        'EMAIL_VERIFICATION_HMAC_SECRET',
+        'EMAIL_VERIFICATION_TTL_SECONDS',
+        'EMAIL_VERIFICATION_TOKEN_TTL_SECONDS',
+        'EMAIL_VERIFICATION_RESEND_AFTER_SECONDS',
+        'IDENTITY_VERIFICATION_MODE',
+      ]),
+    )
+  })
+
   it('uses a host-only secure cookie name in production', () => {
     const config = loadConfig({
       NODE_ENV: 'production',
@@ -29,6 +59,38 @@ describe('web api configuration', () => {
 
   it('requires an explicit public origin in production', () => {
     expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow('PUBLIC_ORIGIN')
+  })
+
+  it('requires an HTTPS public origin in production but allows HTTP localhost in development', () => {
+    expect(loadConfig({ PUBLIC_ORIGIN: 'http://localhost:5173' }).publicOrigin).toBe(
+      'http://localhost:5173',
+    )
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        PUBLIC_ORIGIN: 'http://daejang.backwardlabs.io',
+      }),
+    ).toThrow('https')
+  })
+
+  it('validates enabled OAuth providers and their independent encryption key', () => {
+    expect(() =>
+      loadConfig({ OAUTH_ENABLED_PROVIDERS: 'github' }),
+    ).toThrow('unsupported provider')
+    expect(() =>
+      loadConfig({
+        OAUTH_ENABLED_PROVIDERS: 'naver',
+        NAVER_CLIENT_ID: 'client-id',
+      }),
+    ).toThrow('NAVER_CLIENT_SECRET')
+    expect(() =>
+      loadConfig({
+        OAUTH_ENABLED_PROVIDERS: 'naver',
+        NAVER_CLIENT_ID: 'client-id',
+        NAVER_CLIENT_SECRET: 'client-secret',
+        OAUTH_TRANSACTION_ENCRYPTION_KEY: 'not-a-32-byte-key',
+      }),
+    ).toThrow('base64-encoded 32-byte key')
   })
 
   it('requires durable PostgreSQL, rate-limit, and Engine mTLS settings in production', () => {
@@ -136,5 +198,78 @@ describe('web api configuration', () => {
         DEV_BOOTSTRAP_DISPLAY_NAME: '김대장',
       }),
     ).toThrow('must not be enabled in production')
+  })
+
+  it('allows mock identity verification outside production only', () => {
+    expect(
+      loadConfig({
+        NODE_ENV: 'development',
+        IDENTITY_VERIFICATION_MODE: 'mock',
+      }).identityVerificationMode,
+    ).toBe('mock')
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
+        DATABASE_URL: 'postgresql://example.invalid/daejang',
+        PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
+        RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
+        IDENTITY_VERIFICATION_MODE: 'mock',
+      }),
+    ).toThrow('not allowed in production')
+  })
+
+  it('enables signup only with an explicit method and completion-capable verifier', () => {
+    const enabled = loadConfig({
+      SIGNUP_ENABLED: 'true',
+      EMAIL_AUTH_ENABLED: 'true',
+      RESEND_API_KEY: 'test-resend-key',
+      EMAIL_FROM: 'GIWA <test@example.com>',
+      IDENTITY_VERIFICATION_MODE: 'mock',
+    })
+    expect(enabled.signup).toEqual({
+      enabled: true,
+      methods: { email: true, oauthProviders: [] },
+    })
+
+    expect(loadConfig().signup).toEqual({
+      enabled: false,
+      methods: { email: false, oauthProviders: [] },
+    })
+    expect(() =>
+      loadConfig({
+        SIGNUP_ENABLED: 'true',
+        IDENTITY_VERIFICATION_MODE: 'mock',
+      }),
+    ).toThrow('at least one configured signup method')
+    expect(() =>
+      loadConfig({
+        SIGNUP_ENABLED: 'true',
+        EMAIL_AUTH_ENABLED: 'true',
+        RESEND_API_KEY: 'test-resend-key',
+        EMAIL_FROM: 'GIWA <test@example.com>',
+      }),
+    ).toThrow('completion-capable identity verifier')
+  })
+
+  it('rejects production signup while no production verifier exists', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
+        DATABASE_URL: 'postgresql://example.invalid/daejang',
+        PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
+        RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
+        ENGINE_GRPC_TARGET: 'jit-engine.internal:8443',
+        ENGINE_GRPC_CA_PATH: '/run/secrets/engine-ca.pem',
+        ENGINE_GRPC_CERT_PATH: '/run/secrets/client.pem',
+        ENGINE_GRPC_KEY_PATH: '/run/secrets/client-key.pem',
+        SIGNUP_ENABLED: 'true',
+        EMAIL_AUTH_ENABLED: 'true',
+        RESEND_API_KEY: 'test-resend-key',
+        EMAIL_FROM: 'GIWA <test@example.com>',
+      }),
+    ).toThrow('completion-capable identity verifier')
   })
 })

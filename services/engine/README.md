@@ -20,15 +20,47 @@ buf generate
 | `DAEJANG_SOURCE_DATABASE_URL` | `daejang_source_app` PostgreSQL DSN |
 | `DAEJANG_QUERY_DATABASE_URL` | ledger·review read model PostgreSQL DSN |
 | `DAEJANG_REPORT_DATABASE_URL` | immutable report snapshot PostgreSQL DSN |
+| `DAEJANG_REVIEW_DATABASE_URL` | Review revision·reference·outbox write PostgreSQL DSN |
+| `DAEJANG_REVIEW_ARTIFACT_DATABASE_URL` | subject-private artifact writer PostgreSQL DSN |
+| `DAEJANG_REVIEW_ARTIFACT_ROOT` | subject-private Review resolution artifact root |
+| `DAEJANG_REVIEW_ARTIFACT_TEMP` | 같은 filesystem에 있는 Review artifact 임시 디렉터리 |
 | `ENGINE_LISTEN` | gRPC listen 주소, 기본 `127.0.0.1:50051` |
 | `ENGINE_TLS_CERT_PATH` | Engine server certificate |
 | `ENGINE_TLS_KEY_PATH` | Engine server private key |
 | `ENGINE_TLS_CLIENT_CA_PATH` | Web API client certificate를 검증할 CA |
+| `ENGINE_WEB_API_CLIENT_DNS_NAME` | application RPC를 허용할 Web API 인증서 DNS SAN |
 
-TLS 세 값은 함께 설정해야 합니다. 로컬 통합 테스트에서만 loopback listen과
+TLS 네 값은 함께 설정해야 합니다. CA가 발급한 다른 인증서가 사용자
+`RequestContext`를 위조하지 못하도록 health RPC를 제외한 모든 RPC는 이 DNS
+SAN이 정확히 포함된 Web API 인증서만 허용하며 wildcard SAN은 거부합니다. 별도 probe 인증서는 health
+service만 호출할 수 있습니다. 로컬 통합 테스트에서만 loopback listen과
 `ENGINE_ALLOW_INSECURE_LOOPBACK=true`를 사용할 수 있습니다. 이 경우 Web API도
 `ENGINE_GRPC_INSECURE_TARGET=127.0.0.1:50051`을 설정합니다. 두 plaintext opt-in은
 production에서 거부됩니다.
+
+Review mutation은 네 Review 설정값을 모두 지정했을 때만 등록됩니다. Review
+DSN은 `daejang_event_app` 수준의 review/reference 권한을, artifact DSN은
+`artifactstore.Put` 권한을 가진 role을 사용합니다. 현재 production 예시는
+Engine이 이미 보유한 `daejang_source_app` DSN을 artifact writer에도 재사용하며,
+artifact-only role이 DB contract에 추가되면 그 role로 축소해야 합니다. 두 DSN은
+artifact metadata를 ResolveV2 transaction에서 참조할 수 있도록 같은 물리
+database를 가리켜야 합니다. 이 opt-in은
+기존 Source·Workflow·Query 배포를 깨지 않기 위한 것이며, 활성화한 DB role에는
+`reviewstore.ResolveV2`와 `artifactstore.Put`에 필요한 migration 16·17,
+bounded evidence query 권한을 추가하는 migration 18이
+있어야 합니다. Engine은 시작 시 `giwa62-review-resolution-v2` contract를
+검증합니다. proof의 schema module digest는 환경변수가 아니라 Review가 열린
+정확한 PARTIAL ledger revision의 immutable `schema_digest`에서 DB가
+파생합니다. Query DSN의 role은 Review 상세에 표시할 bounded projection을 위해
+`subject_evidence`의 published fragment·observation·account·asset을 읽을 수
+있어야 하며, raw artifact나 observation detail JSON 권한은 필요하지 않습니다.
+Review 기능이 활성화되면 Engine은 시작 시 이 evidence projection 권한을
+preflight하고, 실행 중 health check에서도 반복 검증합니다. 따라서 DB migration
+16 → 17 → 18을 모두 적용한 뒤 Engine을 배포해야 합니다. 브라우저와 Web API는
+ReviewRoom이나 체인을 직접 호출하지 않고 Engine이 원자적으로 생성한
+`ReviewResolved V2` event와 `REVIEWROOM`·`APPLICATION_ENGINE` delivery를
+downstream worker 경계로 사용합니다. 상세 계약과 후속 의존성은
+[Review 응답 흐름](../../docs/review-resolution-flow.md)에 정리되어 있습니다.
 
 ```bash
 go test ./...
@@ -42,7 +74,7 @@ go run ./cmd/engine-api
 
 ## 운영 프로세스
 
-- `engine-api`: mTLS gRPC Source·Workflow·Query API. 연결된 DB 중 하나라도
+- `engine-api`: mTLS gRPC Source·Workflow·Query·Review API. 연결된 DB 중 하나라도
   응답하지 않으면 표준 gRPC health를 `NOT_SERVING`으로 내린다.
 - `sync-worker`: `FOR UPDATE SKIP LOCKED`로 Sync Job을 임대하고 private object
   root의 Upbit PDF 무결성을 검증한다. 지원하지 않는 소스는 안전한 실패 코드로
@@ -51,7 +83,8 @@ go run ./cmd/engine-api
 
 운영 구성은 `deploy/compose.production.yaml`을 기준으로 한다. Engine 서버
 인증서 SAN에는 `engine.internal`이 포함되어야 하며 Web client 인증서와 probe
-client 인증서는 분리한다.
+client 인증서는 분리한다. Web client 인증서 DNS SAN에는
+`ENGINE_WEB_API_CLIENT_DNS_NAME`의 값이 포함되어야 한다.
 
 Engine 이미지 빌드는 private `BackwardLabs/daejang-db` module을 내려받기 위해
 BuildKit secret `github_token`이 필요하다. Compose는 현재 shell의 `GH_PAT`을 이

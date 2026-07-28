@@ -257,6 +257,7 @@ Web 인증 persistence는 다음 경계를 사용한다.
 - 운영 시작 시 CA, Web API client certificate, private key, Engine target이 모두 없으면 설정 검증에 실패한다.
 - `server.ts`는 공개 listener를 열기 전에 client certificate가 필요한 TLS channel로 Engine 연결 preflight를 수행한다.
 - 인증서의 서버 이름은 기본적으로 Engine target과 일치해야 한다. 별도 이름을 사용할 때만 `ENGINE_GRPC_SERVER_NAME`을 명시한다.
+- Engine은 CA 서명만으로 application caller를 신뢰하지 않는다. health RPC 외에는 `ENGINE_WEB_API_CLIENT_DNS_NAME`을 wildcard 없이 정확히 포함한 DNS SAN의 Web API 인증서만 허용하므로 probe나 다른 내부 인증서가 `RequestContext`를 위조할 수 없다.
 - 로컬 개발에서는 양쪽 runtime이 명시적으로 허용한 loopback target에만 plaintext gRPC를 사용할 수 있으며 production 설정은 이를 거부한다.
 - 브라우저 Session Token이나 공급자 Token은 Engine으로 전달하지 않는다.
 - SourceService의 지갑 등록·목록·연결 해제 RPC는 모든 요청에 서버 Session에서 만든 `RequestContext`를 요구한다.

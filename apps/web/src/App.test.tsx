@@ -1,6 +1,30 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App.tsx'
+
+beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/auth/capabilities')) {
+        return new Response(JSON.stringify({
+          signup: {
+            enabled: true,
+            methods: {
+              email: true,
+              oauthProviders: ['kakao', 'naver', 'google'],
+            },
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected request: ${String(input)}`)
+    }),
+  )
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('App', () => {
   it('renders the landing page with product sections and real preview images', () => {

@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Render production Compose
+        run: >-
+          docker compose
+          --env-file deploy/production.env.example
+          --file deploy/compose.production.yaml
+          config --quiet
+
+  engine:
+    name: Engine quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DAEJANG_DB_READ_TOKEN: ${{ secrets.DAEJANG_DB_READ_TOKEN }}
+      GOPRIVATE: github.com/BackwardLabs/*
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/engine/go.mod
+          cache-dependency-path: services/engine/go.sum
+      - name: Require private module token
+        shell: bash
+        run: |
+          if [[ -z "${DAEJANG_DB_READ_TOKEN}" ]]; then
+            echo "DAEJANG_DB_READ_TOKEN is required for the private daejang-db module." >&2
+            exit 1
+          fi
+      - name: Configure private module access
+        shell: bash
+        run: |
+          set +x
+          git config --global \
+            url."https://x-access-token:${DAEJANG_DB_READ_TOKEN}@github.com/".insteadOf \
+            "https://github.com/"
+      - name: Test
+        working-directory: services/engine
+        run: go test ./...
+      - name: Vet
+        working-directory: services/engine
+        run: go vet ./...
+      - name: Build
+        working-directory: services/engine
+        run: go build ./...
+      - name: Remove private module credentials
+        if: always()
+        shell: bash
+        run: |
+          git config --global --unset-all \
+            url."https://x-access-token:${DAEJANG_DB_READ_TOKEN}@github.com/".insteadOf \
+            || true

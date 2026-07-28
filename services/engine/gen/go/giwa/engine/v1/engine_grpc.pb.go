@@ -665,3 +665,143 @@ var QueryService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "giwa/engine/v1/engine.proto",
 }
+
+const (
+	ReviewService_GetReview_FullMethodName     = "/giwa.engine.v1.ReviewService/GetReview"
+	ReviewService_ResolveReview_FullMethodName = "/giwa.engine.v1.ReviewService/ResolveReview"
+)
+
+// ReviewServiceClient is the client API for ReviewService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type ReviewServiceClient interface {
+	GetReview(ctx context.Context, in *GetReviewRequest, opts ...grpc.CallOption) (*GetReviewResponse, error)
+	ResolveReview(ctx context.Context, in *ResolveReviewRequest, opts ...grpc.CallOption) (*ResolveReviewResponse, error)
+}
+
+type reviewServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewReviewServiceClient(cc grpc.ClientConnInterface) ReviewServiceClient {
+	return &reviewServiceClient{cc}
+}
+
+func (c *reviewServiceClient) GetReview(ctx context.Context, in *GetReviewRequest, opts ...grpc.CallOption) (*GetReviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetReviewResponse)
+	err := c.cc.Invoke(ctx, ReviewService_GetReview_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *reviewServiceClient) ResolveReview(ctx context.Context, in *ResolveReviewRequest, opts ...grpc.CallOption) (*ResolveReviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveReviewResponse)
+	err := c.cc.Invoke(ctx, ReviewService_ResolveReview_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ReviewServiceServer is the server API for ReviewService service.
+// All implementations must embed UnimplementedReviewServiceServer
+// for forward compatibility.
+type ReviewServiceServer interface {
+	GetReview(context.Context, *GetReviewRequest) (*GetReviewResponse, error)
+	ResolveReview(context.Context, *ResolveReviewRequest) (*ResolveReviewResponse, error)
+	mustEmbedUnimplementedReviewServiceServer()
+}
+
+// UnimplementedReviewServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedReviewServiceServer struct{}
+
+func (UnimplementedReviewServiceServer) GetReview(context.Context, *GetReviewRequest) (*GetReviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetReview not implemented")
+}
+func (UnimplementedReviewServiceServer) ResolveReview(context.Context, *ResolveReviewRequest) (*ResolveReviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveReview not implemented")
+}
+func (UnimplementedReviewServiceServer) mustEmbedUnimplementedReviewServiceServer() {}
+func (UnimplementedReviewServiceServer) testEmbeddedByValue()                       {}
+
+// UnsafeReviewServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ReviewServiceServer will
+// result in compilation errors.
+type UnsafeReviewServiceServer interface {
+	mustEmbedUnimplementedReviewServiceServer()
+}
+
+func RegisterReviewServiceServer(s grpc.ServiceRegistrar, srv ReviewServiceServer) {
+	// If the following call panics, it indicates UnimplementedReviewServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ReviewService_ServiceDesc, srv)
+}
+
+func _ReviewService_GetReview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReviewServiceServer).GetReview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ReviewService_GetReview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReviewServiceServer).GetReview(ctx, req.(*GetReviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ReviewService_ResolveReview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveReviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ReviewServiceServer).ResolveReview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ReviewService_ResolveReview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ReviewServiceServer).ResolveReview(ctx, req.(*ResolveReviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// ReviewService_ServiceDesc is the grpc.ServiceDesc for ReviewService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ReviewService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "giwa.engine.v1.ReviewService",
+	HandlerType: (*ReviewServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetReview",
+			Handler:    _ReviewService_GetReview_Handler,
+		},
+		{
+			MethodName: "ResolveReview",
+			Handler:    _ReviewService_ResolveReview_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "giwa/engine/v1/engine.proto",
+}

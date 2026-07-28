@@ -6,12 +6,15 @@ import (
 	"net"
 	"time"
 
+	"github.com/BackwardLabs/daejang-db/pkg/artifactstore"
 	"github.com/BackwardLabs/daejang-db/pkg/readmodelstore"
 	"github.com/BackwardLabs/daejang-db/pkg/reportstore"
+	"github.com/BackwardLabs/daejang-db/pkg/reviewstore"
 	"github.com/BackwardLabs/daejang-db/pkg/sourcejobstore"
 	"github.com/BackwardLabs/daejang-db/pkg/sourcestore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
 	"github.com/BackwardLabs/daejang/services/engine/internal/query"
+	"github.com/BackwardLabs/daejang/services/engine/internal/review"
 	"github.com/BackwardLabs/daejang/services/engine/internal/source"
 	"github.com/BackwardLabs/daejang/services/engine/internal/workflow"
 	"google.golang.org/grpc"
@@ -43,6 +46,30 @@ func Run(ctx context.Context, config Config) error {
 	}
 	defer reportRuntime.Close()
 
+	var reviewRuntime *reviewstore.Runtime
+	var reviewArtifactRuntime *artifactstore.Runtime
+	if config.ReviewDatabaseURL != "" {
+		reviewRuntime, err = reviewstore.Open(ctx, reviewstore.Options{
+			DatabaseURL: config.ReviewDatabaseURL, ApplicationName: "daejang-engine-review-api",
+			RequireResolutionV2: true,
+		})
+		if err != nil {
+			return fmt.Errorf("open review persistence: %w", err)
+		}
+		defer reviewRuntime.Close()
+		reviewArtifactRuntime, err = artifactstore.Open(ctx, artifactstore.Options{
+			DatabaseURL: config.ReviewArtifactDatabaseURL, ApplicationName: "daejang-engine-review-artifacts",
+			ArtifactRoot: config.ReviewArtifactRoot, ArtifactTemp: config.ReviewArtifactTemp,
+		})
+		if err != nil {
+			return fmt.Errorf("open review artifact persistence: %w", err)
+		}
+		defer reviewArtifactRuntime.Close()
+		if err := readRuntime.Store.CheckReviewEvidenceAccess(ctx); err != nil {
+			return fmt.Errorf("verify review evidence query access: %w", err)
+		}
+	}
+
 	listener, err := net.Listen("tcp", config.Listen)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", config.Listen, err)
@@ -55,7 +82,12 @@ func Run(ctx context.Context, config Config) error {
 		if err != nil {
 			return fmt.Errorf("configure Engine mTLS: %w", err)
 		}
-		options = append(options, grpc.Creds(credentials))
+		options = append(
+			options,
+			grpc.Creds(credentials),
+			grpc.UnaryInterceptor(requireWebAPIClient(config.WebAPIClientDNSName)),
+			grpc.StreamInterceptor(requireWebAPIStreamClient(config.WebAPIClientDNSName)),
+		)
 	}
 	grpcServer := grpc.NewServer(options...)
 	healthServer := health.NewServer()
@@ -66,6 +98,13 @@ func Run(ctx context.Context, config Config) error {
 	enginev1.RegisterWorkflowServiceServer(grpcServer, &workflow.Service{Store: jobRuntime.Store})
 	enginev1.RegisterQueryServiceServer(grpcServer, &query.Service{Reads: readRuntime.Store, Reports: reportRuntime.Store})
 	services := []string{"", enginev1.SourceService_ServiceDesc.ServiceName, enginev1.WorkflowService_ServiceDesc.ServiceName, enginev1.QueryService_ServiceDesc.ServiceName}
+	if reviewRuntime != nil {
+		enginev1.RegisterReviewServiceServer(grpcServer, &review.Service{
+			Reviews: reviewRuntime.Store, Evidence: readRuntime.Store,
+			Artifacts: reviewArtifactRuntime.Store,
+		})
+		services = append(services, enginev1.ReviewService_ServiceDesc.ServiceName)
+	}
 	for _, name := range services {
 		healthServer.SetServingStatus(name, grpc_health_v1.HealthCheckResponse_NOT_SERVING)
 	}
@@ -81,7 +120,21 @@ func Run(ctx context.Context, config Config) error {
 		if err := readRuntime.Ping(checkCtx); err != nil {
 			return err
 		}
-		return reportRuntime.Ping(checkCtx)
+		if err := reportRuntime.Ping(checkCtx); err != nil {
+			return err
+		}
+		if reviewRuntime != nil {
+			if err := readRuntime.Store.CheckReviewEvidenceAccess(checkCtx); err != nil {
+				return err
+			}
+			if err := reviewRuntime.Ping(checkCtx); err != nil {
+				return err
+			}
+			if err := reviewArtifactRuntime.Ping(checkCtx); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 
 	serveError := make(chan error, 1)

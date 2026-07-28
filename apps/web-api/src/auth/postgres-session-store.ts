@@ -126,13 +126,10 @@ export class PostgresSessionStore implements SessionStore {
   }: Parameters<SessionStore['replaceAfterAuthentication']>[0]) {
     return this.#transaction(async (client) => {
       if (currentTokenHash) {
-        const revoked = await client.query<{ id: string }>(
-          'DELETE FROM web_private.sessions WHERE token_hash = $1 RETURNING id',
+        await client.query(
+          'DELETE FROM web_private.sessions WHERE token_hash = $1',
           [currentTokenHash],
         )
-        if (revoked.rowCount !== 1) {
-          return undefined
-        }
       }
 
       return this.#insertSession(client, replacementTokenHash, replacement)

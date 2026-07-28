@@ -62,7 +62,7 @@ Web API는 다음 보안 경계를 기본으로 적용합니다.
 - private Upbit PDF 업로드, digest 검증, durable Sync Job lease
 - 실제 DB 기반 Dashboard·Activity·Ledger·Review와 immutable Report snapshot
 
-메모리 SessionStore와 rate-limit store는 로컬 개발과 테스트 전용입니다. 운영 모드는 `DATABASE_URL`, 32 byte 이상의 `RATE_LIMIT_HMAC_SECRET`, Engine CA·client certificate·private key 설정이 없으면 시작하지 않습니다. Web schema는 `daejang-db`의 단일 사용자 baseline `000008` migration이 소유하고, ingress 기준은 [`deploy/nginx`](deploy/nginx/README.md)에 있습니다.
+메모리 SessionStore와 rate-limit store는 로컬 개발과 테스트 전용입니다. 운영 모드는 `DATABASE_URL`, 32 byte 이상의 `RATE_LIMIT_HMAC_SECRET`, Engine CA·client certificate·private key 설정이 없으면 시작하지 않습니다. Web schema는 `daejang-db` migration이 소유하며 OAuth·이메일 인증 persistence는 `000015`에서 추가됩니다. ingress 기준은 [`deploy/nginx`](deploy/nginx/README.md), DB부터 Worker까지 실제 배포 순서는 [계정 인증 배포 실행 순서](docs/auth-deployment-runbook.md)에 있습니다.
 
 ## 검증 명령
 
