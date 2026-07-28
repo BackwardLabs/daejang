@@ -340,14 +340,12 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       ...(options.engineDataClient ? { engineDataClient: options.engineDataClient } : {}),
       ...(options.now ? { now: options.now } : {}),
     })
-    if (options.uploadStore) {
-      await registerDataRoutes(protectedApp, {
-        uploadStore: options.uploadStore,
-        uploadAdmissionRateLimiter,
-        ...(options.engineDataClient ? { engine: options.engineDataClient } : {}),
-        ...(options.now ? { now: options.now } : {}),
-      })
-    }
+    await registerDataRoutes(protectedApp, {
+      uploadAdmissionRateLimiter,
+      ...(options.uploadStore ? { uploadStore: options.uploadStore } : {}),
+      ...(options.engineDataClient ? { engine: options.engineDataClient } : {}),
+      ...(options.now ? { now: options.now } : {}),
+    })
     if (options.taxReportReader) {
       await registerTaxReportRoutes(protectedApp, {
         reader: options.taxReportReader,

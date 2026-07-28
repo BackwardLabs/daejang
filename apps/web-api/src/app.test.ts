@@ -704,6 +704,52 @@ describe('web api authentication boundary', () => {
     })
   })
 
+  it('keeps data endpoints registered when neither Engine nor upload storage is configured', async () => {
+    const unauthenticated = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/dashboard?taxYear=2026',
+    })
+    expect(unauthenticated.statusCode).toBe(401)
+    expect(unauthenticated.json()).toMatchObject({
+      error: { code: 'AUTHENTICATION_REQUIRED' },
+    })
+
+    const { token } = await createSession()
+    const headers = {
+      cookie: `${config.sessionCookieName}=${token}`,
+      origin: config.publicOrigin,
+    }
+
+    for (const url of [
+      '/api/v1/dashboard?taxYear=2026',
+      '/api/v1/ledger?taxYear=2026',
+      '/api/v1/reviews',
+      '/api/v1/reports?taxYear=2026',
+    ]) {
+      const response = await context.app.inject({ method: 'GET', url, headers })
+      expect(response.statusCode).toBe(503)
+      expect(response.json()).toMatchObject({
+        error: { code: 'ENGINE_UNAVAILABLE' },
+      })
+    }
+
+    const upload = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads',
+      headers,
+      payload: {
+        filename: 'statement.pdf',
+        mediaType: 'application/pdf',
+        sizeBytes: 128,
+        intentKey: 'no-upload-storage',
+      },
+    })
+    expect(upload.statusCode).toBe(503)
+    expect(upload.json()).toMatchObject({
+      error: { code: 'UPBIT_PDF_IMPORT_UNAVAILABLE' },
+    })
+  })
+
   it('does not clear the winning cookie when concurrent rotation loses', async () => {
     const { token } = await createSession()
     const request = () =>

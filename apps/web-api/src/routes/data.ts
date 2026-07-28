@@ -243,7 +243,7 @@ const enforceUploadAdmission = (decision: {
 export const registerDataRoutes = async (
   app: FastifyInstance,
   options: {
-    uploadStore: UploadStore
+    uploadStore?: UploadStore
     uploadAdmissionRateLimiter: UploadAdmissionRateLimiter
     engine?: EngineDataClient
     now?: () => Date
@@ -257,8 +257,19 @@ export const registerDataRoutes = async (
       throw upbitPdfImportUnavailable()
     }
   }
-  const requireUpbitPdfImport: onRequestHookHandler = async () => {
+  const availableUploadStore = () => {
+    if (!options.uploadStore) {
+      throw new ApiError(
+        503,
+        'UPLOAD_UNAVAILABLE',
+        '문서 업로드 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+      )
+    }
+    return options.uploadStore
+  }
+  const requireUpbitPdfUpload: onRequestHookHandler = async () => {
     assertUpbitPdfImport()
+    availableUploadStore()
   }
   const admitUploadCreate: onRequestHookHandler = async (request) => {
     const context = contextFor(request)
@@ -284,14 +295,15 @@ export const registerDataRoutes = async (
 
   app.post<{ Body: { filename: string; mediaType: 'application/pdf'; sizeBytes: number; intentKey: string } }>(
     '/api/v1/uploads',
-    { onRequest: [requireUpbitPdfImport, admitUploadCreate], schema: { body: { type: 'object', additionalProperties: false, required: ['filename','mediaType','sizeBytes','intentKey'], properties: {
+    { onRequest: [requireUpbitPdfUpload, admitUploadCreate], schema: { body: { type: 'object', additionalProperties: false, required: ['filename','mediaType','sizeBytes','intentKey'], properties: {
       filename: { type: 'string', minLength: 1, maxLength: 255 }, mediaType: { type: 'string', const: 'application/pdf' },
       sizeBytes: { type: 'integer', minimum: 1, maximum: maximumUploadBytes }, intentKey: { type: 'string', minLength: 1, maxLength: 200 },
     } } } },
     async (request, reply) => {
       assertUpbitPdfImport()
+      const uploadStore = availableUploadStore()
       const context = contextFor(request)
-      const session = await options.uploadStore.create({ userId: context.userId, originalFilename: request.body.filename,
+      const session = await uploadStore.create({ userId: context.userId, originalFilename: request.body.filename,
         mediaType: request.body.mediaType, expectedBytes: request.body.sizeBytes, idempotencyKey: request.body.intentKey, now: now() })
       return reply.status(201).send({
         uploadId: session.id,
@@ -304,9 +316,10 @@ export const registerDataRoutes = async (
 
   app.put<{ Params: { uploadId: string }; Body: Buffer }>(
     '/api/v1/uploads/:uploadId/content',
-    { onRequest: [requireUpbitPdfImport, admitUploadContent], bodyLimit: maximumUploadBytes, schema: { params: { type: 'object', required: ['uploadId'], properties: { uploadId: { type: 'string', format: 'uuid' } } } } },
+    { onRequest: [requireUpbitPdfUpload, admitUploadContent], bodyLimit: maximumUploadBytes, schema: { params: { type: 'object', required: ['uploadId'], properties: { uploadId: { type: 'string', format: 'uuid' } } } } },
     async (request, reply) => {
       assertUpbitPdfImport()
+      const uploadStore = availableUploadStore()
       const context = contextFor(request)
       if (!Buffer.isBuffer(request.body)) throw resourceNotFound()
       if (request.body.byteLength !== uploadContentLength(request.headers['content-length'])) {
@@ -316,7 +329,7 @@ export const registerDataRoutes = async (
           '업로드 파일 크기가 요청 정보와 일치하지 않습니다.',
         )
       }
-      const session = await options.uploadStore.write(context.userId, request.params.uploadId, request.body, now())
+      const session = await uploadStore.write(context.userId, request.params.uploadId, request.body, now())
       if (!session) throw resourceNotFound()
       return reply.status(204).send()
     },
@@ -324,7 +337,7 @@ export const registerDataRoutes = async (
 
   app.post<{ Params: { uploadId: string }; Body: { coverageStart: string; coverageEnd: string } }>(
     '/api/v1/uploads/:uploadId/confirm',
-    { onRequest: requireUpbitPdfImport, schema: {
+    { onRequest: requireUpbitPdfUpload, schema: {
       params: { type: 'object', required: ['uploadId'], properties: { uploadId: { type: 'string', format: 'uuid' } } },
       body: { type: 'object', additionalProperties: false, required: ['coverageStart','coverageEnd'], properties: {
         coverageStart: { type: 'string', format: 'date' }, coverageEnd: { type: 'string', format: 'date' },
@@ -332,21 +345,22 @@ export const registerDataRoutes = async (
     } },
     async (request, reply) => {
       assertUpbitPdfImport()
+      const uploadStore = availableUploadStore()
       if (!validDateRange(request.body.coverageStart, request.body.coverageEnd)) {
         throw new ApiError(400, 'INVALID_COVERAGE_PERIOD', '문서 포함 종료일은 시작일보다 빠를 수 없습니다.')
       }
       const context = contextFor(request, `upload:${request.params.uploadId}`)
-      const session = await options.uploadStore
+      const session = await uploadStore
         .confirm(context.userId, request.params.uploadId, now())
         .catch(mapUploadValidationError)
       if (!session?.verifiedDigest || session.verifiedBytes === undefined) throw resourceNotFound()
       if (!configuredEngine) {
-        const discarded = await options.uploadStore.discard(context.userId, session.id)
+        const discarded = await uploadStore.discard(context.userId, session.id)
         if (!discarded) throw new Error('Unavailable Engine upload discard failed')
         throw new ApiError(503, 'ENGINE_UNAVAILABLE', '데이터 처리 서비스를 사용할 수 없습니다.')
       }
       if (engine.upbitPdfImportSupported !== true) {
-        const discarded = await options.uploadStore.discard(context.userId, session.id)
+        const discarded = await uploadStore.discard(context.userId, session.id)
         if (!discarded) throw new Error('Unsupported PDF upload discard failed')
         throw upbitPdfImportUnavailable()
       }
