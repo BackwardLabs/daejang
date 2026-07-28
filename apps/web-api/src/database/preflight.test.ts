@@ -1,7 +1,7 @@
 import type { Pool } from 'pg'
 import { describe, expect, it, vi } from 'vitest'
 
-import { assertTaxReportSchema, assertWebAuthSchema } from './preflight.js'
+import { assertReportPaymentSchema, assertTaxReportSchema, assertWebAuthSchema } from './preflight.js'
 
 const validWebAuthContract = {
   users_table: 'web_private.users',
@@ -45,6 +45,15 @@ const validTaxReportContract = {
   migration_version: '24',
 }
 
+const validReportPaymentContract = {
+  orders_table: 'web_private.report_payment_orders',
+  authorizations_table: 'web_private.report_payment_authorizations',
+  entitlements_table: 'web_private.report_payment_entitlements',
+  contract_version: 1,
+  contract_digest: '28f6894a953e6acc5c238b04e025662ee6bc7d3b5dbd31e783c40789b9e6dcf4',
+  migration_version: '25',
+}
+
 function poolReturning<T>(row: T): Pool {
   return {
     query: vi.fn().mockResolvedValue({ rows: [row] }),
@@ -86,5 +95,22 @@ describe('tax report schema preflight', () => {
         }),
       ),
     ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+})
+
+describe('report payment schema preflight', () => {
+  it('accepts the durable order, replay and entitlement contract', async () => {
+    await expect(
+      assertReportPaymentSchema(poolReturning(validReportPaymentContract)),
+    ).resolves.toBeUndefined()
+  })
+
+  it('rejects a deployment without the nonce replay table', async () => {
+    await expect(
+      assertReportPaymentSchema(poolReturning({
+        ...validReportPaymentContract,
+        authorizations_table: null,
+      })),
+    ).rejects.toThrow('report x402 payment migration contract is invalid')
   })
 })

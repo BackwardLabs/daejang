@@ -2,6 +2,79 @@
   background: #fff;
 }
 
+.report-payment-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  margin-top: 22px;
+  padding: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.report-payment-panel > div > span {
+  color: #d64b12;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.report-payment-panel h3 {
+  margin-top: 4px;
+  font-size: 16px;
+}
+
+.report-payment-panel > div > p {
+  margin-top: 5px;
+  color: #666b73;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.report-payment-panel > button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid #d64b12;
+  border-radius: 8px;
+  color: #fff;
+  background: #d64b12;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.report-payment-panel > button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.report-payment-feedback {
+  grid-column: 1 / -1;
+  color: #16794c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.report-payment-feedback.is-error {
+  color: #b42318;
+}
+
+.report-payment-feedback a {
+  color: inherit;
+}
+
+@media (max-width: 767px) {
+  .report-payment-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .report-payment-panel > button {
+    width: 100%;
+  }
+}
+
 .report-main {
   width: 100%;
   min-width: 0;

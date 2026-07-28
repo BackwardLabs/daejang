@@ -20,10 +20,22 @@ export type AppConfig = {
   engineMtls: EngineMtlsConfig | undefined
   engineInsecureTarget?: string
   privateObjectRoot?: string
+  reportPayments?: ReportPaymentConfig
   devBootstrapUser?: {
     id: string
     displayName: string
   }
+}
+
+export type ReportPaymentConfig = {
+  facilitatorUrl: string
+  network: 'eip155:91342'
+  asset: string
+  amount: string
+  payTo: string
+  maxTimeoutSeconds: number
+  tokenName: string
+  tokenVersion: string
 }
 
 export type SignupCapability = {
@@ -87,6 +99,62 @@ const parseOrigin = (value: string) => {
   }
 
   return url.origin
+}
+
+const evmAddressPattern = /^0x[0-9a-fA-F]{40}$/
+
+const loadReportPaymentConfig = (
+  environment: NodeJS.ProcessEnv,
+  production: boolean,
+): ReportPaymentConfig | undefined => {
+  const enabled = parseBoolean(
+    environment.X402_REPORT_PAYMENTS_ENABLED,
+    false,
+    'X402_REPORT_PAYMENTS_ENABLED',
+  )
+  if (!enabled) return undefined
+
+  const facilitatorUrl = environment.X402_FACILITATOR_URL
+  const asset = environment.X402_ASSET_ADDRESS
+  const payTo = environment.X402_PAY_TO_ADDRESS
+  const amount = environment.X402_AMOUNT_ATOMIC
+  if (!facilitatorUrl || !asset || !payTo || !amount) {
+    throw new Error(
+      'X402_FACILITATOR_URL, X402_ASSET_ADDRESS, X402_PAY_TO_ADDRESS and X402_AMOUNT_ATOMIC are required when report payments are enabled',
+    )
+  }
+  const url = new URL(facilitatorUrl)
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(url.hostname)
+  if (url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('X402_FACILITATOR_URL must contain only scheme, host, and optional port')
+  }
+  if (production && url.protocol !== 'https:') {
+    throw new Error('X402_FACILITATOR_URL must use https in production')
+  }
+  if (!production && url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    throw new Error('X402_FACILITATOR_URL must use https or loopback http')
+  }
+  if (!evmAddressPattern.test(asset) || !evmAddressPattern.test(payTo)) {
+    throw new Error('X402 asset and pay-to values must be EVM addresses')
+  }
+  if (!/^[1-9][0-9]*$/.test(amount)) {
+    throw new Error('X402_AMOUNT_ATOMIC must be a positive integer string')
+  }
+
+  return {
+    facilitatorUrl: url.origin,
+    network: 'eip155:91342',
+    asset,
+    amount,
+    payTo,
+    maxTimeoutSeconds: parsePositiveInteger(
+      environment.X402_MAX_TIMEOUT_SECONDS,
+      300,
+      'X402_MAX_TIMEOUT_SECONDS',
+    ),
+    tokenName: environment.X402_TOKEN_NAME ?? 'Mock USD',
+    tokenVersion: environment.X402_TOKEN_VERSION ?? '1',
+  }
 }
 
 const parseNonNegativeInteger = (
@@ -331,6 +399,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   const production = runtimeMode === 'production'
   const oauth = loadOAuthConfig(environment, production)
   const emailAuth = loadEmailAuthConfig(environment, production)
+  const reportPayments = loadReportPaymentConfig(environment, production)
   const identityVerificationMode = parseIdentityVerificationMode(
     environment.IDENTITY_VERIFICATION_MODE,
     production,
@@ -462,6 +531,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     signup,
     identityVerificationMode,
     engineMtls: loadEngineMtlsConfig(environment, production),
+    ...(reportPayments ? { reportPayments } : {}),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
     ...(devBootstrapUserId && devBootstrapDisplayName

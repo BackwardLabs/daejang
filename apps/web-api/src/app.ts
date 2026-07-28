@@ -39,12 +39,15 @@ import {
 import { registerSourceRoutes } from './routes/sources.js'
 import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
 import { registerTaxReportRoutes } from './routes/tax-reports.js'
+import { registerReportPaymentRoutes } from './routes/report-payments.js'
 import { registerSecurityPolicy } from './security.js'
 import {
   MemoryWalletSourceStore,
   type WalletSourceStore,
 } from './sources/wallet-source-store.js'
 import type { TaxReportReader } from './tax-report/types.js'
+import type { ReportPaymentFacilitator } from './report-payment/facilitator.js'
+import type { ReportPaymentStore } from './report-payment/types.js'
 import type { UploadStore } from './uploads/upload-store.js'
 
 type BuildAppOptions = {
@@ -60,6 +63,8 @@ type BuildAppOptions = {
   engineDataClient?: EngineDataClient
   developmentUserStore?: DevelopmentUserStore
   taxReportReader?: TaxReportReader
+  reportPaymentStore?: ReportPaymentStore
+  reportPaymentFacilitator?: ReportPaymentFacilitator
   now?: () => Date
   readinessCheck?: () => Promise<void>
 }
@@ -95,6 +100,23 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   }
   if (config.runtimeMode === 'production' && options.taxReportReader?.durable !== true) {
     throw new Error('A durable TaxReportReader is required in production')
+  }
+  if (
+    config.runtimeMode === 'production' &&
+    config.reportPayments &&
+    options.reportPaymentStore?.durable !== true
+  ) {
+    throw new Error('A durable ReportPaymentStore is required when report payments are enabled')
+  }
+  if (
+    config.reportPayments &&
+    (!options.taxReportReader ||
+      !options.reportPaymentStore ||
+      !options.reportPaymentFacilitator)
+  ) {
+    throw new Error(
+      'TaxReportReader, ReportPaymentStore and ReportPaymentFacilitator are required when report payments are enabled',
+    )
   }
   const signupMethodsMatchAuthConfiguration =
     (!config.signup.methods.email || config.emailAuth.enabled) &&
@@ -335,6 +357,22 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     await registerTaxReportRoutes(app, {
       authenticate: authHooks.authenticate,
       reader: options.taxReportReader,
+    })
+  }
+  if (
+    options.taxReportReader &&
+    config.reportPayments &&
+    options.reportPaymentStore &&
+    options.reportPaymentFacilitator
+  ) {
+    await registerReportPaymentRoutes(app, {
+      authenticate: authHooks.authenticate,
+      config,
+      paymentConfig: config.reportPayments,
+      reader: options.taxReportReader,
+      store: options.reportPaymentStore,
+      facilitator: options.reportPaymentFacilitator,
+      ...(options.now ? { now: options.now } : {}),
     })
   }
   return {

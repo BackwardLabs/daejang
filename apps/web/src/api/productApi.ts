@@ -98,6 +98,18 @@ export type ReportModel = {
   issuedAt: string
 }
 
+export type PayableTaxReportModel = {
+  schemaVersion: 'giwa.web.tax-report.v1'
+  reportId: string
+  residentId: string
+  taxYear: number
+  finality: 'FINAL' | 'PROVISIONAL'
+  status: 'FINAL' | 'PARTIAL'
+  filingStatus: 'READY' | 'BLOCKED'
+  pointerVersion: number
+  reportArtifactDigest: string
+}
+
 export const loadDashboard = (taxYear: string, signal?: AbortSignal) =>
   requestApi<{ dashboard: DashboardModel }>(`/dashboard?taxYear=${taxYear}`, { signal })
 export const loadLedger = (taxYear: string, signal?: AbortSignal) =>
@@ -124,6 +136,11 @@ export const resolveReview = (reviewId: string, input: {
 )
 export const loadReports = (taxYear: string, signal?: AbortSignal) =>
   requestApi<{ items: ReportModel[] }>(`/reports?taxYear=${taxYear}`, { signal })
+export const loadCurrentTaxReport = (taxYear: string, signal?: AbortSignal) =>
+  requestApi<{ report: PayableTaxReportModel }>(
+    `/tax-reports/${taxYear}/current?finality=FINAL`,
+    { signal },
+  )
 export const createReport = (taxYear: string) => requestApi<{ report: ReportModel }>('/reports', {
   method: 'POST', body: JSON.stringify({ taxYear: Number(taxYear), intentKey: crypto.randomUUID() }),
 })

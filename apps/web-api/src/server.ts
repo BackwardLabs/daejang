@@ -7,10 +7,12 @@ import { PostgresRateLimitStore } from './auth/rate-limit.js'
 import { PostgresSessionStore } from './auth/postgres-session-store.js'
 import { PostgresUserStore } from './auth/postgres-user-store.js'
 import { loadConfig } from './config.js'
-import { assertTaxReportSchema, assertWebAuthSchema } from './database/preflight.js'
+import { assertReportPaymentSchema, assertTaxReportSchema, assertWebAuthSchema } from './database/preflight.js'
 import { EngineMtlsClient } from './engine/mtls-client.js'
 import { PostgresWalletSourceStore } from './sources/postgres-wallet-source-store.js'
 import { PostgresTaxReportReader } from './tax-report/postgres-tax-report-reader.js'
+import { HttpReportPaymentFacilitator } from './report-payment/facilitator.js'
+import { PostgresReportPaymentStore } from './report-payment/postgres-report-payment-store.js'
 import { assertPrivateObjectRoot, PostgresFileUploadStore } from './uploads/postgres-file-upload-store.js'
 
 const config = loadConfig()
@@ -31,6 +33,9 @@ const engineClient = config.engineMtls
 if (pool) {
   await assertWebAuthSchema(pool)
   await assertTaxReportSchema(pool)
+  if (config.reportPayments) {
+    await assertReportPaymentSchema(pool)
+  }
 }
 if (engineClient) {
   await engineClient.waitForReady(5_000)
@@ -55,6 +60,14 @@ const { app } = await buildApp({
         rateLimitStore: new PostgresRateLimitStore(pool),
         accountAuthStore: new PostgresAccountAuthStore(pool),
         taxReportReader: new PostgresTaxReportReader(pool),
+        ...(config.reportPayments
+          ? {
+              reportPaymentStore: new PostgresReportPaymentStore(pool),
+              reportPaymentFacilitator: new HttpReportPaymentFacilitator(
+                config.reportPayments.facilitatorUrl,
+              ),
+            }
+          : {}),
         ...(engineClient
           ? {
               walletSourceStore: new PostgresWalletSourceStore(pool, engineClient),
