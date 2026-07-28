@@ -330,6 +330,12 @@ select:focus-visible {
   cursor: default;
 }
 
+.button--primary:disabled {
+  border-color: var(--color-line);
+  color: var(--color-muted);
+  background: var(--color-surface-muted);
+}
+
 .button-row {
   flex-wrap: wrap;
   gap: 12px;

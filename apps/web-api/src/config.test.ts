@@ -20,6 +20,7 @@ describe('web api configuration', () => {
     expect([...documentedKeys]).toEqual(
       expect.arrayContaining([
         'SIGNUP_SESSION_TTL_SECONDS',
+        'SIGNUP_ENABLED',
         'EMAIL_AUTH_ENABLED',
         'RESEND_API_KEY',
         'EMAIL_FROM',
@@ -217,5 +218,58 @@ describe('web api configuration', () => {
         IDENTITY_VERIFICATION_MODE: 'mock',
       }),
     ).toThrow('not allowed in production')
+  })
+
+  it('enables signup only with an explicit method and completion-capable verifier', () => {
+    const enabled = loadConfig({
+      SIGNUP_ENABLED: 'true',
+      EMAIL_AUTH_ENABLED: 'true',
+      RESEND_API_KEY: 'test-resend-key',
+      EMAIL_FROM: 'GIWA <test@example.com>',
+      IDENTITY_VERIFICATION_MODE: 'mock',
+    })
+    expect(enabled.signup).toEqual({
+      enabled: true,
+      methods: { email: true, oauthProviders: [] },
+    })
+
+    expect(loadConfig().signup).toEqual({
+      enabled: false,
+      methods: { email: false, oauthProviders: [] },
+    })
+    expect(() =>
+      loadConfig({
+        SIGNUP_ENABLED: 'true',
+        IDENTITY_VERIFICATION_MODE: 'mock',
+      }),
+    ).toThrow('at least one configured signup method')
+    expect(() =>
+      loadConfig({
+        SIGNUP_ENABLED: 'true',
+        EMAIL_AUTH_ENABLED: 'true',
+        RESEND_API_KEY: 'test-resend-key',
+        EMAIL_FROM: 'GIWA <test@example.com>',
+      }),
+    ).toThrow('completion-capable identity verifier')
+  })
+
+  it('rejects production signup while no production verifier exists', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
+        DATABASE_URL: 'postgresql://example.invalid/daejang',
+        PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
+        RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
+        ENGINE_GRPC_TARGET: 'jit-engine.internal:8443',
+        ENGINE_GRPC_CA_PATH: '/run/secrets/engine-ca.pem',
+        ENGINE_GRPC_CERT_PATH: '/run/secrets/client.pem',
+        ENGINE_GRPC_KEY_PATH: '/run/secrets/client-key.pem',
+        SIGNUP_ENABLED: 'true',
+        EMAIL_AUTH_ENABLED: 'true',
+        RESEND_API_KEY: 'test-resend-key',
+        EMAIL_FROM: 'GIWA <test@example.com>',
+      }),
+    ).toThrow('completion-capable identity verifier')
   })
 })

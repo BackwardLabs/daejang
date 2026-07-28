@@ -90,6 +90,13 @@ export const signupAuthenticationRequired = () =>
     '회원가입 확인을 다시 진행해 주세요.',
   )
 
+export const signupUnavailable = () =>
+  new ApiError(
+    503,
+    'SIGNUP_UNAVAILABLE',
+    '현재 회원가입을 진행할 수 없습니다.',
+  )
+
 export const invalidEmailVerification = () =>
   new ApiError(
     400,

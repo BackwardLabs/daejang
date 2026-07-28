@@ -3,9 +3,11 @@ import { Brand } from './Brand.tsx'
 export function LandingHeader({
   onLogin,
   onStart,
+  signupAvailable,
 }: {
   onLogin: () => void
   onStart: () => void
+  signupAvailable: boolean
 }) {
   return (
     <header className="site-header">
@@ -30,8 +32,9 @@ export function LandingHeader({
             className="button button--primary button--header"
             type="button"
             onClick={onStart}
+            disabled={!signupAvailable}
           >
-            시작하기
+            {signupAvailable ? '시작하기' : '가입 준비 중'}
           </button>
         </div>
       </div>

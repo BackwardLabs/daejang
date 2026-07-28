@@ -11,6 +11,7 @@ import {
   verifyEmailCode,
   WebApiError,
   type LegalDocument,
+  type SignupMethods,
   type SocialProvider,
 } from '../../auth/api.ts'
 import type { PublicPath } from '../../auth/navigation.ts'
@@ -34,6 +35,7 @@ type OnboardingFlowProps = {
   onExit: () => void
   onLogin: () => void
   onNavigate: (path: PublicPath) => void
+  signupMethods: SignupMethods
 }
 
 const steps = [
@@ -230,18 +232,24 @@ function MethodScreen({
   onEmail,
   onSocial,
   onLogin,
+  signupMethods,
 }: {
   onEmail: () => void
   onSocial: (provider: SocialProvider) => void
   onLogin: () => void
+  signupMethods: SignupMethods
 }) {
+  const socialProviders = signupMethods.oauthProviders.filter(
+    (provider) => provider in providerInfo,
+  )
+  const hasSocialProvider = socialProviders.length > 0
   return (
     <article className="auth-card">
       <StepBadge step={1} label="계정" />
       <h2>Daejang 계정 만들기</h2>
       <p className="auth-lead">회원정보를 만들 방법을 선택해 주세요</p>
       <div className="auth-provider-list">
-        {(Object.keys(providerInfo) as SocialProvider[]).map((provider) => {
+        {socialProviders.map((provider) => {
           const item = providerInfo[provider]
           return (
             <button
@@ -258,10 +266,15 @@ function MethodScreen({
           )
         })}
       </div>
-      <div className="auth-divider"><span>또는</span></div>
-      <button className="auth-secondary-button" type="button" onClick={onEmail}>
-        이메일로 가입하기
-      </button>
+      {hasSocialProvider && signupMethods.email ? <div className="auth-divider"><span>또는</span></div> : null}
+      {signupMethods.email ? (
+        <button className="auth-secondary-button" type="button" onClick={onEmail}>
+          이메일로 가입하기
+        </button>
+      ) : null}
+      {!hasSocialProvider && !signupMethods.email ? (
+        <p className="auth-alert auth-alert--error" role="alert">현재 사용할 수 있는 가입 방법이 없습니다.</p>
+      ) : null}
       <button className="auth-text-button" type="button" onClick={onLogin}>
         이미 계정이 있나요? <strong>로그인</strong>
       </button>
@@ -588,7 +601,7 @@ function ConsentScreen({ onComplete, onBack }: {
             />
             <span>
               <strong>모두 동의</strong>
-              <small>선택 항목을 포함하며 언제든 철회할 수 있어요</small>
+              <small>선택 항목에 동의하지 않아도 가입할 수 있어요</small>
             </span>
           </label>
           <div className="auth-consent-list" role="region" aria-label="약관 동의">
@@ -762,6 +775,7 @@ export function OnboardingFlow({
   onExit,
   onLogin,
   onNavigate,
+  signupMethods,
 }: OnboardingFlowProps) {
   const [screen, setScreen] = useState<OnboardingScreen>(initialScreen)
   const [provider, setProvider] = useState<SocialProvider | null>(null)
@@ -818,6 +832,7 @@ export function OnboardingFlow({
           setScreen('social')
         }}
         onLogin={onLogin}
+        signupMethods={signupMethods}
       />
     )
   }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSocialAuthStartUrl,
   completeMockIdentityVerification,
+  getAuthCapabilities,
   sendEmailCode,
 } from './api.ts'
 
@@ -10,6 +11,51 @@ afterEach(() => {
 })
 
 describe('Web auth API client', () => {
+  it('loads the server-owned signup capability contract', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        signup: {
+          enabled: true,
+          methods: { email: true, oauthProviders: ['naver'] },
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getAuthCapabilities()).resolves.toEqual({
+      signup: {
+        enabled: true,
+        methods: { email: true, oauthProviders: ['naver'] },
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/api/v1/auth/capabilities',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('rejects malformed capability responses so signup stays fail-closed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            signup: {
+              enabled: true,
+              methods: { email: true, oauthProviders: ['unknown-provider'] },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+
+    await expect(getAuthCapabilities()).rejects.toMatchObject({
+      status: 502,
+      code: 'INVALID_AUTH_CAPABILITIES',
+    })
+  })
+
   it('builds same-origin OAuth start URLs with approved return paths', () => {
     expect(
       buildSocialAuthStartUrl('naver', 'signup', 'https://daejang.backwardlabs.io'),

@@ -41,6 +41,10 @@ const config: AppConfig = {
     verificationTokenTtlSeconds: 600,
     resendAfterSeconds: 60,
   },
+  signup: {
+    enabled: false,
+    methods: { email: false, oauthProviders: [] },
+  },
   identityVerificationMode: 'disabled',
   engineMtls: {
     target: 'jit-engine.internal:8443',

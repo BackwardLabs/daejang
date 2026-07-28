@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
+  getAuthCapabilities,
+  type AuthCapabilities,
+} from './auth/api.ts'
+import {
   consumeOnboardingReturn,
   navigateTo,
   readPublicPath,
@@ -18,6 +22,12 @@ import {
   TermsPage,
 } from './pages/public/PublicPages.tsx'
 
+function canSignup(capabilities: AuthCapabilities) {
+  return capabilities.signup.enabled &&
+    (capabilities.signup.methods.email ||
+      capabilities.signup.methods.oauthProviders.length > 0)
+}
+
 const pageTitles: Record<PublicPath, string> = {
   '/': 'Daejang | 디지털 자산 기록을 한곳에서',
   '/login': '로그인 | Daejang',
@@ -29,18 +39,39 @@ const pageTitles: Record<PublicPath, string> = {
 export function App() {
   const [returnedFromSignup] = useState(() => consumeOnboardingReturn())
   const [path, setPath] = useState<PublicPath | null>(() => readPublicPath())
-  const [onboardingVisible, setOnboardingVisible] = useState(returnedFromSignup)
+  const [authCapabilities, setAuthCapabilities] = useState<AuthCapabilities>()
+  const [onboardingVisible, setOnboardingVisible] = useState(false)
   const [onboardingScreen, setOnboardingScreen] = useState<OnboardingScreen>(
     returnedFromSignup ? 'consent' : 'method',
   )
   const [onboardingKey, setOnboardingKey] = useState(0)
+  const signupAvailable = authCapabilities ? canSignup(authCapabilities) : false
+
+  useEffect(() => {
+    let active = true
+    void getAuthCapabilities()
+      .then((capabilities) => {
+        if (!active) return
+        setAuthCapabilities(capabilities)
+        if (returnedFromSignup && canSignup(capabilities)) {
+          setOnboardingScreen('consent')
+          setOnboardingVisible(true)
+        }
+      })
+      .catch(() => {
+        if (active) setAuthCapabilities(undefined)
+      })
+    return () => {
+      active = false
+    }
+  }, [returnedFromSignup])
 
   useEffect(() => {
     const onPopState = () => {
       const returned = consumeOnboardingReturn()
       const nextPath = readPublicPath()
       setPath(nextPath)
-      if (returned) {
+      if (returned && signupAvailable) {
         setOnboardingVisible(true)
         setOnboardingScreen('consent')
         setOnboardingKey((current) => current + 1)
@@ -51,7 +82,7 @@ export function App() {
 
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [])
+  }, [signupAvailable])
 
   useEffect(() => {
     document.title = onboardingVisible
@@ -83,6 +114,7 @@ export function App() {
   }
 
   const startOnboarding = () => {
+    if (!signupAvailable) return
     navigateTo('/')
     setPath('/')
     setOnboardingScreen('method')
@@ -97,8 +129,23 @@ export function App() {
     setPath('/login')
   }
 
-  const continueAfterLogin = (nextPath: string) => {
+  const continueAfterLogin = async (nextPath: string) => {
     if (nextPath === '/?onboarding=terms') {
+      let capabilities = authCapabilities
+      if (!capabilities) {
+        try {
+          capabilities = await getAuthCapabilities()
+          setAuthCapabilities(capabilities)
+        } catch {
+          capabilities = undefined
+        }
+      }
+      if (!capabilities || !canSignup(capabilities)) {
+        setOnboardingVisible(false)
+        navigateTo('/login')
+        setPath('/login')
+        return
+      }
       window.history.replaceState(null, '', nextPath)
       consumeOnboardingReturn()
       setPath('/')
@@ -122,6 +169,7 @@ export function App() {
         onSignup={startOnboarding}
         onNavigate={navigatePublic}
         onAuthenticated={continueAfterLogin}
+        signupAvailable={signupAvailable}
       />
     ) : path === '/terms' ? (
       <TermsPage onHome={goHome} onNavigate={navigatePublic} />
@@ -136,12 +184,13 @@ export function App() {
         onLogin={openLogin}
         onStart={startOnboarding}
         onNavigate={navigatePublic}
+        signupAvailable={signupAvailable}
       />
     )
 
   return (
     <>
-      {onboardingVisible ? (
+      {onboardingVisible && signupAvailable && authCapabilities ? (
         <OnboardingFlow
           key={onboardingKey}
           initialScreen={onboardingScreen}
@@ -149,6 +198,7 @@ export function App() {
           onExit={exitOnboarding}
           onLogin={openLogin}
           onNavigate={navigatePublic}
+          signupMethods={authCapabilities.signup.methods}
         />
       ) : publicPage}
     </>

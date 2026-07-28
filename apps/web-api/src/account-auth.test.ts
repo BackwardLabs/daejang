@@ -50,6 +50,10 @@ const config: AppConfig = {
     verificationTokenTtlSeconds: 600,
     resendAfterSeconds: 60,
   },
+  signup: {
+    enabled: true,
+    methods: { email: true, oauthProviders: ['naver'] },
+  },
   identityVerificationMode: 'mock',
   engineMtls: undefined,
 }
@@ -213,7 +217,9 @@ describe('account authentication routes', () => {
     const callback = await context.app.inject({
       method: 'GET',
       url: `/api/v1/auth/oauth/naver/callback?code=active-subject&state=${state}`,
-      headers: { cookie: oauthCookie },
+      headers: {
+        cookie: `${oauthCookie}; ${config.sessionCookieName}=stale-token`,
+      },
     })
 
     expect(callback.statusCode).toBe(302)
@@ -326,10 +332,19 @@ describe('account authentication routes', () => {
     const credential = await store.findEmailCredential('user@example.com')
     expect(credential).toBeTruthy()
     store.setUserStatus(credential?.user.id as string, 'active')
+    const previousSession = await context.sessionService.create({
+      user: {
+        id: '00000000-0000-4000-8000-000000000099',
+        displayName: '이전 사용자',
+      },
+    })
     const activeLogin = await context.app.inject({
       method: 'POST',
       url: '/api/v1/auth/email/login',
-      headers: originHeaders,
+      headers: {
+        ...originHeaders,
+        cookie: `${config.sessionCookieName}=${previousSession.token}`,
+      },
       payload: {
         email: 'user@example.com',
         password: 'Password1!',
@@ -346,6 +361,9 @@ describe('account authentication routes', () => {
     )
     expect(activeLoginCookies).toContain('daejang_session=')
     expect(activeLoginCookies).toContain('daejang_signup=;')
+    expect(
+      await context.sessionService.resolve(previousSession.token),
+    ).toBeUndefined()
 
     now = new Date(now.getTime() + 61_000)
     const genericExisting = await context.app.inject({
@@ -357,6 +375,179 @@ describe('account authentication routes', () => {
     expect(genericExisting.statusCode).toBe(202)
     expect(genericExisting.json()).toMatchObject({ status: 'accepted' })
     expect(sender.calls).toBe(1)
+  })
+
+  it('publishes signup methods from the server capability', async () => {
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/capabilities',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      signup: {
+        enabled: true,
+        methods: { email: true, oauthProviders: ['naver'] },
+      },
+    })
+  })
+
+  it('rejects every signup continuation when signup is disabled while keeping login available', async () => {
+    const originHeaders = { origin: config.publicOrigin }
+    const inFlightOAuthSignup = await startOAuth('signup')
+    await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email/send-code',
+      headers: originHeaders,
+      payload: { email: 'pending@example.com', intent: 'signup' },
+    })
+    const verified = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email/verify-code',
+      headers: originHeaders,
+      payload: {
+        email: 'pending@example.com',
+        intent: 'signup',
+        code: sender.code,
+      },
+    })
+    await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email/signup',
+      headers: originHeaders,
+      payload: {
+        email: 'pending@example.com',
+        password: 'Password1!',
+        passwordConfirmation: 'Password1!',
+        verificationToken: verified.json<{ verificationToken: string }>()
+          .verificationToken,
+      },
+    })
+
+    const disabledContext = await buildApp({
+      config: {
+        ...config,
+        signup: {
+          enabled: false,
+          methods: { email: false, oauthProviders: [] },
+        },
+      },
+      logger: false,
+      accountAuthStore: store,
+      oauthAdapters: [new FakeNaverAdapter()],
+      verificationEmailSender: sender,
+      now: () => now,
+    })
+    try {
+      const capability = await disabledContext.app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/capabilities',
+      })
+      expect(capability.json()).toEqual({
+        signup: {
+          enabled: false,
+          methods: { email: false, oauthProviders: [] },
+        },
+      })
+
+      const callback = await disabledContext.app.inject({
+        method: 'GET',
+        url: `/api/v1/auth/oauth/naver/callback?code=blocked-subject&state=${inFlightOAuthSignup.state}`,
+        headers: { cookie: inFlightOAuthSignup.cookie },
+      })
+      expect(callback.statusCode).toBe(302)
+      expect(callback.headers.location).toBe(
+        '/login?auth_error=signup_unavailable',
+      )
+      expect(
+        await store.findUserByIdentity('naver', 'blocked-subject'),
+      ).toBeUndefined()
+
+      for (const request of [
+        {
+          method: 'GET' as const,
+          url: '/api/v1/auth/oauth/naver/start?intent=signup',
+        },
+        {
+          method: 'POST' as const,
+          url: '/api/v1/auth/email/send-code',
+          headers: originHeaders,
+          payload: { email: 'blocked@example.com', intent: 'signup' },
+        },
+        {
+          method: 'POST' as const,
+          url: '/api/v1/auth/email/verify-code',
+          headers: originHeaders,
+          payload: {
+            email: 'blocked@example.com',
+            intent: 'signup',
+            code: '123456',
+          },
+        },
+        {
+          method: 'POST' as const,
+          url: '/api/v1/auth/email/signup',
+          headers: originHeaders,
+          payload: {
+            email: 'blocked@example.com',
+            password: 'Password1!',
+            passwordConfirmation: 'Password1!',
+            verificationToken: 'x'.repeat(20),
+          },
+        },
+        {
+          method: 'POST' as const,
+          url: '/api/v1/signup/consents',
+          headers: originHeaders,
+          payload: {
+            locale: 'ko-KR',
+            decisions: [
+              '00000000-0000-4000-8000-000000000011',
+              '00000000-0000-4000-8000-000000000012',
+              '00000000-0000-4000-8000-000000000013',
+            ].map((legalDocumentId) => ({
+              legalDocumentId,
+              action: 'accepted',
+            })),
+          },
+        },
+        {
+          method: 'POST' as const,
+          url: '/api/v1/signup/identity-verification/mock-complete',
+          headers: originHeaders,
+        },
+      ]) {
+        const response = await disabledContext.app.inject(request)
+        expect(response.statusCode).toBe(503)
+        expect(response.json()).toMatchObject({
+          error: { code: 'SIGNUP_UNAVAILABLE' },
+        })
+      }
+
+      const pendingLogin = await disabledContext.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/email/login',
+        headers: originHeaders,
+        payload: { email: 'pending@example.com', password: 'Password1!' },
+      })
+      expect(pendingLogin.statusCode).toBe(503)
+      expect(pendingLogin.json()).toMatchObject({
+        error: { code: 'SIGNUP_UNAVAILABLE' },
+      })
+
+      const credential = await store.findEmailCredential('pending@example.com')
+      store.setUserStatus(credential?.user.id as string, 'active')
+      const activeLogin = await disabledContext.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/email/login',
+        headers: originHeaders,
+        payload: { email: 'pending@example.com', password: 'Password1!' },
+      })
+      expect(activeLogin.statusCode).toBe(200)
+      expect(activeLogin.json()).toMatchObject({ status: 'authenticated' })
+    } finally {
+      await disabledContext.app.close()
+    }
   })
 
   it('rejects legal document content whose stored digest does not match', async () => {
@@ -479,30 +670,16 @@ describe('account authentication routes', () => {
       nextStep: 'identity_verification',
     })
 
-    const disabledContext = await buildApp({
-      config: { ...config, identityVerificationMode: 'disabled' },
-      logger: false,
-      accountAuthStore: store,
-      oauthAdapters: [new FakeNaverAdapter()],
-      verificationEmailSender: sender,
-      now: () => now,
-    })
-    try {
-      const disabledCompletion = await disabledContext.app.inject({
-        method: 'POST',
-        url: '/api/v1/signup/identity-verification/mock-complete',
-        headers: {
-          ...originHeaders,
-          cookie: signupCookie,
-        },
-      })
-      expect(disabledCompletion.statusCode).toBe(503)
-      expect(disabledCompletion.json()).toMatchObject({
-        error: { code: 'IDENTITY_VERIFICATION_UNAVAILABLE' },
-      })
-    } finally {
-      await disabledContext.app.close()
-    }
+    await expect(
+      buildApp({
+        config: { ...config, identityVerificationMode: 'disabled' },
+        logger: false,
+        accountAuthStore: store,
+        oauthAdapters: [new FakeNaverAdapter()],
+        verificationEmailSender: sender,
+        now: () => now,
+      }),
+    ).rejects.toThrow('Signup capability')
 
     const completion = await context.app.inject({
       method: 'POST',

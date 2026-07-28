@@ -15,6 +15,7 @@ export type AppConfig = {
   rateLimitHmacSecret: string
   oauth: OAuthConfig
   emailAuth: EmailAuthConfig
+  signup: SignupCapability
   identityVerificationMode: 'disabled' | 'mock'
   engineMtls: EngineMtlsConfig | undefined
   engineInsecureTarget?: string
@@ -22,6 +23,14 @@ export type AppConfig = {
   devBootstrapUser?: {
     id: string
     displayName: string
+  }
+}
+
+export type SignupCapability = {
+  enabled: boolean
+  methods: {
+    email: boolean
+    oauthProviders: ReadonlyArray<OAuthProviderName>
   }
 }
 
@@ -320,6 +329,39 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   }
 
   const production = runtimeMode === 'production'
+  const oauth = loadOAuthConfig(environment, production)
+  const emailAuth = loadEmailAuthConfig(environment, production)
+  const identityVerificationMode = parseIdentityVerificationMode(
+    environment.IDENTITY_VERIFICATION_MODE,
+    production,
+  )
+  const signupRequested = parseBoolean(
+    environment.SIGNUP_ENABLED,
+    false,
+    'SIGNUP_ENABLED',
+  )
+  const signupMethods = {
+    email: emailAuth.enabled,
+    oauthProviders: [...oauth.enabledProviders],
+  }
+  if (
+    signupRequested &&
+    !signupMethods.email &&
+    signupMethods.oauthProviders.length === 0
+  ) {
+    throw new Error('SIGNUP_ENABLED=true requires at least one configured signup method')
+  }
+  if (signupRequested && (production || identityVerificationMode !== 'mock')) {
+    throw new Error(
+      'SIGNUP_ENABLED=true requires a completion-capable identity verifier',
+    )
+  }
+  const signup: SignupCapability = signupRequested
+    ? { enabled: true, methods: signupMethods }
+    : {
+        enabled: false,
+        methods: { email: false, oauthProviders: [] },
+      }
   const engineInsecureTarget = loadDevelopmentEngineTarget(
     environment,
     production,
@@ -415,12 +457,10 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     ),
     databaseUrl: environment.DATABASE_URL,
     rateLimitHmacSecret,
-    oauth: loadOAuthConfig(environment, production),
-    emailAuth: loadEmailAuthConfig(environment, production),
-    identityVerificationMode: parseIdentityVerificationMode(
-      environment.IDENTITY_VERIFICATION_MODE,
-      production,
-    ),
+    oauth,
+    emailAuth,
+    signup,
+    identityVerificationMode,
     engineMtls: loadEngineMtlsConfig(environment, production),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),

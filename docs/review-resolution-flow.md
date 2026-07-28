@@ -96,7 +96,11 @@ SHA-256 digest가 변하지 않는다. 이미 같은 내용이 저장된 재시�
 artifact는 `SUBJECT_PRIVATE` privacy·retention으로 먼저 등록한다. `Pin`은 이
 단계에서 올리지 않는다. `reviewstore.ResolveV2`가 성공할 때 canonical artifact
 domain reference를 pinned 상태로 만들기 때문에 이중 pin과 경쟁 실패 시
-audit-pinned orphan을 피할 수 있다.
+audit-pinned orphan을 피할 수 있다. 다만 artifact `Put` 뒤 CAS 또는 DB transaction이
+실패하면 content-addressed object와 unpinned metadata는 남을 수 있다. 현재 API에는
+이를 같은 transaction에서 회수할 delete/list 계약이 없으므로 subject-private ACL과
+volume monitoring을 유지하고, storage owner가 retention 및 reconciliation/GC 후속
+작업을 맡는다. 이 문서는 cross-store atomicity를 보장한다고 주장하지 않는다.
 
 Engine 배포는 review mutation DSN과 artifact writer DSN을 별도 설정값으로
 받는다. 두 DSN은 같은 물리 database를 가리켜야 ResolveV2 transaction이 앞서
@@ -115,8 +119,10 @@ Review DB transaction은 다음을 한 번에 수행한다.
 7. `REVIEWROOM`과 `APPLICATION_ENGINE`의 독립 delivery row 추가
 
 Web이나 BFF는 ReviewRoom 컨트랙트, EAS 또는 ReviewProofRegistry를 직접 호출하지
-않는다. 두 delivery는 독립적으로 lease·retry되며 downstream은 immutable
-`eventId`를 idempotency key로 사용한다. ReviewRoom delivery worker가 canonical
+않는다. 두 delivery row는 durable handoff 기록이며 자체로 recalculation, anchoring
+또는 report delivery 완료를 증명하지 않는다. delivery worker가 구현된 뒤 두
+consumer는 독립적으로 lease·retry하며 downstream은 immutable `eventId`를
+idempotency key로 사용한다. ReviewRoom delivery worker가 canonical
 HTTP ingest를 완료한 뒤에야 ReviewRoom 내부 Anchor Worker가 온체인 proof를
 발행한다.
 
@@ -134,9 +140,12 @@ UI는 option과 근거 요구 여부를 표시하고, 요청 중에는 revision/
 알린다. 일반 전송 실패에서는 같은 intentKey를 유지해 안전하게 재시도한다.
 stale 응답에서는 intentKey를 폐기하고 최신 revision을 다시 불러온다.
 
-migration 17은 기존 OPEN Review가 한 건이라도 있으면 적용을 중단한다. cutover
-전에 migration 16 경로로 모두 해결하거나, 팀이 별도 audited remediation을
-합의해야 한다. migration 17 이후 새 Review는 immutable opening ledger revision
+migration 17은 기존 OPEN Review가 한 건이라도 있으면 적용을 중단한다. PR #20에는
+migration-16 호환 resolver artifact가 포함되지 않으므로, OPEN Review가 있는
+운영 DB는 전환하지 않는다. 버전된 cutover 명령·입력 manifest·dry-run·audit
+log·migration 16 복제 DB 테스트를 갖춘 후속 변경을 독립적으로 리뷰한 뒤에만
+전환한다. 자동 삭제나 검증되지 않은 SQL로 이 게이트를 우회하지 않는다.
+migration 17 이후 새 Review는 immutable opening ledger revision
 연결 없이는 생성되지 않으므로 `REVIEW_LINEAGE_UNAVAILABLE`은 정상 lifecycle이
 아니라 미적용 migration 또는 데이터 손상을 막는 fallback이다. 이를 새 Review로
 재분석했다는 이유만으로 기존 OPEN 행을 숨겨서는 안 된다.

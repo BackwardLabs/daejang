@@ -1,6 +1,18 @@
 export type SocialProvider = 'kakao' | 'naver' | 'google'
 export type AuthIntent = 'signup' | 'login'
 
+export type SignupMethods = {
+  email: boolean
+  oauthProviders: SocialProvider[]
+}
+
+export type AuthCapabilities = {
+  signup: {
+    enabled: boolean
+    methods: SignupMethods
+  }
+}
+
 type ApiErrorPayload = {
   error?: {
     code?: string
@@ -85,6 +97,52 @@ export function buildSocialAuthStartUrl(
 
 export function startSocialAuth(provider: SocialProvider, intent: AuthIntent) {
   window.location.assign(buildSocialAuthStartUrl(provider, intent))
+}
+
+const socialProviders = new Set<SocialProvider>(['kakao', 'naver', 'google'])
+
+function parseAuthCapabilities(value: unknown): AuthCapabilities {
+  if (!value || typeof value !== 'object') {
+    throw new WebApiError(502, 'INVALID_AUTH_CAPABILITIES', '가입 상태를 확인하지 못했습니다')
+  }
+
+  const signup = (value as { signup?: unknown }).signup
+  if (!signup || typeof signup !== 'object') {
+    throw new WebApiError(502, 'INVALID_AUTH_CAPABILITIES', '가입 상태를 확인하지 못했습니다')
+  }
+
+  const enabled = (signup as { enabled?: unknown }).enabled
+  const methods = (signup as { methods?: unknown }).methods
+  if (typeof enabled !== 'boolean' || !methods || typeof methods !== 'object') {
+    throw new WebApiError(502, 'INVALID_AUTH_CAPABILITIES', '가입 상태를 확인하지 못했습니다')
+  }
+
+  const email = (methods as { email?: unknown }).email
+  const oauthProviders = (methods as { oauthProviders?: unknown }).oauthProviders
+  if (
+    typeof email !== 'boolean' ||
+    !Array.isArray(oauthProviders) ||
+    !oauthProviders.every(
+      (provider): provider is SocialProvider =>
+        typeof provider === 'string' &&
+        socialProviders.has(provider as SocialProvider),
+    )
+  ) {
+    throw new WebApiError(502, 'INVALID_AUTH_CAPABILITIES', '가입 상태를 확인하지 못했습니다')
+  }
+
+  return {
+    signup: {
+      enabled,
+      methods: { email, oauthProviders },
+    },
+  }
+}
+
+export async function getAuthCapabilities() {
+  return parseAuthCapabilities(
+    await requestJson<unknown>('auth/capabilities'),
+  )
 }
 
 export type EmailCodeResponse = {

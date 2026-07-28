@@ -39,6 +39,7 @@ import {
   oauthAccountNotFound,
   oauthProviderUnavailable,
   signupAuthenticationRequired,
+  signupUnavailable,
 } from '../errors.js'
 
 type AccountAuthRoutesOptions = {
@@ -67,6 +68,12 @@ const requiredLegalDocumentTypes = new Set<LegalDocumentType>([
 ])
 const currentTime = (options: AccountAuthRoutesOptions) =>
   options.now?.() ?? new Date()
+
+const assertSignupEnabled = (options: AccountAuthRoutesOptions) => {
+  if (!options.config.signup.enabled) {
+    throw signupUnavailable()
+  }
+}
 
 const hasMatchingContentHash = (content: string, expectedHash: string) =>
   createHash('sha256').update(content, 'utf8').digest('hex') === expectedHash
@@ -119,6 +126,7 @@ const completeActiveLogin = async (
     providerIdentity: string
     ip: string
     user: AccountUser
+    currentSessionToken: string | undefined
   },
   options: AccountAuthRoutesOptions,
 ) => {
@@ -126,7 +134,7 @@ const completeActiveLogin = async (
     provider: input.provider,
     ip: input.ip,
     providerIdentity: input.providerIdentity,
-    currentSessionToken: undefined,
+    currentSessionToken: input.currentSessionToken,
     verifyProvider: async () => ({
       user: {
         id: input.user.id,
@@ -147,6 +155,16 @@ export const registerAccountAuthRoutes = async (
   app: FastifyInstance,
   options: AccountAuthRoutesOptions,
 ) => {
+  app.get('/api/v1/auth/capabilities', async () => ({
+    signup: {
+      enabled: options.config.signup.enabled,
+      methods: {
+        email: options.config.signup.methods.email,
+        oauthProviders: [...options.config.signup.methods.oauthProviders],
+      },
+    },
+  }))
+
   app.get<{
     Params: { provider: string }
     Querystring: {
@@ -156,11 +174,18 @@ export const registerAccountAuthRoutes = async (
   }>(
     '/api/v1/auth/oauth/:provider/start',
     {
-      preHandler: createLoginRateLimitHook(
-        options.authRateLimiter,
-        'oauth',
-        'begin',
-      ),
+      preHandler: [
+        async (request) => {
+          if (request.query.intent === 'signup') {
+            assertSignupEnabled(options)
+          }
+        },
+        createLoginRateLimitHook(
+          options.authRateLimiter,
+          'oauth',
+          'begin',
+        ),
+      ],
       schema: {
         params: {
           type: 'object',
@@ -183,6 +208,9 @@ export const registerAccountAuthRoutes = async (
       const provider = parseProvider(request.params.provider)
       if (!oauthIntents.has(request.query.intent as OAuthIntent)) {
         throw oauthProviderUnavailable()
+      }
+      if (request.query.intent === 'signup') {
+        assertSignupEnabled(options)
       }
       const authorizationUrl = await options.oauthService.start({
         provider,
@@ -276,6 +304,9 @@ export const registerAccountAuthRoutes = async (
           code: request.query.code,
           state: request.query.state,
         })
+        if (completed.transaction.intent === 'signup') {
+          assertSignupEnabled(options)
+        }
         let user = await options.accountStore.findUserByIdentity(
           provider,
           completed.identity.providerSubject,
@@ -286,6 +317,7 @@ export const registerAccountAuthRoutes = async (
             throw oauthAccountNotFound()
           }
           if (user.status === 'pending') {
+            assertSignupEnabled(options)
             await setSignupCookieForUser(reply, user, options)
             return reply.redirect('/?onboarding=terms', 302)
           }
@@ -299,6 +331,8 @@ export const registerAccountAuthRoutes = async (
               providerIdentity: `${provider}:${completed.identity.providerSubject}`,
               ip: request.ip,
               user,
+              currentSessionToken:
+                request.cookies[options.config.sessionCookieName],
             },
             options,
           )
@@ -345,15 +379,18 @@ export const registerAccountAuthRoutes = async (
   }>(
     '/api/v1/auth/email/send-code',
     {
-      preHandler: createLoginRateLimitHook(
-        options.authRateLimiter,
-        'email',
-        'begin',
-        (request) => {
-          const body = request.body as { email?: unknown } | undefined
-          return typeof body?.email === 'string' ? body.email : undefined
-        },
-      ),
+      preHandler: [
+        async () => assertSignupEnabled(options),
+        createLoginRateLimitHook(
+          options.authRateLimiter,
+          'email',
+          'begin',
+          (request) => {
+            const body = request.body as { email?: unknown } | undefined
+            return typeof body?.email === 'string' ? body.email : undefined
+          },
+        ),
+      ],
       schema: {
         body: {
           type: 'object',
@@ -367,6 +404,7 @@ export const registerAccountAuthRoutes = async (
       },
     },
     async (request, reply) => {
+      assertSignupEnabled(options)
       if (!options.config.emailAuth.enabled) {
         throw oauthProviderUnavailable()
       }
@@ -382,15 +420,18 @@ export const registerAccountAuthRoutes = async (
   }>(
     '/api/v1/auth/email/verify-code',
     {
-      preHandler: createLoginRateLimitHook(
-        options.authRateLimiter,
-        'email',
-        'complete',
-        (request) => {
-          const body = request.body as { email?: unknown } | undefined
-          return typeof body?.email === 'string' ? body.email : undefined
-        },
-      ),
+      preHandler: [
+        async () => assertSignupEnabled(options),
+        createLoginRateLimitHook(
+          options.authRateLimiter,
+          'email',
+          'complete',
+          (request) => {
+            const body = request.body as { email?: unknown } | undefined
+            return typeof body?.email === 'string' ? body.email : undefined
+          },
+        ),
+      ],
       schema: {
         body: {
           type: 'object',
@@ -404,11 +445,13 @@ export const registerAccountAuthRoutes = async (
         },
       },
     },
-    async (request) =>
-      options.emailAuthService.verifySignupCode(
+    async (request) => {
+      assertSignupEnabled(options)
+      return options.emailAuthService.verifySignupCode(
         request.body.email,
         request.body.code,
-      ),
+      )
+    },
   )
 
   app.post<{
@@ -421,15 +464,18 @@ export const registerAccountAuthRoutes = async (
   }>(
     '/api/v1/auth/email/signup',
     {
-      preHandler: createLoginRateLimitHook(
-        options.authRateLimiter,
-        'email',
-        'complete',
-        (request) => {
-          const body = request.body as { email?: unknown } | undefined
-          return typeof body?.email === 'string' ? body.email : undefined
-        },
-      ),
+      preHandler: [
+        async () => assertSignupEnabled(options),
+        createLoginRateLimitHook(
+          options.authRateLimiter,
+          'email',
+          'complete',
+          (request) => {
+            const body = request.body as { email?: unknown } | undefined
+            return typeof body?.email === 'string' ? body.email : undefined
+          },
+        ),
+      ],
       schema: {
         body: {
           type: 'object',
@@ -458,6 +504,7 @@ export const registerAccountAuthRoutes = async (
       },
     },
     async (request, reply) => {
+      assertSignupEnabled(options)
       const user = await options.emailAuthService.signup({
         rawEmail: request.body.email,
         password: request.body.password,
@@ -505,6 +552,7 @@ export const registerAccountAuthRoutes = async (
         request.body.password,
       )
       if (user.status === 'pending') {
+        assertSignupEnabled(options)
         await setSignupCookieForUser(reply, user, options)
         return {
           status: 'signup_pending',
@@ -521,6 +569,8 @@ export const registerAccountAuthRoutes = async (
           providerIdentity: request.body.email,
           ip: request.ip,
           user,
+          currentSessionToken:
+            request.cookies[options.config.sessionCookieName],
         },
         options,
       )
@@ -587,7 +637,10 @@ export const registerAccountAuthRoutes = async (
   }>(
     '/api/v1/signup/consents',
     {
-      preHandler: options.authenticateSignup,
+      preHandler: [
+        async () => assertSignupEnabled(options),
+        options.authenticateSignup,
+      ],
       schema: {
         body: {
           type: 'object',
@@ -638,7 +691,12 @@ export const registerAccountAuthRoutes = async (
 
   app.post(
     '/api/v1/signup/identity-verification/mock-complete',
-    { preHandler: options.authenticateSignup },
+    {
+      preHandler: [
+        async () => assertSignupEnabled(options),
+        options.authenticateSignup,
+      ],
+    },
     async (request, reply) => {
       if (options.config.identityVerificationMode !== 'mock') {
         throw identityVerificationUnavailable()

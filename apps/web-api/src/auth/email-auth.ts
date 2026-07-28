@@ -30,6 +30,17 @@ export interface VerificationEmailSender {
   }): Promise<void>
 }
 
+export interface EmailAuthObserver {
+  challengeAbandonFailed(input: {
+    challengeId: string
+    error: unknown
+  }): void
+}
+
+const silentEmailAuthObserver: EmailAuthObserver = {
+  challengeAbandonFailed: () => {},
+}
+
 export class ResendVerificationEmailSender
   implements VerificationEmailSender
 {
@@ -181,6 +192,7 @@ export class EmailAuthService {
     private readonly sender: VerificationEmailSender,
     private readonly config: EmailAuthConfig,
     private readonly now: () => Date = () => new Date(),
+    private readonly observer: EmailAuthObserver = silentEmailAuthObserver,
   ) {
     this.#dummyPasswordHash = hash(
       'GIWA-dummy-password-for-timing-only-1!',
@@ -193,7 +205,11 @@ export class EmailAuthService {
   async sendSignupCode(rawEmail: string) {
     const email = normalizeEmail(rawEmail)
     const now = this.now()
-    const latest = await this.store.getLatestEmailChallenge(email, 'signup')
+    const latest = await this.store.getEligibleEmailChallenge(
+      email,
+      'signup',
+      now,
+    )
     if (latest && latest.resendAfter.getTime() > now.getTime()) {
       return {
         expiresInSeconds: Math.max(
@@ -240,11 +256,26 @@ export class EmailAuthService {
       maxAttempts: 5,
       consumedAt: undefined,
     })
-    await this.sender.sendVerificationCode({
-      to: email,
-      code,
-      expiresInMinutes: Math.ceil(this.config.verificationTtlSeconds / 60),
-    })
+    try {
+      await this.sender.sendVerificationCode({
+        to: email,
+        code,
+        expiresInMinutes: Math.ceil(this.config.verificationTtlSeconds / 60),
+      })
+    } catch {
+      try {
+        const abandoned = await this.store.abandonEmailChallenge({
+          challengeId,
+          now,
+        })
+        if (!abandoned) {
+          throw new Error('Email challenge could not be abandoned')
+        }
+      } catch (error) {
+        this.observer.challengeAbandonFailed({ challengeId, error })
+      }
+      throw emailDeliveryFailed()
+    }
     return {
       expiresInSeconds: this.config.verificationTtlSeconds,
       resendAfterSeconds: this.config.resendAfterSeconds,
@@ -256,7 +287,12 @@ export class EmailAuthService {
     if (!/^[0-9]{6}$/u.test(code)) {
       throw invalidEmailVerification()
     }
-    const latest = await this.store.getLatestEmailChallenge(email, 'signup')
+    const now = this.now()
+    const latest = await this.store.getEligibleEmailChallenge(
+      email,
+      'signup',
+      now,
+    )
     if (!latest) {
       throw invalidEmailVerification()
     }
@@ -269,13 +305,13 @@ export class EmailAuthService {
         email,
         code,
       ),
-      now: this.now(),
+      now,
     })
     if (!verified?.consumedAt) {
       throw invalidEmailVerification()
     }
     const expiresAt =
-      this.now().getTime() + this.config.verificationTokenTtlSeconds * 1_000
+      now.getTime() + this.config.verificationTokenTtlSeconds * 1_000
     const encodedPayload = encodePayload({
       challengeId: verified.id,
       email,

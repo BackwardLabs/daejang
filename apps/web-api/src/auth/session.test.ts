@@ -105,7 +105,19 @@ describe('SessionService', () => {
     expect(authenticated?.session.user.id).toBe(USER_ID)
   })
 
-  it('allows only one authenticated replacement for the same previous token', async () => {
+  it('allows authenticated replacement when the presented token is stale', async () => {
+    const service = new SessionService(new MemorySessionStore(), 100, 20)
+
+    const authenticated = await service.replaceAfterAuthentication(
+      'stale-token',
+      newSession(USER_ID),
+    )
+
+    expect(authenticated?.session.user.id).toBe(USER_ID)
+    expect(await service.resolve(authenticated?.token ?? '')).toBeDefined()
+  })
+
+  it('invalidates the old token while allowing concurrent verified replacements', async () => {
     const service = new SessionService(new MemorySessionStore(), 100, 20)
     const previous = await service.create(newSession(PREVIOUS_USER_ID))
 
@@ -114,6 +126,8 @@ describe('SessionService', () => {
       service.replaceAfterAuthentication(previous.token, newSession(USER_ID)),
     ])
 
-    expect([first, second].filter(Boolean)).toHaveLength(1)
+    expect(first?.session.user.id).toBe(USER_ID)
+    expect(second?.session.user.id).toBe(USER_ID)
+    expect(await service.resolve(previous.token)).toBeUndefined()
   })
 })

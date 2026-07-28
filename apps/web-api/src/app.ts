@@ -90,6 +90,26 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   ) {
     throw new Error('A durable AccountAuthStore is required in production')
   }
+  const signupMethodsMatchAuthConfiguration =
+    (!config.signup.methods.email || config.emailAuth.enabled) &&
+    config.signup.methods.oauthProviders.every((provider) =>
+      config.oauth.enabledProviders.has(provider),
+    )
+  if (
+    !signupMethodsMatchAuthConfiguration ||
+    (!config.signup.enabled &&
+      (config.signup.methods.email ||
+        config.signup.methods.oauthProviders.length > 0)) ||
+    (config.signup.enabled &&
+      (config.runtimeMode === 'production' ||
+        config.identityVerificationMode !== 'mock' ||
+        (!config.signup.methods.email &&
+          config.signup.methods.oauthProviders.length === 0)))
+  ) {
+    throw new Error(
+      'Signup capability must match configured authentication methods and a completion-capable verifier',
+    )
+  }
 
   const app =
     options.logger === false
@@ -138,6 +158,17 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       new DisabledVerificationEmailSender(),
     config.emailAuth,
     options.now,
+    {
+      challengeAbandonFailed: ({ challengeId, error }) => {
+        app.log.error(
+          {
+            challengeId,
+            errorClass: error instanceof Error ? 'error' : 'non_error',
+          },
+          'email challenge compensation failed',
+        )
+      },
+    },
   )
   const walletSourceStore = options.walletSourceStore ?? new MemoryWalletSourceStore()
 

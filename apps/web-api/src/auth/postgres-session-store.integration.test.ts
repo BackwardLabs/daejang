@@ -356,7 +356,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
     expect((await createSession()).session.sessionEpoch).toBe(epoch + 1)
   })
 
-  it('allows only one atomic replacement of the same PostgreSQL session', async () => {
+  it('invalidates an old PostgreSQL token while allowing verified concurrent replacements', async () => {
     const previous = await createSession()
     const input = { user: { id: USER_ID, displayName: '김대장' } }
     const [first, second] = await Promise.all([
@@ -364,7 +364,17 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       sessions.replaceAfterAuthentication(previous.token, input),
     ])
 
-    expect([first, second].filter(Boolean)).toHaveLength(1)
+    expect(first?.session.user.id).toBe(USER_ID)
+    expect(second?.session.user.id).toBe(USER_ID)
+    expect(await sessions.resolve(previous.token)).toBeUndefined()
+  })
+
+  it('does not block PostgreSQL login replacement for a stale presented token', async () => {
+    const replacement = await sessions.replaceAfterAuthentication('stale-token', {
+      user: { id: USER_ID, displayName: '김대장' },
+    })
+
+    expect(replacement?.session.user.id).toBe(USER_ID)
   })
 
   it('fails schema preflight when an append-only guard is disabled', async () => {
@@ -449,6 +459,41 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       user: { id: first.user.id },
       passwordHash: expect.stringContaining('$argon2id$'),
     })
+  })
+
+  it('abandons an undelivered PostgreSQL email challenge at the retry boundary', async () => {
+    const email = 'postgres-abandoned-auth-test@example.com'
+    const pending = await accounts.findOrCreatePendingDirectEmail(email)
+    const now = new Date('2027-07-20T00:00:00.000Z')
+    const challengeId = '00000000-0000-4000-8000-000000000403'
+    await accounts.createEmailChallenge({
+      id: challengeId,
+      userEmailId: pending.userEmailId,
+      email,
+      purpose: 'signup',
+      codeDigest: 'd'.repeat(43),
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 300_000),
+      resendAfter: new Date(now.getTime() + 60_000),
+      attempts: 0,
+      maxAttempts: 5,
+      consumedAt: undefined,
+    })
+
+    await expect(
+      accounts.abandonEmailChallenge({ challengeId, now }),
+    ).resolves.toBe(true)
+    await expect(
+      accounts.getEligibleEmailChallenge(email, 'signup', now),
+    ).resolves.toBeUndefined()
+    await expect(
+      accounts.verifyEmailChallenge({
+        email,
+        purpose: 'signup',
+        codeDigest: 'd'.repeat(43),
+        now,
+      }),
+    ).resolves.toBeUndefined()
   })
 
   it('activates signup only after accepting every current legal document version', async () => {

@@ -91,11 +91,16 @@ export interface AccountAuthStore {
     userEmailId: string
     loginEnabled: boolean
   }>
-  getLatestEmailChallenge(
+  getEligibleEmailChallenge(
     email: string,
     purpose: EmailChallengePurpose,
+    now: Date,
   ): Promise<EmailChallengeRecord | undefined>
   createEmailChallenge(record: EmailChallengeRecord): Promise<void>
+  abandonEmailChallenge(input: {
+    challengeId: string
+    now: Date
+  }): Promise<boolean>
   verifyEmailChallenge(input: {
     email: string
     purpose: EmailChallengePurpose
@@ -469,7 +474,11 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
     })
   }
 
-  async getLatestEmailChallenge(email: string, purpose: EmailChallengePurpose) {
+  async getEligibleEmailChallenge(
+    email: string,
+    purpose: EmailChallengePurpose,
+    now: Date,
+  ) {
     const result = await this.pool.query<EmailChallengeRow>(
       `
         SELECT
@@ -491,10 +500,13 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
           AND user_email.source = 'email'
           AND user_email.status = 'active'
           AND challenge.purpose = $2
+          AND challenge.consumed_at IS NULL
+          AND challenge.expires_at > $3
+          AND challenge.attempts < challenge.max_attempts
         ORDER BY challenge.created_at DESC, challenge.id DESC
         LIMIT 1
       `,
-      [email, purpose],
+      [email, purpose, now],
     )
     const row = result.rows[0]
     return row ? toEmailChallenge(row) : undefined
@@ -531,6 +543,22 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
     )
   }
 
+  async abandonEmailChallenge(input: { challengeId: string; now: Date }) {
+    const result = await this.pool.query(
+      `
+        UPDATE web_private.email_verification_challenges
+        SET
+          expires_at = $2,
+          resend_after = $2,
+          attempts = max_attempts
+        WHERE id = $1
+          AND consumed_at IS NULL
+      `,
+      [input.challengeId, input.now],
+    )
+    return result.rowCount === 1
+  }
+
   async verifyEmailChallenge(input: {
     email: string
     purpose: EmailChallengePurpose
@@ -559,11 +587,14 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
             AND user_email.source = 'email'
             AND user_email.status = 'active'
             AND challenge.purpose = $2
+            AND challenge.consumed_at IS NULL
+            AND challenge.expires_at > $3
+            AND challenge.attempts < challenge.max_attempts
           ORDER BY challenge.created_at DESC, challenge.id DESC
           LIMIT 1
           FOR UPDATE OF challenge
         `,
-        [input.email, input.purpose],
+        [input.email, input.purpose, input.now],
       )
       const row = selected.rows[0]
       if (
@@ -1173,14 +1204,39 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
     return { user, userEmailId: emailRecord.id, loginEnabled: false }
   }
 
-  async getLatestEmailChallenge(email: string, purpose: EmailChallengePurpose) {
+  async getEligibleEmailChallenge(
+    email: string,
+    purpose: EmailChallengePurpose,
+    now: Date,
+  ) {
     return [...this.#emailChallenges.values()]
-      .filter((challenge) => challenge.email === email && challenge.purpose === purpose)
+      .filter(
+        (challenge) =>
+          challenge.email === email &&
+          challenge.purpose === purpose &&
+          !challenge.consumedAt &&
+          challenge.expiresAt.getTime() > now.getTime() &&
+          challenge.attempts < challenge.maxAttempts,
+      )
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0]
   }
 
   async createEmailChallenge(record: EmailChallengeRecord) {
     this.#emailChallenges.set(record.id, { ...record })
+  }
+
+  async abandonEmailChallenge(input: { challengeId: string; now: Date }) {
+    const challenge = this.#emailChallenges.get(input.challengeId)
+    if (!challenge || challenge.consumedAt) {
+      return false
+    }
+    this.#emailChallenges.set(input.challengeId, {
+      ...challenge,
+      expiresAt: input.now,
+      resendAfter: input.now,
+      attempts: challenge.maxAttempts,
+    })
+    return true
   }
 
   async verifyEmailChallenge(input: {
@@ -1189,13 +1245,12 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
     codeDigest: string
     now: Date
   }) {
-    const challenge = await this.getLatestEmailChallenge(input.email, input.purpose)
-    if (
-      !challenge ||
-      challenge.consumedAt ||
-      challenge.expiresAt.getTime() <= input.now.getTime() ||
-      challenge.attempts >= challenge.maxAttempts
-    ) {
+    const challenge = await this.getEligibleEmailChallenge(
+      input.email,
+      input.purpose,
+      input.now,
+    )
+    if (!challenge) {
       return undefined
     }
     const updated = {

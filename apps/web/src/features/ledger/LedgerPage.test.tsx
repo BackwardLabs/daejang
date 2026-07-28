@@ -61,6 +61,18 @@ const secondReviewDetail = {
   ...secondReviewSummary,
 }
 
+const ledgerEvent = {
+  eventId: 'event-2027',
+  revisionId: 'ledger-revision-2027',
+  revisionNumber: 1,
+  eventType: 'TRADE',
+  flowShape: 'INFLOW_OUTFLOW',
+  resolution: 'RESOLVED',
+  interpretationSupport: 'SUPPORTED',
+  effectiveAt: '2027-01-01T00:00:00.000Z',
+  postings: [],
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -78,6 +90,98 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
     expect(await screen.findByRole('heading', { name: '아직 처리된 거래가 없습니다' })).toBeInTheDocument()
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/ledger?taxYear=2027'), expect.anything())
+  })
+
+  it('keeps a healthy ledger visible when the Review list fails', async () => {
+    let reviewListReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent] })
+      if (url.endsWith('/reviews')) {
+        reviewListReads++
+        if (reviewListReads > 1) return jsonResponse({ items: [reviewSummary] })
+        return jsonResponse({ error: { code: 'ENGINE_UNAVAILABLE', message: 'review unavailable' } }, 503)
+      }
+      if (url.endsWith('/reviews/review-1')) return jsonResponse({ review: reviewDetail })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    expect(await screen.findByText('event-2027')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '검토 0' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('검토 목록을 불러오지 못했습니다')
+    fireEvent.click(screen.getByRole('button', { name: '검토 다시 불러오기' }))
+    expect(await screen.findByRole('button', { name: /UNKNOWN_TRANSACTION/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '거래 1' }))
+    expect(screen.getByText('event-2027')).toBeInTheDocument()
+  })
+
+  it('keeps a healthy Review surface usable when the ledger fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) {
+        return jsonResponse({ error: { code: 'ENGINE_UNAVAILABLE', message: 'ledger unavailable' } }, 503)
+      }
+      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('장부를 불러오지 못했습니다')
+
+    fireEvent.click(await screen.findByRole('button', { name: '검토 1' }))
+    expect(await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })).toBeInTheDocument()
+    expect(screen.queryByText('장부를 불러오지 못했습니다')).not.toBeInTheDocument()
+  })
+
+  it('ignores stale ledger and Review responses after the year changes', async () => {
+    let resolveOldLedger: ((response: Response) => void) | undefined
+    let resolveOldReviews: ((response: Response) => void) | undefined
+    let reviewListReads = 0
+    const oldLedger = new Promise<Response>((resolve) => { resolveOldLedger = resolve })
+    const oldReviews = new Promise<Response>((resolve) => { resolveOldReviews = resolve })
+    const event2026 = {
+      ...ledgerEvent,
+      eventId: 'event-2026',
+      revisionId: 'ledger-revision-2026',
+      effectiveAt: '2026-01-01T00:00:00.000Z',
+    }
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/ledger?taxYear=2027')) return oldLedger
+      if (url.includes('/ledger?taxYear=2026')) return jsonResponse({ items: [event2026] })
+      if (url.endsWith('/reviews') && !init?.method) {
+        reviewListReads++
+        return reviewListReads === 1 ? oldReviews : jsonResponse({ items: [secondReviewSummary] })
+      }
+      if (url.endsWith('/reviews/review-2') && !init?.method) {
+        return jsonResponse({ review: secondReviewDetail })
+      }
+      if (url.endsWith('/reviews/review-1') && !init?.method) {
+        return jsonResponse({ review: reviewDetail })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.change(screen.getByLabelText('조회 기간'), { target: { value: '2026' } })
+
+    expect(await screen.findByText('event-2026')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '검토 1' }))
+    expect(await screen.findByRole('button', { name: /NEEDS_CONTEXT/ })).toBeInTheDocument()
+
+    resolveOldLedger?.(jsonResponse({ items: [ledgerEvent] }))
+    resolveOldReviews?.(jsonResponse({ items: [reviewSummary] }))
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /UNKNOWN_TRANSACTION/ })).not.toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: '거래 1' }))
+    expect(screen.getByText('event-2026')).toBeInTheDocument()
+    expect(screen.queryByText('event-2027')).not.toBeInTheDocument()
   })
 
   it('submits the current revision and shows durable resolution completion', async () => {

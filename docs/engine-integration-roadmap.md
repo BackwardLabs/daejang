@@ -17,7 +17,7 @@
 | Upbit PDF 업로드 | 구현 | 20 MiB 제한, private object root, PDF magic·size·SHA-256 확인, source·job 원자 경계 |
 | Sync Job | 구현 | durable idempotency, fenced lease, `SKIP LOCKED`, 성공·실패 상태 |
 | Activity·Ledger·Review 조회 | 구현 | Web JSON → QueryService → read-only DB role |
-| Review 상세·응답 revision | 구현 | account scope, option validation, CAS, private artifact, V2 event·consumer delivery |
+| Review 상세·응답 revision | 구현 | account scope, option validation, CAS, private artifact, V2 event·consumer delivery row |
 | Report snapshot | 구현 | immutable digest snapshot, 실제 계산 전 `PARTIAL` 표시 |
 | Upbit 행 추출·정규화 | 후속 | 공식 PDF fixture와 문서 버전 계약 필요 |
 | Ledger 재계산·세금 Lot | 후속 | resolved Review revision을 producer 입력으로 연결 필요 |
@@ -36,14 +36,15 @@ flowchart TD
   parse -->|아니오| fail[명시적 실패 상태]
   activity --> review[Review read model]
   review --> resolution[Account-scoped Review resolution]
-  resolution --> delivery[ReviewResolved V2 + consumer delivery]
-  delivery -. ReviewRoom/Application workers·proof gate .-> report[Immutable Report snapshot]
+  resolution --> delivery[ReviewResolved V2 + durable delivery rows]
+  delivery -. 미구현 workers·proof gate .-> report[Immutable Report snapshot]
 ```
 
 다음 구현은 지원할 Upbit PDF 실물 fixture를 고정한 뒤 행 추출·정규화 producer를
 worker에 연결하는 작업입니다. 그 결과를 기존 ledger/review/lot 저장 계약으로
 발행한 뒤 resolved Review를 재계산에 반영하고 anchor·Report gate를 거쳐 최종
-세금 Report 산출을 활성화합니다. parser가
+세금 Report 산출을 활성화합니다. delivery row는 downstream handoff가 저장됐다는
+뜻일 뿐 recalculation, anchor 또는 report delivery 완료 신호가 아닙니다. parser가
 없는 문서는 성공한 거래 0건으로 위장하지 않고 지원 불가 실패로 종료해야 합니다.
 
 ## 단계별 완료 조건

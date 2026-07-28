@@ -34,9 +34,12 @@ export const formatReviewQuantity = (quantity: string, assetDecimals?: number) =
 export function LedgerPage() {
   const [year, setYear] = useState<AppYear>('2027')
   const [events, setEvents] = useState<LedgerEventModel[]>([])
+  const ledgerGenerationRef = useRef(0)
   const [reviews, setReviews] = useState<ReviewModel[]>([])
   const [reviewCursor, setReviewCursor] = useState<string>()
   const [reviewPageStatus, setReviewPageStatus] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [reviewStatus, setReviewStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [reviewReloadKey, setReviewReloadKey] = useState(0)
   const reviewListGenerationRef = useRef(0)
   const [selectedId, setSelectedId] = useState<string>()
   const [selectedReviewId, setSelectedReviewId] = useState<string>()
@@ -49,28 +52,57 @@ export function LedgerPage() {
   const [resolutionStatus, setResolutionStatus] = useState<'idle' | 'submitting' | 'refreshing' | 'success' | 'error' | 'stale' | 'stale-error' | 'conflict' | 'reanalyze'>('idle')
   const [resolutionIntentKey, setResolutionIntentKey] = useState<string>()
   const [view, setView] = useState<'ledger' | 'review'>('ledger')
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [ledgerStatus, setLedgerStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const generation = ++ledgerGenerationRef.current
+    setLedgerStatus('loading')
+    setEvents([])
+    setSelectedId(undefined)
+    void loadLedger(year, controller.signal)
+      .then((ledger) => {
+        if (ledgerGenerationRef.current !== generation) return
+        setEvents(ledger.items)
+        setSelectedId(ledger.items[0]?.eventId)
+        setLedgerStatus('ready')
+      })
+      .catch((error: unknown) => {
+        if (
+          ledgerGenerationRef.current === generation &&
+          !(error instanceof DOMException && error.name === 'AbortError')
+        ) setLedgerStatus('error')
+      })
+    return () => controller.abort()
+  }, [year])
 
   useEffect(() => {
     const controller = new AbortController()
     const generation = ++reviewListGenerationRef.current
-    setStatus('loading')
+    setReviewStatus('loading')
     setReviewPageStatus('idle')
-    void Promise.all([loadLedger(year, controller.signal), loadReviews({ signal: controller.signal })])
-      .then(([ledger, review]) => {
+    setReviews([])
+    setReviewCursor(undefined)
+    selectedReviewIdRef.current = undefined
+    setSelectedReviewId(undefined)
+    void loadReviews({ signal: controller.signal })
+      .then((review) => {
         if (reviewListGenerationRef.current !== generation) return
-        setEvents(ledger.items)
         setReviews(review.items)
         setReviewCursor(review.nextCursor)
-        setSelectedId(ledger.items[0]?.eventId)
         const firstReviewId = review.items[0]?.id
         selectedReviewIdRef.current = firstReviewId
         setSelectedReviewId(firstReviewId)
-        setStatus('ready')
+        setReviewStatus('ready')
       })
-      .catch((error: unknown) => { if (!(error instanceof DOMException && error.name === 'AbortError')) setStatus('error') })
+      .catch((error: unknown) => {
+        if (
+          reviewListGenerationRef.current === generation &&
+          !(error instanceof DOMException && error.name === 'AbortError')
+        ) setReviewStatus('error')
+      })
     return () => controller.abort()
-  }, [year])
+  }, [reviewReloadKey, year])
 
   useEffect(() => {
     selectedReviewIdRef.current = selectedReviewId
@@ -228,10 +260,10 @@ export function LedgerPage() {
           </div>
         </section>
 
-        {status === 'error' ? <p className="ledger-api-state" role="alert">장부를 불러오지 못했습니다. Engine과 데이터베이스 연결을 확인해 주세요.</p> : null}
-        {status === 'loading' ? <p className="ledger-api-state" role="status">장부를 불러오는 중입니다.</p> : null}
+        {view === 'ledger' && ledgerStatus === 'error' ? <p className="ledger-api-state" role="alert">장부를 불러오지 못했습니다. Engine과 데이터베이스 연결을 확인해 주세요.</p> : null}
+        {view === 'ledger' && ledgerStatus === 'loading' ? <p className="ledger-api-state" role="status">장부를 불러오는 중입니다.</p> : null}
 
-        {status === 'ready' && view === 'ledger' ? (
+        {ledgerStatus === 'ready' && view === 'ledger' ? (
           events.length === 0 ? (
             <section className="ledger-empty-state"><h2>아직 처리된 거래가 없습니다</h2><p>데이터 소스를 등록하고 Sync Job이 완료되면 실제 거래가 여기에 표시됩니다.</p><a href="/sources">데이터 소스 관리</a></section>
           ) : (
@@ -252,7 +284,15 @@ export function LedgerPage() {
           )
         ) : null}
 
-        {status === 'ready' && view === 'review' ? (
+        {view === 'review' && reviewStatus === 'loading' ? <p className="ledger-api-state" role="status">검토 목록을 불러오는 중입니다.</p> : null}
+        {view === 'review' && reviewStatus === 'error' ? (
+          <section className="ledger-api-state" role="alert">
+            <p>검토 목록을 불러오지 못했습니다. 장부는 계속 확인할 수 있습니다.</p>
+            <button type="button" onClick={() => setReviewReloadKey((current) => current + 1)}>검토 다시 불러오기</button>
+          </section>
+        ) : null}
+
+        {reviewStatus === 'ready' && view === 'review' ? (
           reviews.length === 0 ? <section className="ledger-empty-state"><h2>열린 검토가 없습니다</h2><p>Engine이 판단 보류 항목을 만들면 사유와 근거가 여기에 표시됩니다.</p></section> :
           <section className="ledger-review-browser" aria-label="열린 검토">
             <div className="ledger-review-browser__list">

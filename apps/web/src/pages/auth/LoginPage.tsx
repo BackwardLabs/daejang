@@ -47,6 +47,8 @@ const authErrorMessages: Record<string, string> = {
     '로그인 요청이 만료되었거나 이미 사용되었습니다. 다시 시도해 주세요',
   oauth_provider_unavailable: '선택한 로그인 수단을 현재 사용할 수 없습니다',
   oauth_account_not_found: '연결된 Daejang 계정을 찾지 못했습니다',
+  signup_unavailable:
+    '현재 신규 가입을 받을 수 없습니다. 기존 계정으로 로그인해 주세요',
   account_already_exists: '이미 가입된 계정입니다. 로그인해 주세요',
   account_unavailable: '현재 이 계정으로 로그인할 수 없습니다',
   oauth_callback_failed: '소셜 서비스에서 계정을 확인하지 못했습니다',
@@ -63,6 +65,7 @@ type LoginPageProps = {
   onSignup: () => void
   onNavigate: (path: PublicPath) => void
   onAuthenticated: (nextPath: string) => void
+  signupAvailable: boolean
 }
 
 export function LoginPage({
@@ -70,6 +73,7 @@ export function LoginPage({
   onSignup,
   onNavigate,
   onAuthenticated,
+  signupAvailable,
 }: LoginPageProps) {
   const [view, setView] = useState<LoginView>('method')
   const [provider, setProvider] = useState<SocialProvider | null>(null)
@@ -114,9 +118,11 @@ export function LoginPage({
       onHome={onHome}
       onNavigate={onNavigate}
       headerAction={
-        <button className="auth-outline-button" type="button" onClick={onSignup}>
-          계정 만들기
-        </button>
+        signupAvailable ? (
+          <button className="auth-outline-button" type="button" onClick={onSignup}>
+            계정 만들기
+          </button>
+        ) : undefined
       }
     >
       <article className="auth-card">
@@ -174,9 +180,13 @@ export function LoginPage({
             >
               이메일로 로그인
             </button>
-            <button className="auth-text-button" type="button" onClick={onSignup}>
-              계정이 없나요? <strong>계정 만들기</strong>
-            </button>
+            {signupAvailable ? (
+              <button className="auth-text-button" type="button" onClick={onSignup}>
+                계정이 없나요? <strong>계정 만들기</strong>
+              </button>
+            ) : (
+              <p className="auth-note">새 계정 가입은 준비 중입니다. 기존 계정으로 로그인해 주세요.</p>
+            )}
           </>
         ) : null}
 

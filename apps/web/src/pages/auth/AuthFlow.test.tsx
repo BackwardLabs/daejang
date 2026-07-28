@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../../App.tsx'
+import type { AuthCapabilities } from '../../auth/api.ts'
 import { OnboardingFlow } from './OnboardingFlow.tsx'
 
 const documents = [
@@ -46,6 +47,16 @@ const documents = [
   },
 ]
 
+const signupCapabilities: AuthCapabilities = {
+  signup: {
+    enabled: true,
+    methods: {
+      email: true,
+      oauthProviders: ['kakao', 'naver', 'google'],
+    },
+  },
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -55,6 +66,15 @@ function jsonResponse(body: unknown, status = 200) {
 
 beforeEach(() => {
   window.history.replaceState(null, '', '/')
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/auth/capabilities')) {
+        return jsonResponse(signupCapabilities)
+      }
+      throw new Error(`Unexpected request: ${String(input)}`)
+    }),
+  )
 })
 
 afterEach(() => {
@@ -77,9 +97,27 @@ describe('authentication flows', () => {
     ).toBeInTheDocument()
   })
 
+  it('explains when signup becomes unavailable during an OAuth callback', () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/login?auth_error=signup_unavailable',
+    )
+    render(<App />)
+
+    expect(
+      screen.getByText(
+        '현재 신규 가입을 받을 수 없습니다. 기존 계정으로 로그인해 주세요',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('uses real email API operations before showing server-backed terms', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
+      if (url.includes('/auth/capabilities')) {
+        return jsonResponse(signupCapabilities)
+      }
       if (url.includes('/send-code')) {
         return jsonResponse(
           { status: 'accepted', expiresInSeconds: 300, resendAfterSeconds: 60 },
@@ -100,7 +138,7 @@ describe('authentication flows', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<App />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: '시작하기' })[0]!)
+    fireEvent.click((await screen.findAllByRole('button', { name: '시작하기' }))[0]!)
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
     fireEvent.change(screen.getByLabelText('이메일 주소'), {
       target: { value: 'user@example.com' },
@@ -145,6 +183,9 @@ describe('authentication flows', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input)
+        if (url.includes('/auth/capabilities')) {
+          return jsonResponse(signupCapabilities)
+        }
         if (url.includes('/auth/email/login')) {
           return jsonResponse({
             status: 'signup_pending',
@@ -175,9 +216,9 @@ describe('authentication flows', () => {
     expect(window.location.pathname).toBe('/')
   })
 
-  it('clears email credentials after leaving the email signup screen', () => {
+  it('clears email credentials after leaving the email signup screen', async () => {
     render(<App />)
-    fireEvent.click(screen.getAllByRole('button', { name: '시작하기' })[0]!)
+    fireEvent.click((await screen.findAllByRole('button', { name: '시작하기' }))[0]!)
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
     fireEvent.change(screen.getByLabelText('이메일 주소'), {
       target: { value: 'private@example.com' },
@@ -186,7 +227,7 @@ describe('authentication flows', () => {
     expect(screen.getByRole('heading', { name: '고객지원' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '서비스로 돌아가기' }))
-    fireEvent.click(screen.getAllByRole('button', { name: '시작하기' })[0]!)
+    fireEvent.click((await screen.findAllByRole('button', { name: '시작하기' }))[0]!)
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
     expect(screen.getByLabelText('이메일 주소')).toHaveValue('')
   })
@@ -194,7 +235,12 @@ describe('authentication flows', () => {
   it('shows policy content above the consent screen in a modal', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(jsonResponse({ documents })),
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/auth/capabilities')) return jsonResponse(signupCapabilities)
+        if (url.includes('/legal-documents/current')) return jsonResponse({ documents })
+        throw new Error(`Unexpected request: ${url}`)
+      }),
     )
     window.history.replaceState(null, '', '/?onboarding=terms')
     render(<App />)
@@ -212,7 +258,12 @@ describe('authentication flows', () => {
   it('renders the current server policy on the public terms page', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(jsonResponse({ documents })),
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/auth/capabilities')) return jsonResponse(signupCapabilities)
+        if (url.includes('/legal-documents/current')) return jsonResponse({ documents })
+        throw new Error(`Unexpected request: ${url}`)
+      }),
     )
     window.history.replaceState(null, '', '/terms')
     render(<App />)
@@ -232,6 +283,9 @@ describe('authentication flows', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input)
+        if (url.includes('/auth/capabilities')) {
+          return jsonResponse(signupCapabilities)
+        }
         if (url.includes('/legal-documents/current')) {
           return jsonResponse({ documents })
         }
@@ -260,13 +314,14 @@ describe('authentication flows', () => {
         onExit={onExit}
         onLogin={vi.fn()}
         onNavigate={vi.fn()}
+        signupMethods={signupCapabilities.signup.methods}
       />,
     )
 
     await screen.findByText('[필수] 서비스 이용약관')
     fireEvent.click(
       screen.getByRole('checkbox', {
-        name: '모두 동의선택 항목을 포함하며 언제든 철회할 수 있어요',
+        name: '모두 동의선택 항목에 동의하지 않아도 가입할 수 있어요',
       }),
     )
     fireEvent.click(
@@ -283,5 +338,43 @@ describe('authentication flows', () => {
 
     expect(onAuthenticated).toHaveBeenCalledWith('/dashboard')
     expect(onExit).not.toHaveBeenCalled()
+  })
+
+  it('fails closed for signup when capability lookup fails while keeping login usable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('capability unavailable')))
+    render(<App />)
+
+    const unavailableButtons = await screen.findAllByRole('button', { name: '가입 준비 중' })
+    expect(unavailableButtons.every((button) => button.hasAttribute('disabled'))).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '이메일로 로그인' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '계정 만들기' })).not.toBeInTheDocument()
+    expect(screen.getByText('새 계정 가입은 준비 중입니다. 기존 계정으로 로그인해 주세요.')).toBeInTheDocument()
+  })
+
+  it('renders only signup methods returned by the server', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes('/auth/capabilities')) {
+          return jsonResponse({
+            signup: {
+              enabled: true,
+              methods: { email: false, oauthProviders: ['naver'] },
+            },
+          })
+        }
+        throw new Error(`Unexpected request: ${String(input)}`)
+      }),
+    )
+    render(<App />)
+
+    fireEvent.click((await screen.findAllByRole('button', { name: '시작하기' }))[0]!)
+    expect(screen.getByRole('button', { name: '네이버로 시작하기' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '카카오로 시작하기' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '구글로 시작하기' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '이메일로 가입하기' })).not.toBeInTheDocument()
   })
 })

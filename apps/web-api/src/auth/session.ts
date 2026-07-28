@@ -143,8 +143,8 @@ export class MemorySessionStore implements SessionStore {
     if (this.#sessions.has(replacementTokenHash)) {
       return undefined
     }
-    if (currentTokenHash && !this.#sessions.delete(currentTokenHash)) {
-      return undefined
+    if (currentTokenHash) {
+      this.#sessions.delete(currentTokenHash)
     }
 
     return this.set(replacementTokenHash, replacement)
