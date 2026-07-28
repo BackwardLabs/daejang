@@ -1,0 +1,4 @@
+# Local Worker proxy target. Production values are configured as Worker secrets.
+WEB_API_ORIGIN=http://127.0.0.1:3000
+CF_ACCESS_CLIENT_ID=replace-with-local-or-staging-client-id
+CF_ACCESS_CLIENT_SECRET=replace-with-local-or-staging-client-secret

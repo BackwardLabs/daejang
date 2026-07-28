@@ -16,14 +16,44 @@ services:
   web-api:
     build: { context: .., dockerfile: apps/web-api/Dockerfile }
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3000
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
       DATABASE_URL: ${WEB_DATABASE_URL}
+      SESSION_ABSOLUTE_TTL_SECONDS: ${SESSION_ABSOLUTE_TTL_SECONDS}
+      SESSION_IDLE_TTL_SECONDS: ${SESSION_IDLE_TTL_SECONDS}
+      SIGNUP_SESSION_TTL_SECONDS: ${SIGNUP_SESSION_TTL_SECONDS}
+      BODY_LIMIT_BYTES: ${BODY_LIMIT_BYTES}
       RATE_LIMIT_HMAC_SECRET: ${RATE_LIMIT_HMAC_SECRET}
       TRUST_PROXY_HOPS: 1
+      OAUTH_ENABLED_PROVIDERS: ${OAUTH_ENABLED_PROVIDERS}
+      OAUTH_TRANSACTION_TTL_SECONDS: ${OAUTH_TRANSACTION_TTL_SECONDS}
+      OAUTH_STATE_HMAC_SECRET: ${OAUTH_STATE_HMAC_SECRET}
+      OAUTH_TRANSACTION_ENCRYPTION_KEY: ${OAUTH_TRANSACTION_ENCRYPTION_KEY}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      KAKAO_CLIENT_ID: ${KAKAO_CLIENT_ID}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET}
+      EMAIL_AUTH_ENABLED: ${EMAIL_AUTH_ENABLED}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      EMAIL_VERIFICATION_HMAC_SECRET: ${EMAIL_VERIFICATION_HMAC_SECRET}
+      EMAIL_VERIFICATION_TTL_SECONDS: ${EMAIL_VERIFICATION_TTL_SECONDS}
+      EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: ${EMAIL_VERIFICATION_TOKEN_TTL_SECONDS}
+      EMAIL_VERIFICATION_RESEND_AFTER_SECONDS: ${EMAIL_VERIFICATION_RESEND_AFTER_SECONDS}
+      IDENTITY_VERIFICATION_MODE: disabled
       PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
       ENGINE_GRPC_TARGET: engine:50051
       ENGINE_GRPC_SERVER_NAME: engine.internal
@@ -37,7 +67,17 @@ services:
       - ${WEB_ENGINE_CLIENT_KEY_PATH}:/run/secrets/web-engine-client-key.pem:ro
     depends_on:
       engine: { condition: service_healthy }
-    networks: [edge, backend]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    networks: [edge, backend, database]
 
   engine:
     build:
@@ -70,7 +110,7 @@ services:
       timeout: 4s
       retries: 3
       start_period: 10s
-    networks: [backend]
+    networks: [backend, database]
 
   sync-worker:
     build:
@@ -83,11 +123,14 @@ services:
       DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
       DAEJANG_PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
     volumes: ["private_objects:/var/lib/daejang/private:ro"]
-    networks: [backend]
+    networks: [backend, database]
 
 networks:
   edge: {}
   backend: {}
+  database:
+    external: true
+    name: ${DAEJANG_DB_NETWORK:-daejang-db_default}
 volumes:
   private_objects: {}
 secrets:

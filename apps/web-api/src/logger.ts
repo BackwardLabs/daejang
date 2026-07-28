@@ -4,6 +4,8 @@ import type { DestinationStream } from 'pino'
 export const redactionPaths = [
   'req.headers.cookie',
   'req.headers.authorization',
+  'req.url',
+  'req.raw.url',
   'res.headers["set-cookie"]',
 ]
 

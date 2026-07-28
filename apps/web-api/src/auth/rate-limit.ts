@@ -5,7 +5,7 @@ import type { Pool } from 'pg'
 
 import { rateLimitExceeded } from '../errors.js'
 
-export type LoginProvider = 'siwe' | 'oidc' | 'email' | 'session'
+export type LoginProvider = 'siwe' | 'oauth' | 'email' | 'session'
 export type LoginPhase = 'begin' | 'complete'
 
 type RateLimitPolicy = {
@@ -18,7 +18,7 @@ const providerPolicies: Record<LoginProvider, Record<LoginPhase, RateLimitPolicy
     begin: { limit: 10, windowSeconds: 60 },
     complete: { limit: 5, windowSeconds: 300 },
   },
-  oidc: {
+  oauth: {
     begin: { limit: 20, windowSeconds: 60 },
     complete: { limit: 10, windowSeconds: 300 },
   },

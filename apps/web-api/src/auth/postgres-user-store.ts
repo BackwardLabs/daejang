@@ -2,7 +2,11 @@ import type { Pool, PoolClient } from 'pg'
 
 export type UserStatus = 'pending' | 'active' | 'suspended' | 'deleted'
 export type ConsentAction = 'accepted' | 'withdrawn'
-export type LegalDocumentType = 'terms' | 'privacy'
+export type LegalDocumentType =
+  | 'terms'
+  | 'privacy'
+  | 'identity_verification'
+  | 'marketing'
 
 export type UserRecord = {
   id: string
