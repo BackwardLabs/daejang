@@ -1,0 +1,231 @@
+syntax = "proto3";
+
+package giwa.jit.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/BackwardLabs/daejang-jit-engine/gen/go/giwa/jit/v1;jitv1";
+
+service CandidateQueryService {
+  rpc MaterializeAccountSelection(MaterializeAccountSelectionRequest) returns (MaterializeAccountSelectionResponse);
+}
+
+service JitEngineService {
+  rpc StartJitRun(StartJitRunRequest) returns (StartJitRunResponse);
+  rpc GetJitRun(GetJitRunRequest) returns (GetJitRunResponse);
+  rpc ListCandidateOutcomes(ListCandidateOutcomesRequest) returns (ListCandidateOutcomesResponse);
+  rpc RetryJitRun(RetryJitRunRequest) returns (RetryJitRunResponse);
+}
+
+message HashValue {
+  string algorithm = 1;
+  string value = 2;
+}
+
+message ArtifactRef {
+  HashValue content_hash = 1;
+  string locator = 2;
+}
+
+message BlockRef {
+  string block_number = 1;
+  string block_hash = 2;
+  google.protobuf.Timestamp block_time = 3;
+}
+
+message BlockRange {
+  string from_block = 1;
+  string to_block = 2;
+}
+
+enum BlockEventKind {
+  BLOCK_EVENT_KIND_UNSPECIFIED = 0;
+  BLOCK_EVENT_KIND_BEACON_WITHDRAWAL = 1;
+}
+
+message TransactionLocator {
+  string block_number = 1;
+  uint32 transaction_index = 2;
+  uint32 match_bits = 3;
+}
+
+message BlockEventLocator {
+  string block_number = 1;
+  BlockEventKind event_kind = 2;
+  uint64 event_index = 3;
+}
+
+message CandidateLocator {
+  oneof position {
+    TransactionLocator transaction = 1;
+    BlockEventLocator block_event = 2;
+  }
+}
+
+message MaterializeAccountSelectionRequest {
+  string index_snapshot_id = 1;
+  string chain_store = 2;
+  string chain_id = 3;
+  string genesis_hash = 4;
+  string address = 5;
+  BlockRange range = 6;
+  string evidence_profile = 7;
+  string profile_hash = 8;
+}
+
+message AccountCandidateSelectionRef {
+  string selection_id = 1;
+  string selection_digest = 2;
+  uint64 logical_candidate_count = 3;
+  ArtifactRef selection_artifact = 4;
+}
+
+message MaterializeAccountSelectionResponse {
+  AccountCandidateSelectionRef selection = 1;
+}
+
+message GetAccountSelectionRequest {
+  string selection_id = 1;
+  string expected_digest = 2;
+}
+
+message AccountCandidateSelection {
+  AccountCandidateSelectionRef ref = 1;
+  string index_snapshot_id = 2;
+  string chain_id = 3;
+  string genesis_hash = 4;
+  string address = 5;
+  BlockRange range = 6;
+  string evidence_profile = 7;
+  string profile_hash = 8;
+  repeated CandidateLocator candidates = 9;
+}
+
+message GetAccountSelectionResponse {
+  AccountCandidateSelection selection = 1;
+}
+
+message JitAccountInput {
+  string account_id = 1;
+  string chain_id = 2;
+  string address = 3;
+  google.protobuf.Timestamp ownership_from = 4;
+  google.protobuf.Timestamp ownership_to = 5;
+}
+
+message CandidateSelectionBinding {
+  string account_id = 1;
+  AccountCandidateSelectionRef selection = 2;
+}
+
+message StartJitRunRequest {
+  string generation_id = 1;
+  string subject_id = 2;
+  string index_snapshot_id = 3;
+  string evidence_profile = 4;
+  repeated JitAccountInput accounts = 5;
+  repeated CandidateSelectionBinding candidate_selections = 6;
+  string retry_of_run_id = 7;
+}
+
+message StartJitRunAccepted {
+  string run_id = 1;
+  uint64 run_revision = 2;
+  string state = 3;
+}
+
+message StartJitRunResponse {
+  StartJitRunAccepted accepted = 1;
+}
+
+message GetJitRunRequest {
+  string run_id = 1;
+}
+
+message SchemaPin {
+  string repository = 1;
+  string commit = 2;
+  string module_digest = 3;
+}
+
+message RuntimeConfigPin {
+  string digest = 1;
+  string provider_set_revision = 2;
+  google.protobuf.Timestamp loaded_at = 3;
+}
+
+message JitProgress {
+  uint64 logical_candidates = 1;
+  uint64 candidates_terminal = 2;
+  uint64 executions_available = 3;
+  uint64 observations_normalized = 4;
+  uint64 evidence_unavailable = 5;
+}
+
+message JitRunResultEnvelope {
+  string run_id = 1;
+  uint64 run_revision = 2;
+  string status = 3;
+  string index_snapshot_id = 4;
+  repeated CandidateSelectionBinding candidate_selections = 5;
+  JitProgress progress = 6;
+  string chain_evidence_bundle_id = 7;
+  string subject_evidence_fragment_id = 8;
+  ArtifactRef candidate_outcome_artifact = 9;
+  ArtifactRef limitation_artifact = 10;
+  string result_digest = 11;
+  SchemaPin schema_pin = 12;
+  string retry_of_run_id = 13;
+  string supersedes_run_id = 14;
+  ArtifactRef chain_evidence_artifact = 15;
+  ArtifactRef subject_evidence_artifact = 16;
+  RuntimeConfigPin runtime_config_pin = 17;
+  repeated ArtifactRef execution_evidence_artifacts = 18;
+}
+
+message GetJitRunResponse {
+  JitRunResultEnvelope result = 1;
+}
+
+message CandidateOutcome {
+  string candidate_id = 1;
+  string account_id = 2;
+  CandidateLocator locator = 3;
+  string status = 4;
+  string reason_code = 5;
+  repeated string hit_ids = 6;
+  repeated string observation_ids = 7;
+  repeated MatchBitOutcome match_bit_outcomes = 8;
+  repeated EvidencePartState evidence_part_states = 9;
+}
+
+message MatchBitOutcome {
+  uint32 match_bit = 1;
+  string status = 2;
+  string reason_code = 3;
+  repeated string hit_ids = 4;
+}
+
+message EvidencePartState {
+  string evidence_part = 1;
+  string state = 2;
+}
+
+message ListCandidateOutcomesRequest {
+  string run_id = 1;
+  uint32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListCandidateOutcomesResponse {
+  repeated CandidateOutcome outcomes = 1;
+  string next_page_token = 2;
+}
+
+message RetryJitRunRequest {
+  string run_id = 1;
+}
+
+message RetryJitRunResponse {
+  StartJitRunAccepted accepted = 1;
+}

@@ -1,23 +1,28 @@
-import type { FastifyInstance, preHandlerHookHandler } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 
 import { ApiError, resourceNotFound, unauthorized } from '../errors.js'
 import {
   AmbiguousCurrentTaxReportError,
   InconsistentTaxReportError,
 } from '../tax-report/postgres-tax-report-reader.js'
-import type { TaxReportFinality, TaxReportReader } from '../tax-report/types.js'
+import type {
+  CurrentTaxReport,
+  TaxAmount,
+  TaxReportFinality,
+  TaxReportReader,
+} from '../tax-report/types.js'
 
 type TaxReportRoutesOptions = {
-  authenticate: preHandlerHookHandler
   reader: TaxReportReader
 }
 
 const amountSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['status'],
+  required: ['status', 'hasAmount'],
   properties: {
     status: { type: 'string', enum: ['KNOWN', 'UNKNOWN'] },
+    hasAmount: { type: 'boolean' },
     amount: { type: 'string', pattern: '^-?(0|[1-9][0-9]*)$' },
   },
 } as const
@@ -26,27 +31,17 @@ const reportResponseSchema = {
   type: 'object',
   additionalProperties: false,
   required: [
-    'schemaVersion', 'reportId', 'residentId', 'taxYear', 'finality', 'status', 'filingStatus',
-    'taxInventoryRunId', 'taxEstimateId', 'lotRunId', 'inputDigest', 'schemaDigest',
-    'denominationAssetId', 'reportArtifactDigest', 'evidencePackDigest', 'pointerVersion',
-    'issuedAt', 'counts', 'summary', 'disposals', 'transfers', 'excludedConversions', 'limitations',
+    'reportId', 'taxYear', 'finality', 'status', 'filingStatus',
+    'denominationAssetId', 'pointerVersion', 'issuedAt', 'counts',
+    'gainLoss', 'taxableBase', 'nationalTax', 'localTax', 'totalTax',
   ],
   properties: {
-    schemaVersion: { type: 'string', const: 'giwa.web.tax-report.v1' },
     reportId: { type: 'string' },
-    residentId: { type: 'string' },
     taxYear: { type: 'integer', minimum: 2027, maximum: 9999 },
     finality: { type: 'string', enum: ['FINAL', 'PROVISIONAL'] },
     status: { type: 'string', enum: ['FINAL', 'PARTIAL'] },
     filingStatus: { type: 'string', enum: ['READY', 'BLOCKED'] },
-    taxInventoryRunId: { type: 'string' },
-    taxEstimateId: { type: 'string' },
-    lotRunId: { type: 'string' },
-    inputDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' },
-    schemaDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     denominationAssetId: { type: 'string' },
-    reportArtifactDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' },
-    evidencePackDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     pointerVersion: { type: 'integer', minimum: 1 },
     issuedAt: { type: 'string', format: 'date-time' },
     counts: {
@@ -57,17 +52,39 @@ const reportResponseSchema = {
         excludedConversions: { type: 'integer', minimum: 0 }, limitations: { type: 'integer', minimum: 0 },
       },
     },
-    summary: {
-      type: 'object', additionalProperties: false,
-      required: ['gainLoss', 'taxableBase', 'nationalTax', 'localTax', 'totalTax'],
-      properties: { gainLoss: amountSchema, taxableBase: amountSchema, nationalTax: amountSchema, localTax: amountSchema, totalTax: amountSchema },
-    },
-    disposals: { type: 'array', items: { type: 'object', additionalProperties: true } },
-    transfers: { type: 'array', items: { type: 'object', additionalProperties: true } },
-    excludedConversions: { type: 'array', items: { type: 'object', additionalProperties: true } },
-    limitations: { type: 'array', items: { type: 'object', additionalProperties: true } },
+    gainLoss: amountSchema,
+    taxableBase: amountSchema,
+    nationalTax: amountSchema,
+    localTax: amountSchema,
+    totalTax: amountSchema,
   },
 } as const
+
+const publicAmount = (amount: TaxAmount) => {
+  const hasAmount = amount.status === 'KNOWN' && typeof amount.amount === 'string'
+  return {
+    status: amount.status,
+    hasAmount,
+    ...(hasAmount ? { amount: amount.amount } : {}),
+  }
+}
+
+const publicReport = (report: CurrentTaxReport) => ({
+  reportId: report.reportId,
+  taxYear: report.taxYear,
+  finality: report.finality,
+  status: report.status,
+  filingStatus: report.filingStatus,
+  denominationAssetId: report.denominationAssetId,
+  pointerVersion: report.pointerVersion,
+  issuedAt: report.issuedAt,
+  counts: report.counts,
+  gainLoss: publicAmount(report.summary.gainLoss),
+  taxableBase: publicAmount(report.summary.taxableBase),
+  nationalTax: publicAmount(report.summary.nationalTax),
+  localTax: publicAmount(report.summary.localTax),
+  totalTax: publicAmount(report.summary.totalTax),
+})
 
 export const registerTaxReportRoutes = async (
   app: FastifyInstance,
@@ -76,7 +93,6 @@ export const registerTaxReportRoutes = async (
   app.get<{ Params: { taxYear: string }; Querystring: { finality?: TaxReportFinality; residentId?: string } }>(
     '/api/v1/tax-reports/:taxYear/current',
     {
-      preHandler: options.authenticate,
       schema: {
         params: {
           type: 'object', additionalProperties: false, required: ['taxYear'],
@@ -104,7 +120,7 @@ export const registerTaxReportRoutes = async (
         if (!report) {
           throw resourceNotFound()
         }
-        return { report }
+        return { report: publicReport(report) }
       } catch (error) {
         if (error instanceof ApiError) {
           throw error

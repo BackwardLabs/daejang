@@ -12,6 +12,7 @@ import (
 	"github.com/BackwardLabs/daejang-db/pkg/reviewstore"
 	"github.com/BackwardLabs/daejang-db/pkg/sourcejobstore"
 	"github.com/BackwardLabs/daejang-db/pkg/sourcestore"
+	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
 	"github.com/BackwardLabs/daejang/services/engine/internal/query"
 	"github.com/BackwardLabs/daejang/services/engine/internal/review"
@@ -45,6 +46,13 @@ func Run(ctx context.Context, config Config) error {
 		return fmt.Errorf("open report persistence: %w", err)
 	}
 	defer reportRuntime.Close()
+	taxReportRuntime, err := taxreportstore.Open(ctx, taxreportstore.Options{
+		DatabaseURL: config.QueryDatabaseURL, ApplicationName: "daejang-engine-tax-report-query",
+	})
+	if err != nil {
+		return fmt.Errorf("open tax report query persistence: %w", err)
+	}
+	defer taxReportRuntime.Close()
 
 	var reviewRuntime *reviewstore.Runtime
 	var reviewArtifactRuntime *artifactstore.Runtime
@@ -96,7 +104,9 @@ func Run(ctx context.Context, config Config) error {
 		Store: source.PostgresStore{Store: sourceRuntime.Store, DocumentStore: jobRuntime.Store},
 	})
 	enginev1.RegisterWorkflowServiceServer(grpcServer, &workflow.Service{Store: jobRuntime.Store})
-	enginev1.RegisterQueryServiceServer(grpcServer, &query.Service{Reads: readRuntime.Store, Reports: reportRuntime.Store})
+	enginev1.RegisterQueryServiceServer(grpcServer, &query.Service{
+		Reads: readRuntime.Store, Reports: reportRuntime.Store, TaxReports: taxReportRuntime.Store,
+	})
 	services := []string{"", enginev1.SourceService_ServiceDesc.ServiceName, enginev1.WorkflowService_ServiceDesc.ServiceName, enginev1.QueryService_ServiceDesc.ServiceName}
 	if reviewRuntime != nil {
 		enginev1.RegisterReviewServiceServer(grpcServer, &review.Service{

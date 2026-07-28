@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import {
-  completeWalletConnectionMock,
-  connectWalletMock,
   createEvmWalletIntentKey,
   evmWalletFlowReducer,
   initialEvmWalletFlowState,
   maskEvmAddress,
   normalizeEvmWalletPeriod,
-  requestOwnershipSignatureMock,
   validateEvmWalletPeriodDraft,
   type CompleteWalletConnectionSuccess,
   type ConnectedWallet,
   type EvmWalletFlowState,
 } from './evmWalletFlow.ts'
+import {
+  completeWalletConnectionTestFixture as completeWalletConnectionMock,
+  connectWalletTestFixture as connectWalletMock,
+  requestOwnershipSignatureTestFixture as requestOwnershipSignatureMock,
+} from './evmWalletFlow.test-fixtures.ts'
 
 const connectedWallet: ConnectedWallet = {
   address: '0x1234567890abcdef1234567890abcdef12345678',
@@ -398,7 +400,7 @@ describe('EVM wallet period validation and normalization', () => {
   })
 })
 
-describe('EVM wallet flow helpers and mock adapters', () => {
+describe('EVM wallet flow helpers and test adapters', () => {
   it('masks full addresses and creates non-empty intent keys', () => {
     expect(maskEvmAddress(connectedWallet.address)).toBe(
       '0x1234…5678',
@@ -437,7 +439,7 @@ describe('EVM wallet flow helpers and mock adapters', () => {
     })
     expect(ownership).toEqual({
       ok: true,
-      verificationId: 'verification_evm_preview',
+      verificationId: 'verification-test',
     })
     expect('signature' in ownership).toBe(false)
     if (!ownership.ok) {

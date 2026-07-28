@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSocialAuthStartUrl,
-  completeMockIdentityVerification,
   getAuthCapabilities,
+  getCurrentUser,
+  loginWithEmail,
   sendEmailCode,
+  submitSignupConsents,
 } from './api.ts'
 
 afterEach(() => {
@@ -16,6 +18,7 @@ describe('Web auth API client', () => {
       new Response(JSON.stringify({
         signup: {
           enabled: true,
+          identityVerificationRequired: false,
           methods: { email: true, oauthProviders: ['naver'] },
         },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
@@ -25,6 +28,7 @@ describe('Web auth API client', () => {
     await expect(getAuthCapabilities()).resolves.toEqual({
       signup: {
         enabled: true,
+        identityVerificationRequired: false,
         methods: { email: true, oauthProviders: ['naver'] },
       },
     })
@@ -42,6 +46,7 @@ describe('Web auth API client', () => {
           JSON.stringify({
             signup: {
               enabled: true,
+              identityVerificationRequired: true,
               methods: { email: true, oauthProviders: ['unknown-provider'] },
             },
           }),
@@ -121,28 +126,88 @@ describe('Web auth API client', () => {
     })
   })
 
-  it('uses the server-side development gate for mock identity completion', async () => {
+  it('rejects a malformed successful current-user response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ user: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+
+    await expect(getCurrentUser()).rejects.toMatchObject({
+      status: 502,
+      code: 'INVALID_AUTH_RESPONSE',
+    })
+  })
+
+  it('accepts canonical account UUIDs without restricting the UUID version', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            user: {
+              id: '018f47a2-4b1c-7def-8abc-0123456789ab',
+              displayName: '김대장',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+
+    await expect(getCurrentUser()).resolves.toEqual({
+      user: {
+        id: '018f47a2-4b1c-7def-8abc-0123456789ab',
+        displayName: '김대장',
+      },
+    })
+  })
+
+  it('rejects a malformed successful email-login response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: 'authenticated',
+            nextPath: '/dashboard',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+
+    await expect(
+      loginWithEmail({ email: 'user@example.com', password: 'Password1!' }),
+    ).rejects.toMatchObject({
+      status: 502,
+      code: 'INVALID_AUTH_RESPONSE',
+    })
+  })
+
+  it('rejects malformed authenticated signup-completion responses', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           status: 'authenticated',
-          nextPath: '/dashboard',
+          nextPath: '//external.example',
+          user: {
+            id: 'not-a-user-id',
+            displayName: '',
+          },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(completeMockIdentityVerification()).resolves.toEqual({
-      status: 'authenticated',
-      nextPath: '/dashboard',
+    await expect(submitSignupConsents([])).rejects.toMatchObject({
+      status: 502,
+      code: 'INVALID_AUTH_RESPONSE',
     })
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:3000/api/v1/signup/identity-verification/mock-complete',
-      expect.objectContaining({
-        method: 'POST',
-        credentials: 'include',
-      }),
-    )
   })
 })

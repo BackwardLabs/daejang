@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { FastifyInstance, preHandlerHookHandler } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { verifyMessage } from 'ethers'
 
 import type { AuthRateLimiter } from '../auth/rate-limit.js'
@@ -132,7 +132,6 @@ export const registerSourceRoutes = async (
     config: AppConfig
     walletSourceStore: WalletSourceStore
     authRateLimiter: AuthRateLimiter
-    authenticate: preHandlerHookHandler
     engineDataClient?: EngineDataClient
     now?: () => Date
   },
@@ -140,9 +139,41 @@ export const registerSourceRoutes = async (
   const now = options.now ?? (() => new Date())
 
   app.get(
+    '/api/v1/sources/capabilities',
+    {
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['upbitPdf'],
+            properties: {
+              upbitPdf: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['registrationEnabled', 'encryptedPdfSupported'],
+                properties: {
+                  registrationEnabled: { type: 'boolean' },
+                  encryptedPdfSupported: { type: 'boolean', const: false },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async () => ({
+      upbitPdf: {
+        registrationEnabled:
+          options.engineDataClient?.upbitPdfImportSupported === true,
+        encryptedPdfSupported: false as const,
+      },
+    }),
+  )
+
+  app.get(
     '/api/v1/sources',
     {
-      preHandler: options.authenticate,
       schema: {
         response: {
           200: {
@@ -176,15 +207,12 @@ export const registerSourceRoutes = async (
   app.post<{ Body: ChallengeBody }>(
     '/api/v1/sources/wallets/challenges',
     {
-      preHandler: [
-        options.authenticate,
-        createLoginRateLimitHook(
-          options.authRateLimiter,
-          'siwe',
-          'begin',
-          (request) => (request.body as ChallengeBody).address,
-        ),
-      ],
+      preHandler: createLoginRateLimitHook(
+        options.authRateLimiter,
+        'siwe',
+        'begin',
+        (request) => (request.body as ChallengeBody).address,
+      ),
       schema: {
         body: {
           type: 'object',
@@ -239,15 +267,12 @@ export const registerSourceRoutes = async (
   app.post<{ Body: RegisterWalletBody }>(
     '/api/v1/sources/wallets',
     {
-      preHandler: [
-        options.authenticate,
-        createLoginRateLimitHook(
-          options.authRateLimiter,
-          'siwe',
-          'complete',
-          (request) => (request.body as RegisterWalletBody).challengeId,
-        ),
-      ],
+      preHandler: createLoginRateLimitHook(
+        options.authRateLimiter,
+        'siwe',
+        'complete',
+        (request) => (request.body as RegisterWalletBody).challengeId,
+      ),
       schema: {
         body: {
           type: 'object',
@@ -319,7 +344,6 @@ export const registerSourceRoutes = async (
   app.post<{ Params: { sourceId: string } }>(
     '/api/v1/sources/:sourceId/disconnect',
     {
-      preHandler: options.authenticate,
       schema: {
         params: {
           type: 'object',

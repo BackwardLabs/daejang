@@ -7,7 +7,9 @@ export type UpbitPdfSelectionErrorCode =
 export type UpbitPdfRegistrationErrorCode =
   | 'DUPLICATE_SOURCE'
   | 'ENCRYPTED_OR_DAMAGED_DOCUMENT'
+  | 'INVALID_PERIOD'
   | 'PROCESSING_FAILED'
+  | 'PROCESSING_TIMEOUT'
   | 'UNSUPPORTED_DOCUMENT'
   | 'UPLOAD_CANCELLED'
   | 'UPLOAD_FAILED'
@@ -19,12 +21,34 @@ export type UpbitPdfSelectionError = {
 export type UpbitPdfRegistrationError = {
   code: UpbitPdfRegistrationErrorCode
   requestId?: string
+  retry?: UpbitPdfRetryContext
 }
+
+export type UpbitPdfRetryContext =
+  | {
+      intentKey: string
+      mode: 'restart-upload'
+    }
+  | {
+      jobId: string
+      mode: 'resume-job'
+      sourceId: string
+    }
+  | {
+      intentKey: string
+      mode: 'restart-job'
+      sourceId: string
+    }
 
 type SelectedFile = {
   file: File
   intentKey: string
 }
+
+export type UpbitPdfRegistrationStage =
+  | 'DOCUMENT_PROCESSING'
+  | 'DOCUMENT_UPLOADING'
+  | 'SOURCE_SUBMITTING'
 
 export type UpbitPdfRegistrationState =
   | {
@@ -39,7 +63,7 @@ export type UpbitPdfRegistrationState =
       view: 'review'
     })
   | (SelectedFile & {
-      status: 'DOCUMENT_UPLOADING' | 'SOURCE_SUBMITTING'
+      status: UpbitPdfRegistrationStage
       view: 'submitting'
     })
   | {
@@ -76,7 +100,7 @@ export type UpbitPdfRegistrationAction =
       type: 'SUBMIT_STARTED'
     }
   | {
-      status: 'DOCUMENT_UPLOADING' | 'SOURCE_SUBMITTING'
+      status: UpbitPdfRegistrationStage
       type: 'SUBMIT_STAGE_CHANGED'
     }
   | {
@@ -253,10 +277,11 @@ export type UpbitPdfRegistrationResult =
 export type UpbitPdfRegistrationRequest = {
   file: File
   intentKey: string
+  retry?: UpbitPdfRetryContext
   coverageStart: string
   coverageEnd: string
   onStageChange: (
-    status: 'DOCUMENT_UPLOADING' | 'SOURCE_SUBMITTING',
+    status: UpbitPdfRegistrationStage,
   ) => void
   signal: AbortSignal
 }
@@ -264,47 +289,6 @@ export type UpbitPdfRegistrationRequest = {
 export type RegisterUpbitPdf = (
   request: UpbitPdfRegistrationRequest,
 ) => Promise<UpbitPdfRegistrationResult>
-
-function waitForMockBoundary(duration: number, signal: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException('The registration was aborted.', 'AbortError'))
-      return
-    }
-
-    function handleAbort() {
-      window.clearTimeout(timeoutId)
-      reject(new DOMException('The registration was aborted.', 'AbortError'))
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      signal.removeEventListener('abort', handleAbort)
-      resolve()
-    }, duration)
-
-    signal.addEventListener('abort', handleAbort, { once: true })
-  })
-}
-
-/**
- * UI-only boundary for this stack. A later API stack can replace this function
- * with upload-session creation, a private presigned upload, and server confirm.
- */
-export const registerUpbitPdfMock: RegisterUpbitPdf = async ({
-  onStageChange,
-  signal,
-}) => {
-  onStageChange('DOCUMENT_UPLOADING')
-  await waitForMockBoundary(240, signal)
-  onStageChange('SOURCE_SUBMITTING')
-  await waitForMockBoundary(320, signal)
-
-  return {
-    ok: true,
-    sourceId: 'src_upbit_preview',
-    sourceStatus: 'UPLOADED',
-  }
-}
 
 export function formatPdfFileSize(bytes: number) {
   if (bytes < 1024) {

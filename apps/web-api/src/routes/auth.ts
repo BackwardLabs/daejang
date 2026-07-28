@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 
 import type { AppConfig } from '../config.js'
 import { sessionRotationConflict, unauthorized } from '../errors.js'
@@ -11,7 +11,6 @@ type AuthRoutesOptions = {
   config: AppConfig
   sessionService: SessionService
   authRateLimiter: AuthRateLimiter
-  authenticate: preHandlerHookHandler
   clearSessionCookie: (reply: FastifyReply, config: AppConfig) => void
 }
 
@@ -22,7 +21,6 @@ export const registerAuthRoutes = async (
   app.get(
     '/api/v1/me',
     {
-      preHandler: options.authenticate,
       schema: {
         response: {
           200: {
@@ -59,15 +57,12 @@ export const registerAuthRoutes = async (
   app.post(
     '/api/v1/auth/session/rotate',
     {
-      preHandler: [
-        options.authenticate,
-        createLoginRateLimitHook(
-          options.authRateLimiter,
-          'session',
-          'complete',
-          (request) => request.authSession?.user.id,
-        ),
-      ],
+      preHandler: createLoginRateLimitHook(
+        options.authRateLimiter,
+        'session',
+        'complete',
+        (request) => request.authSession?.user.id,
+      ),
       schema: {
         response: {
           204: { type: 'null' },
@@ -98,7 +93,6 @@ export const registerAuthRoutes = async (
   app.post(
     '/api/v1/auth/logout',
     {
-      preHandler: options.authenticate,
       schema: {
         response: {
           204: { type: 'null' },

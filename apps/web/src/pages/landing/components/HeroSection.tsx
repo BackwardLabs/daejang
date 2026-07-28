@@ -1,9 +1,7 @@
 export function HeroSection({
   onStart,
-  signupAvailable,
 }: {
   onStart: () => void
-  signupAvailable: boolean
 }) {
   return (
     <section className="hero-section" aria-labelledby="hero-title">
@@ -22,8 +20,8 @@ export function HeroSection({
             항목과 계산 근거를 함께 보여줍니다.
           </p>
           <div className="button-row">
-            <button className="button button--primary" type="button" onClick={onStart} disabled={!signupAvailable}>
-              {signupAvailable ? '시작하기' : '가입 준비 중'}
+            <button className="button button--primary" type="button" onClick={onStart}>
+              시작하기
             </button>
             <a className="button button--secondary" href="#how-it-works">
               작동 방식

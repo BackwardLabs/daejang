@@ -96,6 +96,26 @@ export type EvmWalletFlowError =
   | EvmWalletConnectionError
   | EvmWalletOwnershipError
 
+export type WalletSyncJobState =
+  | 'FAILED'
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+
+export type WalletSyncJobSnapshot = {
+  failureCode?: string
+  failureMessage?: string
+  id: string
+  processedRecords: number | string
+  state: WalletSyncJobState
+}
+
+export type WatchWalletSyncJob = (request: {
+  jobId: string
+  onUpdate: (job: WalletSyncJobSnapshot) => void
+  signal: AbortSignal
+}) => Promise<WalletSyncJobSnapshot>
+
 export const EVM_WALLET_ALLOWED_TAX_YEARS = [
   '2027',
   '2026',
@@ -681,79 +701,3 @@ export type CompleteWalletConnectionResult =
 export type CompleteWalletConnection = (
   request: CompleteWalletConnectionRequest,
 ) => Promise<CompleteWalletConnectionResult>
-
-function throwIfAborted(signal: AbortSignal) {
-  if (signal.aborted) {
-    throw new DOMException('The wallet flow was aborted.', 'AbortError')
-  }
-}
-
-function waitForMockBoundary(duration: number, signal: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    throwIfAborted(signal)
-
-    function handleAbort() {
-      window.clearTimeout(timeoutId)
-      reject(new DOMException('The wallet flow was aborted.', 'AbortError'))
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      signal.removeEventListener('abort', handleAbort)
-      resolve()
-    }, duration)
-
-    signal.addEventListener('abort', handleAbort, { once: true })
-  })
-}
-
-export const connectWalletMock: ConnectWallet = async ({
-  provider,
-  signal,
-}) => {
-  await waitForMockBoundary(180, signal)
-  throwIfAborted(signal)
-
-  return {
-    ok: true,
-    wallet: {
-      address: '0x1234567890abcdef1234567890abcdef12345678',
-      chainId: 'eip155:1',
-      network: 'Ethereum',
-      provider,
-    },
-  }
-}
-
-export const requestOwnershipSignatureMock: RequestOwnershipSignature =
-  async ({ signal }) => {
-    await waitForMockBoundary(320, signal)
-    throwIfAborted(signal)
-
-    return {
-      ok: true,
-      verificationId: 'verification_evm_preview',
-    }
-  }
-
-export const completeWalletConnectionMock: CompleteWalletConnection =
-  async ({ period, signal }) => {
-    await waitForMockBoundary(360, signal)
-    throwIfAborted(signal)
-
-    const validationError = validateEvmWalletPeriodDraft(period)
-    if (validationError) {
-      return {
-        error: validationError,
-        ok: false,
-      }
-    }
-
-    return {
-      jobId: 'job_evm_preview',
-      jobStatus: 'BACKFILLING',
-      normalizedPeriod: normalizeEvmWalletPeriod(period),
-      ok: true,
-      sourceId: 'src_evm_preview',
-      sourceStatus: 'SOURCE_SAVED',
-    }
-  }

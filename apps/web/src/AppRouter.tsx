@@ -1,33 +1,91 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, useTransition } from 'react'
 import { App } from './App.tsx'
-import { getCurrentUser, WebApiError } from './auth/api.ts'
 import {
-  getCurrentUserSnapshot,
-  setCurrentUser,
-  useCurrentUser,
+  bootstrapSession,
+  useSession,
 } from './auth/session-store.ts'
+import { navigateTo } from './auth/navigation.ts'
 import type { ProductPageKind } from './features/product/ProductPage.tsx'
 
+const loadReownEvmWalletConnectionRoute = () =>
+  import('./features/sources/ReownEvmWalletConnectionRoute.tsx')
+const loadDashboardPage = () => import('./features/dashboard/DashboardPage.tsx')
+const loadLedgerPage = () => import('./features/ledger/LedgerPage.tsx')
+const loadReportPage = () => import('./features/reports/ReportPage.tsx')
+const loadSourceManagementPage = () =>
+  import('./features/sources/SourceManagementPage.tsx')
+const loadSourceMethodIntroPage = () =>
+  import('./features/sources/SourceMethodIntroPage.tsx')
+const loadSourceTypeSelectionPage = () =>
+  import('./features/sources/SourceTypeSelectionPage.tsx')
+const loadUpbitPdfRegistrationPage = () =>
+  import('./features/sources/UpbitPdfRegistrationPage.tsx')
+const loadProductPage = () => import('./features/product/ProductPage.tsx')
+
 const ReownEvmWalletConnectionRoute = lazy(async () => {
-  const module = await import(
-    './features/sources/ReownEvmWalletConnectionRoute.tsx'
-  )
+  const module = await loadReownEvmWalletConnectionRoute()
 
   return { default: module.ReownEvmWalletConnectionRoute }
 })
-const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage.tsx').then((module) => ({ default: module.DashboardPage })))
-const LedgerPage = lazy(() => import('./features/ledger/LedgerPage.tsx').then((module) => ({ default: module.LedgerPage })))
-const ReportPage = lazy(() => import('./features/reports/ReportPage.tsx').then((module) => ({ default: module.ReportPage })))
-const SourceManagementPage = lazy(() => import('./features/sources/SourceManagementPage.tsx').then((module) => ({ default: module.SourceManagementPage })))
-const SourceMethodIntroPage = lazy(() => import('./features/sources/SourceMethodIntroPage.tsx').then((module) => ({ default: module.SourceMethodIntroPage })))
-const SourceTypeSelectionPage = lazy(() => import('./features/sources/SourceTypeSelectionPage.tsx').then((module) => ({ default: module.SourceTypeSelectionPage })))
-const UpbitPdfRegistrationPage = lazy(() => import('./features/sources/UpbitPdfRegistrationPage.tsx').then((module) => ({ default: module.UpbitPdfRegistrationPage })))
-const ProductPage = lazy(() => import('./features/product/ProductPage.tsx').then((module) => ({ default: module.ProductPage })))
+const DashboardPage = lazy(() =>
+  loadDashboardPage().then((module) => ({ default: module.DashboardPage })))
+const LedgerPage = lazy(() =>
+  loadLedgerPage().then((module) => ({ default: module.LedgerPage })))
+const ReportPage = lazy(() =>
+  loadReportPage().then((module) => ({ default: module.ReportPage })))
+const SourceManagementPage = lazy(() =>
+  loadSourceManagementPage().then((module) => ({
+    default: module.SourceManagementPage,
+  })))
+const SourceMethodIntroPage = lazy(() =>
+  loadSourceMethodIntroPage().then((module) => ({
+    default: module.SourceMethodIntroPage,
+  })))
+const SourceTypeSelectionPage = lazy(() =>
+  loadSourceTypeSelectionPage().then((module) => ({
+    default: module.SourceTypeSelectionPage,
+  })))
+const UpbitPdfRegistrationPage = lazy(() =>
+  loadUpbitPdfRegistrationPage().then((module) => ({
+    default: module.UpbitPdfRegistrationPage,
+  })))
+const ProductPage = lazy(() =>
+  loadProductPage().then((module) => ({ default: module.ProductPage })))
+
+const routePreloaders: Record<string, () => Promise<unknown>> = {
+  '/dashboard': loadDashboardPage,
+  '/ledger': loadLedgerPage,
+  '/reports': loadReportPage,
+  '/settings': loadProductPage,
+  '/sources': loadSourceManagementPage,
+  '/sources/new': loadSourceTypeSelectionPage,
+  '/sources/new/upbit': loadSourceMethodIntroPage,
+  '/sources/new/upbit/upload': loadUpbitPdfRegistrationPage,
+  '/sources/new/wallet': loadSourceMethodIntroPage,
+  '/sources/new/wallet/connect': loadReownEvmWalletConnectionRoute,
+}
+
+function preloadRoute(pathname: string) {
+  const preload = routePreloaders[normalizePath(pathname)]
+  if (preload) void preload().catch(() => undefined)
+}
 
 function normalizePath(pathname: string) {
   const normalized = pathname.replace(/\/+$/, '')
 
   return normalized || '/'
+}
+
+function internalAnchor(target: EventTarget | null) {
+  if (!(target instanceof Element)) return undefined
+  const anchor = target.closest<HTMLAnchorElement>('a[href]')
+  if (!anchor || (anchor.target && anchor.target !== '_self')) return undefined
+  if (anchor.hasAttribute('download') || anchor.relList.contains('external')) {
+    return undefined
+  }
+
+  const url = new URL(anchor.href, window.location.href)
+  return url.origin === window.location.origin ? url : undefined
 }
 
 const protectedRoutes = new Set([
@@ -38,106 +96,60 @@ const protectedRoutes = new Set([
   '/sources',
 ])
 
-function SessionGate({ children }: { children: React.ReactNode }) {
-  const user = useCurrentUser()
-  const [state, setState] = useState<'checking' | 'ready' | 'anonymous' | 'error'>(
-    () => (getCurrentUserSnapshot() ? 'ready' : 'checking'),
-  )
-
-  const checkSession = async () => {
-    setState('checking')
-    try {
-      const response = await getCurrentUser()
-      setCurrentUser(response.user)
-      setState('ready')
-    } catch (caught) {
-      if (caught instanceof WebApiError && caught.status === 401) {
-        setCurrentUser(null)
-        window.history.replaceState(null, '', '/login')
-        setState('anonymous')
-        return
-      }
-      setState('error')
-    }
-  }
-
-  useEffect(() => {
-    if (user) {
-      setState('ready')
-      return
-    }
-    void checkSession()
-  }, [user])
-
-  if (state === 'ready' && user) return children
-  if (state === 'anonymous') return <App />
-
-  if (state === 'error') {
-    return (
-      <main className="session-state" role="alert">
-        <h1>로그인 상태를 확인하지 못했습니다</h1>
-        <p>네트워크 연결을 확인한 뒤 다시 시도해 주세요</p>
-        <button type="button" onClick={checkSession}>다시 시도</button>
-      </main>
-    )
-  }
-
-  return <p className="session-state" role="status">로그인 상태를 확인하는 중</p>
-}
-
-function PublicEntry({ onRedirect }: { onRedirect: () => void }) {
-  const user = useCurrentUser()
-  const [checking, setChecking] = useState(true)
-
-  useEffect(() => {
-    let active = true
-
-    const redirectToDashboard = () => {
-      window.history.replaceState(null, '', '/dashboard')
-      onRedirect()
-    }
-
-    if (user) {
-      redirectToDashboard()
-      return
-    }
-
-    void getCurrentUser()
-      .then(({ user: currentUser }) => {
-        if (!active) return
-        setCurrentUser(currentUser)
-        redirectToDashboard()
-      })
-      .catch(() => {
-        if (active) setChecking(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [user])
-
-  return checking ? (
-    <p className="session-state" role="status">로그인 상태를 확인하는 중</p>
-  ) : (
-    <App />
-  )
-}
-
 export function AppRouter() {
   const [path, setPath] = useState(() => normalizePath(window.location.pathname))
+  const [, startRouteTransition] = useTransition()
+  const session = useSession()
+  const isProtectedRoute =
+    protectedRoutes.has(path) || path.startsWith('/sources/')
+  const isPublicEntry = path === '/' || path === '/login'
 
   useEffect(() => {
     function handlePathChange() {
-      setPath(normalizePath(window.location.pathname))
+      const nextPath = normalizePath(window.location.pathname)
+      preloadRoute(nextPath)
+      startRouteTransition(() => {
+        setPath(nextPath)
+      })
+    }
+
+    function handleRouteIntent(event: Event) {
+      const url = internalAnchor(event.target)
+      if (url) preloadRoute(url.pathname)
     }
 
     window.addEventListener('popstate', handlePathChange)
-    return () => window.removeEventListener('popstate', handlePathChange)
-  }, [])
+    document.addEventListener('pointerover', handleRouteIntent)
+    document.addEventListener('focusin', handleRouteIntent)
+    return () => {
+      window.removeEventListener('popstate', handlePathChange)
+      document.removeEventListener('pointerover', handleRouteIntent)
+      document.removeEventListener('focusin', handleRouteIntent)
+    }
+  }, [startRouteTransition])
 
-  const isProtectedRoute =
-    protectedRoutes.has(path) || path.startsWith('/sources/')
+  useEffect(() => {
+    preloadRoute(path)
+  }, [path])
+
+  useEffect(() => {
+    if (
+      session.status === 'unknown' ||
+      session.status === 'checking'
+    ) {
+      void bootstrapSession()
+    }
+  }, [session.status])
+
+  useEffect(() => {
+    if (session.status === 'authenticated' && isPublicEntry) {
+      navigateTo('/dashboard', true)
+      return
+    }
+    if (session.status === 'anonymous' && isProtectedRoute) {
+      navigateTo('/login', true)
+    }
+  }, [isProtectedRoute, isPublicEntry, session.status])
 
   const productRoutes: Partial<Record<string, ProductPageKind>> = {
     '/settings': 'settings',
@@ -146,6 +158,25 @@ export function AppRouter() {
   const pending = <p role="status">화면을 준비하고 있습니다</p>
 
   if (isProtectedRoute) {
+    if (session.status === 'error') {
+      return (
+        <main className="session-state" role="alert">
+          <h1>로그인 상태를 확인하지 못했습니다</h1>
+          <p>네트워크 연결을 확인한 뒤 다시 시도해 주세요</p>
+          <button
+            type="button"
+            onClick={() => void bootstrapSession({ retry: true })}
+          >
+            다시 시도
+          </button>
+        </main>
+      )
+    }
+
+    if (session.status !== 'authenticated' || !session.user) {
+      return <p className="session-state" role="status">로그인 상태를 확인하는 중</p>
+    }
+
     let protectedPage: React.ReactNode
 
     if (path === '/dashboard') protectedPage = <DashboardPage />
@@ -167,15 +198,16 @@ export function AppRouter() {
       protectedPage = <ProductPage kind={productPage} />
     }
 
-    return (
-      <SessionGate>
-        <Suspense fallback={pending}>{protectedPage}</Suspense>
-      </SessionGate>
-    )
+    return <Suspense fallback={pending}>{protectedPage}</Suspense>
   }
 
-  if (path === '/' || path === '/login') {
-    return <PublicEntry onRedirect={() => setPath('/dashboard')} />
+  if (
+    isPublicEntry &&
+    (session.status === 'unknown' ||
+      session.status === 'checking' ||
+      session.status === 'authenticated')
+  ) {
+    return <p className="session-state" role="status">로그인 상태를 확인하는 중</p>
   }
 
   return <App />

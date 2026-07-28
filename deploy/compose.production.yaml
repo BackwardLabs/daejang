@@ -67,13 +67,13 @@ services:
       - ${WEB_ENGINE_CLIENT_CERT_PATH}:/run/secrets/web-engine-client-cert.pem:ro
       - ${WEB_ENGINE_CLIENT_KEY_PATH}:/run/secrets/web-engine-client-key.pem:ro
     depends_on:
-      engine: { condition: service_healthy }
+      engine: { condition: service_started }
     healthcheck:
       test:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:3000/healthz').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+        - "fetch('http://127.0.0.1:3000/readyz').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
       interval: 10s
       timeout: 3s
       retries: 6
@@ -129,7 +129,15 @@ services:
     environment:
       DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
       DAEJANG_PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
-    volumes: ["private_objects:/var/lib/daejang/private:ro"]
+      # jitd is deployed outside this Compose project on the private backend.
+      # The mounted bridge config uses tcp:// plus the container TLS paths below.
+      DAEJANG_JIT_BRIDGE_CONFIG: /run/config/jit-bridge.json
+    volumes:
+      - private_objects:/var/lib/daejang/private:ro
+      - ${JIT_BRIDGE_CONFIG_PATH}:/run/config/jit-bridge.json:ro
+      - ${JIT_BRIDGE_CA_PATH}:/run/secrets/jit-ca.pem:ro
+      - ${JIT_BRIDGE_CLIENT_CERT_PATH}:/run/secrets/jit-client-cert.pem:ro
+      - ${JIT_BRIDGE_CLIENT_KEY_PATH}:/run/secrets/jit-client-key.pem:ro
     networks: [backend, database]
 
 networks:

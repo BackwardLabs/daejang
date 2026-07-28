@@ -6,11 +6,27 @@ import {
   waitFor,
 } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { UpbitPdfRegistrationPage } from './UpbitPdfRegistrationPage.tsx'
+import {
+  UpbitPdfRegistrationPage as ProductionUpbitPdfRegistrationPage,
+} from './UpbitPdfRegistrationPage.tsx'
 import type {
   RegisterUpbitPdf,
+  UpbitPdfRegistrationRequest,
   UpbitPdfRegistrationResult,
 } from './upbitPdfRegistration.ts'
+
+function UpbitPdfRegistrationPage({
+  registerPdf,
+}: {
+  registerPdf: RegisterUpbitPdf
+}) {
+  return (
+    <ProductionUpbitPdfRegistrationPage
+      registrationEnabled
+      registerPdf={registerPdf}
+    />
+  )
+}
 
 function selectFile(file: File) {
   fireEvent.change(
@@ -41,6 +57,21 @@ function createDeferred<T>() {
 }
 
 describe('UpbitPdfRegistrationPage', () => {
+  it('does not expose a file input when registration is disabled', () => {
+    render(
+      <ProductionUpbitPdfRegistrationPage registrationEnabled={false} />,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '파일은 선택하거나 전송하지 않았습니다.',
+    )
+    expect(
+      screen.queryByLabelText('Upbit 거래내역서 PDF 선택'),
+    ).not.toBeInTheDocument()
+    expect(document.querySelector('input[type="file"]')).toBeNull()
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+  })
+
   it('reviews a valid PDF, saves the source, and never persists the file or filename', async () => {
     const pdf = new File(['%PDF-1.7\ntransaction'], 'upbit-2027.pdf', {
       type: 'application/pdf',
@@ -99,7 +130,7 @@ describe('UpbitPdfRegistrationPage', () => {
         name: 'Upbit 데이터 소스를 등록했어요',
       }),
     ).toHaveFocus()
-    expect(screen.getByText('업로드 완료')).toBeInTheDocument()
+    expect(screen.getByText('처리 완료')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '조회 기간 설정' }),
     ).toBeDisabled()
@@ -274,5 +305,56 @@ describe('UpbitPdfRegistrationPage', () => {
     ).toBeInTheDocument()
     expect(registrationCalls).toBe(2)
     expect(intentKeys[0]).toBe(intentKeys[1])
+  })
+
+  it('forwards the server retry context when the user resumes timed-out processing', async () => {
+    const retry = {
+      jobId: 'job-timeout',
+      mode: 'resume-job' as const,
+      sourceId: 'source-timeout',
+    }
+    const requests: UpbitPdfRegistrationRequest[] = []
+    const registerPdf: RegisterUpbitPdf = async (request) => {
+      requests.push(request)
+      if (requests.length === 1) {
+        return {
+          ok: false,
+          error: {
+            code: 'PROCESSING_TIMEOUT',
+            requestId: 'job-timeout',
+            retry,
+          },
+        }
+      }
+
+      return {
+        ok: true,
+        sourceId: 'source-timeout',
+        sourceStatus: 'UPLOADED',
+      }
+    }
+
+    render(<UpbitPdfRegistrationPage registerPdf={registerPdf} />)
+    selectFile(
+      new File(['%PDF-1.7'], 'upbit-history.pdf', {
+        type: 'application/pdf',
+      }),
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Upbit PDF 등록' }),
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '처리 결과를 아직 확인하지 못했어요',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '다시 시도' }))
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Upbit 데이터 소스를 등록했어요',
+      }),
+    ).toBeInTheDocument()
+    expect(requests).toHaveLength(2)
+    expect(requests[1]?.retry).toEqual(retry)
   })
 })

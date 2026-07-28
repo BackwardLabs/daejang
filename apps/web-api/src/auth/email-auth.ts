@@ -4,6 +4,8 @@ import {
   randomUUID,
   timingSafeEqual,
 } from 'node:crypto'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as wait } from 'node:timers/promises'
 
 import { argon2id, hash, verify } from 'argon2'
 import { Resend } from 'resend'
@@ -35,10 +37,29 @@ export interface EmailAuthObserver {
     challengeId: string
     error: unknown
   }): void
+  verificationDeliveryFailed(input: {
+    challengeId: string
+    error: unknown
+  }): void
+}
+
+export interface SignupCodeResponseTiming {
+  minimumDurationMilliseconds: number
+  monotonicNow: () => number
+  wait: (milliseconds: number) => Promise<void>
 }
 
 const silentEmailAuthObserver: EmailAuthObserver = {
   challengeAbandonFailed: () => {},
+  verificationDeliveryFailed: () => {},
+}
+
+// Keep every successful signup-code response behind the same lower-bound
+// latency so an existing account is not exposed by an immediate return.
+const defaultSignupCodeResponseTiming: SignupCodeResponseTiming = {
+  minimumDurationMilliseconds: 500,
+  monotonicNow: () => performance.now(),
+  wait: async (milliseconds) => wait(milliseconds),
 }
 
 export class ResendVerificationEmailSender
@@ -193,6 +214,8 @@ export class EmailAuthService {
     private readonly config: EmailAuthConfig,
     private readonly now: () => Date = () => new Date(),
     private readonly observer: EmailAuthObserver = silentEmailAuthObserver,
+    private readonly signupCodeResponseTiming: SignupCodeResponseTiming =
+      defaultSignupCodeResponseTiming,
   ) {
     this.#dummyPasswordHash = hash(
       'GIWA-dummy-password-for-timing-only-1!',
@@ -203,32 +226,41 @@ export class EmailAuthService {
   }
 
   async sendSignupCode(rawEmail: string) {
+    const responseStartedAt = this.signupCodeResponseTiming.monotonicNow()
     const email = normalizeEmail(rawEmail)
     const now = this.now()
-    const latest = await this.store.getEligibleEmailChallenge(
-      email,
-      'signup',
-      now,
-    )
-    if (latest && latest.resendAfter.getTime() > now.getTime()) {
-      return {
-        expiresInSeconds: Math.max(
-          1,
-          Math.ceil((latest.expiresAt.getTime() - now.getTime()) / 1_000),
-        ),
-        resendAfterSeconds: Math.max(
-          1,
-          Math.ceil((latest.resendAfter.getTime() - now.getTime()) / 1_000),
-        ),
+    const acceptedResponse = {
+      expiresInSeconds: this.config.verificationTtlSeconds,
+      resendAfterSeconds: this.config.resendAfterSeconds,
+    }
+    const accept = async () => {
+      const elapsedMilliseconds = Math.max(
+        0,
+        this.signupCodeResponseTiming.monotonicNow() - responseStartedAt,
+      )
+      const remainingMilliseconds = Math.ceil(
+        this.signupCodeResponseTiming.minimumDurationMilliseconds -
+          elapsedMilliseconds,
+      )
+      if (remainingMilliseconds > 0) {
+        await this.signupCodeResponseTiming.wait(remainingMilliseconds)
       }
+      return acceptedResponse
+    }
+    const [existingCredential, latest] = await Promise.all([
+      this.store.findEmailCredential(email),
+      this.store.getEligibleEmailChallenge(email, 'signup', now),
+    ])
+    if (existingCredential) {
+      return accept()
+    }
+    if (latest && latest.resendAfter.getTime() > now.getTime()) {
+      return accept()
     }
 
     const pending = await this.store.findOrCreatePendingDirectEmail(email)
     if (pending.loginEnabled) {
-      return {
-        expiresInSeconds: this.config.verificationTtlSeconds,
-        resendAfterSeconds: this.config.resendAfterSeconds,
-      }
+      return accept()
     }
     const challengeId = randomUUID()
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0')
@@ -262,7 +294,7 @@ export class EmailAuthService {
         code,
         expiresInMinutes: Math.ceil(this.config.verificationTtlSeconds / 60),
       })
-    } catch {
+    } catch (deliveryError) {
       try {
         const abandoned = await this.store.abandonEmailChallenge({
           challengeId,
@@ -274,12 +306,13 @@ export class EmailAuthService {
       } catch (error) {
         this.observer.challengeAbandonFailed({ challengeId, error })
       }
-      throw emailDeliveryFailed()
+      this.observer.verificationDeliveryFailed({
+        challengeId,
+        error: deliveryError,
+      })
+      return accept()
     }
-    return {
-      expiresInSeconds: this.config.verificationTtlSeconds,
-      resendAfterSeconds: this.config.resendAfterSeconds,
-    }
+    return accept()
   }
 
   async verifySignupCode(rawEmail: string, code: string) {

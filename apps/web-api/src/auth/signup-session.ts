@@ -1,6 +1,10 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
-import type { AccountAuthStore, AccountUser } from './account-auth-store.js'
+import type {
+  AccountAuthStore,
+  AccountUser,
+  LegalDocumentType,
+} from './account-auth-store.js'
 
 const hashToken = (token: string) =>
   createHash('sha256').update(token).digest('base64url')
@@ -34,11 +38,16 @@ export class SignupSessionService {
     await this.store.revokeSignupSession(hashToken(token), this.now())
   }
 
-  async complete(token: string, userId: string) {
+  async complete(
+    token: string,
+    userId: string,
+    requiredDocumentTypes: ReadonlyArray<LegalDocumentType>,
+  ) {
     return this.store.completeSignup({
       userId,
       signupTokenHash: hashToken(token),
       now: this.now(),
+      requiredDocumentTypes,
     })
   }
 }

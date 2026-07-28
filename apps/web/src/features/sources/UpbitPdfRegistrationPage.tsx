@@ -11,6 +11,7 @@ import pdfStepComplete from '../../assets/sources/pdf-step-complete.svg'
 import pdfStepInactive from '../../assets/sources/pdf-step-inactive.svg'
 import registrationComplete from '../../assets/sources/registration-complete.svg'
 import upbitLogo from '../../assets/sources/upbit-logo.png'
+import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import {
   createUpbitPdfIntentKey,
@@ -26,6 +27,7 @@ import {
   type UpbitPdfSelectionErrorCode,
 } from './upbitPdfRegistration.ts'
 import { registerUpbitPdfApi } from './upbitPdfApi.ts'
+import { useSourceCapabilities } from './useSourceCapabilities.ts'
 import './upbit-pdf-flow.css'
 
 const registrationSteps = ['PDF 선택', '등록 정보 확인', '등록 완료'] as const
@@ -70,10 +72,20 @@ const registrationErrorCopy: Record<
     recovery: 'replace',
     title: 'PDF를 열어 확인할 수 없어요',
   },
+  INVALID_PERIOD: {
+    body: '종료일은 시작일보다 빠를 수 없습니다. 문서에 포함된 기간을 다시 확인해 주세요.',
+    recovery: 'retry',
+    title: '수집 기간을 확인해 주세요',
+  },
   PROCESSING_FAILED: {
     body: '문서를 확인하는 동안 일시적인 문제가 발생했습니다. 선택한 파일을 유지한 채 다시 시도할 수 있습니다.',
     recovery: 'retry',
     title: 'PDF 확인을 완료하지 못했어요',
+  },
+  PROCESSING_TIMEOUT: {
+    body: '처리 결과 확인 시간이 예상보다 길어졌습니다. 업로드된 파일과 진행 중인 작업을 그대로 이어서 다시 확인할 수 있습니다.',
+    recovery: 'retry',
+    title: '처리 결과를 아직 확인하지 못했어요',
   },
   UNSUPPORTED_DOCUMENT: {
     body: '지원되는 Upbit 거래내역서인지 확인한 뒤 올바른 PDF로 교체해 주세요.',
@@ -188,12 +200,12 @@ function RegistrationErrorNotice({
         <p>{copy.body}</p>
         {error.requestId ? (
           <span className="pdf-error-notice__request">
-            요청 ID: {error.requestId}
+            참조 ID: {error.requestId}
           </span>
         ) : null}
         {copy.recovery === 'manage-or-replace' ? (
           <div className="pdf-error-notice__actions">
-            <a href="/sources">기존 소스 확인</a>
+            <AppLink href="/sources">기존 소스 확인</AppLink>
           </div>
         ) : null}
       </div>
@@ -367,7 +379,7 @@ function PdfReviewStep({
   onCancel: () => void
   onReplace: () => void
   onSubmit: () => void
-  status: 'DOCUMENT_UPLOADING' | 'SOURCE_EDITING' | 'SOURCE_SAVE_FAILED' | 'SOURCE_SUBMITTING'
+  status: 'DOCUMENT_PROCESSING' | 'DOCUMENT_UPLOADING' | 'SOURCE_EDITING' | 'SOURCE_SAVE_FAILED' | 'SOURCE_SUBMITTING'
   onCoverageEndChange: (value: string) => void
   onCoverageStartChange: (value: string) => void
 }) {
@@ -440,7 +452,9 @@ function PdfReviewStep({
               <strong>
                 {status === 'DOCUMENT_UPLOADING'
                   ? 'PDF를 안전하게 업로드하고 있어요'
-                  : '서버에서 문서를 확인하고 있어요'}
+                  : status === 'SOURCE_SUBMITTING'
+                    ? '서버에서 문서를 확인하고 있어요'
+                    : '거래내역 처리 결과를 확인하고 있어요'}
               </strong>
               <p>이 화면을 닫지 말고 잠시 기다려 주세요.</p>
             </div>
@@ -497,21 +511,21 @@ function PdfReviewStep({
             <span aria-hidden="true">02</span>
             <div>
               <strong>서버 문서 확인</strong>
-              <p>파일 형식, 손상·암호화 여부와 중복을 확인합니다.</p>
+              <p>파일 형식과 손상·암호화 여부를 먼저 확인합니다.</p>
             </div>
           </li>
           <li>
             <span aria-hidden="true">03</span>
             <div>
-              <strong>데이터 소스 저장</strong>
-              <p>모든 확인이 끝난 뒤에만 데이터 소스를 저장합니다.</p>
+              <strong>처리 결과 확인</strong>
+              <p>지원 문서 처리 작업이 성공한 뒤에만 등록 완료로 표시합니다.</p>
             </div>
           </li>
         </ol>
         <div className="pdf-registration-aside__note">
-          <strong>아직 수집 전 단계입니다</strong>
+          <strong>처리 완료까지 확인합니다</strong>
           <p>
-            데이터 소스를 저장한 다음 조회 기간을 설정하고 수집을 시작합니다.
+            업로드만 끝난 상태를 등록 완료로 표시하지 않습니다.
           </p>
         </div>
       </aside>
@@ -547,7 +561,7 @@ function PdfCompletionStep({
           <span>현재 상태</span>
           <strong className="pdf-source-status">
             <span aria-hidden="true" />
-            {sourceStatus === 'UPLOADED' ? '업로드 완료' : sourceStatus}
+            {sourceStatus === 'UPLOADED' ? '처리 완료' : sourceStatus}
           </strong>
         </div>
         <div>
@@ -580,7 +594,7 @@ function PdfCompletionStep({
   )
 }
 
-export function UpbitPdfRegistrationPage({
+function UpbitPdfRegistrationFlow({
   registerPdf = registerUpbitPdfApi,
 }: {
   registerPdf?: RegisterUpbitPdf
@@ -690,6 +704,7 @@ export function UpbitPdfRegistrationPage({
       const result = await registerPdf({
         file,
         intentKey,
+        retry: state.error?.retry,
         coverageStart,
         coverageEnd,
         onStageChange: (status) => {
@@ -823,4 +838,36 @@ export function UpbitPdfRegistrationPage({
       </p>
     </SourceFlowLayout>
   )
+}
+
+export function UpbitPdfRegistrationPage({
+  registerPdf,
+  registrationEnabled,
+}: {
+  registerPdf?: RegisterUpbitPdf
+  registrationEnabled?: boolean
+}) {
+  const capabilities = useSourceCapabilities()
+  const enabled =
+    registrationEnabled ?? capabilities.upbitPdf.registrationEnabled
+
+  if (!enabled) {
+    return (
+      <SourceFlowLayout
+        badge={{ label: '등록 불가', tone: 'upbit' }}
+        description="현재는 Upbit PDF 등록을 받을 수 없습니다."
+        eyebrow="DATA SOURCES · UPBIT"
+        title="Upbit PDF 등록"
+      >
+        <p className="source-api-notice" role="alert">
+          안전한 문서 처리 경로가 활성화된 뒤 등록할 수 있습니다. 파일은 선택하거나 전송하지 않았습니다.
+        </p>
+        <AppLink href="/sources/new">
+          <span aria-hidden="true">←</span> 연결 방식 다시 선택
+        </AppLink>
+      </SourceFlowLayout>
+    )
+  }
+
+  return <UpbitPdfRegistrationFlow registerPdf={registerPdf} />
 }

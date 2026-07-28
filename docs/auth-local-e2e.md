@@ -190,10 +190,11 @@ KAKAO_CLIENT_SECRET=<값>
 
 EMAIL_AUTH_ENABLED=true
 RESEND_API_KEY=<값>
-EMAIL_FROM=GIWA <onboarding@resend.dev>
+EMAIL_FROM=GIWA <no-reply@auth.backwardlabs.io>
 EMAIL_VERIFICATION_HMAC_SECRET=<32바이트 이상 로컬 전용 secret>
 
-IDENTITY_VERIFICATION_MODE=mock
+SIGNUP_ENABLED=true
+IDENTITY_VERIFICATION_MODE=disabled
 ```
 
 OAuth Client Secret과 Resend API Key는 `VITE_*` 변수에 넣으면 안 된다. 실제 값은 Git, PR, 로그, 채팅에 붙이지 않는다.
@@ -214,8 +215,6 @@ openssl rand -base64 32
 ```dotenv
 VITE_WEB_API_BASE_URL=/api/v1
 VITE_API_PROXY_TARGET=http://127.0.0.1:3000
-VITE_DEV_BOOTSTRAP_SESSION=false
-VITE_DEV_IDENTITY_MOCK_ENABLED=true
 ```
 
 ## 6. 실행
@@ -288,12 +287,11 @@ done
 2. 공급자 동의 후 GIWA callback 복귀
 3. 가입 의도에서는 pending GIWA 계정 생성
 4. 약관 전문 표시와 필수 동의
-5. 개발용 본인확인 완료
-6. `/dashboard` 이동
-7. 새로고침 후 Session 유지
-8. 로그아웃
-9. 같은 공급자로 다시 로그인
-10. `/dashboard` 재진입
+5. 필수 약관 동의 후 `/dashboard` 이동
+6. 새로고침 후 Session 유지
+7. 로그아웃
+8. 같은 공급자로 다시 로그인
+9. `/dashboard` 재진입
 
 이메일 가입에서는 실제 인증번호 수신, 인증번호 만료·오입력, 비밀번호 규칙, 로그아웃 후 재로그인을 함께 확인한다.
 

@@ -1,10 +1,12 @@
+import {
+  getSessionRevision,
+  invalidateSessionAtRevision,
+} from '../auth/session-store.ts'
+
 const apiBaseUrl = (import.meta.env.VITE_WEB_API_BASE_URL || '/api/v1').replace(
   /\/$/,
   '',
 )
-const developmentBootstrapEnabled =
-  import.meta.env.DEV && import.meta.env.VITE_DEV_BOOTSTRAP_SESSION === 'true'
-
 export class ApiClientError extends Error {
   readonly status: number
   readonly code: string
@@ -19,20 +21,6 @@ export class ApiClientError extends Error {
     this.status = status
     this.code = code
   }
-}
-
-let bootstrapRequest: Promise<void> | undefined
-
-async function bootstrapDevelopmentSession() {
-  bootstrapRequest ??= fetch(`${apiBaseUrl}/dev/session`, {
-    method: 'POST',
-    credentials: 'same-origin',
-  }).then(async (response) => {
-    if (!response.ok) {
-      throw await toApiError(response)
-    }
-  })
-  return bootstrapRequest
 }
 
 async function toApiError(response: Response) {
@@ -54,7 +42,7 @@ async function toApiError(response: Response) {
 async function send(path: string, init: RequestInit) {
   return fetch(`${apiBaseUrl}${path}`, {
     ...init,
-    credentials: 'same-origin',
+    credentials: 'include',
     headers: {
       ...(init.body ? { 'content-type': 'application/json' } : {}),
       ...init.headers,
@@ -62,12 +50,17 @@ async function send(path: string, init: RequestInit) {
   })
 }
 
-export async function requestRaw(path: string, init: RequestInit = {}) {
-  let response = await send(path, init)
-  if (response.status === 401 && developmentBootstrapEnabled) {
-    await bootstrapDevelopmentSession()
-    response = await send(path, init)
+async function sendWithSessionBoundary(path: string, init: RequestInit) {
+  const sessionRevision = getSessionRevision()
+  const response = await send(path, init)
+  if (response.status === 401) {
+    invalidateSessionAtRevision(sessionRevision)
   }
+  return response
+}
+
+export async function requestRaw(path: string, init: RequestInit = {}) {
+  const response = await sendWithSessionBoundary(path, init)
   if (!response.ok) {
     throw await toApiError(response)
   }
@@ -78,11 +71,7 @@ export async function requestApi<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  let response = await send(path, init)
-  if (response.status === 401 && developmentBootstrapEnabled) {
-    await bootstrapDevelopmentSession()
-    response = await send(path, init)
-  }
+  const response = await sendWithSessionBoundary(path, init)
   if (!response.ok) {
     throw await toApiError(response)
   }

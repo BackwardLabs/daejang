@@ -40,6 +40,7 @@ const config: AppConfig = {
   },
   signup: {
     enabled: false,
+    identityVerificationRequired: false,
     methods: { email: false, oauthProviders: [] },
   },
   identityVerificationMode: 'disabled',
@@ -47,16 +48,12 @@ const config: AppConfig = {
 }
 
 const fixture: CurrentTaxReport = {
-  schemaVersion: 'giwa.web.tax-report.v1', reportId: 'report-1', residentId: 'resident-1', taxYear: 2027,
-  finality: 'FINAL', status: 'PARTIAL', filingStatus: 'BLOCKED', taxInventoryRunId: 'inventory-1',
-  taxEstimateId: 'estimate-1', lotRunId: 'lot-1', inputDigest: 'a'.repeat(64), schemaDigest: 'b'.repeat(64),
-  denominationAssetId: 'asset-krw', reportArtifactDigest: 'c'.repeat(64), evidencePackDigest: 'd'.repeat(64),
+  reportId: 'report-1', taxYear: 2027,
+  finality: 'FINAL', status: 'PARTIAL', filingStatus: 'BLOCKED',
+  denominationAssetId: 'asset-krw',
   pointerVersion: 1, issuedAt: '2028-01-10T00:00:00.000Z',
   counts: { disposals: 0, transfers: 0, excludedConversions: 1, limitations: 1 },
   summary: { gainLoss: { status: 'KNOWN', amount: '0' }, taxableBase: { status: 'UNKNOWN' }, nationalTax: { status: 'UNKNOWN' }, localTax: { status: 'UNKNOWN' }, totalTax: { status: 'UNKNOWN' } },
-  disposals: [], transfers: [],
-  excludedConversions: [{ eventId: 'event-wrap', revisionId: 'revision-wrap', relationId: 'relation-wrap', taxAddressId: 'wallet-1', taxAssetId: 'tax-asset-eth', fromLegId: 'leg-eth-out', toLegId: 'leg-weth-in', fromQuantity: '1', toQuantity: '1' }],
-  limitations: [{ code: 'UNALLOCATED_TRANSITION_FEE', reason: 'fee policy is unresolved' }],
 }
 
 class FakeTaxReportReader implements TaxReportReader {
@@ -83,7 +80,7 @@ describe('current tax report route', () => {
 
   const createSession = () => context.sessionService.create({ user: { id: USER_ID, displayName: '김대장' } })
 
-  it('derives the subject only from the authenticated session and preserves UNKNOWN amounts', async () => {
+  it('derives the subject only from the authenticated session and returns a privacy-safe projection', async () => {
     const { token } = await createSession()
     const response = await context.app.inject({
       method: 'GET', url: '/api/v1/tax-reports/2027/current',
@@ -92,8 +89,15 @@ describe('current tax report route', () => {
 
     expect(response.statusCode).toBe(200)
     expect(reader.calls).toEqual([{ subjectId: USER_ID, taxYear: 2027, finality: 'FINAL' }])
-    expect(response.json()).toMatchObject({ report: { status: 'PARTIAL', summary: { totalTax: { status: 'UNKNOWN' } }, evidencePackDigest: 'd'.repeat(64) } })
-    expect(response.json().report.summary.totalTax).not.toHaveProperty('amount')
+    expect(response.json()).toMatchObject({
+      report: {
+        status: 'PARTIAL',
+        totalTax: { status: 'UNKNOWN', hasAmount: false },
+      },
+    })
+    expect(response.json().report.totalTax).not.toHaveProperty('amount')
+    expect(response.json().report).not.toHaveProperty('residentId')
+    expect(response.json().report).not.toHaveProperty('evidencePackDigest')
   })
 
   it('supports explicit provisional reads and rejects invalid years before storage access', async () => {

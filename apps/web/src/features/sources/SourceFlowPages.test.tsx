@@ -1,11 +1,19 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SourceManagementPage } from './SourceManagementPage.tsx'
 import { SourceMethodIntroPage } from './SourceMethodIntroPage.tsx'
 import { SourceTypeSelectionPage } from './SourceTypeSelectionPage.tsx'
 
+afterEach(() => vi.unstubAllGlobals())
+
 describe('source flow pages', () => {
-  it('starts from an empty source list and keeps the selected tax year in sync', () => {
+  it('starts from an empty source list and keeps the selected tax year in sync', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )))
     const { unmount } = render(<SourceManagementPage />)
 
     expect(
@@ -13,7 +21,7 @@ describe('source flow pages', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('현재 연결된 소스 0개')).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', {
+      await screen.findByRole('heading', {
         name: '아직 연결된 데이터 소스가 없어요',
       }),
     ).toBeInTheDocument()
@@ -42,7 +50,26 @@ describe('source flow pages', () => {
     expect(screen.queryByText('2026 과세연도')).not.toBeInTheDocument()
   })
 
-  it('offers only the documented Upbit PDF and EVM Wallet methods', () => {
+  it('uses production-safe copy when source services are unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ error: { code: 'WALLET_SOURCE_UNAVAILABLE' } }), {
+        status: 503,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )))
+
+    render(<SourceManagementPage />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '데이터 소스를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.',
+    )
+    expect(screen.queryByText(/로컬 데이터베이스/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: '아직 연결된 데이터 소스가 없어요' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps Upbit PDF disabled when the safe import path is unavailable', () => {
     render(<SourceTypeSelectionPage />)
 
     const methods = screen.getByRole('region', {
@@ -56,8 +83,11 @@ describe('source flow pages', () => {
       within(methods).getByRole('heading', { name: 'EVM Wallet' }),
     ).toBeInTheDocument()
     expect(
-      within(methods).getByRole('link', { name: 'Upbit PDF 선택' }),
-    ).toHaveAttribute('href', '/sources/new/upbit')
+      within(methods).getByText('Upbit PDF 등록 불가'),
+    ).toHaveAttribute('aria-disabled', 'true')
+    expect(
+      within(methods).queryByRole('link', { name: 'Upbit PDF 선택' }),
+    ).not.toBeInTheDocument()
     expect(
       within(methods).getByRole('link', { name: 'EVM Wallet 선택' }),
     ).toHaveAttribute('href', '/sources/new/wallet')
@@ -74,7 +104,7 @@ describe('source flow pages', () => {
     ).toBeInTheDocument()
   })
 
-  it('explains the Upbit PDF flow and links to registration', () => {
+  it('explains the Upbit PDF flow without linking to a disabled registration path', () => {
     render(<SourceMethodIntroPage methodId="upbit-pdf" />)
 
     expect(
@@ -89,14 +119,17 @@ describe('source flow pages', () => {
     expect(
       screen.getByText(/Upbit PDF는 자동 동기화되지 않습니다/),
     ).toBeInTheDocument()
-    expect(
-      screen.getByText(/MVP에서는 암호화되지 않은 Upbit 거래내역서 PDF만/),
-    ).toBeInTheDocument()
     expect(screen.queryByText(/PDF 비밀번호/)).not.toBeInTheDocument()
 
     expect(
-      screen.getByRole('link', { name: 'PDF 등록 시작' }),
-    ).toHaveAttribute('href', '/sources/new/upbit/upload')
+      screen.getByText('Upbit PDF 등록 불가'),
+    ).toHaveAttribute('aria-disabled', 'true')
+    expect(
+      screen.queryByRole('link', { name: 'PDF 등록 시작' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '현재는 안전한 Upbit 문서 처리 경로가 활성화되지 않아 PDF 등록을 받을 수 없습니다.',
+    )
     expect(
       screen.getByRole('link', { name: '연결 방식 다시 선택' }),
     ).toHaveAttribute('href', '/sources/new')

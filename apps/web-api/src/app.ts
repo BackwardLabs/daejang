@@ -10,9 +10,14 @@ import {
 import {
   DisabledVerificationEmailSender,
   EmailAuthService,
+  type SignupCodeResponseTiming,
   type VerificationEmailSender,
 } from './auth/email-auth.js'
-import { AuthRateLimiter, MemoryRateLimitStore } from './auth/rate-limit.js'
+import {
+  AuthRateLimiter,
+  MemoryRateLimitStore,
+  UploadAdmissionRateLimiter,
+} from './auth/rate-limit.js'
 import type { RateLimitStore } from './auth/rate-limit.js'
 import { LoginCompletionService } from './auth/login-completion.js'
 import { OAuthService, type OAuthProviderAdapter } from './auth/oauth.js'
@@ -32,10 +37,6 @@ import { status as grpcStatus } from '@grpc/grpc-js'
 import { createLogger } from './logger.js'
 import { registerAuthRoutes } from './routes/auth.js'
 import { registerAccountAuthRoutes } from './routes/account-auth.js'
-import {
-  registerDevelopmentRoutes,
-  type DevelopmentUserStore,
-} from './routes/development.js'
 import { registerSourceRoutes } from './routes/sources.js'
 import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
 import { registerTaxReportRoutes } from './routes/tax-reports.js'
@@ -45,6 +46,7 @@ import {
   type WalletSourceStore,
 } from './sources/wallet-source-store.js'
 import type { TaxReportReader } from './tax-report/types.js'
+import { UnavailableWalletSourceStore } from './sources/unavailable-wallet-source-store.js'
 import type { UploadStore } from './uploads/upload-store.js'
 
 type BuildAppOptions = {
@@ -55,10 +57,10 @@ type BuildAppOptions = {
   accountAuthStore?: AccountAuthStore
   oauthAdapters?: ReadonlyArray<OAuthProviderAdapter>
   verificationEmailSender?: VerificationEmailSender
+  signupCodeResponseTiming?: SignupCodeResponseTiming
   walletSourceStore?: WalletSourceStore
   uploadStore?: UploadStore
   engineDataClient?: EngineDataClient
-  developmentUserStore?: DevelopmentUserStore
   taxReportReader?: TaxReportReader
   now?: () => Date
   readinessCheck?: () => Promise<void>
@@ -84,9 +86,6 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   if (config.runtimeMode === 'production' && options.walletSourceStore?.durable !== true) {
     throw new Error('A durable WalletSourceStore is required in production')
   }
-  if (config.devBootstrapUser && !options.developmentUserStore) {
-    throw new Error('A DevelopmentUserStore is required for development bootstrap')
-  }
   if (
     config.runtimeMode === 'production' &&
     options.accountAuthStore?.durable !== true
@@ -101,19 +100,22 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     config.signup.methods.oauthProviders.every((provider) =>
       config.oauth.enabledProviders.has(provider),
     )
+  const identityRequirementMatchesConfiguration =
+    !config.signup.enabled ||
+    config.signup.identityVerificationRequired ===
+      (config.identityVerificationMode !== 'disabled')
   if (
     !signupMethodsMatchAuthConfiguration ||
+    !identityRequirementMatchesConfiguration ||
     (!config.signup.enabled &&
       (config.signup.methods.email ||
         config.signup.methods.oauthProviders.length > 0)) ||
     (config.signup.enabled &&
-      (config.runtimeMode === 'production' ||
-        config.identityVerificationMode !== 'mock' ||
-        (!config.signup.methods.email &&
-          config.signup.methods.oauthProviders.length === 0)))
+      !config.signup.methods.email &&
+      config.signup.methods.oauthProviders.length === 0)
   ) {
     throw new Error(
-      'Signup capability must match configured authentication methods and a completion-capable verifier',
+      'Signup capability must match configured authentication methods and identity verification mode',
     )
   }
 
@@ -136,8 +138,14 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     config.sessionIdleTtlSeconds,
     options.now,
   )
+  const rateLimitStore = options.rateLimitStore ?? new MemoryRateLimitStore()
   const authRateLimiter = new AuthRateLimiter(
-    options.rateLimitStore ?? new MemoryRateLimitStore(),
+    rateLimitStore,
+    config.rateLimitHmacSecret,
+    options.now,
+  )
+  const uploadAdmissionRateLimiter = new UploadAdmissionRateLimiter(
+    rateLimitStore,
     config.rateLimitHmacSecret,
     options.now,
   )
@@ -174,9 +182,23 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           'email challenge compensation failed',
         )
       },
+      verificationDeliveryFailed: ({ challengeId, error }) => {
+        app.log.error(
+          {
+            challengeId,
+            errorClass: error instanceof Error ? 'error' : 'non_error',
+          },
+          'email challenge delivery failed',
+        )
+      },
     },
+    options.signupCodeResponseTiming,
   )
-  const walletSourceStore = options.walletSourceStore ?? new MemoryWalletSourceStore()
+  const walletSourceStore = options.walletSourceStore ?? (
+    config.databaseUrl
+      ? new UnavailableWalletSourceStore()
+      : new MemoryWalletSourceStore()
+  )
 
   await app.register(cookie)
   app.decorateRequest('authSession', undefined)
@@ -289,13 +311,6 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     }
   })
 
-  await registerAuthRoutes(app, {
-    config,
-    sessionService,
-    authRateLimiter,
-    authenticate: authHooks.authenticate,
-    clearSessionCookie: authHooks.clearSessionCookie,
-  })
   await registerAccountAuthRoutes(app, {
     config,
     accountStore: accountAuthStore,
@@ -308,35 +323,37 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     authenticateSignup: authHooks.authenticateSignup,
     ...(options.now ? { now: options.now } : {}),
   })
-  await registerSourceRoutes(app, {
-    config,
-    walletSourceStore,
-    authRateLimiter,
-    authenticate: authHooks.authenticate,
-    ...(options.engineDataClient ? { engineDataClient: options.engineDataClient } : {}),
-    ...(options.now ? { now: options.now } : {}),
-  })
-  if (options.uploadStore && options.engineDataClient) {
-    await registerDataRoutes(app, {
-      authenticate: authHooks.authenticate,
-      uploadStore: options.uploadStore,
-      engine: options.engineDataClient,
-      ...(options.now ? { now: options.now } : {}),
-    })
-  }
-  if (options.developmentUserStore) {
-    await registerDevelopmentRoutes(app, {
+
+  await app.register(async (protectedApp) => {
+    protectedApp.addHook('onRequest', authHooks.authenticate)
+
+    await registerAuthRoutes(protectedApp, {
       config,
       sessionService,
-      userStore: options.developmentUserStore,
+      authRateLimiter,
+      clearSessionCookie: authHooks.clearSessionCookie,
     })
-  }
-  if (options.taxReportReader) {
-    await registerTaxReportRoutes(app, {
-      authenticate: authHooks.authenticate,
-      reader: options.taxReportReader,
+    await registerSourceRoutes(protectedApp, {
+      config,
+      walletSourceStore,
+      authRateLimiter,
+      ...(options.engineDataClient ? { engineDataClient: options.engineDataClient } : {}),
+      ...(options.now ? { now: options.now } : {}),
     })
-  }
+    if (options.uploadStore) {
+      await registerDataRoutes(protectedApp, {
+        uploadStore: options.uploadStore,
+        uploadAdmissionRateLimiter,
+        ...(options.engineDataClient ? { engine: options.engineDataClient } : {}),
+        ...(options.now ? { now: options.now } : {}),
+      })
+    }
+    if (options.taxReportReader) {
+      await registerTaxReportRoutes(protectedApp, {
+        reader: options.taxReportReader,
+      })
+    }
+  })
   return {
     app,
     config,

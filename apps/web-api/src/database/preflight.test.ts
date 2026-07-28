@@ -39,10 +39,14 @@ const validWebAuthContract = {
 const validTaxReportContract = {
   report_table: 'reporting.tax_report',
   current_table: 'reporting.current_tax_report',
-  inventory_table: 'tax.inventory_run',
-  estimate_table: 'tax.estimate',
   contract_version: '1',
   migration_version: '24',
+  reporting_usage: true,
+  reporting_create: false,
+  report_select: true,
+  report_write: false,
+  current_select: true,
+  current_write: false,
 }
 
 function poolReturning<T>(row: T): Pool {
@@ -83,6 +87,17 @@ describe('tax report schema preflight', () => {
         poolReturning({
           ...validTaxReportContract,
           migration_version: '19',
+        }),
+      ),
+    ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+
+  it('rejects a runtime role without the narrow current-report read grant', async () => {
+    await expect(
+      assertTaxReportSchema(
+        poolReturning({
+          ...validTaxReportContract,
+          report_select: false,
         }),
       ),
     ).rejects.toThrow('tax report persistence migration contract is invalid')

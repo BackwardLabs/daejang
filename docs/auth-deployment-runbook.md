@@ -186,13 +186,63 @@ chmod 600 deploy/production.env
 ```
 
 현재 운영에는 production identity verifier가 없으므로 `SIGNUP_ENABLED=false`와
-`IDENTITY_VERIFICATION_MODE=disabled`를 유지한다. 로그인은 사용할 수 있지만 신규
-가입 API와 UI는 fail-closed 상태다. `SIGNUP_ENABLED=true`는 현재 production에서
-설정 오류로 startup을 중단해야 한다.
+`IDENTITY_VERIFICATION_MODE=disabled`를 유지한다. `disabled`는 운영 본인확인을
+대체하지 않으며 이 상태에서 신규 가입을 열지 않는다. 실사용 provider와 callback 검증,
+실패·재시도·감사 기록을 구현하고 운영 환경에서 검증한 뒤에만 가입을 활성화한다.
+신규 가입이 닫혀 있어도 기존 계정 로그인은 계속 사용할 수 있다.
+
+신규 가입을 닫은 상태에서 운영용 이메일 계정이 필요하면 migration이나 프런트에
+계정·비밀번호를 넣지 않고 one-shot provisioning 명령을 사용한다. 명령은 일반
+`web_private.users`, `user_emails`, `email_credentials` 행을 만들며 비밀번호는
+Argon2id로만 저장한다. 동일한 사용자 ID나 이메일이 이미 있으면 전체 transaction이
+실패한다. 이 명령은 비밀번호 변경 수단으로 사용하지 않는다.
+
+```bash
+read -r -s -p "Account password: " GIWA_ACCOUNT_PASSWORD
+echo
+
+DATABASE_URL="$WEB_DATABASE_URL" \
+PROVISION_ACCOUNT_USER_ID="<운영 사용자 UUID>" \
+PROVISION_ACCOUNT_DISPLAY_NAME="<운영 표시명>" \
+PROVISION_ACCOUNT_EMAIL="<운영 이메일>" \
+PROVISION_ACCOUNT_CONFIRM_EMAIL="<운영 이메일>" \
+PROVISION_ACCOUNT_PASSWORD="$GIWA_ACCOUNT_PASSWORD" \
+npm run account:provision --workspace @daejang/web-api
+
+unset GIWA_ACCOUNT_PASSWORD
+```
+
+운영에서는 가능하면 `PROVISION_ACCOUNT_PASSWORD_FILE`에 secret mount 경로를
+지정하고 `PROVISION_ACCOUNT_PASSWORD`는 생략한다. 성공 출력에는 상태와 user ID만
+포함되며 표시명, 이메일, 비밀번호와 해시는 출력하지 않는다. 실행 후 일반 로그인 화면에서
+이메일과 지정한 비밀번호를 입력해 로그인한다.
 
 TLS private key, DB password, OAuth secret, Resend key와 `GH_PAT`는 Git에 넣지 않는다.
 Engine image의 private module fetch에 쓰는 `GH_PAT`는 build 중에만 secret mount로
 전달한다.
+
+### Upbit PDF 활성화 게이트와 비공개 저장소
+
+현재 Upbit PDF 등록은 비활성 상태를 유지한다. UI만 열거나 환경 변수만 바꿔 우회하지
+않으며, 다음 조건을 모두 구현하고 운영 환경에서 검증하기 전에는 파일을 접수하지 않는다.
+
+1. 지원 대상 Upbit 문서 레이아웃을 판별하고 실패를 닫힌 상태로 처리하는 parser가 있다.
+2. 암호화 PDF의 비밀번호는 브라우저의 격리된 처리 경계에서만 사용하고 API, 로그,
+   DB와 object metadata로 전송하거나 저장하지 않는다.
+3. Web API가 확인한 object를 Engine이 durable하게 인수했다는 상태 계약이 있으며,
+   timeout·재시도·정리 작업이 처리 중인 object를 먼저 삭제하지 않는다.
+4. 운영 비공개 object storage가 아래 보안·복구 요건을 충족하고 실제 배포 설정과
+   복구 시험으로 입증된다.
+
+운영 비공개 object storage는 저장 데이터 암호화(encryption at rest), 서비스 계정별
+최소 권한과 네트워크 접근 통제, 감사 가능한 접근 기록을 제공해야 한다. 또한 backup,
+object versioning, 보존·삭제 기한과 복구 절차를 하나의 retention 정책으로 정의하고
+정기적으로 복구와 만료 삭제를 시험한다. 로컬 파일시스템이나 Compose named volume을
+사용한다는 사실만으로 이 요건을 충족했다고 간주하지 않는다. 개인정보가 backup이나
+이전 version에 무기한 남지 않도록 동일한 보존·삭제 정책을 적용한다.
+
+위 조건이 하나라도 충족되지 않으면 Upbit capability는 비활성으로 응답하고, Web API는
+업로드 body를 저장하거나 upload row를 만들기 전에 요청을 거절한다.
 
 ## 8. App stack 시작
 
@@ -247,10 +297,10 @@ curl -i \
 성공 기준:
 
 - `/me`는 HTML이 아닌 JSON `401`과 `Cache-Control: no-store`를 반환한다.
-- capability는 `signup.enabled=false`와 서버가 현재 허용하는 가입 method를
-  반환한다. 로그인 provider 목록은 이 endpoint의 계약이 아니다.
+- capability는 `signup.enabled=false`와 서버가 현재 허용하는 가입 method를 반환한다.
+  로그인 provider 목록은 이 endpoint의 계약이 아니다.
 - 활성 OAuth login은 provider로 향하는 `302`와 보호된 transaction cookie를 반환한다.
-- signup API는 안정적인 unavailable 오류로 거절된다.
+- signup API와 UI는 안정적인 unavailable 상태로 닫혀 있다.
 - 브라우저 실제 login callback 뒤 이전 session cookie는 거절되고 새 cookie만 유효하다.
 
 ## 10. Review delivery와 artifact 운영 경계
@@ -273,4 +323,4 @@ CAS 또는 DB 실패 전에 기록된 content-addressed subject-private artifact
 - App 문제는 직전 정상 image/commit으로 되돌리되 DB migration은 down하지 않는다.
 - Review writer를 다시 열기 전에 DB schema와 Engine module pin이 일치하는지 확인한다.
 - `docker compose down --volumes`는 운영 DB와 artifact를 지울 수 있으므로 실행하지 않는다.
-- production signup을 임시 우회나 mock으로 열지 않는다.
+- production signup을 임시 우회, `disabled` identity mode 또는 mock으로 열지 않는다.

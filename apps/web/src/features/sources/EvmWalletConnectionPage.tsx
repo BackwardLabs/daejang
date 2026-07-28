@@ -16,16 +16,14 @@ import rabbyLogo from '../../assets/sources/wallet/rabby.svg'
 import stepActive from '../../assets/sources/wallet/step-active.svg'
 import stepInactive from '../../assets/sources/wallet/step-inactive.svg'
 import walletConnectLogo from '../../assets/sources/wallet/walletconnect.svg'
+import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import {
   EVM_WALLET_ALLOWED_TAX_YEARS,
-  completeWalletConnectionMock,
-  connectWalletMock,
   createEvmWalletIntentKey,
   evmWalletFlowReducer,
   initialEvmWalletFlowState,
   maskEvmAddress,
-  requestOwnershipSignatureMock,
   validateEvmWalletPeriodDraft,
   type CompleteWalletConnection,
   type ConnectedWallet,
@@ -40,6 +38,8 @@ import {
   type EvmWalletProviderId,
   type NormalizedEvmWalletPeriod,
   type RequestOwnershipSignature,
+  type WalletSyncJobSnapshot,
+  type WatchWalletSyncJob,
 } from './evmWalletFlow.ts'
 import './evm-wallet-flow.css'
 
@@ -241,7 +241,7 @@ function SafetyAside() {
       </section>
 
       <section className="wallet-flow-aside__card wallet-flow-aside__card--subtle">
-        <h2>MVP 지원 범위</h2>
+        <h2>현재 지원 범위</h2>
         <p>EVM 호환 공개 주소를 기준으로 연결합니다.</p>
         <div className="wallet-supported-chains">
           <span>Ethereum</span>
@@ -333,9 +333,9 @@ function WalletSelectionStep({
         </fieldset>
 
         <div className="wallet-flow-actions">
-          <a className="wallet-flow-secondary-action" href="/sources/new">
+          <AppLink className="wallet-flow-secondary-action" href="/sources/new">
             <span aria-hidden="true">←</span> 취소
-          </a>
+          </AppLink>
           <button
             type="button"
             className="source-primary-action"
@@ -532,20 +532,20 @@ function BackfillAside() {
     <aside className="wallet-flow-aside" aria-label="최초 수집 처리 기준">
       <section className="wallet-flow-aside__card">
         <span className="wallet-flow-aside__eyebrow">INITIAL BACKFILL</span>
-        <h2>최초 backfill 순서</h2>
+        <h2>현재 수집 방식</h2>
         <ol className="wallet-flow-numbered-list">
           <li>
             <span>01</span>
             <div>
-              <strong>선택 기간의 최근 90일</strong>
-              <p>종료일을 기준으로 먼저 수집합니다.</p>
+              <strong>사용자가 선택한 전체 기간</strong>
+              <p>선택 범위를 한 건의 수집 요청으로 처리합니다.</p>
             </div>
           </li>
           <li>
             <span>02</span>
             <div>
-              <strong>선택 기간 나머지</strong>
-              <p>백그라운드에서 이어서 수집합니다.</p>
+              <strong>작업 상태 확인</strong>
+              <p>요청한 작업의 대기·처리·완료 상태를 확인합니다.</p>
             </div>
           </li>
         </ol>
@@ -561,8 +561,8 @@ function BackfillAside() {
             <span>GIWA 공개 체인에 원본 금융 데이터를 남기지 않습니다.</span>
           </li>
           <li>
-            <strong>사용자 지갑 주소를 기록하지 않음</strong>
-            <span>필요한 결과만 서비스 DB에서 관리합니다.</span>
+            <strong>공개 지갑 주소를 서비스에 저장</strong>
+            <span>공개 체인 거래 수집에만 사용하며 개인키나 서명 권한은 저장하지 않습니다.</span>
           </li>
         </ul>
       </section>
@@ -643,7 +643,7 @@ function ScopeStep({
               <p>과세연도 전체 또는 최대 1년의 직접 기간을 선택합니다.</p>
             </div>
             <span className="wallet-period-panel__sync">
-              동기화 · 매일 자동 + 수동 새로고침
+              동기화 · 사용자 요청 시 선택 범위 수집
             </span>
           </header>
 
@@ -808,22 +808,22 @@ function CompletionAside({
   syncStatus: 'BACKFILLING' | 'REGISTERED'
 }) {
   return (
-    <aside className="wallet-flow-aside" aria-label="연결 이후 동기화와 데이터 관리">
+    <aside className="wallet-flow-aside" aria-label="현재 수집과 데이터 관리">
       <section className="wallet-flow-aside__card">
         <span className="wallet-flow-aside__eyebrow">
           {syncStatus === 'BACKFILLING' ? 'ONGOING SYNC' : 'NEXT STEP'}
         </span>
-        <h2>{syncStatus === 'BACKFILLING' ? '이후 동기화' : '수집 준비 상태'}</h2>
+        <h2>{syncStatus === 'BACKFILLING' ? '현재 수집' : '수집 준비 상태'}</h2>
         <ul className="wallet-completion-list">
           {syncStatus === 'BACKFILLING' ? (
             <>
               <li>
-                <strong>매일 자동</strong>
-                <span>마지막 정상 체크포인트 이후의 신규 거래를 가져옵니다.</span>
+                <strong>현재 요청</strong>
+                <span>사용자가 선택한 전체 기간을 한 건의 작업으로 처리합니다.</span>
               </li>
               <li>
-                <strong>수동 새로고침</strong>
-                <span>재실행해도 같은 거래를 중복 생성하지 않습니다.</span>
+                <strong>상태 확인</strong>
+                <span>대시보드에서 현재 수집 작업 상태를 확인할 수 있습니다.</span>
               </li>
             </>
           ) : (
@@ -863,18 +863,39 @@ function CompletionAside({
 
 function CompletionStep({
   addressPreview,
+  jobId,
+  jobSnapshot,
   network,
   normalizedPeriod,
   onReset,
   syncStatus,
+  watchError,
 }: {
   addressPreview: string
+  jobId?: string
+  jobSnapshot: WalletSyncJobSnapshot | null
   network: string
   normalizedPeriod: NormalizedEvmWalletPeriod
   onReset: () => void
   syncStatus: 'BACKFILLING' | 'REGISTERED'
+  watchError: boolean
 }) {
   const isBackfilling = syncStatus === 'BACKFILLING'
+  const syncCopy = jobSnapshot?.state === 'SUCCEEDED'
+    ? { badge: 'SUCCEEDED', description: '선택한 기간의 수집 작업이 완료됐습니다.', label: '수집 완료' }
+    : jobSnapshot?.state === 'FAILED'
+      ? { badge: 'FAILED', description: '수집 작업이 실패했습니다. 소스 관리에서 오류를 확인한 뒤 다시 실행해 주세요.', label: '수집 실패' }
+      : jobSnapshot?.state === 'RUNNING'
+        ? { badge: 'RUNNING', description: '선택한 기간의 거래를 처리하고 있습니다.', label: '거래 수집 중' }
+        : jobSnapshot?.state === 'QUEUED'
+          ? { badge: 'QUEUED', description: '수집 작업이 실행 순서를 기다리고 있습니다.', label: '수집 대기' }
+          : {
+              badge: isBackfilling ? 'BACKFILLING' : 'REGISTERED',
+              description: isBackfilling
+                ? '연결은 완료됐으며 선택한 전체 기간을 처리하고 있습니다.'
+                : '처리 엔진이 연결되면 저장한 범위로 거래 수집을 시작합니다.',
+              label: isBackfilling ? '선택 기간 수집 중' : '수집 대기',
+            }
   return (
     <div className="wallet-flow-grid">
       <section className="wallet-flow-card" aria-labelledby="wallet-complete-title">
@@ -888,8 +909,8 @@ function CompletionStep({
               지갑 연결이 완료됐어요
             </h2>
             <p>
-              {isBackfilling
-                ? '최근 90일 거래부터 우선 수집하고 있습니다.'
+              {jobSnapshot?.state === 'SUCCEEDED'
+                ? '지갑 연결과 최초 거래 수집을 완료했습니다.'
                 : '지갑 주소와 선택한 수집 범위를 저장했습니다.'}
             </p>
           </div>
@@ -898,15 +919,23 @@ function CompletionStep({
         <div className="wallet-backfill-status" role="status">
           <div>
             <span>현재 동기화 상태</span>
-            <strong>{isBackfilling ? '최근 90일 수집 중' : '수집 대기'}</strong>
+            <strong>{syncCopy.label}</strong>
           </div>
-          <b>{syncStatus}</b>
+          <b>{syncCopy.badge}</b>
         </div>
         <p className="wallet-signature-expiry">
-          {isBackfilling
-            ? '연결은 완료됐으며 나머지 기간은 백그라운드에서 이어집니다.'
-            : '처리 엔진이 연결되면 저장한 범위로 거래 수집을 시작합니다.'}
+          {syncCopy.description}
         </p>
+        {watchError ? (
+          <p className="wallet-flow-alert" role="alert">
+            동기화 상태를 새로 확인하지 못했습니다. 작업은 서버에서 계속될 수 있습니다.
+          </p>
+        ) : null}
+        {jobSnapshot?.state === 'FAILED' && jobSnapshot.failureMessage ? (
+          <p className="wallet-flow-alert" role="alert">
+            {jobSnapshot.failureMessage}
+          </p>
+        ) : null}
 
         <dl className="wallet-completion-details">
           <div>
@@ -921,6 +950,12 @@ function CompletionStep({
             <dt>수집 기간</dt>
             <dd>{formatPeriodLabel(normalizedPeriod)}</dd>
           </div>
+          {jobId ? (
+            <div>
+              <dt>동기화 작업 ID</dt>
+              <dd>{jobId}</dd>
+            </div>
+          ) : null}
         </dl>
 
         <div className="wallet-flow-actions">
@@ -931,10 +966,10 @@ function CompletionStep({
           >
             <span aria-hidden="true">←</span> 다른 지갑 연결
           </button>
-          <a className="source-primary-action" href={isBackfilling ? '/dashboard' : '/sources'}>
+          <AppLink className="source-primary-action" href={isBackfilling ? '/dashboard' : '/sources'}>
             {isBackfilling ? '수집 진행 상태 보기' : '연결된 소스 보기'}{' '}
             <span aria-hidden="true">→</span>
-          </a>
+          </AppLink>
         </div>
         <p className="source-footer-note">
           {isBackfilling
@@ -982,19 +1017,23 @@ function getPageCopy(state: EvmWalletFlowState) {
 }
 
 export function EvmWalletConnectionPage({
-  completeConnection = completeWalletConnectionMock,
-  connectWallet = connectWalletMock,
-  requestSignature = requestOwnershipSignatureMock,
+  completeConnection,
+  connectWallet,
+  requestSignature,
+  watchSyncJob,
 }: {
-  completeConnection?: CompleteWalletConnection
-  connectWallet?: ConnectWallet
-  requestSignature?: RequestOwnershipSignature
+  completeConnection: CompleteWalletConnection
+  connectWallet: ConnectWallet
+  requestSignature: RequestOwnershipSignature
+  watchSyncJob?: WatchWalletSyncJob
 }) {
   const [state, dispatch] = useReducer(
     evmWalletFlowReducer,
     initialEvmWalletFlowState,
   )
   const [signatureReminder, setSignatureReminder] = useState('')
+  const [syncJob, setSyncJob] = useState<WalletSyncJobSnapshot | null>(null)
+  const [syncWatchError, setSyncWatchError] = useState(false)
   const activeRequestRef = useRef(0)
   const abortControllerRef = useRef<AbortController | null>(null)
   const requestPendingRef = useRef(false)
@@ -1005,6 +1044,25 @@ export function EvmWalletConnectionPage({
   const currentStep = getCurrentStep(state)
   const pageCopy = getPageCopy(state)
   const focusKey = `${state.view}:${state.status}`
+  const completedJobId = state.view === 'complete' ? state.jobId : undefined
+
+  useEffect(() => {
+    setSyncJob(null)
+    setSyncWatchError(false)
+    if (!completedJobId || !watchSyncJob) return
+
+    const controller = new AbortController()
+    void watchSyncJob({
+      jobId: completedJobId,
+      onUpdate: setSyncJob,
+      signal: controller.signal,
+    }).catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        setSyncWatchError(true)
+      }
+    })
+    return () => controller.abort()
+  }, [completedJobId, watchSyncJob])
 
   useEffect(
     () => () => {
@@ -1278,17 +1336,21 @@ export function EvmWalletConnectionPage({
         {state.view === 'complete' ? (
           <CompletionStep
             addressPreview={state.addressPreview}
+            jobId={state.jobId}
+            jobSnapshot={syncJob}
             network={state.network}
             normalizedPeriod={state.normalizedPeriod}
             onReset={() => dispatch({ type: 'RESET' })}
             syncStatus={state.status}
+            watchError={syncWatchError}
           />
         ) : null}
       </div>
 
       <p className="source-footer-note">
         private key·seed phrase·쓰기·출금 권한은 요청하거나 저장하지
-        않습니다. 지갑 주소와 거래 원문은 공개 체인에 기록하지 않습니다.
+        않습니다. 공개 지갑 주소는 사용자가 선택한 체인의 거래 수집을 위해
+        서비스 DB에 저장합니다.
       </p>
     </SourceFlowLayout>
   )

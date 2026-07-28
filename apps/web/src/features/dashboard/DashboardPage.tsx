@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AppSidebar, type AppYear } from '../../components/AppSidebar.tsx'
+import { AppLink } from '../../components/AppLink.tsx'
 import { loadDashboard, loadLedger, loadReviews, type DashboardModel, type LedgerEventModel, type ReviewModel } from '../../api/productApi.ts'
 import './dashboard.css'
 
@@ -115,12 +116,12 @@ export function DashboardPage() {
                   ? '불러오는 중…'
                   : '새로고침'}
               </button>
-              <a href="/reports" className="dashboard-action dashboard-action--outline">
+              <AppLink href="/reports" className="dashboard-action dashboard-action--outline">
                 보고서 보기
-              </a>
-              <a href="/sources" className="dashboard-action dashboard-action--primary">
+              </AppLink>
+              <AppLink href="/sources" className="dashboard-action dashboard-action--primary">
                 거래 추가
-              </a>
+              </AppLink>
             </div>
           </section>
 
@@ -141,7 +142,7 @@ export function DashboardPage() {
               <strong>{count(dashboard?.openReviewCount)}건</strong>의 거래가
               검토를 기다리고 있습니다. 근거를 연결하면 신고 준비도가 올라갑니다.
             </p>
-            <a href="/ledger">검토 필요</a>
+            <AppLink href="/ledger">검토 필요</AppLink>
           </section>
 
           <section className="dashboard-metrics" aria-label="장부 핵심 지표">
@@ -186,7 +187,7 @@ export function DashboardPage() {
             <article className="dashboard-review-queue">
               <header>
                 <h2>검토 큐</h2>
-                <a href="/ledger">전체 보기 →</a>
+                <AppLink href="/ledger">전체 보기 →</AppLink>
               </header>
               <ul>
                 {reviews.slice(0, 3).map((item) => (

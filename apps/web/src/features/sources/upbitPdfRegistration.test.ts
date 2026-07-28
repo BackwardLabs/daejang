@@ -43,6 +43,10 @@ describe('upbitPdfRegistrationReducer', () => {
       type: 'SUBMIT_STAGE_CHANGED',
     })
     state = upbitPdfRegistrationReducer(state, {
+      status: 'DOCUMENT_PROCESSING',
+      type: 'SUBMIT_STAGE_CHANGED',
+    })
+    state = upbitPdfRegistrationReducer(state, {
       sourceId: 'source-upbit-1',
       sourceStatus: 'UPLOADED',
       type: 'SUBMIT_SUCCEEDED',
@@ -81,6 +85,11 @@ describe('upbitPdfRegistrationReducer', () => {
       error: {
         code: 'PROCESSING_FAILED',
         requestId: 'request-safe-1',
+        retry: {
+          intentKey: 'intent-job-retry-1',
+          mode: 'restart-job',
+          sourceId: 'source-upbit-retry',
+        },
       },
       type: 'SUBMIT_FAILED',
     })
@@ -89,6 +98,11 @@ describe('upbitPdfRegistrationReducer', () => {
       error: {
         code: 'PROCESSING_FAILED',
         requestId: 'request-safe-1',
+        retry: {
+          intentKey: 'intent-job-retry-1',
+          mode: 'restart-job',
+          sourceId: 'source-upbit-retry',
+        },
       },
       file,
       intentKey: 'intent-upbit-retry',

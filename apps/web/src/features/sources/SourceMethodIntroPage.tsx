@@ -3,15 +3,20 @@ import {
   sourceMethodDefinitions,
   type SourceMethodId,
 } from './sourceDefinitions.ts'
+import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
+import { useSourceCapabilities } from './useSourceCapabilities.ts'
 
 export function SourceMethodIntroPage({
   methodId,
 }: {
   methodId: SourceMethodId
 }) {
+  const capabilities = useSourceCapabilities()
   const method = sourceMethodDefinitions[methodId]
   const isUpbitPdf = methodId === 'upbit-pdf'
+  const registrationEnabled =
+    !isUpbitPdf || capabilities.upbitPdf.registrationEnabled
   const actionLabel =
     isUpbitPdf ? 'PDF 등록 시작' : '지갑 연결 시작'
 
@@ -51,19 +56,25 @@ export function SourceMethodIntroPage({
           </div>
 
           <div className="source-intro-actions">
-            <a
-              className="source-primary-action"
-              href={
-                isUpbitPdf
-                  ? '/sources/new/upbit/upload'
-                  : '/sources/new/wallet/connect'
-              }
-            >
-              {actionLabel} <span aria-hidden="true">→</span>
-            </a>
-            <a href="/sources/new">
+            {registrationEnabled ? (
+              <AppLink
+                className="source-primary-action"
+                href={
+                  isUpbitPdf
+                    ? '/sources/new/upbit/upload'
+                    : '/sources/new/wallet/connect'
+                }
+              >
+                {actionLabel} <span aria-hidden="true">→</span>
+              </AppLink>
+            ) : (
+              <span className="source-primary-action" aria-disabled="true">
+                Upbit PDF 등록 불가
+              </span>
+            )}
+            <AppLink href="/sources/new">
               <span aria-hidden="true">←</span> 연결 방식 다시 선택
-            </a>
+            </AppLink>
           </div>
         </div>
 
@@ -90,6 +101,12 @@ export function SourceMethodIntroPage({
           </div>
         </aside>
       </section>
+
+      {!registrationEnabled ? (
+        <p className="source-api-notice" role="alert">
+          현재는 안전한 Upbit 문서 처리 경로가 활성화되지 않아 PDF 등록을 받을 수 없습니다.
+        </p>
+      ) : null}
 
       <p className="source-footer-note">{method.intro.footer}</p>
     </SourceFlowLayout>

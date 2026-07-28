@@ -915,12 +915,17 @@ func (x *ListSourcesResponse) GetDocumentItems() []*DocumentSource {
 }
 
 type EnqueueSyncRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Context       *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	SourceKind    string                 `protobuf:"bytes,2,opt,name=source_kind,json=sourceKind,proto3" json:"source_kind,omitempty"`
-	SourceId      string                 `protobuf:"bytes,3,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Context    *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	SourceKind string                 `protobuf:"bytes,2,opt,name=source_kind,json=sourceKind,proto3" json:"source_kind,omitempty"`
+	SourceId   string                 `protobuf:"bytes,3,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	// Inclusive calendar DATE in YYYY-MM-DD form, normalized to UTC midnight by Engine.
+	RequestedCoverageStart string `protobuf:"bytes,4,opt,name=requested_coverage_start,json=requestedCoverageStart,proto3" json:"requested_coverage_start,omitempty"`
+	// Inclusive calendar DATE in YYYY-MM-DD form, normalized to UTC midnight by Engine.
+	RequestedCoverageEnd string `protobuf:"bytes,5,opt,name=requested_coverage_end,json=requestedCoverageEnd,proto3" json:"requested_coverage_end,omitempty"`
+	Trigger              string `protobuf:"bytes,6,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *EnqueueSyncRequest) Reset() {
@@ -970,6 +975,27 @@ func (x *EnqueueSyncRequest) GetSourceKind() string {
 func (x *EnqueueSyncRequest) GetSourceId() string {
 	if x != nil {
 		return x.SourceId
+	}
+	return ""
+}
+
+func (x *EnqueueSyncRequest) GetRequestedCoverageStart() string {
+	if x != nil {
+		return x.RequestedCoverageStart
+	}
+	return ""
+}
+
+func (x *EnqueueSyncRequest) GetRequestedCoverageEnd() string {
+	if x != nil {
+		return x.RequestedCoverageEnd
+	}
+	return ""
+}
+
+func (x *EnqueueSyncRequest) GetTrigger() string {
+	if x != nil {
+		return x.Trigger
 	}
 	return ""
 }
@@ -1211,25 +1237,32 @@ func (x *ListSyncJobsResponse) GetItems() []*SyncJob {
 }
 
 type SyncJob struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	SourceKind       string                 `protobuf:"bytes,2,opt,name=source_kind,json=sourceKind,proto3" json:"source_kind,omitempty"`
-	SourceId         string                 `protobuf:"bytes,3,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
-	State            string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
-	Phase            string                 `protobuf:"bytes,5,opt,name=phase,proto3" json:"phase,omitempty"`
-	Attempts         uint32                 `protobuf:"varint,6,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	ProcessedRecords int64                  `protobuf:"varint,7,opt,name=processed_records,json=processedRecords,proto3" json:"processed_records,omitempty"`
-	TotalRecords     int64                  `protobuf:"varint,8,opt,name=total_records,json=totalRecords,proto3" json:"total_records,omitempty"`
-	HasTotalRecords  bool                   `protobuf:"varint,9,opt,name=has_total_records,json=hasTotalRecords,proto3" json:"has_total_records,omitempty"`
-	FailureCode      string                 `protobuf:"bytes,10,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
-	FailureMessage   string                 `protobuf:"bytes,11,opt,name=failure_message,json=failureMessage,proto3" json:"failure_message,omitempty"`
-	OutputFragmentId string                 `protobuf:"bytes,12,opt,name=output_fragment_id,json=outputFragmentId,proto3" json:"output_fragment_id,omitempty"`
-	CreatedAt        *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	StartedAt        *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	CompletedAt      *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
-	UpdatedAt        *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Id                     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	SourceKind             string                 `protobuf:"bytes,2,opt,name=source_kind,json=sourceKind,proto3" json:"source_kind,omitempty"`
+	SourceId               string                 `protobuf:"bytes,3,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	State                  string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
+	Phase                  string                 `protobuf:"bytes,5,opt,name=phase,proto3" json:"phase,omitempty"`
+	Attempts               uint32                 `protobuf:"varint,6,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	ProcessedRecords       int64                  `protobuf:"varint,7,opt,name=processed_records,json=processedRecords,proto3" json:"processed_records,omitempty"`
+	TotalRecords           int64                  `protobuf:"varint,8,opt,name=total_records,json=totalRecords,proto3" json:"total_records,omitempty"`
+	HasTotalRecords        bool                   `protobuf:"varint,9,opt,name=has_total_records,json=hasTotalRecords,proto3" json:"has_total_records,omitempty"`
+	FailureCode            string                 `protobuf:"bytes,10,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+	FailureMessage         string                 `protobuf:"bytes,11,opt,name=failure_message,json=failureMessage,proto3" json:"failure_message,omitempty"`
+	OutputFragmentId       string                 `protobuf:"bytes,12,opt,name=output_fragment_id,json=outputFragmentId,proto3" json:"output_fragment_id,omitempty"`
+	CreatedAt              *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	StartedAt              *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	CompletedAt            *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	UpdatedAt              *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	RequestedCoverageStart string                 `protobuf:"bytes,17,opt,name=requested_coverage_start,json=requestedCoverageStart,proto3" json:"requested_coverage_start,omitempty"`
+	RequestedCoverageEnd   string                 `protobuf:"bytes,18,opt,name=requested_coverage_end,json=requestedCoverageEnd,proto3" json:"requested_coverage_end,omitempty"`
+	Trigger                string                 `protobuf:"bytes,19,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	CheckpointCursor       string                 `protobuf:"bytes,20,opt,name=checkpoint_cursor,json=checkpointCursor,proto3" json:"checkpoint_cursor,omitempty"`
+	SegmentCursor          string                 `protobuf:"bytes,21,opt,name=segment_cursor,json=segmentCursor,proto3" json:"segment_cursor,omitempty"`
+	UpstreamJitRunId       string                 `protobuf:"bytes,22,opt,name=upstream_jit_run_id,json=upstreamJitRunId,proto3" json:"upstream_jit_run_id,omitempty"`
+	ProgressVersion        int64                  `protobuf:"varint,23,opt,name=progress_version,json=progressVersion,proto3" json:"progress_version,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *SyncJob) Reset() {
@@ -1372,6 +1405,55 @@ func (x *SyncJob) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *SyncJob) GetRequestedCoverageStart() string {
+	if x != nil {
+		return x.RequestedCoverageStart
+	}
+	return ""
+}
+
+func (x *SyncJob) GetRequestedCoverageEnd() string {
+	if x != nil {
+		return x.RequestedCoverageEnd
+	}
+	return ""
+}
+
+func (x *SyncJob) GetTrigger() string {
+	if x != nil {
+		return x.Trigger
+	}
+	return ""
+}
+
+func (x *SyncJob) GetCheckpointCursor() string {
+	if x != nil {
+		return x.CheckpointCursor
+	}
+	return ""
+}
+
+func (x *SyncJob) GetSegmentCursor() string {
+	if x != nil {
+		return x.SegmentCursor
+	}
+	return ""
+}
+
+func (x *SyncJob) GetUpstreamJitRunId() string {
+	if x != nil {
+		return x.UpstreamJitRunId
+	}
+	return ""
+}
+
+func (x *SyncJob) GetProgressVersion() int64 {
+	if x != nil {
+		return x.ProgressVersion
+	}
+	return 0
 }
 
 type GetDashboardRequest struct {
@@ -3054,6 +3136,554 @@ func (x *ListReportsResponse) GetItems() []*ReportSnapshot {
 	return nil
 }
 
+type GetCurrentTaxReportRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Context       *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	TaxYear       int32                  `protobuf:"varint,2,opt,name=tax_year,json=taxYear,proto3" json:"tax_year,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCurrentTaxReportRequest) Reset() {
+	*x = GetCurrentTaxReportRequest{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCurrentTaxReportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCurrentTaxReportRequest) ProtoMessage() {}
+
+func (x *GetCurrentTaxReportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCurrentTaxReportRequest.ProtoReflect.Descriptor instead.
+func (*GetCurrentTaxReportRequest) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *GetCurrentTaxReportRequest) GetContext() *RequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *GetCurrentTaxReportRequest) GetTaxYear() int32 {
+	if x != nil {
+		return x.TaxYear
+	}
+	return 0
+}
+
+type ListTaxReportHistoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Context       *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	TaxYear       int32                  `protobuf:"varint,2,opt,name=tax_year,json=taxYear,proto3" json:"tax_year,omitempty"`
+	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaxReportHistoryRequest) Reset() {
+	*x = ListTaxReportHistoryRequest{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaxReportHistoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaxReportHistoryRequest) ProtoMessage() {}
+
+func (x *ListTaxReportHistoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaxReportHistoryRequest.ProtoReflect.Descriptor instead.
+func (*ListTaxReportHistoryRequest) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *ListTaxReportHistoryRequest) GetContext() *RequestContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
+}
+
+func (x *ListTaxReportHistoryRequest) GetTaxYear() int32 {
+	if x != nil {
+		return x.TaxYear
+	}
+	return 0
+}
+
+func (x *ListTaxReportHistoryRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type TaxAmount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Amount        string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	HasAmount     bool                   `protobuf:"varint,3,opt,name=has_amount,json=hasAmount,proto3" json:"has_amount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaxAmount) Reset() {
+	*x = TaxAmount{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaxAmount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaxAmount) ProtoMessage() {}
+
+func (x *TaxAmount) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaxAmount.ProtoReflect.Descriptor instead.
+func (*TaxAmount) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *TaxAmount) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *TaxAmount) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *TaxAmount) GetHasAmount() bool {
+	if x != nil {
+		return x.HasAmount
+	}
+	return false
+}
+
+type TaxReportCounts struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Disposals           int32                  `protobuf:"varint,1,opt,name=disposals,proto3" json:"disposals,omitempty"`
+	Transfers           int32                  `protobuf:"varint,2,opt,name=transfers,proto3" json:"transfers,omitempty"`
+	ExcludedConversions int32                  `protobuf:"varint,3,opt,name=excluded_conversions,json=excludedConversions,proto3" json:"excluded_conversions,omitempty"`
+	Limitations         int32                  `protobuf:"varint,4,opt,name=limitations,proto3" json:"limitations,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *TaxReportCounts) Reset() {
+	*x = TaxReportCounts{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaxReportCounts) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaxReportCounts) ProtoMessage() {}
+
+func (x *TaxReportCounts) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaxReportCounts.ProtoReflect.Descriptor instead.
+func (*TaxReportCounts) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *TaxReportCounts) GetDisposals() int32 {
+	if x != nil {
+		return x.Disposals
+	}
+	return 0
+}
+
+func (x *TaxReportCounts) GetTransfers() int32 {
+	if x != nil {
+		return x.Transfers
+	}
+	return 0
+}
+
+func (x *TaxReportCounts) GetExcludedConversions() int32 {
+	if x != nil {
+		return x.ExcludedConversions
+	}
+	return 0
+}
+
+func (x *TaxReportCounts) GetLimitations() int32 {
+	if x != nil {
+		return x.Limitations
+	}
+	return 0
+}
+
+type TaxReport struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	ReportId             string                 `protobuf:"bytes,1,opt,name=report_id,json=reportId,proto3" json:"report_id,omitempty"`
+	ResidentId           string                 `protobuf:"bytes,2,opt,name=resident_id,json=residentId,proto3" json:"resident_id,omitempty"`
+	TaxYear              int32                  `protobuf:"varint,3,opt,name=tax_year,json=taxYear,proto3" json:"tax_year,omitempty"`
+	Finality             string                 `protobuf:"bytes,4,opt,name=finality,proto3" json:"finality,omitempty"`
+	Status               string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
+	FilingStatus         string                 `protobuf:"bytes,6,opt,name=filing_status,json=filingStatus,proto3" json:"filing_status,omitempty"`
+	TaxInventoryRunId    string                 `protobuf:"bytes,7,opt,name=tax_inventory_run_id,json=taxInventoryRunId,proto3" json:"tax_inventory_run_id,omitempty"`
+	TaxEstimateId        string                 `protobuf:"bytes,8,opt,name=tax_estimate_id,json=taxEstimateId,proto3" json:"tax_estimate_id,omitempty"`
+	LotRunId             string                 `protobuf:"bytes,9,opt,name=lot_run_id,json=lotRunId,proto3" json:"lot_run_id,omitempty"`
+	InputDigest          string                 `protobuf:"bytes,10,opt,name=input_digest,json=inputDigest,proto3" json:"input_digest,omitempty"`
+	SchemaDigest         string                 `protobuf:"bytes,11,opt,name=schema_digest,json=schemaDigest,proto3" json:"schema_digest,omitempty"`
+	DenominationAssetId  string                 `protobuf:"bytes,12,opt,name=denomination_asset_id,json=denominationAssetId,proto3" json:"denomination_asset_id,omitempty"`
+	ReportArtifactDigest string                 `protobuf:"bytes,13,opt,name=report_artifact_digest,json=reportArtifactDigest,proto3" json:"report_artifact_digest,omitempty"`
+	EvidencePackDigest   string                 `protobuf:"bytes,14,opt,name=evidence_pack_digest,json=evidencePackDigest,proto3" json:"evidence_pack_digest,omitempty"`
+	PointerVersion       int64                  `protobuf:"varint,15,opt,name=pointer_version,json=pointerVersion,proto3" json:"pointer_version,omitempty"`
+	IssuedAt             *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=issued_at,json=issuedAt,proto3" json:"issued_at,omitempty"`
+	UpdatedAt            *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Counts               *TaxReportCounts       `protobuf:"bytes,18,opt,name=counts,proto3" json:"counts,omitempty"`
+	GainLoss             *TaxAmount             `protobuf:"bytes,19,opt,name=gain_loss,json=gainLoss,proto3" json:"gain_loss,omitempty"`
+	TaxableBase          *TaxAmount             `protobuf:"bytes,20,opt,name=taxable_base,json=taxableBase,proto3" json:"taxable_base,omitempty"`
+	NationalTax          *TaxAmount             `protobuf:"bytes,21,opt,name=national_tax,json=nationalTax,proto3" json:"national_tax,omitempty"`
+	LocalTax             *TaxAmount             `protobuf:"bytes,22,opt,name=local_tax,json=localTax,proto3" json:"local_tax,omitempty"`
+	TotalTax             *TaxAmount             `protobuf:"bytes,23,opt,name=total_tax,json=totalTax,proto3" json:"total_tax,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *TaxReport) Reset() {
+	*x = TaxReport{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaxReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaxReport) ProtoMessage() {}
+
+func (x *TaxReport) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaxReport.ProtoReflect.Descriptor instead.
+func (*TaxReport) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *TaxReport) GetReportId() string {
+	if x != nil {
+		return x.ReportId
+	}
+	return ""
+}
+
+func (x *TaxReport) GetResidentId() string {
+	if x != nil {
+		return x.ResidentId
+	}
+	return ""
+}
+
+func (x *TaxReport) GetTaxYear() int32 {
+	if x != nil {
+		return x.TaxYear
+	}
+	return 0
+}
+
+func (x *TaxReport) GetFinality() string {
+	if x != nil {
+		return x.Finality
+	}
+	return ""
+}
+
+func (x *TaxReport) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *TaxReport) GetFilingStatus() string {
+	if x != nil {
+		return x.FilingStatus
+	}
+	return ""
+}
+
+func (x *TaxReport) GetTaxInventoryRunId() string {
+	if x != nil {
+		return x.TaxInventoryRunId
+	}
+	return ""
+}
+
+func (x *TaxReport) GetTaxEstimateId() string {
+	if x != nil {
+		return x.TaxEstimateId
+	}
+	return ""
+}
+
+func (x *TaxReport) GetLotRunId() string {
+	if x != nil {
+		return x.LotRunId
+	}
+	return ""
+}
+
+func (x *TaxReport) GetInputDigest() string {
+	if x != nil {
+		return x.InputDigest
+	}
+	return ""
+}
+
+func (x *TaxReport) GetSchemaDigest() string {
+	if x != nil {
+		return x.SchemaDigest
+	}
+	return ""
+}
+
+func (x *TaxReport) GetDenominationAssetId() string {
+	if x != nil {
+		return x.DenominationAssetId
+	}
+	return ""
+}
+
+func (x *TaxReport) GetReportArtifactDigest() string {
+	if x != nil {
+		return x.ReportArtifactDigest
+	}
+	return ""
+}
+
+func (x *TaxReport) GetEvidencePackDigest() string {
+	if x != nil {
+		return x.EvidencePackDigest
+	}
+	return ""
+}
+
+func (x *TaxReport) GetPointerVersion() int64 {
+	if x != nil {
+		return x.PointerVersion
+	}
+	return 0
+}
+
+func (x *TaxReport) GetIssuedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.IssuedAt
+	}
+	return nil
+}
+
+func (x *TaxReport) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
+func (x *TaxReport) GetCounts() *TaxReportCounts {
+	if x != nil {
+		return x.Counts
+	}
+	return nil
+}
+
+func (x *TaxReport) GetGainLoss() *TaxAmount {
+	if x != nil {
+		return x.GainLoss
+	}
+	return nil
+}
+
+func (x *TaxReport) GetTaxableBase() *TaxAmount {
+	if x != nil {
+		return x.TaxableBase
+	}
+	return nil
+}
+
+func (x *TaxReport) GetNationalTax() *TaxAmount {
+	if x != nil {
+		return x.NationalTax
+	}
+	return nil
+}
+
+func (x *TaxReport) GetLocalTax() *TaxAmount {
+	if x != nil {
+		return x.LocalTax
+	}
+	return nil
+}
+
+func (x *TaxReport) GetTotalTax() *TaxAmount {
+	if x != nil {
+		return x.TotalTax
+	}
+	return nil
+}
+
+type GetCurrentTaxReportResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Report        *TaxReport             `protobuf:"bytes,1,opt,name=report,proto3" json:"report,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCurrentTaxReportResponse) Reset() {
+	*x = GetCurrentTaxReportResponse{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCurrentTaxReportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCurrentTaxReportResponse) ProtoMessage() {}
+
+func (x *GetCurrentTaxReportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCurrentTaxReportResponse.ProtoReflect.Descriptor instead.
+func (*GetCurrentTaxReportResponse) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *GetCurrentTaxReportResponse) GetReport() *TaxReport {
+	if x != nil {
+		return x.Report
+	}
+	return nil
+}
+
+type ListTaxReportHistoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*TaxReport           `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTaxReportHistoryResponse) Reset() {
+	*x = ListTaxReportHistoryResponse{}
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTaxReportHistoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTaxReportHistoryResponse) ProtoMessage() {}
+
+func (x *ListTaxReportHistoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_giwa_engine_v1_engine_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTaxReportHistoryResponse.ProtoReflect.Descriptor instead.
+func (*ListTaxReportHistoryResponse) Descriptor() ([]byte, []int) {
+	return file_giwa_engine_v1_engine_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *ListTaxReportHistoryResponse) GetItems() []*TaxReport {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
 var File_giwa_engine_v1_engine_proto protoreflect.FileDescriptor
 
 const file_giwa_engine_v1_engine_proto_rawDesc = "" +
@@ -3139,12 +3769,15 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x90\x01\n" +
 	"\x13ListSourcesResponse\x122\n" +
 	"\x05items\x18\x01 \x03(\v2\x1c.giwa.engine.v1.WalletSourceR\x05items\x12E\n" +
-	"\x0edocument_items\x18\x02 \x03(\v2\x1e.giwa.engine.v1.DocumentSourceR\rdocumentItems\"\x8c\x01\n" +
+	"\x0edocument_items\x18\x02 \x03(\v2\x1e.giwa.engine.v1.DocumentSourceR\rdocumentItems\"\x96\x02\n" +
 	"\x12EnqueueSyncRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x1f\n" +
 	"\vsource_kind\x18\x02 \x01(\tR\n" +
 	"sourceKind\x12\x1b\n" +
-	"\tsource_id\x18\x03 \x01(\tR\bsourceId\"@\n" +
+	"\tsource_id\x18\x03 \x01(\tR\bsourceId\x128\n" +
+	"\x18requested_coverage_start\x18\x04 \x01(\tR\x16requestedCoverageStart\x124\n" +
+	"\x16requested_coverage_end\x18\x05 \x01(\tR\x14requestedCoverageEnd\x12\x18\n" +
+	"\atrigger\x18\x06 \x01(\tR\atrigger\"@\n" +
 	"\x13EnqueueSyncResponse\x12)\n" +
 	"\x03job\x18\x01 \x01(\v2\x17.giwa.engine.v1.SyncJobR\x03job\"d\n" +
 	"\x11GetSyncJobRequest\x128\n" +
@@ -3156,7 +3789,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\"E\n" +
 	"\x14ListSyncJobsResponse\x12-\n" +
-	"\x05items\x18\x01 \x03(\v2\x17.giwa.engine.v1.SyncJobR\x05items\"\x87\x05\n" +
+	"\x05items\x18\x01 \x03(\v2\x17.giwa.engine.v1.SyncJobR\x05items\"\xbf\a\n" +
 	"\aSyncJob\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vsource_kind\x18\x02 \x01(\tR\n" +
@@ -3178,7 +3811,14 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"started_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12=\n" +
 	"\fcompleted_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"j\n" +
+	"updated_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x128\n" +
+	"\x18requested_coverage_start\x18\x11 \x01(\tR\x16requestedCoverageStart\x124\n" +
+	"\x16requested_coverage_end\x18\x12 \x01(\tR\x14requestedCoverageEnd\x12\x18\n" +
+	"\atrigger\x18\x13 \x01(\tR\atrigger\x12+\n" +
+	"\x11checkpoint_cursor\x18\x14 \x01(\tR\x10checkpointCursor\x12%\n" +
+	"\x0esegment_cursor\x18\x15 \x01(\tR\rsegmentCursor\x12-\n" +
+	"\x13upstream_jit_run_id\x18\x16 \x01(\tR\x10upstreamJitRunId\x12)\n" +
+	"\x10progress_version\x18\x17 \x01(\x03R\x0fprogressVersion\"j\n" +
 	"\x13GetDashboardRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x19\n" +
 	"\btax_year\x18\x02 \x01(\x05R\ataxYear\"\xce\x02\n" +
@@ -3334,7 +3974,56 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x14CreateReportResponse\x126\n" +
 	"\x06report\x18\x01 \x01(\v2\x1e.giwa.engine.v1.ReportSnapshotR\x06report\"K\n" +
 	"\x13ListReportsResponse\x124\n" +
-	"\x05items\x18\x01 \x03(\v2\x1e.giwa.engine.v1.ReportSnapshotR\x05items2\x96\x03\n" +
+	"\x05items\x18\x01 \x03(\v2\x1e.giwa.engine.v1.ReportSnapshotR\x05items\"w\n" +
+	"\x1aGetCurrentTaxReportRequest\x128\n" +
+	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x19\n" +
+	"\btax_year\x18\x02 \x01(\x05R\ataxYearJ\x04\b\x03\x10\x04\"\x8e\x01\n" +
+	"\x1bListTaxReportHistoryRequest\x128\n" +
+	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x19\n" +
+	"\btax_year\x18\x02 \x01(\x05R\ataxYear\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limitJ\x04\b\x03\x10\x04\"Z\n" +
+	"\tTaxAmount\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\x12\x16\n" +
+	"\x06amount\x18\x02 \x01(\tR\x06amount\x12\x1d\n" +
+	"\n" +
+	"has_amount\x18\x03 \x01(\bR\thasAmount\"\xa2\x01\n" +
+	"\x0fTaxReportCounts\x12\x1c\n" +
+	"\tdisposals\x18\x01 \x01(\x05R\tdisposals\x12\x1c\n" +
+	"\ttransfers\x18\x02 \x01(\x05R\ttransfers\x121\n" +
+	"\x14excluded_conversions\x18\x03 \x01(\x05R\x13excludedConversions\x12 \n" +
+	"\vlimitations\x18\x04 \x01(\x05R\vlimitations\"\x92\b\n" +
+	"\tTaxReport\x12\x1b\n" +
+	"\treport_id\x18\x01 \x01(\tR\breportId\x12\x1f\n" +
+	"\vresident_id\x18\x02 \x01(\tR\n" +
+	"residentId\x12\x19\n" +
+	"\btax_year\x18\x03 \x01(\x05R\ataxYear\x12\x1a\n" +
+	"\bfinality\x18\x04 \x01(\tR\bfinality\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\tR\x06status\x12#\n" +
+	"\rfiling_status\x18\x06 \x01(\tR\ffilingStatus\x12/\n" +
+	"\x14tax_inventory_run_id\x18\a \x01(\tR\x11taxInventoryRunId\x12&\n" +
+	"\x0ftax_estimate_id\x18\b \x01(\tR\rtaxEstimateId\x12\x1c\n" +
+	"\n" +
+	"lot_run_id\x18\t \x01(\tR\blotRunId\x12!\n" +
+	"\finput_digest\x18\n" +
+	" \x01(\tR\vinputDigest\x12#\n" +
+	"\rschema_digest\x18\v \x01(\tR\fschemaDigest\x122\n" +
+	"\x15denomination_asset_id\x18\f \x01(\tR\x13denominationAssetId\x124\n" +
+	"\x16report_artifact_digest\x18\r \x01(\tR\x14reportArtifactDigest\x120\n" +
+	"\x14evidence_pack_digest\x18\x0e \x01(\tR\x12evidencePackDigest\x12'\n" +
+	"\x0fpointer_version\x18\x0f \x01(\x03R\x0epointerVersion\x127\n" +
+	"\tissued_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\bissuedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x127\n" +
+	"\x06counts\x18\x12 \x01(\v2\x1f.giwa.engine.v1.TaxReportCountsR\x06counts\x126\n" +
+	"\tgain_loss\x18\x13 \x01(\v2\x19.giwa.engine.v1.TaxAmountR\bgainLoss\x12<\n" +
+	"\ftaxable_base\x18\x14 \x01(\v2\x19.giwa.engine.v1.TaxAmountR\vtaxableBase\x12<\n" +
+	"\fnational_tax\x18\x15 \x01(\v2\x19.giwa.engine.v1.TaxAmountR\vnationalTax\x126\n" +
+	"\tlocal_tax\x18\x16 \x01(\v2\x19.giwa.engine.v1.TaxAmountR\blocalTax\x126\n" +
+	"\ttotal_tax\x18\x17 \x01(\v2\x19.giwa.engine.v1.TaxAmountR\btotalTax\"P\n" +
+	"\x1bGetCurrentTaxReportResponse\x121\n" +
+	"\x06report\x18\x01 \x01(\v2\x19.giwa.engine.v1.TaxReportR\x06report\"O\n" +
+	"\x1cListTaxReportHistoryResponse\x12/\n" +
+	"\x05items\x18\x01 \x03(\v2\x19.giwa.engine.v1.TaxReportR\x05items2\x96\x03\n" +
 	"\rSourceService\x12_\n" +
 	"\x0eRegisterWallet\x12%.giwa.engine.v1.RegisterWalletRequest\x1a&.giwa.engine.v1.RegisterWalletResponse\x12e\n" +
 	"\x10RegisterDocument\x12'.giwa.engine.v1.RegisterDocumentRequest\x1a(.giwa.engine.v1.RegisterDocumentResponse\x12V\n" +
@@ -3344,13 +4033,15 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\vEnqueueSync\x12\".giwa.engine.v1.EnqueueSyncRequest\x1a#.giwa.engine.v1.EnqueueSyncResponse\x12S\n" +
 	"\n" +
 	"GetSyncJob\x12!.giwa.engine.v1.GetSyncJobRequest\x1a\".giwa.engine.v1.GetSyncJobResponse\x12Y\n" +
-	"\fListSyncJobs\x12#.giwa.engine.v1.ListSyncJobsRequest\x1a$.giwa.engine.v1.ListSyncJobsResponse2\xdb\x03\n" +
+	"\fListSyncJobs\x12#.giwa.engine.v1.ListSyncJobsRequest\x1a$.giwa.engine.v1.ListSyncJobsResponse2\xbe\x05\n" +
 	"\fQueryService\x12Y\n" +
 	"\fGetDashboard\x12#.giwa.engine.v1.GetDashboardRequest\x1a$.giwa.engine.v1.GetDashboardResponse\x12e\n" +
 	"\x10ListLedgerEvents\x12'.giwa.engine.v1.ListLedgerEventsRequest\x1a(.giwa.engine.v1.ListLedgerEventsResponse\x12V\n" +
 	"\vListReviews\x12\".giwa.engine.v1.ListReviewsRequest\x1a#.giwa.engine.v1.ListReviewsResponse\x12Y\n" +
 	"\fCreateReport\x12#.giwa.engine.v1.CreateReportRequest\x1a$.giwa.engine.v1.CreateReportResponse\x12V\n" +
-	"\vListReports\x12\".giwa.engine.v1.ListReportsRequest\x1a#.giwa.engine.v1.ListReportsResponse2\xbf\x01\n" +
+	"\vListReports\x12\".giwa.engine.v1.ListReportsRequest\x1a#.giwa.engine.v1.ListReportsResponse\x12n\n" +
+	"\x13GetCurrentTaxReport\x12*.giwa.engine.v1.GetCurrentTaxReportRequest\x1a+.giwa.engine.v1.GetCurrentTaxReportResponse\x12q\n" +
+	"\x14ListTaxReportHistory\x12+.giwa.engine.v1.ListTaxReportHistoryRequest\x1a,.giwa.engine.v1.ListTaxReportHistoryResponse2\xbf\x01\n" +
 	"\rReviewService\x12P\n" +
 	"\tGetReview\x12 .giwa.engine.v1.GetReviewRequest\x1a!.giwa.engine.v1.GetReviewResponse\x12\\\n" +
 	"\rResolveReview\x12$.giwa.engine.v1.ResolveReviewRequest\x1a%.giwa.engine.v1.ResolveReviewResponseBPZNgithub.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1;enginev1b\x06proto3"
@@ -3367,70 +4058,77 @@ func file_giwa_engine_v1_engine_proto_rawDescGZIP() []byte {
 	return file_giwa_engine_v1_engine_proto_rawDescData
 }
 
-var file_giwa_engine_v1_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_giwa_engine_v1_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_giwa_engine_v1_engine_proto_goTypes = []any{
-	(*ActorContext)(nil),               // 0: giwa.engine.v1.ActorContext
-	(*RequestContext)(nil),             // 1: giwa.engine.v1.RequestContext
-	(*RegisterWalletRequest)(nil),      // 2: giwa.engine.v1.RegisterWalletRequest
-	(*ListSourcesRequest)(nil),         // 3: giwa.engine.v1.ListSourcesRequest
-	(*RegisterWalletResponse)(nil),     // 4: giwa.engine.v1.RegisterWalletResponse
-	(*RegisterDocumentRequest)(nil),    // 5: giwa.engine.v1.RegisterDocumentRequest
-	(*RegisterDocumentResponse)(nil),   // 6: giwa.engine.v1.RegisterDocumentResponse
-	(*DisconnectSourceRequest)(nil),    // 7: giwa.engine.v1.DisconnectSourceRequest
-	(*DisconnectSourceResponse)(nil),   // 8: giwa.engine.v1.DisconnectSourceResponse
-	(*WalletChainScope)(nil),           // 9: giwa.engine.v1.WalletChainScope
-	(*WalletSource)(nil),               // 10: giwa.engine.v1.WalletSource
-	(*DocumentSource)(nil),             // 11: giwa.engine.v1.DocumentSource
-	(*ListSourcesResponse)(nil),        // 12: giwa.engine.v1.ListSourcesResponse
-	(*EnqueueSyncRequest)(nil),         // 13: giwa.engine.v1.EnqueueSyncRequest
-	(*EnqueueSyncResponse)(nil),        // 14: giwa.engine.v1.EnqueueSyncResponse
-	(*GetSyncJobRequest)(nil),          // 15: giwa.engine.v1.GetSyncJobRequest
-	(*GetSyncJobResponse)(nil),         // 16: giwa.engine.v1.GetSyncJobResponse
-	(*ListSyncJobsRequest)(nil),        // 17: giwa.engine.v1.ListSyncJobsRequest
-	(*ListSyncJobsResponse)(nil),       // 18: giwa.engine.v1.ListSyncJobsResponse
-	(*SyncJob)(nil),                    // 19: giwa.engine.v1.SyncJob
-	(*GetDashboardRequest)(nil),        // 20: giwa.engine.v1.GetDashboardRequest
-	(*Dashboard)(nil),                  // 21: giwa.engine.v1.Dashboard
-	(*GetDashboardResponse)(nil),       // 22: giwa.engine.v1.GetDashboardResponse
-	(*ListLedgerEventsRequest)(nil),    // 23: giwa.engine.v1.ListLedgerEventsRequest
-	(*LedgerPosting)(nil),              // 24: giwa.engine.v1.LedgerPosting
-	(*LedgerEvent)(nil),                // 25: giwa.engine.v1.LedgerEvent
-	(*ListLedgerEventsResponse)(nil),   // 26: giwa.engine.v1.ListLedgerEventsResponse
-	(*ListReviewsRequest)(nil),         // 27: giwa.engine.v1.ListReviewsRequest
-	(*ReviewItem)(nil),                 // 28: giwa.engine.v1.ReviewItem
-	(*ListReviewsResponse)(nil),        // 29: giwa.engine.v1.ListReviewsResponse
-	(*GetReviewRequest)(nil),           // 30: giwa.engine.v1.GetReviewRequest
-	(*ReviewOption)(nil),               // 31: giwa.engine.v1.ReviewOption
-	(*ReviewObservationReference)(nil), // 32: giwa.engine.v1.ReviewObservationReference
-	(*ReviewDetail)(nil),               // 33: giwa.engine.v1.ReviewDetail
-	(*GetReviewResponse)(nil),          // 34: giwa.engine.v1.GetReviewResponse
-	(*ResolveReviewRequest)(nil),       // 35: giwa.engine.v1.ResolveReviewRequest
-	(*ResolveReviewResponse)(nil),      // 36: giwa.engine.v1.ResolveReviewResponse
-	(*CreateReportRequest)(nil),        // 37: giwa.engine.v1.CreateReportRequest
-	(*ListReportsRequest)(nil),         // 38: giwa.engine.v1.ListReportsRequest
-	(*ReportSnapshot)(nil),             // 39: giwa.engine.v1.ReportSnapshot
-	(*CreateReportResponse)(nil),       // 40: giwa.engine.v1.CreateReportResponse
-	(*ListReportsResponse)(nil),        // 41: giwa.engine.v1.ListReportsResponse
-	(*timestamppb.Timestamp)(nil),      // 42: google.protobuf.Timestamp
+	(*ActorContext)(nil),                 // 0: giwa.engine.v1.ActorContext
+	(*RequestContext)(nil),               // 1: giwa.engine.v1.RequestContext
+	(*RegisterWalletRequest)(nil),        // 2: giwa.engine.v1.RegisterWalletRequest
+	(*ListSourcesRequest)(nil),           // 3: giwa.engine.v1.ListSourcesRequest
+	(*RegisterWalletResponse)(nil),       // 4: giwa.engine.v1.RegisterWalletResponse
+	(*RegisterDocumentRequest)(nil),      // 5: giwa.engine.v1.RegisterDocumentRequest
+	(*RegisterDocumentResponse)(nil),     // 6: giwa.engine.v1.RegisterDocumentResponse
+	(*DisconnectSourceRequest)(nil),      // 7: giwa.engine.v1.DisconnectSourceRequest
+	(*DisconnectSourceResponse)(nil),     // 8: giwa.engine.v1.DisconnectSourceResponse
+	(*WalletChainScope)(nil),             // 9: giwa.engine.v1.WalletChainScope
+	(*WalletSource)(nil),                 // 10: giwa.engine.v1.WalletSource
+	(*DocumentSource)(nil),               // 11: giwa.engine.v1.DocumentSource
+	(*ListSourcesResponse)(nil),          // 12: giwa.engine.v1.ListSourcesResponse
+	(*EnqueueSyncRequest)(nil),           // 13: giwa.engine.v1.EnqueueSyncRequest
+	(*EnqueueSyncResponse)(nil),          // 14: giwa.engine.v1.EnqueueSyncResponse
+	(*GetSyncJobRequest)(nil),            // 15: giwa.engine.v1.GetSyncJobRequest
+	(*GetSyncJobResponse)(nil),           // 16: giwa.engine.v1.GetSyncJobResponse
+	(*ListSyncJobsRequest)(nil),          // 17: giwa.engine.v1.ListSyncJobsRequest
+	(*ListSyncJobsResponse)(nil),         // 18: giwa.engine.v1.ListSyncJobsResponse
+	(*SyncJob)(nil),                      // 19: giwa.engine.v1.SyncJob
+	(*GetDashboardRequest)(nil),          // 20: giwa.engine.v1.GetDashboardRequest
+	(*Dashboard)(nil),                    // 21: giwa.engine.v1.Dashboard
+	(*GetDashboardResponse)(nil),         // 22: giwa.engine.v1.GetDashboardResponse
+	(*ListLedgerEventsRequest)(nil),      // 23: giwa.engine.v1.ListLedgerEventsRequest
+	(*LedgerPosting)(nil),                // 24: giwa.engine.v1.LedgerPosting
+	(*LedgerEvent)(nil),                  // 25: giwa.engine.v1.LedgerEvent
+	(*ListLedgerEventsResponse)(nil),     // 26: giwa.engine.v1.ListLedgerEventsResponse
+	(*ListReviewsRequest)(nil),           // 27: giwa.engine.v1.ListReviewsRequest
+	(*ReviewItem)(nil),                   // 28: giwa.engine.v1.ReviewItem
+	(*ListReviewsResponse)(nil),          // 29: giwa.engine.v1.ListReviewsResponse
+	(*GetReviewRequest)(nil),             // 30: giwa.engine.v1.GetReviewRequest
+	(*ReviewOption)(nil),                 // 31: giwa.engine.v1.ReviewOption
+	(*ReviewObservationReference)(nil),   // 32: giwa.engine.v1.ReviewObservationReference
+	(*ReviewDetail)(nil),                 // 33: giwa.engine.v1.ReviewDetail
+	(*GetReviewResponse)(nil),            // 34: giwa.engine.v1.GetReviewResponse
+	(*ResolveReviewRequest)(nil),         // 35: giwa.engine.v1.ResolveReviewRequest
+	(*ResolveReviewResponse)(nil),        // 36: giwa.engine.v1.ResolveReviewResponse
+	(*CreateReportRequest)(nil),          // 37: giwa.engine.v1.CreateReportRequest
+	(*ListReportsRequest)(nil),           // 38: giwa.engine.v1.ListReportsRequest
+	(*ReportSnapshot)(nil),               // 39: giwa.engine.v1.ReportSnapshot
+	(*CreateReportResponse)(nil),         // 40: giwa.engine.v1.CreateReportResponse
+	(*ListReportsResponse)(nil),          // 41: giwa.engine.v1.ListReportsResponse
+	(*GetCurrentTaxReportRequest)(nil),   // 42: giwa.engine.v1.GetCurrentTaxReportRequest
+	(*ListTaxReportHistoryRequest)(nil),  // 43: giwa.engine.v1.ListTaxReportHistoryRequest
+	(*TaxAmount)(nil),                    // 44: giwa.engine.v1.TaxAmount
+	(*TaxReportCounts)(nil),              // 45: giwa.engine.v1.TaxReportCounts
+	(*TaxReport)(nil),                    // 46: giwa.engine.v1.TaxReport
+	(*GetCurrentTaxReportResponse)(nil),  // 47: giwa.engine.v1.GetCurrentTaxReportResponse
+	(*ListTaxReportHistoryResponse)(nil), // 48: giwa.engine.v1.ListTaxReportHistoryResponse
+	(*timestamppb.Timestamp)(nil),        // 49: google.protobuf.Timestamp
 }
 var file_giwa_engine_v1_engine_proto_depIdxs = []int32{
 	0,  // 0: giwa.engine.v1.RequestContext.actor:type_name -> giwa.engine.v1.ActorContext
 	1,  // 1: giwa.engine.v1.RegisterWalletRequest.context:type_name -> giwa.engine.v1.RequestContext
-	42, // 2: giwa.engine.v1.RegisterWalletRequest.verified_at:type_name -> google.protobuf.Timestamp
+	49, // 2: giwa.engine.v1.RegisterWalletRequest.verified_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: giwa.engine.v1.ListSourcesRequest.context:type_name -> giwa.engine.v1.RequestContext
 	10, // 4: giwa.engine.v1.RegisterWalletResponse.source:type_name -> giwa.engine.v1.WalletSource
 	1,  // 5: giwa.engine.v1.RegisterDocumentRequest.context:type_name -> giwa.engine.v1.RequestContext
 	11, // 6: giwa.engine.v1.RegisterDocumentResponse.source:type_name -> giwa.engine.v1.DocumentSource
 	1,  // 7: giwa.engine.v1.DisconnectSourceRequest.context:type_name -> giwa.engine.v1.RequestContext
-	42, // 8: giwa.engine.v1.DisconnectSourceRequest.disconnected_at:type_name -> google.protobuf.Timestamp
+	49, // 8: giwa.engine.v1.DisconnectSourceRequest.disconnected_at:type_name -> google.protobuf.Timestamp
 	10, // 9: giwa.engine.v1.DisconnectSourceResponse.source:type_name -> giwa.engine.v1.WalletSource
-	42, // 10: giwa.engine.v1.WalletSource.verified_at:type_name -> google.protobuf.Timestamp
-	42, // 11: giwa.engine.v1.WalletSource.created_at:type_name -> google.protobuf.Timestamp
-	42, // 12: giwa.engine.v1.WalletSource.updated_at:type_name -> google.protobuf.Timestamp
-	42, // 13: giwa.engine.v1.WalletSource.disconnected_at:type_name -> google.protobuf.Timestamp
+	49, // 10: giwa.engine.v1.WalletSource.verified_at:type_name -> google.protobuf.Timestamp
+	49, // 11: giwa.engine.v1.WalletSource.created_at:type_name -> google.protobuf.Timestamp
+	49, // 12: giwa.engine.v1.WalletSource.updated_at:type_name -> google.protobuf.Timestamp
+	49, // 13: giwa.engine.v1.WalletSource.disconnected_at:type_name -> google.protobuf.Timestamp
 	9,  // 14: giwa.engine.v1.WalletSource.chain_scopes:type_name -> giwa.engine.v1.WalletChainScope
-	42, // 15: giwa.engine.v1.DocumentSource.created_at:type_name -> google.protobuf.Timestamp
-	42, // 16: giwa.engine.v1.DocumentSource.updated_at:type_name -> google.protobuf.Timestamp
+	49, // 15: giwa.engine.v1.DocumentSource.created_at:type_name -> google.protobuf.Timestamp
+	49, // 16: giwa.engine.v1.DocumentSource.updated_at:type_name -> google.protobuf.Timestamp
 	10, // 17: giwa.engine.v1.ListSourcesResponse.items:type_name -> giwa.engine.v1.WalletSource
 	11, // 18: giwa.engine.v1.ListSourcesResponse.document_items:type_name -> giwa.engine.v1.DocumentSource
 	1,  // 19: giwa.engine.v1.EnqueueSyncRequest.context:type_name -> giwa.engine.v1.RequestContext
@@ -3439,68 +4137,84 @@ var file_giwa_engine_v1_engine_proto_depIdxs = []int32{
 	19, // 22: giwa.engine.v1.GetSyncJobResponse.job:type_name -> giwa.engine.v1.SyncJob
 	1,  // 23: giwa.engine.v1.ListSyncJobsRequest.context:type_name -> giwa.engine.v1.RequestContext
 	19, // 24: giwa.engine.v1.ListSyncJobsResponse.items:type_name -> giwa.engine.v1.SyncJob
-	42, // 25: giwa.engine.v1.SyncJob.created_at:type_name -> google.protobuf.Timestamp
-	42, // 26: giwa.engine.v1.SyncJob.started_at:type_name -> google.protobuf.Timestamp
-	42, // 27: giwa.engine.v1.SyncJob.completed_at:type_name -> google.protobuf.Timestamp
-	42, // 28: giwa.engine.v1.SyncJob.updated_at:type_name -> google.protobuf.Timestamp
+	49, // 25: giwa.engine.v1.SyncJob.created_at:type_name -> google.protobuf.Timestamp
+	49, // 26: giwa.engine.v1.SyncJob.started_at:type_name -> google.protobuf.Timestamp
+	49, // 27: giwa.engine.v1.SyncJob.completed_at:type_name -> google.protobuf.Timestamp
+	49, // 28: giwa.engine.v1.SyncJob.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 29: giwa.engine.v1.GetDashboardRequest.context:type_name -> giwa.engine.v1.RequestContext
-	42, // 30: giwa.engine.v1.Dashboard.last_sync_updated_at:type_name -> google.protobuf.Timestamp
+	49, // 30: giwa.engine.v1.Dashboard.last_sync_updated_at:type_name -> google.protobuf.Timestamp
 	21, // 31: giwa.engine.v1.GetDashboardResponse.dashboard:type_name -> giwa.engine.v1.Dashboard
 	1,  // 32: giwa.engine.v1.ListLedgerEventsRequest.context:type_name -> giwa.engine.v1.RequestContext
-	42, // 33: giwa.engine.v1.LedgerPosting.occurred_at:type_name -> google.protobuf.Timestamp
-	42, // 34: giwa.engine.v1.LedgerEvent.effective_at:type_name -> google.protobuf.Timestamp
+	49, // 33: giwa.engine.v1.LedgerPosting.occurred_at:type_name -> google.protobuf.Timestamp
+	49, // 34: giwa.engine.v1.LedgerEvent.effective_at:type_name -> google.protobuf.Timestamp
 	24, // 35: giwa.engine.v1.LedgerEvent.postings:type_name -> giwa.engine.v1.LedgerPosting
 	25, // 36: giwa.engine.v1.ListLedgerEventsResponse.items:type_name -> giwa.engine.v1.LedgerEvent
 	1,  // 37: giwa.engine.v1.ListReviewsRequest.context:type_name -> giwa.engine.v1.RequestContext
-	42, // 38: giwa.engine.v1.ReviewItem.created_at:type_name -> google.protobuf.Timestamp
+	49, // 38: giwa.engine.v1.ReviewItem.created_at:type_name -> google.protobuf.Timestamp
 	28, // 39: giwa.engine.v1.ListReviewsResponse.items:type_name -> giwa.engine.v1.ReviewItem
 	1,  // 40: giwa.engine.v1.GetReviewRequest.context:type_name -> giwa.engine.v1.RequestContext
-	42, // 41: giwa.engine.v1.ReviewObservationReference.occurred_at:type_name -> google.protobuf.Timestamp
+	49, // 41: giwa.engine.v1.ReviewObservationReference.occurred_at:type_name -> google.protobuf.Timestamp
 	31, // 42: giwa.engine.v1.ReviewDetail.options:type_name -> giwa.engine.v1.ReviewOption
 	32, // 43: giwa.engine.v1.ReviewDetail.observations:type_name -> giwa.engine.v1.ReviewObservationReference
-	42, // 44: giwa.engine.v1.ReviewDetail.created_at:type_name -> google.protobuf.Timestamp
-	42, // 45: giwa.engine.v1.ReviewDetail.revision_created_at:type_name -> google.protobuf.Timestamp
+	49, // 44: giwa.engine.v1.ReviewDetail.created_at:type_name -> google.protobuf.Timestamp
+	49, // 45: giwa.engine.v1.ReviewDetail.revision_created_at:type_name -> google.protobuf.Timestamp
 	33, // 46: giwa.engine.v1.GetReviewResponse.review:type_name -> giwa.engine.v1.ReviewDetail
 	1,  // 47: giwa.engine.v1.ResolveReviewRequest.context:type_name -> giwa.engine.v1.RequestContext
 	33, // 48: giwa.engine.v1.ResolveReviewResponse.review:type_name -> giwa.engine.v1.ReviewDetail
 	1,  // 49: giwa.engine.v1.CreateReportRequest.context:type_name -> giwa.engine.v1.RequestContext
 	1,  // 50: giwa.engine.v1.ListReportsRequest.context:type_name -> giwa.engine.v1.RequestContext
-	42, // 51: giwa.engine.v1.ReportSnapshot.issued_at:type_name -> google.protobuf.Timestamp
+	49, // 51: giwa.engine.v1.ReportSnapshot.issued_at:type_name -> google.protobuf.Timestamp
 	39, // 52: giwa.engine.v1.CreateReportResponse.report:type_name -> giwa.engine.v1.ReportSnapshot
 	39, // 53: giwa.engine.v1.ListReportsResponse.items:type_name -> giwa.engine.v1.ReportSnapshot
-	2,  // 54: giwa.engine.v1.SourceService.RegisterWallet:input_type -> giwa.engine.v1.RegisterWalletRequest
-	5,  // 55: giwa.engine.v1.SourceService.RegisterDocument:input_type -> giwa.engine.v1.RegisterDocumentRequest
-	3,  // 56: giwa.engine.v1.SourceService.ListSources:input_type -> giwa.engine.v1.ListSourcesRequest
-	7,  // 57: giwa.engine.v1.SourceService.DisconnectSource:input_type -> giwa.engine.v1.DisconnectSourceRequest
-	13, // 58: giwa.engine.v1.WorkflowService.EnqueueSync:input_type -> giwa.engine.v1.EnqueueSyncRequest
-	15, // 59: giwa.engine.v1.WorkflowService.GetSyncJob:input_type -> giwa.engine.v1.GetSyncJobRequest
-	17, // 60: giwa.engine.v1.WorkflowService.ListSyncJobs:input_type -> giwa.engine.v1.ListSyncJobsRequest
-	20, // 61: giwa.engine.v1.QueryService.GetDashboard:input_type -> giwa.engine.v1.GetDashboardRequest
-	23, // 62: giwa.engine.v1.QueryService.ListLedgerEvents:input_type -> giwa.engine.v1.ListLedgerEventsRequest
-	27, // 63: giwa.engine.v1.QueryService.ListReviews:input_type -> giwa.engine.v1.ListReviewsRequest
-	37, // 64: giwa.engine.v1.QueryService.CreateReport:input_type -> giwa.engine.v1.CreateReportRequest
-	38, // 65: giwa.engine.v1.QueryService.ListReports:input_type -> giwa.engine.v1.ListReportsRequest
-	30, // 66: giwa.engine.v1.ReviewService.GetReview:input_type -> giwa.engine.v1.GetReviewRequest
-	35, // 67: giwa.engine.v1.ReviewService.ResolveReview:input_type -> giwa.engine.v1.ResolveReviewRequest
-	4,  // 68: giwa.engine.v1.SourceService.RegisterWallet:output_type -> giwa.engine.v1.RegisterWalletResponse
-	6,  // 69: giwa.engine.v1.SourceService.RegisterDocument:output_type -> giwa.engine.v1.RegisterDocumentResponse
-	12, // 70: giwa.engine.v1.SourceService.ListSources:output_type -> giwa.engine.v1.ListSourcesResponse
-	8,  // 71: giwa.engine.v1.SourceService.DisconnectSource:output_type -> giwa.engine.v1.DisconnectSourceResponse
-	14, // 72: giwa.engine.v1.WorkflowService.EnqueueSync:output_type -> giwa.engine.v1.EnqueueSyncResponse
-	16, // 73: giwa.engine.v1.WorkflowService.GetSyncJob:output_type -> giwa.engine.v1.GetSyncJobResponse
-	18, // 74: giwa.engine.v1.WorkflowService.ListSyncJobs:output_type -> giwa.engine.v1.ListSyncJobsResponse
-	22, // 75: giwa.engine.v1.QueryService.GetDashboard:output_type -> giwa.engine.v1.GetDashboardResponse
-	26, // 76: giwa.engine.v1.QueryService.ListLedgerEvents:output_type -> giwa.engine.v1.ListLedgerEventsResponse
-	29, // 77: giwa.engine.v1.QueryService.ListReviews:output_type -> giwa.engine.v1.ListReviewsResponse
-	40, // 78: giwa.engine.v1.QueryService.CreateReport:output_type -> giwa.engine.v1.CreateReportResponse
-	41, // 79: giwa.engine.v1.QueryService.ListReports:output_type -> giwa.engine.v1.ListReportsResponse
-	34, // 80: giwa.engine.v1.ReviewService.GetReview:output_type -> giwa.engine.v1.GetReviewResponse
-	36, // 81: giwa.engine.v1.ReviewService.ResolveReview:output_type -> giwa.engine.v1.ResolveReviewResponse
-	68, // [68:82] is the sub-list for method output_type
-	54, // [54:68] is the sub-list for method input_type
-	54, // [54:54] is the sub-list for extension type_name
-	54, // [54:54] is the sub-list for extension extendee
-	0,  // [0:54] is the sub-list for field type_name
+	1,  // 54: giwa.engine.v1.GetCurrentTaxReportRequest.context:type_name -> giwa.engine.v1.RequestContext
+	1,  // 55: giwa.engine.v1.ListTaxReportHistoryRequest.context:type_name -> giwa.engine.v1.RequestContext
+	49, // 56: giwa.engine.v1.TaxReport.issued_at:type_name -> google.protobuf.Timestamp
+	49, // 57: giwa.engine.v1.TaxReport.updated_at:type_name -> google.protobuf.Timestamp
+	45, // 58: giwa.engine.v1.TaxReport.counts:type_name -> giwa.engine.v1.TaxReportCounts
+	44, // 59: giwa.engine.v1.TaxReport.gain_loss:type_name -> giwa.engine.v1.TaxAmount
+	44, // 60: giwa.engine.v1.TaxReport.taxable_base:type_name -> giwa.engine.v1.TaxAmount
+	44, // 61: giwa.engine.v1.TaxReport.national_tax:type_name -> giwa.engine.v1.TaxAmount
+	44, // 62: giwa.engine.v1.TaxReport.local_tax:type_name -> giwa.engine.v1.TaxAmount
+	44, // 63: giwa.engine.v1.TaxReport.total_tax:type_name -> giwa.engine.v1.TaxAmount
+	46, // 64: giwa.engine.v1.GetCurrentTaxReportResponse.report:type_name -> giwa.engine.v1.TaxReport
+	46, // 65: giwa.engine.v1.ListTaxReportHistoryResponse.items:type_name -> giwa.engine.v1.TaxReport
+	2,  // 66: giwa.engine.v1.SourceService.RegisterWallet:input_type -> giwa.engine.v1.RegisterWalletRequest
+	5,  // 67: giwa.engine.v1.SourceService.RegisterDocument:input_type -> giwa.engine.v1.RegisterDocumentRequest
+	3,  // 68: giwa.engine.v1.SourceService.ListSources:input_type -> giwa.engine.v1.ListSourcesRequest
+	7,  // 69: giwa.engine.v1.SourceService.DisconnectSource:input_type -> giwa.engine.v1.DisconnectSourceRequest
+	13, // 70: giwa.engine.v1.WorkflowService.EnqueueSync:input_type -> giwa.engine.v1.EnqueueSyncRequest
+	15, // 71: giwa.engine.v1.WorkflowService.GetSyncJob:input_type -> giwa.engine.v1.GetSyncJobRequest
+	17, // 72: giwa.engine.v1.WorkflowService.ListSyncJobs:input_type -> giwa.engine.v1.ListSyncJobsRequest
+	20, // 73: giwa.engine.v1.QueryService.GetDashboard:input_type -> giwa.engine.v1.GetDashboardRequest
+	23, // 74: giwa.engine.v1.QueryService.ListLedgerEvents:input_type -> giwa.engine.v1.ListLedgerEventsRequest
+	27, // 75: giwa.engine.v1.QueryService.ListReviews:input_type -> giwa.engine.v1.ListReviewsRequest
+	37, // 76: giwa.engine.v1.QueryService.CreateReport:input_type -> giwa.engine.v1.CreateReportRequest
+	38, // 77: giwa.engine.v1.QueryService.ListReports:input_type -> giwa.engine.v1.ListReportsRequest
+	42, // 78: giwa.engine.v1.QueryService.GetCurrentTaxReport:input_type -> giwa.engine.v1.GetCurrentTaxReportRequest
+	43, // 79: giwa.engine.v1.QueryService.ListTaxReportHistory:input_type -> giwa.engine.v1.ListTaxReportHistoryRequest
+	30, // 80: giwa.engine.v1.ReviewService.GetReview:input_type -> giwa.engine.v1.GetReviewRequest
+	35, // 81: giwa.engine.v1.ReviewService.ResolveReview:input_type -> giwa.engine.v1.ResolveReviewRequest
+	4,  // 82: giwa.engine.v1.SourceService.RegisterWallet:output_type -> giwa.engine.v1.RegisterWalletResponse
+	6,  // 83: giwa.engine.v1.SourceService.RegisterDocument:output_type -> giwa.engine.v1.RegisterDocumentResponse
+	12, // 84: giwa.engine.v1.SourceService.ListSources:output_type -> giwa.engine.v1.ListSourcesResponse
+	8,  // 85: giwa.engine.v1.SourceService.DisconnectSource:output_type -> giwa.engine.v1.DisconnectSourceResponse
+	14, // 86: giwa.engine.v1.WorkflowService.EnqueueSync:output_type -> giwa.engine.v1.EnqueueSyncResponse
+	16, // 87: giwa.engine.v1.WorkflowService.GetSyncJob:output_type -> giwa.engine.v1.GetSyncJobResponse
+	18, // 88: giwa.engine.v1.WorkflowService.ListSyncJobs:output_type -> giwa.engine.v1.ListSyncJobsResponse
+	22, // 89: giwa.engine.v1.QueryService.GetDashboard:output_type -> giwa.engine.v1.GetDashboardResponse
+	26, // 90: giwa.engine.v1.QueryService.ListLedgerEvents:output_type -> giwa.engine.v1.ListLedgerEventsResponse
+	29, // 91: giwa.engine.v1.QueryService.ListReviews:output_type -> giwa.engine.v1.ListReviewsResponse
+	40, // 92: giwa.engine.v1.QueryService.CreateReport:output_type -> giwa.engine.v1.CreateReportResponse
+	41, // 93: giwa.engine.v1.QueryService.ListReports:output_type -> giwa.engine.v1.ListReportsResponse
+	47, // 94: giwa.engine.v1.QueryService.GetCurrentTaxReport:output_type -> giwa.engine.v1.GetCurrentTaxReportResponse
+	48, // 95: giwa.engine.v1.QueryService.ListTaxReportHistory:output_type -> giwa.engine.v1.ListTaxReportHistoryResponse
+	34, // 96: giwa.engine.v1.ReviewService.GetReview:output_type -> giwa.engine.v1.GetReviewResponse
+	36, // 97: giwa.engine.v1.ReviewService.ResolveReview:output_type -> giwa.engine.v1.ResolveReviewResponse
+	82, // [82:98] is the sub-list for method output_type
+	66, // [66:82] is the sub-list for method input_type
+	66, // [66:66] is the sub-list for extension type_name
+	66, // [66:66] is the sub-list for extension extendee
+	0,  // [0:66] is the sub-list for field type_name
 }
 
 func init() { file_giwa_engine_v1_engine_proto_init() }
@@ -3514,7 +4228,7 @@ func file_giwa_engine_v1_engine_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_giwa_engine_v1_engine_proto_rawDesc), len(file_giwa_engine_v1_engine_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   42,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   4,
 		},

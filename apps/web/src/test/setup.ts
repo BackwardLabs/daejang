@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
-import { setCurrentUser } from '../auth/session-store.ts'
+import { resetSessionStateForTests } from '../auth/session-store.ts'
 
 function createMemoryStorage(): Storage {
   const values = new Map<string, string>()
@@ -41,7 +41,7 @@ Object.defineProperties(window, {
 
 afterEach(() => {
   cleanup()
-  setCurrentUser(null)
+  resetSessionStateForTests()
   window.localStorage.clear()
   window.sessionStorage.clear()
 })

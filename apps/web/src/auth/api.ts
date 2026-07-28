@@ -9,9 +9,25 @@ export type SignupMethods = {
 export type AuthCapabilities = {
   signup: {
     enabled: boolean
+    identityVerificationRequired: boolean
     methods: SignupMethods
   }
 }
+
+export type AuthenticatedUser = {
+  id: string
+  displayName: string
+}
+
+export type AuthenticatedSessionResponse = {
+  status: 'authenticated'
+  nextPath: string
+  user: AuthenticatedUser
+}
+
+export type EmailLoginResponse =
+  | AuthenticatedSessionResponse
+  | { status: 'signup_pending'; nextPath: '/?onboarding=terms' }
 
 type ApiErrorPayload = {
   error?: {
@@ -37,6 +53,97 @@ export class WebApiError extends Error {
 }
 
 const defaultApiBase = '/api/v1'
+const userIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+
+function invalidAuthResponse(message: string) {
+  return new WebApiError(502, 'INVALID_AUTH_RESPONSE', message)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isSafeInternalPath(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.startsWith('/') &&
+    !value.startsWith('//')
+  )
+}
+
+function parseAuthenticatedUser(value: unknown): AuthenticatedUser {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    !userIdPattern.test(value.id) ||
+    typeof value.displayName !== 'string' ||
+    !value.displayName.trim()
+  ) {
+    throw invalidAuthResponse('회원 정보를 확인하지 못했습니다')
+  }
+
+  return {
+    id: value.id,
+    displayName: value.displayName,
+  }
+}
+
+function parseAuthenticatedSessionResponse(
+  value: unknown,
+): AuthenticatedSessionResponse {
+  if (
+    !isRecord(value) ||
+    value.status !== 'authenticated' ||
+    !isSafeInternalPath(value.nextPath)
+  ) {
+    throw invalidAuthResponse('인증 결과를 확인하지 못했습니다')
+  }
+
+  return {
+    status: 'authenticated',
+    nextPath: value.nextPath,
+    user: parseAuthenticatedUser(value.user),
+  }
+}
+
+function parseEmailLoginResponse(value: unknown): EmailLoginResponse {
+  if (
+    isRecord(value) &&
+    value.status === 'signup_pending' &&
+    value.nextPath === '/?onboarding=terms'
+  ) {
+    return {
+      status: 'signup_pending',
+      nextPath: '/?onboarding=terms',
+    }
+  }
+
+  return parseAuthenticatedSessionResponse(value)
+}
+
+function parseCurrentUserResponse(value: unknown) {
+  if (!isRecord(value)) {
+    throw invalidAuthResponse('로그인 상태를 확인하지 못했습니다')
+  }
+
+  return { user: parseAuthenticatedUser(value.user) }
+}
+
+function parseSignupConsentResponse(value: unknown) {
+  if (
+    isRecord(value) &&
+    value.status === 'accepted' &&
+    value.nextStep === 'identity_verification'
+  ) {
+    return {
+      status: 'accepted' as const,
+      nextStep: 'identity_verification' as const,
+    }
+  }
+
+  return parseAuthenticatedSessionResponse(value)
+}
 
 function apiBaseUrl(origin = window.location.origin) {
   const configured = import.meta.env.VITE_WEB_API_BASE_URL?.trim() || defaultApiBase
@@ -112,8 +219,16 @@ function parseAuthCapabilities(value: unknown): AuthCapabilities {
   }
 
   const enabled = (signup as { enabled?: unknown }).enabled
+  const identityVerificationRequired = (
+    signup as { identityVerificationRequired?: unknown }
+  ).identityVerificationRequired
   const methods = (signup as { methods?: unknown }).methods
-  if (typeof enabled !== 'boolean' || !methods || typeof methods !== 'object') {
+  if (
+    typeof enabled !== 'boolean' ||
+    typeof identityVerificationRequired !== 'boolean' ||
+    !methods ||
+    typeof methods !== 'object'
+  ) {
     throw new WebApiError(502, 'INVALID_AUTH_CAPABILITIES', '가입 상태를 확인하지 못했습니다')
   }
 
@@ -134,6 +249,7 @@ function parseAuthCapabilities(value: unknown): AuthCapabilities {
   return {
     signup: {
       enabled,
+      identityVerificationRequired,
       methods: { email, oauthProviders },
     },
   }
@@ -182,26 +298,20 @@ export function createEmailAccount(input: {
   )
 }
 
-export function loginWithEmail(input: {
+export async function loginWithEmail(input: {
   email: string
   password: string
 }) {
-  return requestJson<
-    | { status: 'authenticated'; nextPath: string }
-    | { status: 'signup_pending'; nextPath: '/?onboarding=terms' }
-  >(
-    'auth/email/login',
-    { method: 'POST', body: { ...input, returnTo: '/dashboard' } },
+  return parseEmailLoginResponse(
+    await requestJson<unknown>('auth/email/login', {
+      method: 'POST',
+      body: { ...input, returnTo: '/dashboard' },
+    }),
   )
 }
 
-export type AuthenticatedUser = {
-  id: string
-  displayName: string
-}
-
-export function getCurrentUser() {
-  return requestJson<{ user: AuthenticatedUser }>('me')
+export async function getCurrentUser() {
+  return parseCurrentUserResponse(await requestJson<unknown>('me'))
 }
 
 export async function logout() {
@@ -241,26 +351,16 @@ export function getCurrentLegalDocuments() {
   )
 }
 
-export function submitSignupConsents(
+export async function submitSignupConsents(
   decisions: Array<{
     legalDocumentId: string
     action: 'accepted' | 'withdrawn'
   }>,
 ) {
-  return requestJson<{
-    status: 'accepted'
-    nextStep: 'identity_verification'
-  }>('signup/consents', {
-    method: 'POST',
-    body: { locale: 'ko-KR', decisions },
-  })
-}
-
-export function completeMockIdentityVerification() {
-  return requestJson<{
-    status: 'authenticated'
-    nextPath: '/dashboard'
-  }>('signup/identity-verification/mock-complete', {
-    method: 'POST',
-  })
+  return parseSignupConsentResponse(
+    await requestJson<unknown>('signup/consents', {
+      method: 'POST',
+      body: { locale: 'ko-KR', decisions },
+    }),
+  )
 }

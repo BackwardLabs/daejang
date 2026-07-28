@@ -49,9 +49,10 @@ const config: AppConfig = {
   },
   signup: {
     enabled: true,
+    identityVerificationRequired: false,
     methods: { email: true, oauthProviders: [] },
   },
-  identityVerificationMode: 'mock',
+  identityVerificationMode: 'disabled',
   engineMtls: undefined,
 }
 
@@ -84,7 +85,12 @@ class JourneyUploadStore implements UploadStore {
     return this.session
   }
 
-  async write(userId: string, uploadId: string, contents: Buffer) {
+  async write(
+    userId: string,
+    uploadId: string,
+    contents: Buffer,
+    _now: Date,
+  ) {
     if (
       !this.session ||
       this.session.userId !== userId ||
@@ -98,7 +104,7 @@ class JourneyUploadStore implements UploadStore {
     return this.session
   }
 
-  async confirm(userId: string, uploadId: string) {
+  async confirm(userId: string, uploadId: string, _now: Date) {
     if (
       !this.session ||
       !this.contents ||
@@ -117,9 +123,27 @@ class JourneyUploadStore implements UploadStore {
     }
     return this.session
   }
+
+  async discard(userId: string, uploadId: string) {
+    if (
+      !this.session ||
+      this.session.userId !== userId ||
+      this.session.id !== uploadId
+    ) {
+      return false
+    }
+    this.contents = undefined
+    this.session = undefined
+    return true
+  }
+
+  async cleanupAbandoned() {
+    return { examined: 0, removed: 0, missing: 0, retryPending: 0 }
+  }
 }
 
 class JourneyEngine implements EngineDataClient {
+  readonly upbitPdfImportSupported = true
   private documents: Array<Record<string, unknown>> = []
   private jobs: Array<Record<string, unknown>> = []
   private reports: Array<Record<string, unknown>> = []
@@ -152,13 +176,12 @@ class JourneyEngine implements EngineDataClient {
 
   async enqueueSync(
     _context: Parameters<EngineDataClient['enqueueSync']>[0],
-    sourceKind: string,
-    sourceId: string,
+    input: Parameters<EngineDataClient['enqueueSync']>[1],
   ) {
     const job = {
       id: randomUUID(),
-      sourceKind,
-      sourceId,
+      sourceKind: input.sourceKind,
+      sourceId: input.sourceId,
       state: 'QUEUED',
       stage: 'COLLECTING',
     }
@@ -228,6 +251,10 @@ class JourneyEngine implements EngineDataClient {
   ) {
     return this.reports.filter((report) => report.taxYear === taxYear)
   }
+
+  async listTaxReportHistory() {
+    return []
+  }
 }
 
 const cookiePair = (
@@ -294,6 +321,7 @@ describe('documented normal user journey', () => {
     expect(capabilities.json()).toEqual({
       signup: {
         enabled: true,
+        identityVerificationRequired: false,
         methods: { email: true, oauthProviders: [] },
       },
     })
@@ -350,7 +378,6 @@ describe('documented normal user journey', () => {
       }>()
       .documents.filter((document) => document.required)
     expect(requiredDocuments.map(({ documentType }) => documentType).sort()).toEqual([
-      'identity_verification',
       'privacy',
       'terms',
     ])
@@ -369,23 +396,16 @@ describe('documented normal user journey', () => {
     })
     expect(consent.statusCode).toBe(200)
     expect(consent.json()).toEqual({
-      status: 'accepted',
-      nextStep: 'identity_verification',
-    })
-
-    const activation = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/signup/identity-verification/mock-complete',
-      headers: { ...origin, cookie: signupCookie as string },
-    })
-    expect(activation.statusCode).toBe(200)
-    expect(activation.json()).toEqual({
       status: 'authenticated',
       nextPath: '/dashboard',
+      user: {
+        id: expect.any(String),
+        displayName: 'GIWA 사용자',
+      },
     })
     const sessionCookie = cookiePair(
       config.sessionCookieName,
-      activation.headers['set-cookie'],
+      consent.headers['set-cookie'],
     )
     expect(sessionCookie).toBeTruthy()
     const authenticatedHeaders = { cookie: sessionCookie as string }
@@ -534,6 +554,10 @@ describe('documented normal user journey', () => {
     expect(returningLogin.json()).toEqual({
       status: 'authenticated',
       nextPath: '/dashboard',
+      user: {
+        id: expect.any(String),
+        displayName: 'GIWA 사용자',
+      },
     })
     const returningSessionCookie = cookiePair(
       config.sessionCookieName,

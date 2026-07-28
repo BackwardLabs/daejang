@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { AppSidebar, type AppYear } from '../../components/AppSidebar.tsx'
+import { AppLink } from '../../components/AppLink.tsx'
 import { ApiClientError } from '../../api/client.ts'
 import {
   loadLedger,
@@ -265,7 +266,7 @@ export function LedgerPage() {
 
         {ledgerStatus === 'ready' && view === 'ledger' ? (
           events.length === 0 ? (
-            <section className="ledger-empty-state"><h2>아직 처리된 거래가 없습니다</h2><p>데이터 소스를 등록하고 Sync Job이 완료되면 실제 거래가 여기에 표시됩니다.</p><a href="/sources">데이터 소스 관리</a></section>
+            <section className="ledger-empty-state"><h2>아직 처리된 거래가 없습니다</h2><p>데이터 소스를 등록하고 Sync Job이 완료되면 실제 거래가 여기에 표시됩니다.</p><AppLink href="/sources">데이터 소스 관리</AppLink></section>
           ) : (
             <section className="ledger-browser" aria-label="거래 장부">
               <div className="ledger-browser__list">

@@ -72,8 +72,9 @@ Migration `24`가 적용된 DB에서는 인증 Session의 사용자 ID를 subjec
 GET /api/v1/tax-reports/:taxYear/current?finality=FINAL|PROVISIONAL&residentId=...
 ```
 
-서버는 시작 시 `reporting.tax_report`, `reporting.current_tax_report`, `tax.inventory_run`,
-`tax.estimate`와 `tax-report-persistence` migration `24` 계약을 확인합니다.
+서버는 시작 시 읽기 권한이 필요한 `reporting.tax_report`,
+`reporting.current_tax_report`와 `tax-report-persistence` migration `24` 계약만
+확인합니다. 세금 계산 상세 테이블은 Web API 역할에 노출하지 않습니다.
 
 ## 검증 명령
 

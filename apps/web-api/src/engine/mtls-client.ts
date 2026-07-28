@@ -110,6 +110,8 @@ type QueryServiceClient = Client & {
   listReviews: UnaryMethod
   createReport: UnaryMethod
   listReports: UnaryMethod
+  getCurrentTaxReport: UnaryMethod
+  listTaxReportHistory: UnaryMethod
 }
 type ReviewServiceClient = Client & {
   getReview: UnaryMethod
@@ -181,6 +183,7 @@ const requestContext = (value: SourceRequestContext) => ({
 
 export class EngineMtlsClient implements WalletSourceRegistry {
   readonly durable = true
+  readonly upbitPdfImportSupported = false
   readonly #client: SourceServiceClient
   readonly #workflowClient: WorkflowServiceClient
   readonly #queryClient: QueryServiceClient
@@ -276,8 +279,16 @@ export class EngineMtlsClient implements WalletSourceRegistry {
     return { wallets: response.items.map(toWalletSource), documents: response.documentItems.map((value) => this.#documentSource(value)) }
   }
 
-  async enqueueSync(context: SourceRequestContext, sourceKind: string, sourceId: string) {
-    const response = await this.#unaryOn(this.#workflowClient, 'enqueueSync', { context: requestContext(context), sourceKind, sourceId }) as { job: Record<string, unknown> }
+  async enqueueSync(context: SourceRequestContext, input: {
+    sourceKind: 'UPBIT_PDF' | 'EVM_WALLET'
+    sourceId: string
+    requestedCoverageStart: string
+    requestedCoverageEnd: string
+    trigger: 'USER_REQUEST'
+  }) {
+    const response = await this.#unaryOn(this.#workflowClient, 'enqueueSync', {
+      context: requestContext(context), ...input,
+    }) as { job: Record<string, unknown> }
     return normalizeProtoValue(response.job) as Record<string, unknown>
   }
 
@@ -342,6 +353,20 @@ export class EngineMtlsClient implements WalletSourceRegistry {
 
   async listReports(context: SourceRequestContext, taxYear: number, limit = 20) {
     const response = await this.#unaryOn(this.#queryClient, 'listReports', { context: requestContext(context), taxYear, limit }) as { items: Array<Record<string, unknown>> }
+    return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
+  }
+
+  async getCurrentTaxReport(context: SourceRequestContext, taxYear: number) {
+    const response = await this.#unaryOn(this.#queryClient, 'getCurrentTaxReport', {
+      context: requestContext(context), taxYear,
+    }) as { report: Record<string, unknown> }
+    return normalizeProtoValue(response.report) as Record<string, unknown>
+  }
+
+  async listTaxReportHistory(context: SourceRequestContext, taxYear: number, limit = 20) {
+    const response = await this.#unaryOn(this.#queryClient, 'listTaxReportHistory', {
+      context: requestContext(context), taxYear, limit,
+    }) as { items: Array<Record<string, unknown>> }
     return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
   }
 

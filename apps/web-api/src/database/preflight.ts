@@ -195,27 +195,39 @@ export const assertTaxReportSchema = async (pool: Pool) => {
   const result = await pool.query<{
     report_table: string | null
     current_table: string | null
-    inventory_table: string | null
-    estimate_table: string | null
     contract_version: string | null
     migration_version: string | null
+    reporting_usage: boolean
+    reporting_create: boolean
+    report_select: boolean
+    report_write: boolean
+    current_select: boolean
+    current_write: boolean
   }>(`
     SELECT
       to_regclass('reporting.tax_report')::text AS report_table,
       to_regclass('reporting.current_tax_report')::text AS current_table,
-      to_regclass('tax.inventory_run')::text AS inventory_table,
-      to_regclass('tax.estimate')::text AS estimate_table,
       (SELECT contract_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS contract_version,
-      (SELECT migration_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS migration_version
+      (SELECT migration_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS migration_version,
+      has_schema_privilege(current_user, 'reporting', 'USAGE') AS reporting_usage,
+      has_schema_privilege(current_user, 'reporting', 'CREATE') AS reporting_create,
+      has_table_privilege(current_user, 'reporting.tax_report', 'SELECT') AS report_select,
+      has_table_privilege(current_user, 'reporting.tax_report', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS report_write,
+      has_table_privilege(current_user, 'reporting.current_tax_report', 'SELECT') AS current_select,
+      has_table_privilege(current_user, 'reporting.current_tax_report', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS current_write
   `)
   const row = result.rows[0]
   if (
     row?.report_table !== 'reporting.tax_report' ||
     row.current_table !== 'reporting.current_tax_report' ||
-    row.inventory_table !== 'tax.inventory_run' ||
-    row.estimate_table !== 'tax.estimate' ||
     row.contract_version !== '1' ||
-    row.migration_version !== '24'
+    row.migration_version !== '24' ||
+    !row.reporting_usage ||
+    row.reporting_create ||
+    !row.report_select ||
+    row.report_write ||
+    !row.current_select ||
+    row.current_write
   ) {
     throw new Error('tax report persistence migration contract is invalid')
   }

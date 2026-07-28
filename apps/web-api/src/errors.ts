@@ -131,10 +131,3 @@ export const legalDocumentsUnavailable = () =>
     'LEGAL_DOCUMENTS_UNAVAILABLE',
     '현재 적용할 약관을 불러오지 못했습니다.',
   )
-
-export const identityVerificationUnavailable = () =>
-  new ApiError(
-    503,
-    'IDENTITY_VERIFICATION_UNAVAILABLE',
-    '현재 본인확인을 진행할 수 없습니다.',
-  )

@@ -3,10 +3,9 @@ package query
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/BackwardLabs/daejang-db/pkg/readmodelstore"
 	"github.com/BackwardLabs/daejang-db/pkg/reportstore"
+	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
 	"github.com/BackwardLabs/daejang/services/engine/internal/source"
 	"google.golang.org/grpc/codes"
@@ -29,14 +29,17 @@ type ReadStore interface {
 	ListOpenReviewsPage(context.Context, string, *readmodelstore.OpenReviewCursor, int32) (readmodelstore.OpenReviewPage, error)
 }
 type ReportStore interface {
-	Commit(context.Context, reportstore.CommitParams) (reportstore.Snapshot, error)
 	List(context.Context, string, int32, int32) ([]reportstore.Snapshot, error)
+}
+type TaxReportStore interface {
+	GetCurrentReportForYear(context.Context, string, int) (taxreportstore.CurrentReportDetail, bool, error)
+	ListReportHistory(context.Context, string, int, int32) ([]taxreportstore.StoredReport, error)
 }
 type Service struct {
 	enginev1.UnimplementedQueryServiceServer
-	Reads   ReadStore
-	Reports ReportStore
-	Now     func() time.Time
+	Reads      ReadStore
+	Reports    ReportStore
+	TaxReports TaxReportStore
 }
 
 func (s *Service) GetDashboard(ctx context.Context, req *enginev1.GetDashboardRequest) (*enginev1.GetDashboardResponse, error) {
@@ -189,35 +192,102 @@ func validReviewPageID(value string) bool {
 }
 
 func (s *Service) CreateReport(ctx context.Context, req *enginev1.CreateReportRequest) (*enginev1.CreateReportResponse, error) {
-	subject, err := source.ValidateRequestContext(req.GetContext(), true)
+	if _, err := source.ValidateRequestContext(req.GetContext(), true); err != nil {
+		return nil, err
+	}
+	return nil, status.Error(codes.FailedPrecondition, "LEGACY_REPORT_CREATION_DISABLED")
+}
+
+func (s *Service) GetCurrentTaxReport(ctx context.Context, req *enginev1.GetCurrentTaxReportRequest) (*enginev1.GetCurrentTaxReportResponse, error) {
+	subject, err := source.ValidateRequestContext(req.GetContext(), false)
 	if err != nil {
 		return nil, err
 	}
-	dashboard, err := s.Reads.Dashboard(ctx, subject, req.GetTaxYear())
+	if req.GetTaxYear() < 2027 {
+		return nil, status.Error(codes.InvalidArgument, "tax year must be 2027 or later")
+	}
+	if s.TaxReports == nil {
+		return nil, status.Error(codes.Unavailable, "tax report query is unavailable")
+	}
+	value, found, err := s.TaxReports.GetCurrentReportForYear(ctx, subject, int(req.GetTaxYear()))
+	if errors.Is(err, taxreportstore.ErrAmbiguousResident) {
+		return nil, status.Error(codes.FailedPrecondition, "AMBIGUOUS_TAX_RESIDENCY")
+	}
 	if err != nil {
-		return nil, status.Error(codes.Internal, "report input query failed")
+		return nil, status.Error(codes.Internal, "tax report query failed")
 	}
-	issuedAt := time.Now().UTC()
-	if s.Now != nil {
-		issuedAt = s.Now().UTC()
+	if !found {
+		return nil, status.Error(codes.NotFound, "tax report not found")
 	}
-	input := digest(fmt.Sprintf("%s|%d|%d|%d|%d", subject, req.GetTaxYear(), dashboard.TransactionCount, dashboard.CompletedCount, dashboard.ExceptionCount))
-	// Until the tax-lot engine publishes a gain/loss artifact, any non-empty
-	// ledger is explicitly partial instead of presenting a fabricated amount.
-	statusValue := "FINAL"
-	complete, exceptions := int64(0), int64(0)
-	if dashboard.TransactionCount > 0 {
-		statusValue = "PARTIAL"
-		exceptions = dashboard.TransactionCount
-	}
-	result := digest(input + "|" + statusValue + "|0|KRW")
-	manifest := digest("giwa-report-v1|" + input + "|" + result)
-	row := digest(subject + "|" + fmt.Sprint(req.GetTaxYear()) + "|" + manifest)
-	value, err := s.Reports.Commit(ctx, reportstore.CommitParams{ID: stableUUID(subject, input), SubjectID: subject, TaxYear: req.GetTaxYear(), Status: statusValue, InputDigest: input, ResultDigest: result, SchemaDigest: digest("giwa-report-schema-v1"), TransactionCount: dashboard.TransactionCount, CompleteCount: complete, ExceptionCount: exceptions, ProfitAmount: "0", Denomination: "KRW", ProducerName: "daejang-engine", ProducerVersion: "0.1.0", ManifestDigest: manifest, RowDigest: row, IssuedAt: issuedAt})
+	return &enginev1.GetCurrentTaxReportResponse{Report: currentTaxReportToProto(value)}, nil
+}
+
+func (s *Service) ListTaxReportHistory(ctx context.Context, req *enginev1.ListTaxReportHistoryRequest) (*enginev1.ListTaxReportHistoryResponse, error) {
+	subject, err := source.ValidateRequestContext(req.GetContext(), false)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "report snapshot commit failed")
+		return nil, err
 	}
-	return &enginev1.CreateReportResponse{Report: reportToProto(value)}, nil
+	if req.GetTaxYear() < 2027 {
+		return nil, status.Error(codes.InvalidArgument, "tax year must be 2027 or later")
+	}
+	limit := req.GetLimit()
+	if limit == 0 {
+		limit = 20
+	}
+	if limit < 1 || limit > 100 {
+		return nil, status.Error(codes.InvalidArgument, "tax report history limit must be between 1 and 100")
+	}
+	if s.TaxReports == nil {
+		return nil, status.Error(codes.Unavailable, "tax report query is unavailable")
+	}
+	values, err := s.TaxReports.ListReportHistory(ctx, subject, int(req.GetTaxYear()), limit)
+	if errors.Is(err, taxreportstore.ErrAmbiguousResident) {
+		return nil, status.Error(codes.FailedPrecondition, "AMBIGUOUS_TAX_RESIDENCY")
+	}
+	if err != nil {
+		return nil, status.Error(codes.Internal, "tax report history query failed")
+	}
+	items := make([]*enginev1.TaxReport, 0, len(values))
+	for _, value := range values {
+		items = append(items, taxReportToProto(value, 0, time.Time{}))
+	}
+	return &enginev1.ListTaxReportHistoryResponse{Items: items}, nil
+}
+
+func currentTaxReportToProto(value taxreportstore.CurrentReportDetail) *enginev1.TaxReport {
+	return taxReportToProto(value.StoredReport, value.PointerVersion, value.UpdatedAt)
+}
+
+func taxReportToProto(value taxreportstore.StoredReport, pointerVersion int64, updatedAt time.Time) *enginev1.TaxReport {
+	result := &enginev1.TaxReport{
+		ReportId: value.ID, ResidentId: value.ResidentID, TaxYear: int32(value.TaxYear),
+		Finality: value.Finality, Status: value.Status, FilingStatus: value.FilingStatus,
+		TaxInventoryRunId: value.TaxInventoryRunID, TaxEstimateId: value.TaxEstimateID,
+		LotRunId: value.LotRunID, InputDigest: value.InputDigest, SchemaDigest: value.SchemaDigest,
+		DenominationAssetId: value.DenominationAssetID, ReportArtifactDigest: value.ReportArtifactDigest,
+		EvidencePackDigest: value.EvidencePackDigest, PointerVersion: pointerVersion,
+		IssuedAt: timestamppb.New(value.IssuedAt),
+		Counts: &enginev1.TaxReportCounts{
+			Disposals: int32(value.Counts.Disposals), Transfers: int32(value.Counts.Transfers),
+			ExcludedConversions: int32(value.Counts.ExcludedConversions), Limitations: int32(value.Counts.Limitations),
+		},
+		GainLoss: taxAmountToProto(value.GainLoss), TaxableBase: taxAmountToProto(value.TaxableBase),
+		NationalTax: taxAmountToProto(value.NationalTax), LocalTax: taxAmountToProto(value.LocalTax),
+		TotalTax: taxAmountToProto(value.TotalTax),
+	}
+	if !updatedAt.IsZero() {
+		result.UpdatedAt = timestamppb.New(updatedAt)
+	}
+	return result
+}
+
+func taxAmountToProto(value taxreportstore.Amount) *enginev1.TaxAmount {
+	result := &enginev1.TaxAmount{Status: value.Status}
+	if value.Status == "KNOWN" {
+		result.Amount = value.Amount
+		result.HasAmount = true
+	}
+	return result
 }
 
 func (s *Service) ListReports(ctx context.Context, req *enginev1.ListReportsRequest) (*enginev1.ListReportsResponse, error) {
@@ -242,15 +312,4 @@ func (s *Service) ListReports(ctx context.Context, req *enginev1.ListReportsRequ
 
 func reportToProto(v reportstore.Snapshot) *enginev1.ReportSnapshot {
 	return &enginev1.ReportSnapshot{Id: v.ID, TaxYear: v.TaxYear, Status: v.Status, InputDigest: v.InputDigest, ResultDigest: v.ResultDigest, SchemaDigest: v.SchemaDigest, TransactionCount: v.TransactionCount, CompleteCount: v.CompleteCount, ExceptionCount: v.ExceptionCount, ProfitAmount: v.ProfitAmount, Denomination: v.Denomination, ManifestDigest: v.ManifestDigest, RowDigest: v.RowDigest, IssuedAt: timestamppb.New(v.IssuedAt)}
-}
-func digest(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
-}
-func stableUUID(subject, key string) string {
-	sum := sha256.Sum256([]byte(subject + "\x00" + key))
-	v := sum[:16]
-	v[6] = (v[6] & 0x0f) | 0x50
-	v[8] = (v[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", v[0:4], v[4:6], v[6:8], v[8:10], v[10:16])
 }

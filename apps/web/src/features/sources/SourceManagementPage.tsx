@@ -1,5 +1,6 @@
 import ethereumDiamond from '../../assets/sources/ethereum-diamond.png'
 import upbitLogo from '../../assets/sources/upbit-logo.png'
+import { AppLink } from '../../components/AppLink.tsx'
 import { useEffect, useState } from 'react'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import {
@@ -80,19 +81,24 @@ export function SourceManagementPage() {
           <h2 id="connected-source-title">연결된 데이터 소스</h2>
           <p>현재 연결된 소스 {activeSources.length}개</p>
         </div>
-        <a className="source-primary-action" href="/sources/new">
+        <AppLink className="source-primary-action" href="/sources/new">
           데이터 소스 추가 <span aria-hidden="true">→</span>
-        </a>
+        </AppLink>
       </section>
 
-      {status === 'error' ? (
-        <p className="source-api-notice" role="alert">
-          데이터 소스를 불러오지 못했습니다. API와 로컬 데이터베이스 연결을
-          확인해 주세요.
+      {status === 'loading' ? (
+        <p className="source-api-notice" role="status">
+          데이터 소스를 불러오는 중입니다.
         </p>
       ) : null}
 
-      {sources.length > 0 ? (
+      {status === 'error' ? (
+        <p className="source-api-notice" role="alert">
+          데이터 소스를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.
+        </p>
+      ) : null}
+
+      {status === 'ready' && sources.length > 0 ? (
         <section className="source-list" aria-label="등록된 데이터 소스">
           {sources.map((source) => (
             <article className="source-list__item" key={source.id}>
@@ -122,7 +128,9 @@ export function SourceManagementPage() {
             </article>
           ))}
         </section>
-      ) : (
+      ) : null}
+
+      {status === 'ready' && sources.length === 0 ? (
         <section className="source-empty-state" aria-labelledby="source-empty-title">
         <div className="source-empty-state__logos" aria-hidden="true">
           <img src={upbitLogo} alt="" />
@@ -138,9 +146,9 @@ export function SourceManagementPage() {
           <span className="source-chip source-chip--upbit">Upbit PDF</span>
           <span className="source-chip source-chip--evm">EVM Wallet</span>
         </div>
-        <a className="source-primary-action" href="/sources/new">
+        <AppLink className="source-primary-action" href="/sources/new">
           데이터 소스 추가 <span aria-hidden="true">→</span>
-        </a>
+        </AppLink>
         <div className="source-processing-note" role="note">
           <strong>등록 완료와 거래 처리 완료는 달라요</strong>
           <span>
@@ -149,7 +157,7 @@ export function SourceManagementPage() {
           </span>
         </div>
         </section>
-      )}
+      ) : null}
 
       <p className="source-footer-note">
         각 데이터 소스의 연결 해제와 거래 데이터 삭제는 별도로 관리됩니다.
