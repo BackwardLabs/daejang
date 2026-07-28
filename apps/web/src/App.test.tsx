@@ -10,6 +10,7 @@ beforeEach(() => {
         return new Response(JSON.stringify({
           signup: {
             enabled: true,
+            identityVerificationRequired: false,
             methods: {
               email: true,
               oauthProviders: ['kakao', 'naver', 'google'],

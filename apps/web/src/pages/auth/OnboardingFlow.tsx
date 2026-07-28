@@ -36,14 +36,17 @@ type OnboardingFlowProps = {
   onLogin: () => void
   onNavigate: (path: PublicPath) => void
   signupMethods: SignupMethods
+  identityVerificationRequired?: boolean
 }
 
-const steps = [
+const signupSteps = (identityVerificationRequired: boolean) => [
   ['계정', '로그인 수단 확인'],
   ['약관', '필수·선택 분리'],
-  ['본인확인', '가입자 확인'],
+  ...(identityVerificationRequired
+    ? ([['본인확인', '가입자 확인']] as const)
+    : []),
   ['완료', '계정 준비 완료'],
-] as const
+]
 
 const providerInfo: Record<
   SocialProvider,
@@ -95,10 +98,13 @@ const documentCopy: Record<
   },
 }
 
-function stepForScreen(screen: OnboardingScreen) {
+function stepForScreen(
+  screen: OnboardingScreen,
+  identityVerificationRequired: boolean,
+) {
   if (screen === 'consent') return 2
   if (screen === 'identity') return 3
-  if (screen === 'complete') return 4
+  if (screen === 'complete') return identityVerificationRequired ? 4 : 3
   return 1
 }
 
@@ -110,7 +116,14 @@ function inlineErrorMessage(caught: unknown, fallback: string) {
   return errorMessage(caught, fallback).replace(/\.$/u, '')
 }
 
-function StepSidebar({ activeStep }: { activeStep: number }) {
+function StepSidebar({
+  activeStep,
+  identityVerificationRequired,
+}: {
+  activeStep: number
+  identityVerificationRequired: boolean
+}) {
+  const steps = signupSteps(identityVerificationRequired)
   return (
     <aside className="auth-step-sidebar" aria-label="회원가입 단계">
       <p className="auth-eyebrow">DAEJANG ACCOUNT</p>
@@ -119,7 +132,11 @@ function StepSidebar({ activeStep }: { activeStep: number }) {
         <br />
         한 계정에서 관리해요
       </h1>
-      <p>계정, 약관, 본인확인을 순서대로 확인합니다</p>
+      <p>
+        {identityVerificationRequired
+          ? '계정, 약관, 본인확인을 순서대로 확인합니다'
+          : '계정과 약관을 순서대로 확인합니다'}
+      </p>
       <ol>
         {steps.map(([label, detail], index) => {
           const number = index + 1
@@ -144,8 +161,16 @@ function StepSidebar({ activeStep }: { activeStep: number }) {
   )
 }
 
-function StepBadge({ step, label }: { step: number; label: string }) {
-  return <p className="auth-step-badge">{step} / 4 · {label}</p>
+function StepBadge({
+  step,
+  label,
+  totalSteps = 4,
+}: {
+  step: number
+  label: string
+  totalSteps?: number
+}) {
+  return <p className="auth-step-badge">{step} / {totalSteps} · {label}</p>
 }
 
 function Dialog({
@@ -229,11 +254,13 @@ function MethodScreen({
   onLogin,
   onBack,
   signupMethods,
+  totalSteps,
 }: {
   onEmail: () => void
   onLogin: () => void
   onBack: () => void
   signupMethods: SignupMethods
+  totalSteps: number
 }) {
   const socialProviders = signupMethods.oauthProviders.filter(
     (provider) => provider in providerInfo,
@@ -256,7 +283,7 @@ function MethodScreen({
       <button className="auth-back-button" type="button" onClick={onBack}>
         ← 로그인 또는 회원가입 선택
       </button>
-      <StepBadge step={1} label="계정" />
+      <StepBadge step={1} label="계정" totalSteps={totalSteps} />
       <h2>Daejang 계정 만들기</h2>
       <p className="auth-lead">회원정보를 만들 방법을 선택해 주세요</p>
       <div className="auth-provider-list">
@@ -337,9 +364,10 @@ function EntryScreen({
   )
 }
 
-function EmailScreen({ onComplete, onBack }: {
+function EmailScreen({ onComplete, onBack, totalSteps }: {
   onComplete: () => void
   onBack: () => void
+  totalSteps: number
 }) {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -462,7 +490,7 @@ function EmailScreen({ onComplete, onBack }: {
       <button className="auth-back-button" type="button" onClick={onBack}>
         ← 다른 가입 방법
       </button>
-      <StepBadge step={1} label="계정" />
+      <StepBadge step={1} label="계정" totalSteps={totalSteps} />
       <h2>이메일 계정 만들기</h2>
       <p className="auth-lead">이메일을 확인하고 안전한 비밀번호를 설정해 주세요</p>
       <form className="auth-form" onSubmit={createAccount}>
@@ -628,9 +656,20 @@ function EmailScreen({ onComplete, onBack }: {
   )
 }
 
-function ConsentScreen({ onComplete, onBack }: {
-  onComplete: () => void
+function ConsentScreen({
+  onComplete,
+  onBack,
+  identityVerificationRequired,
+  totalSteps,
+}: {
+  onComplete: (result: {
+    status: 'accepted' | 'authenticated'
+    nextStep?: 'identity_verification'
+    nextPath?: '/dashboard'
+  }) => void
   onBack: () => void
+  identityVerificationRequired: boolean
+  totalSteps: number
 }) {
   const [documents, setDocuments] = useState<LegalDocument[]>([])
   const [accepted, setAccepted] = useState<Record<string, boolean>>({})
@@ -666,13 +705,13 @@ function ConsentScreen({ onComplete, onBack }: {
     setSubmitting(true)
     setError('')
     try {
-      await submitSignupConsents(
+      const result = await submitSignupConsents(
         documents.map(({ id }) => ({
           legalDocumentId: id,
           action: accepted[id] ? ('accepted' as const) : ('withdrawn' as const),
         })),
       )
-      onComplete()
+      onComplete(result)
     } catch (caught) {
       setError(errorMessage(caught, '동의 내용을 저장하지 못했습니다'))
     } finally {
@@ -682,7 +721,7 @@ function ConsentScreen({ onComplete, onBack }: {
 
   return (
     <article className="auth-card">
-      <StepBadge step={2} label="약관" />
+      <StepBadge step={2} label="약관" totalSteps={totalSteps} />
       <h2>약관과 개인정보 안내</h2>
       <p className="auth-lead">필수 항목과 선택 항목을 나누어 확인해 주세요</p>
       {loading ? <p className="auth-state" role="status">약관을 불러오는 중</p> : null}
@@ -745,7 +784,11 @@ function ConsentScreen({ onComplete, onBack }: {
             disabled={!requiredAccepted || submitting}
             onClick={submit}
           >
-            {submitting ? '동의 내용 저장 중' : '본인확인으로 계속하기'}
+            {submitting
+              ? '동의 내용 저장 중'
+              : identityVerificationRequired
+                ? '본인확인으로 계속하기'
+                : '가입 완료하기'}
           </button>
           <button className="auth-secondary-button" type="button" onClick={onBack}>
             이전으로
@@ -854,17 +897,27 @@ function IdentityScreen({
   )
 }
 
-function CompleteScreen({ onExit }: { onExit: () => void }) {
+function CompleteScreen({
+  onExit,
+  identityVerificationRequired,
+  totalSteps,
+}: {
+  onExit: () => void
+  identityVerificationRequired: boolean
+  totalSteps: number
+}) {
   return (
     <article className="auth-card auth-card--result">
       <span className="auth-result-icon" aria-hidden="true">✓</span>
-      <StepBadge step={4} label="완료" />
+      <StepBadge step={totalSteps} label="완료" totalSteps={totalSteps} />
       <h2>계정 준비를 마쳤어요</h2>
       <p className="auth-lead">가입에 필요한 단계를 모두 완료했습니다</p>
       <ul className="auth-complete-list">
         <li><span>01</span>로그인 수단 등록</li>
         <li><span>02</span>필수 약관 동의</li>
-        <li><span>03</span>휴대전화 본인확인</li>
+        {identityVerificationRequired ? (
+          <li><span>03</span>휴대전화 본인확인</li>
+        ) : null}
       </ul>
       <button className="auth-primary-button" type="button" onClick={onExit}>
         서비스로 이동
@@ -880,11 +933,16 @@ export function OnboardingFlow({
   onLogin,
   onNavigate,
   signupMethods,
+  identityVerificationRequired = true,
 }: OnboardingFlowProps) {
   const [screen, setScreen] = useState<OnboardingScreen>(initialScreen)
   const [completionPath, setCompletionPath] = useState('/dashboard')
   const regionRef = useRef<HTMLDivElement>(null)
-  const activeStep = useMemo(() => stepForScreen(screen), [screen])
+  const totalSteps = identityVerificationRequired ? 4 : 3
+  const activeStep = useMemo(
+    () => stepForScreen(screen, identityVerificationRequired),
+    [identityVerificationRequired, screen],
+  )
   const signupAvailable =
     signupMethods.email || signupMethods.oauthProviders.length > 0
 
@@ -911,13 +969,23 @@ export function OnboardingFlow({
       <EmailScreen
         onComplete={() => setScreen('consent')}
         onBack={() => setScreen('method')}
+        totalSteps={totalSteps}
       />
     )
   } else if (screen === 'consent') {
     content = (
       <ConsentScreen
-        onComplete={() => setScreen('identity')}
+        onComplete={(result) => {
+          if (result.status === 'authenticated' && result.nextPath) {
+            setCompletionPath(result.nextPath)
+            setScreen('complete')
+            return
+          }
+          setScreen('identity')
+        }}
         onBack={() => setScreen('method')}
+        identityVerificationRequired={identityVerificationRequired}
+        totalSteps={totalSteps}
       />
     )
   } else if (screen === 'identity') {
@@ -932,7 +1000,11 @@ export function OnboardingFlow({
     )
   } else if (screen === 'complete') {
     content = (
-      <CompleteScreen onExit={() => onAuthenticated(completionPath)} />
+      <CompleteScreen
+        onExit={() => onAuthenticated(completionPath)}
+        identityVerificationRequired={identityVerificationRequired}
+        totalSteps={totalSteps}
+      />
     )
   } else {
     content = (
@@ -941,6 +1013,7 @@ export function OnboardingFlow({
         onLogin={onLogin}
         onBack={() => setScreen('entry')}
         signupMethods={signupMethods}
+        totalSteps={totalSteps}
       />
     )
   }
@@ -956,7 +1029,12 @@ export function OnboardingFlow({
       sidebar={
         screen === 'entry'
           ? undefined
-          : <StepSidebar activeStep={activeStep} />
+          : (
+              <StepSidebar
+                activeStep={activeStep}
+                identityVerificationRequired={identityVerificationRequired}
+              />
+            )
       }
       headerAction={
         <div className="auth-header-actions">

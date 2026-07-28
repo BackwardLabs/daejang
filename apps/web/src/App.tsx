@@ -213,6 +213,9 @@ export function App() {
               oauthProviders: [],
             }
           }
+          identityVerificationRequired={
+            authCapabilities?.signup.identityVerificationRequired ?? true
+          }
         />
       ) : publicPage}
     </>

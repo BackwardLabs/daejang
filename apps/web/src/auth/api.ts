@@ -9,6 +9,7 @@ export type SignupMethods = {
 export type AuthCapabilities = {
   signup: {
     enabled: boolean
+    identityVerificationRequired: boolean
     methods: SignupMethods
   }
 }
@@ -112,8 +113,16 @@ function parseAuthCapabilities(value: unknown): AuthCapabilities {
   }
 
   const enabled = (signup as { enabled?: unknown }).enabled
+  const identityVerificationRequired = (
+    signup as { identityVerificationRequired?: unknown }
+  ).identityVerificationRequired
   const methods = (signup as { methods?: unknown }).methods
-  if (typeof enabled !== 'boolean' || !methods || typeof methods !== 'object') {
+  if (
+    typeof enabled !== 'boolean' ||
+    typeof identityVerificationRequired !== 'boolean' ||
+    !methods ||
+    typeof methods !== 'object'
+  ) {
     throw new WebApiError(502, 'INVALID_AUTH_CAPABILITIES', '가입 상태를 확인하지 못했습니다')
   }
 
@@ -134,6 +143,7 @@ function parseAuthCapabilities(value: unknown): AuthCapabilities {
   return {
     signup: {
       enabled,
+      identityVerificationRequired,
       methods: { email, oauthProviders },
     },
   }
@@ -248,8 +258,9 @@ export function submitSignupConsents(
   }>,
 ) {
   return requestJson<{
-    status: 'accepted'
-    nextStep: 'identity_verification'
+    status: 'accepted' | 'authenticated'
+    nextStep?: 'identity_verification'
+    nextPath?: '/dashboard'
   }>('signup/consents', {
     method: 'POST',
     body: { locale: 'ko-KR', decisions },

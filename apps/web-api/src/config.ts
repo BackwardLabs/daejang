@@ -28,6 +28,7 @@ export type AppConfig = {
 
 export type SignupCapability = {
   enabled: boolean
+  identityVerificationRequired: boolean
   methods: {
     email: boolean
     oauthProviders: ReadonlyArray<OAuthProviderName>
@@ -351,15 +352,15 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   ) {
     throw new Error('SIGNUP_ENABLED=true requires at least one configured signup method')
   }
-  if (signupRequested && (production || identityVerificationMode !== 'mock')) {
-    throw new Error(
-      'SIGNUP_ENABLED=true requires a completion-capable identity verifier',
-    )
-  }
   const signup: SignupCapability = signupRequested
-    ? { enabled: true, methods: signupMethods }
+    ? {
+        enabled: true,
+        identityVerificationRequired: identityVerificationMode !== 'disabled',
+        methods: signupMethods,
+      }
     : {
         enabled: false,
+        identityVerificationRequired: false,
         methods: { email: false, oauthProviders: [] },
       }
   const engineInsecureTarget = loadDevelopmentEngineTarget(

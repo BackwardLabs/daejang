@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppRouter } from './AppRouter.tsx'
 import { setCurrentUser } from './auth/session-store.ts'
 
 afterEach(() => {
+  cleanup()
   setCurrentUser(null)
   window.history.pushState({}, '', '/')
   vi.unstubAllGlobals()

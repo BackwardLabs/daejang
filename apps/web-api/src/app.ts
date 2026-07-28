@@ -95,19 +95,22 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     config.signup.methods.oauthProviders.every((provider) =>
       config.oauth.enabledProviders.has(provider),
     )
+  const identityRequirementMatchesConfiguration =
+    !config.signup.enabled ||
+    config.signup.identityVerificationRequired ===
+      (config.identityVerificationMode !== 'disabled')
   if (
     !signupMethodsMatchAuthConfiguration ||
+    !identityRequirementMatchesConfiguration ||
     (!config.signup.enabled &&
       (config.signup.methods.email ||
         config.signup.methods.oauthProviders.length > 0)) ||
     (config.signup.enabled &&
-      (config.runtimeMode === 'production' ||
-        config.identityVerificationMode !== 'mock' ||
-        (!config.signup.methods.email &&
-          config.signup.methods.oauthProviders.length === 0)))
+      !config.signup.methods.email &&
+      config.signup.methods.oauthProviders.length === 0)
   ) {
     throw new Error(
-      'Signup capability must match configured authentication methods and a completion-capable verifier',
+      'Signup capability must match configured authentication methods and identity verification mode',
     )
   }
 

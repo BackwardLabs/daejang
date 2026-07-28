@@ -590,6 +590,8 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
     await accounts.recordSignupConsents({
       userId,
       locale: 'ko-KR',
+      applicableDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
       decisions: initialDocuments.map(([legalDocumentId], index) => ({
         id: `00000000-0000-4000-8000-00000000052${index}`,
         legalDocumentId,
@@ -607,12 +609,19 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       new Date('2027-07-19T00:00:00.000Z'),
     )
     await expect(
-      accounts.completeSignup({ userId, signupTokenHash, now: asOf }),
+      accounts.completeSignup({
+        userId,
+        signupTokenHash,
+        now: asOf,
+        requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      }),
     ).rejects.toThrow('Required legal documents were not accepted')
 
     await accounts.recordSignupConsents({
       userId,
       locale: 'ko-KR',
+      applicableDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
       decisions: [
         currentTermsId,
         initialDocuments[1][0],
@@ -625,10 +634,20 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       now: asOf,
     })
     await expect(
-      accounts.completeSignup({ userId, signupTokenHash, now: asOf }),
+      accounts.completeSignup({
+        userId,
+        signupTokenHash,
+        now: asOf,
+        requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      }),
     ).resolves.toMatchObject({ id: userId, status: 'active' })
     await expect(
-      accounts.completeSignup({ userId, signupTokenHash, now: asOf }),
+      accounts.completeSignup({
+        userId,
+        signupTokenHash,
+        now: asOf,
+        requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      }),
     ).resolves.toBeUndefined()
   })
 })

@@ -16,6 +16,7 @@ describe('Web auth API client', () => {
       new Response(JSON.stringify({
         signup: {
           enabled: true,
+          identityVerificationRequired: false,
           methods: { email: true, oauthProviders: ['naver'] },
         },
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
@@ -25,6 +26,7 @@ describe('Web auth API client', () => {
     await expect(getAuthCapabilities()).resolves.toEqual({
       signup: {
         enabled: true,
+        identityVerificationRequired: false,
         methods: { email: true, oauthProviders: ['naver'] },
       },
     })
@@ -42,6 +44,7 @@ describe('Web auth API client', () => {
           JSON.stringify({
             signup: {
               enabled: true,
+              identityVerificationRequired: false,
               methods: { email: true, oauthProviders: ['unknown-provider'] },
             },
           }),

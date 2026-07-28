@@ -132,6 +132,8 @@ export interface AccountAuthStore {
   recordSignupConsents(input: {
     userId: string
     locale: string
+    applicableDocumentTypes: ReadonlyArray<LegalDocumentType>
+    requiredDocumentTypes: ReadonlyArray<LegalDocumentType>
     decisions: ReadonlyArray<{
       id: string
       legalDocumentId: string
@@ -143,6 +145,7 @@ export interface AccountAuthStore {
     userId: string
     signupTokenHash: string
     now: Date
+    requiredDocumentTypes: ReadonlyArray<LegalDocumentType>
   }): Promise<AccountUser | undefined>
 }
 
@@ -821,6 +824,8 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
   async recordSignupConsents(input: {
     userId: string
     locale: string
+    applicableDocumentTypes: ReadonlyArray<LegalDocumentType>
+    requiredDocumentTypes: ReadonlyArray<LegalDocumentType>
     decisions: ReadonlyArray<{
       id: string
       legalDocumentId: string
@@ -842,13 +847,14 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
             ON content_record.legal_document_id = document.id
           WHERE document.locale = $1
             AND document.effective_at <= $2
+            AND document.document_type::text = ANY($3::text[])
           ORDER BY
             document.document_type,
             document.effective_at DESC,
             document.version DESC,
             document.id DESC
         `,
-        [input.locale, input.now],
+        [input.locale, input.now, input.applicableDocumentTypes],
       )
       const currentById = new Map(
         current.rows.map((document) => [document.id, document.document_type]),
@@ -871,11 +877,7 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
       if (decidedDocumentIds.size !== currentById.size) {
         throw new Error('Consent must decide every current legal document')
       }
-      for (const required of [
-        'terms',
-        'privacy',
-        'identity_verification',
-      ] as const) {
+      for (const required of input.requiredDocumentTypes) {
         if (!acceptedTypes.has(required)) {
           throw new Error(`Required legal document was not accepted: ${required}`)
         }
@@ -906,6 +908,7 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
     userId: string
     signupTokenHash: string
     now: Date
+    requiredDocumentTypes: ReadonlyArray<LegalDocumentType>
   }): Promise<AccountUser | undefined> {
     return this.#transaction(async (client) => {
       const pending = await client.query<{
@@ -944,11 +947,7 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
             FROM web_private.legal_documents document
             JOIN web_private.legal_document_contents content_record
               ON content_record.legal_document_id = document.id
-            WHERE document.document_type IN (
-              'terms',
-              'privacy',
-              'identity_verification'
-            )
+            WHERE document.document_type::text = ANY($3::text[])
               AND document.locale = 'ko-KR'
               AND document.effective_at <= $2
             ORDER BY
@@ -969,7 +968,7 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
             LIMIT 1
           ) consent ON true
         `,
-        [input.userId, input.now],
+        [input.userId, input.now, input.requiredDocumentTypes],
       )
       const acceptedTypes = new Set(
         requiredConsents.rows
@@ -977,7 +976,7 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
           .map((consent) => consent.document_type),
       )
       if (
-        [...(['terms', 'privacy', 'identity_verification'] as const)].some(
+        input.requiredDocumentTypes.some(
           (documentType) => !acceptedTypes.has(documentType),
         )
       ) {
@@ -1344,6 +1343,8 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
   async recordSignupConsents(input: {
     userId: string
     locale: string
+    applicableDocumentTypes: ReadonlyArray<LegalDocumentType>
+    requiredDocumentTypes: ReadonlyArray<LegalDocumentType>
     decisions: ReadonlyArray<{
       id: string
       legalDocumentId: string
@@ -1351,7 +1352,10 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
     }>
     now: Date
   }) {
-    const current = await this.listCurrentLegalDocuments(input.locale, input.now)
+    const applicableTypes = new Set(input.applicableDocumentTypes)
+    const current = (
+      await this.listCurrentLegalDocuments(input.locale, input.now)
+    ).filter((document) => applicableTypes.has(document.documentType))
     const currentById = new Map(
       current.map((document) => [document.id, document.documentType]),
     )
@@ -1373,11 +1377,7 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
     if (decidedDocumentIds.size !== currentById.size) {
       throw new Error('Consent must decide every current legal document')
     }
-    for (const required of [
-      'terms',
-      'privacy',
-      'identity_verification',
-    ] as const) {
+    for (const required of input.requiredDocumentTypes) {
       if (!accepted.has(required)) {
         throw new Error(`Required legal document was not accepted: ${required}`)
       }
@@ -1395,6 +1395,7 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
     userId: string
     signupTokenHash: string
     now: Date
+    requiredDocumentTypes: ReadonlyArray<LegalDocumentType>
   }) {
     const session = this.#signupSessions.get(input.signupTokenHash)
     const user = this.#users.get(input.userId)
@@ -1426,7 +1427,7 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
         .map((document) => document.documentType),
     )
     if (
-      [...(['terms', 'privacy', 'identity_verification'] as const)].some(
+      input.requiredDocumentTypes.some(
         (documentType) => !acceptedTypes.has(documentType),
       )
     ) {

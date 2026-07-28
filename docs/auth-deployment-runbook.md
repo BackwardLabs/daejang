@@ -185,10 +185,11 @@ test -f deploy/production.env || \
 chmod 600 deploy/production.env
 ```
 
-현재 운영에는 production identity verifier가 없으므로 `SIGNUP_ENABLED=false`와
-`IDENTITY_VERIFICATION_MODE=disabled`를 유지한다. 로그인은 사용할 수 있지만 신규
-가입 API와 UI는 fail-closed 상태다. `SIGNUP_ENABLED=true`는 현재 production에서
-설정 오류로 startup을 중단해야 한다.
+MVP에서는 `SIGNUP_ENABLED=true`와 `IDENTITY_VERIFICATION_MODE=disabled`를 함께
+사용한다. 이 조합은 mock 본인확인 결과를 만들지 않고, 이용약관과 개인정보 처리방침
+동의가 끝나면 계정을 활성화한다. NICE 연동 전까지 본인확인 안내와 본인확인 화면은
+가입 절차에 노출하지 않는다. 신규 가입만 닫아야 할 때는 `SIGNUP_ENABLED=false`로
+바꾸며 기존 계정 로그인은 계속 허용한다.
 
 TLS private key, DB password, OAuth secret, Resend key와 `GH_PAT`는 Git에 넣지 않는다.
 Engine image의 private module fetch에 쓰는 `GH_PAT`는 build 중에만 secret mount로
@@ -247,10 +248,11 @@ curl -i \
 성공 기준:
 
 - `/me`는 HTML이 아닌 JSON `401`과 `Cache-Control: no-store`를 반환한다.
-- capability는 `signup.enabled=false`와 서버가 현재 허용하는 가입 method를
+- capability는 `signup.enabled=true`,
+  `signup.identityVerificationRequired=false`와 서버가 현재 허용하는 가입 method를
   반환한다. 로그인 provider 목록은 이 endpoint의 계약이 아니다.
 - 활성 OAuth login은 provider로 향하는 `302`와 보호된 transaction cookie를 반환한다.
-- signup API는 안정적인 unavailable 오류로 거절된다.
+- 필수 약관 동의가 끝난 신규 계정은 mock 본인확인 없이 활성화된다.
 - 브라우저 실제 login callback 뒤 이전 session cookie는 거절되고 새 cookie만 유효하다.
 
 ## 10. Review delivery와 artifact 운영 경계
@@ -273,4 +275,4 @@ CAS 또는 DB 실패 전에 기록된 content-addressed subject-private artifact
 - App 문제는 직전 정상 image/commit으로 되돌리되 DB migration은 down하지 않는다.
 - Review writer를 다시 열기 전에 DB schema와 Engine module pin이 일치하는지 확인한다.
 - `docker compose down --volumes`는 운영 DB와 artifact를 지울 수 있으므로 실행하지 않는다.
-- production signup을 임시 우회나 mock으로 열지 않는다.
+- production에서 `IDENTITY_VERIFICATION_MODE=mock`을 사용하지 않는다.

@@ -66,6 +66,7 @@ const documents = [
 const signupCapabilities: AuthCapabilities = {
   signup: {
     enabled: true,
+    identityVerificationRequired: true,
     methods: {
       email: true,
       oauthProviders: ['kakao', 'naver', 'google'],
@@ -629,6 +630,64 @@ describe('authentication flows', () => {
     expect(onExit).not.toHaveBeenCalled()
   })
 
+  it('completes signup after legal consent when identity verification is disabled', async () => {
+    const documentsWithoutIdentity = documents.filter(
+      ({ documentType }) => documentType !== 'identity_verification',
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/legal-documents/current')) {
+          return jsonResponse({ documents: documentsWithoutIdentity })
+        }
+        if (url.includes('/signup/consents')) {
+          return jsonResponse({
+            status: 'authenticated',
+            nextPath: '/dashboard',
+          })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+
+    render(
+      <OnboardingFlow
+        initialScreen="consent"
+        onAuthenticated={vi.fn()}
+        onExit={vi.fn()}
+        onLogin={vi.fn()}
+        onNavigate={vi.fn()}
+        signupMethods={signupCapabilities.signup.methods}
+        identityVerificationRequired={false}
+      />,
+    )
+
+    await screen.findByText('[필수] 서비스 이용약관')
+    expect(
+      screen.queryByText('본인확인 정보 처리 안내'),
+    ).not.toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: '모두 동의선택 항목에 동의하지 않아도 가입할 수 있어요',
+      }),
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: '가입 완료하기' }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: '계정 준비를 마쳤어요' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', {
+        name: '안전한 이용을 위해 본인확인이 필요해요',
+      }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('휴대전화 본인확인')).not.toBeInTheDocument()
+    expect(screen.getByText('3 / 3 · 완료')).toBeInTheDocument()
+  })
+
   it('withdraws optional consent when signup returns to the consent step', async () => {
     const submittedDecisions: unknown[] = []
     vi.stubGlobal(
@@ -731,6 +790,7 @@ describe('authentication flows', () => {
           return jsonResponse({
             signup: {
               enabled: true,
+              identityVerificationRequired: false,
               methods: { email: false, oauthProviders: ['naver'] },
             },
           })

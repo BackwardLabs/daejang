@@ -43,6 +43,7 @@ const config: AppConfig = {
   },
   signup: {
     enabled: false,
+    identityVerificationRequired: false,
     methods: { email: false, oauthProviders: [] },
   },
   identityVerificationMode: 'disabled',

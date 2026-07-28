@@ -220,7 +220,7 @@ describe('web api configuration', () => {
     ).toThrow('not allowed in production')
   })
 
-  it('enables signup only with an explicit method and completion-capable verifier', () => {
+  it('enables signup only with an explicit method and reports whether identity verification is required', () => {
     const enabled = loadConfig({
       SIGNUP_ENABLED: 'true',
       EMAIL_AUTH_ENABLED: 'true',
@@ -230,11 +230,13 @@ describe('web api configuration', () => {
     })
     expect(enabled.signup).toEqual({
       enabled: true,
+      identityVerificationRequired: true,
       methods: { email: true, oauthProviders: [] },
     })
 
     expect(loadConfig().signup).toEqual({
       enabled: false,
+      identityVerificationRequired: false,
       methods: { email: false, oauthProviders: [] },
     })
     expect(() =>
@@ -243,18 +245,23 @@ describe('web api configuration', () => {
         IDENTITY_VERIFICATION_MODE: 'mock',
       }),
     ).toThrow('at least one configured signup method')
-    expect(() =>
+    expect(
       loadConfig({
         SIGNUP_ENABLED: 'true',
         EMAIL_AUTH_ENABLED: 'true',
         RESEND_API_KEY: 'test-resend-key',
         EMAIL_FROM: 'GIWA <test@example.com>',
-      }),
-    ).toThrow('completion-capable identity verifier')
+        IDENTITY_VERIFICATION_MODE: 'disabled',
+      }).signup,
+    ).toEqual({
+      enabled: true,
+      identityVerificationRequired: false,
+      methods: { email: true, oauthProviders: [] },
+    })
   })
 
-  it('rejects production signup while no production verifier exists', () => {
-    expect(() =>
+  it('allows explicit production signup without collecting mock identity results', () => {
+    expect(
       loadConfig({
         NODE_ENV: 'production',
         PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
@@ -269,7 +276,15 @@ describe('web api configuration', () => {
         EMAIL_AUTH_ENABLED: 'true',
         RESEND_API_KEY: 'test-resend-key',
         EMAIL_FROM: 'GIWA <test@example.com>',
+        IDENTITY_VERIFICATION_MODE: 'disabled',
       }),
-    ).toThrow('completion-capable identity verifier')
+    ).toMatchObject({
+      signup: {
+        enabled: true,
+        identityVerificationRequired: false,
+        methods: { email: true, oauthProviders: [] },
+      },
+      identityVerificationMode: 'disabled',
+    })
   })
 })

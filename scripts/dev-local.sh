@@ -207,6 +207,8 @@ start_api() {
       PORT="$API_PORT" \
       PUBLIC_ORIGIN="http://localhost:${WEB_PORT}" \
       DATABASE_URL="$WEB_DATABASE_URL" \
+      SIGNUP_ENABLED=true \
+      IDENTITY_VERIFICATION_MODE=disabled \
       ENGINE_GRPC_INSECURE_TARGET="$(
         if ((START_ENGINE == 1)); then
           printf '127.0.0.1:%s' "$ENGINE_PORT"
@@ -227,7 +229,7 @@ start_web() {
       VITE_WEB_API_BASE_URL=/api/v1 \
       VITE_API_PROXY_TARGET="http://127.0.0.1:${API_PORT}" \
       VITE_DEV_BOOTSTRAP_SESSION=false \
-      VITE_DEV_IDENTITY_MOCK_ENABLED=true \
+      VITE_DEV_IDENTITY_MOCK_ENABLED=false \
       npm run dev --workspace @daejang/web -- \
         --host 127.0.0.1 \
         --port "$WEB_PORT" \
@@ -287,6 +289,7 @@ monitor_services() {
   local index
   local pid
   local status
+  local api_health_failures=0
 
   while true; do
     for index in "${!PIDS[@]}"; do
@@ -300,6 +303,17 @@ monitor_services() {
         exit "$status"
       fi
     done
+    if curl --silent --show-error --fail --max-time 2 \
+      "http://127.0.0.1:${API_PORT}/readyz" >/dev/null 2>&1; then
+      api_health_failures=0
+    else
+      ((api_health_failures += 1))
+      if ((api_health_failures >= 5)); then
+        printf 'ERROR: Web API has been unavailable for %s consecutive checks\n' \
+          "$api_health_failures" >&2
+        exit 1
+      fi
+    fi
     sleep 1
   done
 }
