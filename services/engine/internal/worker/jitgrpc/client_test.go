@@ -146,7 +146,7 @@ func TestRemoteEndpointRequiresMutualTLS(t *testing.T) {
 }
 
 func TestDialUsesLocalCredentialsAndRequiresServingJITServices(t *testing.T) {
-	directory, err := os.MkdirTemp("/private/tmp", "jitgrpc-")
+	directory, err := os.MkdirTemp("", "jitgrpc-")
 	if err != nil {
 		t.Fatal(err)
 	}
