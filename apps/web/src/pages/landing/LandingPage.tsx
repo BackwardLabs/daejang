@@ -7,18 +7,27 @@ import { LandingHeader } from './components/LandingHeader.tsx'
 import { ProductFlow } from './components/ProductFlow.tsx'
 import { SourceJourney } from './components/SourceJourney.tsx'
 import { ValueProposition } from './components/ValueProposition.tsx'
+import type { PublicPath } from '../../auth/navigation.ts'
 
 const collectActions = [
   { href: '#how-it-works', label: '수집 흐름 보기', variant: 'primary' },
   { href: '#faq-support', label: '지원 범위', variant: 'secondary' },
 ] as const
 
-export function LandingPage() {
+export function LandingPage({
+  onLogin,
+  onStart,
+  onNavigate,
+}: {
+  onLogin: () => void
+  onStart: () => void
+  onNavigate: (path: PublicPath) => void
+}) {
   return (
     <div className="landing-page" id="top">
-      <LandingHeader />
+      <LandingHeader onLogin={onLogin} onStart={onStart} />
       <main>
-        <HeroSection />
+        <HeroSection onStart={onStart} />
         <SourceJourney />
         <ValueProposition />
         <ProductFlow />
@@ -51,9 +60,9 @@ export function LandingPage() {
           imagePosition="left"
         />
         <FaqSection />
-        <FinalCta />
+        <FinalCta onStart={onStart} />
       </main>
-      <LandingFooter />
+      <LandingFooter onNavigate={onNavigate} />
     </div>
   )
 }
