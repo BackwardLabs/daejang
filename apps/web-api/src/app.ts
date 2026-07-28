@@ -38,11 +38,13 @@ import {
 } from './routes/development.js'
 import { registerSourceRoutes } from './routes/sources.js'
 import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
+import { registerTaxReportRoutes } from './routes/tax-reports.js'
 import { registerSecurityPolicy } from './security.js'
 import {
   MemoryWalletSourceStore,
   type WalletSourceStore,
 } from './sources/wallet-source-store.js'
+import type { TaxReportReader } from './tax-report/types.js'
 import type { UploadStore } from './uploads/upload-store.js'
 
 type BuildAppOptions = {
@@ -57,6 +59,7 @@ type BuildAppOptions = {
   uploadStore?: UploadStore
   engineDataClient?: EngineDataClient
   developmentUserStore?: DevelopmentUserStore
+  taxReportReader?: TaxReportReader
   now?: () => Date
   readinessCheck?: () => Promise<void>
 }
@@ -89,6 +92,9 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     options.accountAuthStore?.durable !== true
   ) {
     throw new Error('A durable AccountAuthStore is required in production')
+  }
+  if (config.runtimeMode === 'production' && options.taxReportReader?.durable !== true) {
+    throw new Error('A durable TaxReportReader is required in production')
   }
   const signupMethodsMatchAuthConfiguration =
     (!config.signup.methods.email || config.emailAuth.enabled) &&
@@ -323,6 +329,12 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       config,
       sessionService,
       userStore: options.developmentUserStore,
+    })
+  }
+  if (options.taxReportReader) {
+    await registerTaxReportRoutes(app, {
+      authenticate: authHooks.authenticate,
+      reader: options.taxReportReader,
     })
   }
   return {

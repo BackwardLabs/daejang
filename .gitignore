@@ -29,4 +29,6 @@ npm-debug.log*
 .DS_Store
 .idea/
 .vscode/*
+.omx/
+.wrangler/
 !.vscode/extensions.json

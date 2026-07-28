@@ -3,6 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppRouter } from './AppRouter.tsx'
 import { setCurrentUser } from './auth/session-store.ts'
 
+vi.mock('./features/sources/reownAppKit.ts', () => ({
+  isReownAppKitConfigured: false,
+  reownAppKit: null,
+}))
+
 afterEach(() => {
   setCurrentUser(null)
   window.history.pushState({}, '', '/')
