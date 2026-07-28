@@ -12,12 +12,14 @@ COPY services/engine /src/services/engine
 WORKDIR /src/services/engine
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/engine-api ./cmd/engine-api \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/sync-worker ./cmd/sync-worker \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/engine-healthcheck ./cmd/engine-healthcheck
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /out/engine-healthcheck ./cmd/engine-healthcheck \
+ && mkdir -p /out/review-artifacts/objects /out/review-artifacts/tmp
 
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 COPY --from=build /out/engine-api /usr/local/bin/engine-api
 COPY --from=build /out/sync-worker /usr/local/bin/sync-worker
 COPY --from=build /out/engine-healthcheck /usr/local/bin/engine-healthcheck
+COPY --from=build --chown=65532:65532 /out/review-artifacts /var/lib/daejang/review-artifacts
 EXPOSE 50051
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/engine-api"]

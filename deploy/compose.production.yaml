@@ -90,9 +90,14 @@ services:
       DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
       DAEJANG_QUERY_DATABASE_URL: ${QUERY_DATABASE_URL}
       DAEJANG_REPORT_DATABASE_URL: ${REPORT_DATABASE_URL}
+      DAEJANG_REVIEW_DATABASE_URL: ${REVIEW_DATABASE_URL}
+      DAEJANG_REVIEW_ARTIFACT_DATABASE_URL: ${REVIEW_ARTIFACT_DATABASE_URL}
+      DAEJANG_REVIEW_ARTIFACT_ROOT: ${REVIEW_ARTIFACT_ROOT:-}
+      DAEJANG_REVIEW_ARTIFACT_TEMP: ${REVIEW_ARTIFACT_TEMP:-}
       ENGINE_TLS_CERT_PATH: /run/secrets/engine-server-cert.pem
       ENGINE_TLS_KEY_PATH: /run/secrets/engine-server-key.pem
       ENGINE_TLS_CLIENT_CA_PATH: /run/secrets/engine-client-ca.pem
+      ENGINE_WEB_API_CLIENT_DNS_NAME: ${ENGINE_WEB_API_CLIENT_DNS_NAME}
       ENGINE_HEALTH_CA_PATH: /run/secrets/engine-ca.pem
       ENGINE_HEALTH_CERT_PATH: /run/secrets/probe-client-cert.pem
       ENGINE_HEALTH_KEY_PATH: /run/secrets/probe-client-key.pem
@@ -104,6 +109,7 @@ services:
       - ${ENGINE_CA_PATH}:/run/secrets/engine-ca.pem:ro
       - ${ENGINE_PROBE_CERT_PATH}:/run/secrets/probe-client-cert.pem:ro
       - ${ENGINE_PROBE_KEY_PATH}:/run/secrets/probe-client-key.pem:ro
+      - review_artifacts:/var/lib/daejang/review-artifacts
     healthcheck:
       test: ["CMD", "/usr/local/bin/engine-healthcheck"]
       interval: 15s
@@ -133,6 +139,7 @@ networks:
     name: ${DAEJANG_DB_NETWORK:-daejang-db_default}
 volumes:
   private_objects: {}
+  review_artifacts: {}
 secrets:
   github_token:
     environment: GH_PAT

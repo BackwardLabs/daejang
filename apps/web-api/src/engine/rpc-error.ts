@@ -1,5 +1,8 @@
 export class EngineRpcError extends Error {
-  constructor(readonly grpcCode: number) {
+  constructor(
+    readonly grpcCode: number,
+    readonly grpcDetails = '',
+  ) {
     super('Engine RPC request failed')
     this.name = 'EngineRpcError'
   }
