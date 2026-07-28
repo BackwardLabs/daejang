@@ -484,6 +484,26 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       accounts.abandonEmailChallenge({ challengeId, now }),
     ).resolves.toBe(true)
     await expect(
+      pool.query(
+        `
+          SELECT attempts, max_attempts, expires_at, resend_after, consumed_at
+          FROM web_private.email_verification_challenges
+          WHERE id = $1
+        `,
+        [challengeId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          attempts: 5,
+          max_attempts: 5,
+          expires_at: new Date(now.getTime() + 300_000),
+          resend_after: new Date(now.getTime() + 60_000),
+          consumed_at: null,
+        },
+      ],
+    })
+    await expect(
       accounts.getEligibleEmailChallenge(email, 'signup', now),
     ).resolves.toBeUndefined()
     await expect(

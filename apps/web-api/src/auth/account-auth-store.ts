@@ -547,14 +547,11 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
     const result = await this.pool.query(
       `
         UPDATE web_private.email_verification_challenges
-        SET
-          expires_at = $2,
-          resend_after = $2,
-          attempts = max_attempts
+        SET attempts = max_attempts
         WHERE id = $1
           AND consumed_at IS NULL
       `,
-      [input.challengeId, input.now],
+      [input.challengeId],
     )
     return result.rowCount === 1
   }
@@ -1232,8 +1229,6 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
     }
     this.#emailChallenges.set(input.challengeId, {
       ...challenge,
-      expiresAt: input.now,
-      resendAfter: input.now,
       attempts: challenge.maxAttempts,
     })
     return true
