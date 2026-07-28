@@ -1,9 +1,7 @@
 export function FinalCta({
   onStart,
-  signupAvailable,
 }: {
   onStart: () => void
-  signupAvailable: boolean
 }) {
   return (
     <section className="final-cta ruled-section" id="get-started" aria-labelledby="cta-title">
@@ -21,9 +19,8 @@ export function FinalCta({
             className="button button--primary"
             type="button"
             onClick={onStart}
-            disabled={!signupAvailable}
           >
-            {signupAvailable ? '시작하기' : '가입 준비 중'}
+            시작하기
           </button>
         </div>
       </div>

@@ -17,20 +17,15 @@ const collectActions = [
 export function LandingPage({
   onStart,
   onNavigate,
-  signupAvailable,
 }: {
   onStart: () => void
   onNavigate: (path: PublicPath) => void
-  signupAvailable: boolean
 }) {
   return (
     <div className="landing-page" id="top">
-      <LandingHeader
-        onStart={onStart}
-        signupAvailable={signupAvailable}
-      />
+      <LandingHeader onStart={onStart} />
       <main>
-        <HeroSection onStart={onStart} signupAvailable={signupAvailable} />
+        <HeroSection onStart={onStart} />
         <SourceJourney />
         <ValueProposition />
         <ProductFlow />
@@ -63,7 +58,7 @@ export function LandingPage({
           imagePosition="left"
         />
         <FaqSection />
-        <FinalCta onStart={onStart} signupAvailable={signupAvailable} />
+        <FinalCta onStart={onStart} />
       </main>
       <LandingFooter onNavigate={onNavigate} />
     </div>

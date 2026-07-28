@@ -80,12 +80,28 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-function openSignupMethodsFromLanding() {
+type FetchHandler = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Response | Promise<Response>
+
+function withSignupCapabilities(handler: FetchHandler) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/auth/capabilities')) {
+      return jsonResponse(signupCapabilities)
+    }
+    return handler(input, init)
+  })
+}
+
+async function openSignupMethodsFromLanding() {
   fireEvent.click(screen.getAllByRole('button', { name: '시작하기' })[0]!)
   expect(
     screen.getByRole('heading', { name: 'Daejang 시작하기' }),
   ).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /회원가입/ }))
+  const signupButton = screen.getByRole('button', { name: /^회원가입/ })
+  await waitFor(() => expect(signupButton).toBeEnabled())
+  fireEvent.click(signupButton)
 }
 
 beforeEach(() => {
@@ -108,7 +124,7 @@ afterEach(() => {
 })
 
 describe('authentication flows', () => {
-  it('redirects directly to social providers and starts each flow only once', () => {
+  it('redirects directly to social providers and starts each flow only once', async () => {
     window.history.replaceState(null, '', '/login')
     const { unmount } = render(<App />)
 
@@ -132,7 +148,7 @@ describe('authentication flows', () => {
 
     window.history.replaceState(null, '', '/')
     render(<App />)
-    openSignupMethodsFromLanding()
+    await openSignupMethodsFromLanding()
     const signupRedirect = screen.getByRole('button', {
       name: '구글로 시작하기',
     })
@@ -171,11 +187,11 @@ describe('authentication flows', () => {
     expect(screen.getByRole('heading', { name: '로그인' })).toBeInTheDocument()
   })
 
-  it('opens signup methods directly from the login page account action', () => {
+  it('opens signup methods directly from the login page account action', async () => {
     window.history.replaceState(null, '', '/login')
     render(<App />)
 
-    const signupButtons = screen.getAllByRole('button', {
+    const signupButtons = await screen.findAllByRole('button', {
       name: '계정 만들기',
     })
     fireEvent.click(signupButtons[signupButtons.length - 1]!)
@@ -253,7 +269,7 @@ describe('authentication flows', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<App />)
 
-    openSignupMethodsFromLanding()
+    await openSignupMethodsFromLanding()
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
     fireEvent.change(screen.getByLabelText('이메일 주소'), {
       target: { value: 'user@example.com' },
@@ -296,7 +312,7 @@ describe('authentication flows', () => {
   it('shows an existing-account error beside the signup email field', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
+      withSignupCapabilities(async () =>
         jsonResponse(
           {
             error: {
@@ -309,7 +325,7 @@ describe('authentication flows', () => {
       ),
     )
     render(<App />)
-    openSignupMethodsFromLanding()
+    await openSignupMethodsFromLanding()
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
 
     const emailInput = screen.getByLabelText('이메일 주소')
@@ -347,9 +363,9 @@ describe('authentication flows', () => {
           409,
         ),
       )
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', withSignupCapabilities(fetchMock))
     render(<App />)
-    openSignupMethodsFromLanding()
+    await openSignupMethodsFromLanding()
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
 
     const emailInput = screen.getByLabelText('이메일 주소')
@@ -389,9 +405,9 @@ describe('authentication flows', () => {
           503,
         ),
       )
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', withSignupCapabilities(fetchMock))
     render(<App />)
-    openSignupMethodsFromLanding()
+    await openSignupMethodsFromLanding()
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
 
     fireEvent.change(screen.getByLabelText('이메일 주소'), {
@@ -428,9 +444,9 @@ describe('authentication flows', () => {
           400,
         ),
       )
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', withSignupCapabilities(fetchMock))
     render(<App />)
-    openSignupMethodsFromLanding()
+    await openSignupMethodsFromLanding()
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
 
     fireEvent.change(screen.getByLabelText('이메일 주소'), {
@@ -491,7 +507,7 @@ describe('authentication flows', () => {
 
   it('clears email credentials after leaving the email signup screen', async () => {
     render(<App />)
-    openSignupMethodsFromLanding()
+    await openSignupMethodsFromLanding()
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
     fireEvent.change(screen.getByLabelText('이메일 주소'), {
       target: { value: 'private@example.com' },
@@ -500,7 +516,7 @@ describe('authentication flows', () => {
     expect(screen.getByRole('heading', { name: '고객지원' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '서비스로 돌아가기' }))
-    openSignupMethodsFromLanding()
+    await openSignupMethodsFromLanding()
     fireEvent.click(screen.getByRole('button', { name: '이메일로 가입하기' }))
     expect(screen.getByLabelText('이메일 주소')).toHaveValue('')
   })
@@ -694,10 +710,13 @@ describe('authentication flows', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('capability unavailable')))
     render(<App />)
 
-    const unavailableButtons = await screen.findAllByRole('button', { name: '가입 준비 중' })
-    expect(unavailableButtons.every((button) => button.hasAttribute('disabled'))).toBe(true)
+    fireEvent.click((await screen.findAllByRole('button', { name: '시작하기' }))[0]!)
+    const unavailableSignup = screen.getByRole('button', {
+      name: /^회원가입 준비 중/,
+    })
+    expect(unavailableSignup).toBeDisabled()
 
-    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+    fireEvent.click(screen.getByRole('button', { name: /^로그인/ }))
     expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '이메일로 로그인' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '계정 만들기' })).not.toBeInTheDocument()
@@ -721,7 +740,7 @@ describe('authentication flows', () => {
     )
     render(<App />)
 
-    fireEvent.click((await screen.findAllByRole('button', { name: '시작하기' }))[0]!)
+    await openSignupMethodsFromLanding()
     expect(screen.getByRole('button', { name: '네이버로 시작하기' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '카카오로 시작하기' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '구글로 시작하기' })).not.toBeInTheDocument()

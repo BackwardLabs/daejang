@@ -193,13 +193,13 @@ export function App() {
       <LandingPage
         onStart={openAuthChoice}
         onNavigate={navigatePublic}
-        signupAvailable={signupAvailable}
       />
     )
 
   return (
     <>
-      {onboardingVisible && signupAvailable && authCapabilities ? (
+      {onboardingVisible &&
+      (onboardingScreen === 'entry' || (signupAvailable && authCapabilities)) ? (
         <OnboardingFlow
           key={onboardingKey}
           initialScreen={onboardingScreen}
@@ -207,7 +207,12 @@ export function App() {
           onExit={exitOnboarding}
           onLogin={openLogin}
           onNavigate={navigatePublic}
-          signupMethods={authCapabilities.signup.methods}
+          signupMethods={
+            authCapabilities?.signup.methods ?? {
+              email: false,
+              oauthProviders: [],
+            }
+          }
         />
       ) : publicPage}
     </>

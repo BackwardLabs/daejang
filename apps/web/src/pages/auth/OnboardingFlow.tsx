@@ -302,9 +302,11 @@ function MethodScreen({
 function EntryScreen({
   onLogin,
   onSignup,
+  signupAvailable,
 }: {
   onLogin: () => void
   onSignup: () => void
+  signupAvailable: boolean
 }) {
   return (
     <article className="auth-card auth-entry-card">
@@ -319,10 +321,14 @@ function EntryScreen({
           </span>
           <b aria-hidden="true">→</b>
         </button>
-        <button type="button" onClick={onSignup}>
+        <button type="button" onClick={onSignup} disabled={!signupAvailable}>
           <span>
-            <strong>회원가입</strong>
-            <small>새 Daejang 계정 만들기</small>
+            <strong>{signupAvailable ? '회원가입' : '회원가입 준비 중'}</strong>
+            <small>
+              {signupAvailable
+                ? '새 Daejang 계정 만들기'
+                : '현재 새 계정 가입을 준비하고 있어요'}
+            </small>
           </span>
           <b aria-hidden="true">→</b>
         </button>
@@ -879,6 +885,8 @@ export function OnboardingFlow({
   const [completionPath, setCompletionPath] = useState('/dashboard')
   const regionRef = useRef<HTMLDivElement>(null)
   const activeStep = useMemo(() => stepForScreen(screen), [screen])
+  const signupAvailable =
+    signupMethods.email || signupMethods.oauthProviders.length > 0
 
   useEffect(() => {
     regionRef.current?.focus()
@@ -895,6 +903,7 @@ export function OnboardingFlow({
       <EntryScreen
         onLogin={onLogin}
         onSignup={() => setScreen('method')}
+        signupAvailable={signupAvailable}
       />
     )
   } else if (screen === 'email') {
