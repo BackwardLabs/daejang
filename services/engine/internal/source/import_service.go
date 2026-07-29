@@ -44,7 +44,7 @@ func (s *Service) ImportUpbitDocument(ctx context.Context, request *enginev1.Imp
 		request.GetOriginalFilename() == "" || len(request.GetOriginalFilename()) > 255 || request.GetMediaType() != "application/pdf" ||
 		request.GetByteLength() != int64(len(encrypted)) || len(encrypted) == 0 || len(encrypted) > maxEncryptedPDFBytes ||
 		len(password) > 256 || !hasPDFHeader(encrypted) ||
-		expectedSubjectName == "" || len(expectedSubjectName) > 255 || !validSHA256(request.GetArtifactDigest()) ||
+		len(expectedSubjectName) > 255 || !validSHA256(request.GetArtifactDigest()) ||
 		digestBytes(encrypted) != request.GetArtifactDigest() {
 		return nil, status.Error(codes.InvalidArgument, "validated UPBIT PDF import metadata and bytes are required")
 	}

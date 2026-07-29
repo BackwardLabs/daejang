@@ -447,41 +447,18 @@ describe('documented normal user journey', () => {
         displayName: 'GIWA 사용자',
       },
     })
-    const unverifiedSessionCookie = cookiePair(
+    const sessionCookie = cookiePair(
       config.sessionCookieName,
       consent.headers['set-cookie'],
     )
-    expect(unverifiedSessionCookie).toBeTruthy()
-    const unverifiedCapabilities = await context.app.inject({
-      method: 'GET',
-      url: '/api/v1/sources/capabilities',
-      headers: { cookie: unverifiedSessionCookie as string },
-    })
-    expect(unverifiedCapabilities.json()).toEqual({
-      upbitPdf: {
-        registrationEnabled: false,
-        encryptedPdfSupported: true,
-      },
-    })
-
-    // Production PDF registration requires an independently provisioned,
-    // immutable KYC subject-name claim. The acceptance test injects that
-    // completed operational boundary before exercising the source flow.
-    const verifiedSession = await context.sessionService.create({
-      user: activated.user,
-      verifiedSubjectName: {
-        normalizedValue: 'GIWA 사용자',
-      },
-    })
-    const sessionCookie = `${config.sessionCookieName}=${verifiedSession.token}`
+    expect(sessionCookie).toBeTruthy()
     const authenticatedHeaders = { cookie: sessionCookie as string }
-
-    const verifiedCapabilities = await context.app.inject({
+    const sourceCapabilities = await context.app.inject({
       method: 'GET',
       url: '/api/v1/sources/capabilities',
       headers: authenticatedHeaders,
     })
-    expect(verifiedCapabilities.json()).toEqual({
+    expect(sourceCapabilities.json()).toEqual({
       upbitPdf: {
         registrationEnabled: true,
         encryptedPdfSupported: true,

@@ -617,7 +617,7 @@ describe('web api authentication boundary', () => {
       byteLength: pdf.length,
       coverageStart: '2026-01-01',
       coverageEnd: '2026-12-31',
-      expectedSubjectName: '김대장',
+      expectedSubjectName: '',
     }))
   })
 

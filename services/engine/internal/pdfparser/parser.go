@@ -99,7 +99,9 @@ type internalEvidenceEnvelope struct {
 		} `json:"contentHash"`
 	} `json:"artifact"`
 	SubjectMatch struct {
-		Status string `json:"status"`
+		Status            string `json:"status"`
+		PolicyRef         string `json:"policyRef"`
+		RawValuesRetained *bool  `json:"rawValuesRetained"`
 	} `json:"subjectMatch"`
 	Producer struct {
 		Name    string `json:"name"`
@@ -329,8 +331,14 @@ func decodeInternalEvidence(value []byte, request Request) (Result, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return Result{}, &Error{Code: "PARSER_RESPONSE_INVALID"}
 	}
+	subjectMatchAccepted :=
+		envelope.SubjectMatch.Status == "MATCH" ||
+			(envelope.SubjectMatch.Status == "INCONCLUSIVE" &&
+				envelope.SubjectMatch.PolicyRef == "mvp-subject-comparison-skipped:v1" &&
+				envelope.SubjectMatch.RawValuesRetained != nil &&
+				!*envelope.SubjectMatch.RawValuesRetained)
 	if envelope.ContractVersion != "internal-document-evidence-input/v2" ||
-		envelope.SubjectMatch.Status != "MATCH" || envelope.ProviderID != "UPBIT" ||
+		!subjectMatchAccepted || envelope.ProviderID != "UPBIT" ||
 		envelope.Artifact.SourceSystem != envelope.ProviderID ||
 		envelope.Artifact.ArtifactID != request.ArtifactID ||
 		envelope.Artifact.ImportID != request.ImportID ||

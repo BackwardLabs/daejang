@@ -1,1 +1,1 @@
-giwa-pdf-parser @ git+https://github.com/BackwardLabs/pdf-parser.git@36209c211f3ed3ff833aba7c74aaa248dc935efc
+giwa-pdf-parser @ git+https://github.com/BackwardLabs/pdf-parser.git@49cb63008cf3ebdf1854a6db26d430d5077b9580

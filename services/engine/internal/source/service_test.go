@@ -107,13 +107,14 @@ func TestImportUpbitDocumentValidatesDigestAndClearsDecryptedRequest(t *testing.
 		Context: validContext(), UploadId: testUploadID, ObjectKey: "private/source.pdf",
 		ArtifactDigest: digestBytes(original), OriginalFilename: "statement.pdf", MediaType: "application/pdf",
 		ByteLength: int64(len(original)), CoverageStart: "2026-01-01", CoverageEnd: "2026-06-30",
-		ExpectedSubjectName: "홍길동", EncryptedOriginalPdf: original, PdfPasswordUtf8: password,
+		EncryptedOriginalPdf: original, PdfPasswordUtf8: password,
 	}
 	response, err := (&Service{Importer: importer}).ImportUpbitDocument(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if importer.calls != 1 || importer.params.SubjectID != validContext().Actor.UserId ||
+		importer.params.ExpectedSubjectName != "" ||
 		response.GetEvidenceTerminalStatus() != "PARTIAL" || response.GetJob().GetState() != "SUCCEEDED" {
 		t.Fatalf("import request was not mapped safely: params=%#v response=%#v", importer.params, response)
 	}

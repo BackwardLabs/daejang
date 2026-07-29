@@ -59,7 +59,9 @@ type internalEvidence struct {
 		DocumentType string `json:"documentType"`
 	} `json:"document"`
 	SubjectMatch struct {
-		Status string `json:"status"`
+		Status            string `json:"status"`
+		PolicyRef         string `json:"policyRef"`
+		RawValuesRetained *bool  `json:"rawValuesRetained"`
 	} `json:"subjectMatch"`
 	Records []internalRecord `json:"records"`
 	Run     struct {
@@ -122,9 +124,15 @@ func Prepare(input Input) (Result, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return Result{}, errors.New("internal evidence has trailing content")
 	}
+	subjectMatchAccepted :=
+		parsed.SubjectMatch.Status == "MATCH" ||
+			(parsed.SubjectMatch.Status == "INCONCLUSIVE" &&
+				parsed.SubjectMatch.PolicyRef == "mvp-subject-comparison-skipped:v1" &&
+				parsed.SubjectMatch.RawValuesRetained != nil &&
+				!*parsed.SubjectMatch.RawValuesRetained)
 	if parsed.ContractVersion != "internal-document-evidence-input/v2" ||
 		parsed.ProviderID != "UPBIT" || parsed.Artifact.SourceSystem != parsed.ProviderID ||
-		parsed.SubjectMatch.Status != "MATCH" || parsed.Document.DocumentType == "" ||
+		!subjectMatchAccepted || parsed.Document.DocumentType == "" ||
 		parsed.Artifact.ArtifactID == "" || parsed.Artifact.ImportID == "" ||
 		parsed.Artifact.SubjectRef == "" || parsed.Artifact.ContentHash.Algorithm != "sha256" ||
 		len(parsed.Artifact.ContentHash.Value) != 64 || parsed.Producer.Name == "" ||
