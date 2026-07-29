@@ -86,6 +86,27 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
     }
   })
 
+  it('keeps the private payment binding outside the public report projection', async () => {
+    const paymentReport = await reader.getCurrentForPayment(
+      subjectId,
+      taxYear,
+      'FINAL',
+      residentId,
+    )
+    if (finality !== 'FINAL') {
+      expect(paymentReport).toBeUndefined()
+      return
+    }
+
+    expect(paymentReport).toMatchObject({
+      residentId,
+      report: { taxYear, finality: 'FINAL' },
+    })
+    expect(paymentReport?.reportArtifactDigest).toMatch(/^[0-9a-f]{64}$/)
+    expect(paymentReport?.report).not.toHaveProperty('residentId')
+    expect(paymentReport?.report).not.toHaveProperty('reportArtifactDigest')
+  })
+
   it('serves the persisted report through the authenticated HTTP contract', async () => {
     const { token } = await appContext.sessionService.create({ user: { id: subjectId, displayName: 'integration subject' } })
     const response = await appContext.app.inject({

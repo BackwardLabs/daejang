@@ -6,8 +6,10 @@ import { ResendVerificationEmailSender } from './auth/email-auth.js'
 import { PostgresRateLimitStore } from './auth/rate-limit.js'
 import { PostgresSessionStore } from './auth/postgres-session-store.js'
 import { loadConfig } from './config.js'
-import { assertTaxReportSchema, assertWebAuthSchema } from './database/preflight.js'
+import { assertReportPaymentSchema, assertTaxReportSchema, assertWebAuthSchema } from './database/preflight.js'
 import { EngineMtlsClient } from './engine/mtls-client.js'
+import { HttpReportPaymentFacilitator } from './report-payment/facilitator.js'
+import { PostgresReportPaymentStore } from './report-payment/postgres-report-payment-store.js'
 import { PostgresWalletSourceStore } from './sources/postgres-wallet-source-store.js'
 import { PostgresTaxReportReader } from './tax-report/postgres-tax-report-reader.js'
 import { startUploadCleanup } from './uploads/upload-cleanup.js'
@@ -33,10 +35,14 @@ const engineClient = config.engineMtls
 const uploadStore = pool && config.privateObjectRoot
   ? new PostgresFileUploadStore(pool, config.privateObjectRoot)
   : undefined
+const taxReportReader = pool ? new PostgresTaxReportReader(pool) : undefined
 
 if (pool) {
   await assertWebAuthSchema(pool)
   await assertTaxReportSchema(pool)
+  if (config.reportPayments) {
+    await assertReportPaymentSchema(pool)
+  }
 }
 if (config.privateObjectRoot) {
   await assertPrivateObjectRoot(config.privateObjectRoot)
@@ -57,7 +63,16 @@ const { app } = await buildApp({
         sessionStore: new PostgresSessionStore(pool),
         rateLimitStore: new PostgresRateLimitStore(pool),
         accountAuthStore: new PostgresAccountAuthStore(pool),
-        taxReportReader: new PostgresTaxReportReader(pool),
+        ...(taxReportReader ? { taxReportReader } : {}),
+        ...(config.reportPayments && taxReportReader
+          ? {
+              reportPaymentTaxReportReader: taxReportReader,
+              reportPaymentStore: new PostgresReportPaymentStore(pool),
+              reportPaymentFacilitator: new HttpReportPaymentFacilitator(
+                config.reportPayments.facilitatorUrl,
+              ),
+            }
+          : {}),
         ...(engineClient
           ? {
               walletSourceStore: new PostgresWalletSourceStore(pool, engineClient),

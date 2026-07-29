@@ -30,8 +30,38 @@ describe('web api configuration', () => {
         'EMAIL_VERIFICATION_RESEND_AFTER_SECONDS',
         'IDENTITY_VERIFICATION_MODE',
         'UPBIT_PDF_IMPORT_ENABLED',
+        'X402_REPORT_PAYMENTS_ENABLED',
+        'X402_FACILITATOR_URL',
+        'X402_ASSET_ADDRESS',
+        'X402_PAY_TO_ADDRESS',
+        'X402_AMOUNT_ATOMIC',
+        'X402_MAX_TIMEOUT_SECONDS',
+        'X402_TOKEN_NAME',
+        'X402_TOKEN_VERSION',
       ]),
     )
+  })
+
+  it('loads GIWA Sepolia report payment terms only when explicitly enabled', () => {
+    expect(loadConfig().reportPayments).toBeUndefined()
+
+    expect(loadConfig({
+      X402_REPORT_PAYMENTS_ENABLED: 'true',
+      X402_FACILITATOR_URL: 'http://localhost:4021',
+      X402_ASSET_ADDRESS: '0x1111111111111111111111111111111111111111',
+      X402_PAY_TO_ADDRESS: '0x2222222222222222222222222222222222222222',
+      X402_AMOUNT_ATOMIC: '100000',
+    }).reportPayments).toMatchObject({
+      network: 'eip155:91342',
+      amount: '100000',
+      maxTimeoutSeconds: 300,
+      tokenName: 'Mock USD',
+    })
+
+    expect(() => loadConfig({
+      X402_REPORT_PAYMENTS_ENABLED: 'true',
+      X402_FACILITATOR_URL: 'https://facilitator.example.com',
+    })).toThrow('are required')
   })
 
   it('uses a host-only secure cookie name in production', () => {

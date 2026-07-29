@@ -13,7 +13,7 @@
 - Quality: Oxlint, TypeScript, Vitest, Testing Library
 - MVP 데이터 소스: Upbit 거래내역 PDF와 여러 EVM 공개 지갑 주소
 
-전체 서비스 경계와 아직 결정되지 않은 항목은 [웹 앱 기술 명세](docs/00-web-app-technical-spec.md)를 확인하세요. 로그인과 가입 흐름은 [사용자 온보딩](docs/01-user-onboarding.md), 데이터 소스 등록과 날짜 설정은 [데이터 소스 등록 및 수집 기간 설정](docs/02-data-source-collection.md)에 정리되어 있습니다. 화면의 색상·타이포·간격 기준은 [웹 디자인 가이드](docs/design.md), 저장소에서 작업을 시작하는 방법은 [개발 가이드](docs/development-guide.md)를 따릅니다.
+전체 서비스 경계와 아직 결정되지 않은 항목은 [웹 앱 기술 명세](docs/00-web-app-technical-spec.md)를 확인하세요. 로그인과 가입 흐름은 [사용자 온보딩](docs/01-user-onboarding.md), 데이터 소스 등록과 날짜 설정은 [데이터 소스 등록 및 수집 기간 설정](docs/02-data-source-collection.md), FINAL 보고서 결제와 다운로드 권한은 [실제 보고서 x402 결제](docs/report-x402-payment.md)에 정리되어 있습니다. 화면의 색상·타이포·간격 기준은 [웹 디자인 가이드](docs/design.md), 저장소에서 작업을 시작하는 방법은 [개발 가이드](docs/development-guide.md)를 따릅니다.
 
 ## 시작하기
 
@@ -104,6 +104,7 @@ DB migration과 persistence client는 `daejang-db`가 소유합니다. Engine �
 - [대장 Flow](https://www.figma.com/board/9rt2FVwNe1Dfv9DXLThXok/%EB%8C%80%EC%9E%A5-flow?node-id=58-145)
 - [Technical Spec — GIWA MVP v0.1](https://linear.app/giwa-daejang/document/technical-spec-giwa-mvp-v01-18d511232c66)
 - [인증·Session Sequence](docs/auth-session-sequences.md)
+- [실제 보고서 x402 결제 Sequence](docs/report-x402-payment.md)
 
 ## 협업
 

@@ -40,6 +40,7 @@ import { registerAccountAuthRoutes } from './routes/account-auth.js'
 import { registerSourceRoutes } from './routes/sources.js'
 import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
 import { registerTaxReportRoutes } from './routes/tax-reports.js'
+import { registerReportPaymentRoutes } from './routes/report-payments.js'
 import { registerSecurityPolicy } from './security.js'
 import {
   MemoryWalletSourceStore,
@@ -47,6 +48,9 @@ import {
 } from './sources/wallet-source-store.js'
 import type { TaxReportReader } from './tax-report/types.js'
 import { UnavailableWalletSourceStore } from './sources/unavailable-wallet-source-store.js'
+import type { ReportPaymentFacilitator } from './report-payment/facilitator.js'
+import type { ReportPaymentStore } from './report-payment/types.js'
+import type { ReportPaymentTaxReportReader } from './tax-report/types.js'
 import type { UploadStore } from './uploads/upload-store.js'
 
 type BuildAppOptions = {
@@ -62,6 +66,9 @@ type BuildAppOptions = {
   uploadStore?: UploadStore
   engineDataClient?: EngineDataClient
   taxReportReader?: TaxReportReader
+  reportPaymentTaxReportReader?: ReportPaymentTaxReportReader
+  reportPaymentStore?: ReportPaymentStore
+  reportPaymentFacilitator?: ReportPaymentFacilitator
   now?: () => Date
   readinessCheck?: () => Promise<void>
 }
@@ -94,6 +101,23 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   }
   if (config.runtimeMode === 'production' && options.taxReportReader?.durable !== true) {
     throw new Error('A durable TaxReportReader is required in production')
+  }
+  if (
+    config.runtimeMode === 'production' &&
+    config.reportPayments &&
+    options.reportPaymentStore?.durable !== true
+  ) {
+    throw new Error('A durable ReportPaymentStore is required when report payments are enabled')
+  }
+  if (
+    config.reportPayments &&
+    (!options.reportPaymentTaxReportReader ||
+      !options.reportPaymentStore ||
+      !options.reportPaymentFacilitator)
+  ) {
+    throw new Error(
+      'ReportPaymentTaxReportReader, ReportPaymentStore and ReportPaymentFacilitator are required when report payments are enabled',
+    )
   }
   const signupMethodsMatchAuthConfiguration =
     (!config.signup.methods.email || config.emailAuth.enabled) &&
@@ -352,6 +376,21 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         reader: options.taxReportReader,
       })
     }
+
+    await registerReportPaymentRoutes(protectedApp, {
+      config,
+      ...(config.reportPayments
+        ? { paymentConfig: config.reportPayments }
+        : {}),
+      ...(options.reportPaymentTaxReportReader
+        ? { reader: options.reportPaymentTaxReportReader }
+        : {}),
+      ...(options.reportPaymentStore ? { store: options.reportPaymentStore } : {}),
+      ...(options.reportPaymentFacilitator
+        ? { facilitator: options.reportPaymentFacilitator }
+        : {}),
+      ...(options.now ? { now: options.now } : {}),
+    })
   })
   return {
     app,
