@@ -406,26 +406,31 @@ const start = async () => {
     })
     await waitFor('worker', () => Promise.resolve(isRunning('worker')), 5_000)
 
+    const webAPIEnvironment = {
+      ...process.env,
+      NODE_ENV: 'production',
+      HOST: '127.0.0.1',
+      PORT: process.env.GIWA_HOST_API_PORT ?? '3001',
+      DATABASE_URL: webURL,
+      PRIVATE_OBJECT_ROOT: join(runtimeRoot, 'private-objects'),
+      ENGINE_ALLOW_INSECURE_LOOPBACK: 'true',
+      ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
+      UPBIT_PDF_IMPORT_ENABLED:
+        process.env.UPBIT_PDF_IMPORT_ENABLED ?? 'false',
+    }
+    for (const name of [
+      'ENGINE_GRPC_TARGET',
+      'ENGINE_GRPC_CA_PATH',
+      'ENGINE_GRPC_CERT_PATH',
+      'ENGINE_GRPC_KEY_PATH',
+    ]) {
+      delete webAPIEnvironment[name]
+    }
     spawnService(
       'web-api',
       process.execPath,
       [join(repositoryRoot, 'apps', 'web-api', 'dist', 'server.js')],
-      {
-        ...process.env,
-        NODE_ENV: 'production',
-        HOST: '127.0.0.1',
-        PORT: process.env.GIWA_HOST_API_PORT ?? '3001',
-        DATABASE_URL: webURL,
-        PRIVATE_OBJECT_ROOT: join(runtimeRoot, 'private-objects'),
-        ENGINE_ALLOW_INSECURE_LOOPBACK: 'true',
-        ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
-        UPBIT_PDF_IMPORT_ENABLED:
-          process.env.UPBIT_PDF_IMPORT_ENABLED ?? 'false',
-        ENGINE_GRPC_TARGET: '',
-        ENGINE_GRPC_CA_PATH: '',
-        ENGINE_GRPC_CERT_PATH: '',
-        ENGINE_GRPC_KEY_PATH: '',
-      },
+      webAPIEnvironment,
     )
     await waitFor(
       'Web API',
