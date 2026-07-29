@@ -304,7 +304,6 @@ describe('account authentication routes', () => {
       payload: { email: 'User@Example.com', intent: 'signup' },
     })
     expect(send.statusCode).toBe(202)
-    const acceptedSignupResponse = send.json()
     expect(sender.code).toMatch(/^[0-9]{6}$/u)
 
     const verified = await context.app.inject({
@@ -419,15 +418,17 @@ describe('account authentication routes', () => {
       headers: originHeaders,
       payload: { email: 'user@example.com', intent: 'signup' },
     })
-    expect(existingSignup.statusCode).toBe(202)
-    expect(existingSignup.json()).toEqual(acceptedSignupResponse)
+    expect(existingSignup.statusCode).toBe(409)
+    expect(existingSignup.json()).toMatchObject({
+      error: { code: 'ACCOUNT_ALREADY_EXISTS' },
+    })
     expect(sender.calls).toBe(1)
     await expect(
       store.getEligibleEmailChallenge('user@example.com', 'signup', now),
     ).resolves.toBeUndefined()
   })
 
-  it('keeps existing and new signup-code responses identical during an email delivery outage', async () => {
+  it('distinguishes existing accounts from temporary email delivery failures', async () => {
     class ExistingEmailStore extends MemoryAccountAuthStore {
       readonly challengeEmails: string[] = []
 
@@ -481,13 +482,13 @@ describe('account authentication routes', () => {
       const existing = await sendCode('existing@example.com')
       const unregistered = await sendCode('unregistered@example.com')
 
-      expect(existing.statusCode).toBe(202)
-      expect(unregistered.statusCode).toBe(202)
-      expect(unregistered.json()).toEqual(existing.json())
-      expect(existing.json()).toEqual({
-        status: 'accepted',
-        expiresInSeconds: 300,
-        resendAfterSeconds: 60,
+      expect(existing.statusCode).toBe(409)
+      expect(existing.json()).toMatchObject({
+        error: { code: 'ACCOUNT_ALREADY_EXISTS' },
+      })
+      expect(unregistered.statusCode).toBe(503)
+      expect(unregistered.json()).toMatchObject({
+        error: { code: 'EMAIL_DELIVERY_FAILED' },
       })
       expect(deliveryCalls).toBe(1)
       expect(outageStore.challengeEmails).toEqual([

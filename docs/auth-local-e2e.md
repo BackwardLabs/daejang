@@ -1,90 +1,83 @@
 # 계정 인증 로컬 통합 검증
 
-이 문서는 DB, Web API, 프런트를 한 로컬 환경에서 연결해 회원가입과 로그인을 검증하는 절차다. 운영 배포 절차는 `auth-deployment-runbook.md`를 따른다.
+이 문서는 현재 `daejang-db/main`과 `daejang/main` checkout을 로컬에서 연결해
+회원가입과 로그인을 확인하는 절차다. 과거 인증 전용 worktree나 개별 PR 브랜치를
+만들 필요는 없다. 운영 서버 절차는
+[`auth-deployment-runbook.md`](auth-deployment-runbook.md)를 따른다.
 
-## worktree와 PR의 관계
+로컬 인증 E2E에는 두 저장소가 필요하다.
 
-`git worktree`는 같은 Git 저장소의 여러 브랜치를 서로 다른 로컬 디렉터리에서 동시에 여는 기능이다. worktree를 추가해도 GitHub 저장소, remote, PR이 새로 생기지 않는다.
+| 저장소 | 역할 |
+| --- | --- |
+| `BackwardLabs/daejang-db` | PostgreSQL, migration `000001`~`000030`, runtime role |
+| `BackwardLabs/daejang` | Web API와 React 프런트 |
 
-현재 인증 작업의 관계는 다음과 같다.
+## 1. 기준 checkout을 준비한다
 
-| 로컬 디렉터리 | 브랜치 | 용도 |
-| --- | --- | --- |
-| `.worktrees/daejang-backend` | `wi11y-giwa-40-사용자-흐름-flow-backend` | Backend PR #17 |
-| `.worktrees/daejang-frontend` | `wi11y-giwa-40-사용자-흐름-flow-frontend` | Frontend PR #18 |
-| `.worktrees/daejang-auth-integration` | `local/giwa-40-auth-integration` | 두 PR을 합친 로컬 검증 전용 브랜치 |
-
-`daejang-db`는 `daejang`과 다른 GitHub 저장소이므로 별도 clone이 필요하다. 반면 `daejang`의 세 worktree는 Git 객체와 remote를 공유한다.
-
-로컬 통합 브랜치는 push하거나 네 번째 PR로 만들지 않는다. 기존 PR을 병합한 뒤 서버에서는 `main`만 pull한다. PR이 승인됐다는 이유로 저장소를 다시 clone하거나 같은 변경으로 새 PR을 만들지 않는다.
-
-## 1. 두 PR을 합친 로컬 작업공간 준비
-
-아래 명령은 `daejang` 원본 checkout에서 실행한다. 원본 checkout이나 기존 worktree에 미커밋 변경이 있으면 먼저 변경 소유자를 확인한다.
+각 저장소가 clean한 `main`인지 확인하고 fast-forward한다. 미커밋 변경이 있으면
+덮어쓰지 말고 먼저 변경 소유자를 확인한다.
 
 ```bash
-git fetch origin --prune
+export GIWA_WORKSPACE=/로컬/경로/Giwa-workspace
+export GIWA_DB_DIR="$GIWA_WORKSPACE/daejang-db"
+export GIWA_APP_DIR="$GIWA_WORKSPACE/daejang"
 
-git worktree add \
-  -b local/giwa-40-auth-integration \
-  ../.worktrees/daejang-auth-integration \
-  origin/main
+git -C "$GIWA_DB_DIR" status --short --branch
+git -C "$GIWA_APP_DIR" status --short --branch
 
-git -C ../.worktrees/daejang-auth-integration \
-  merge --no-ff --no-edit \
-  wi11y-giwa-40-사용자-흐름-flow-backend
+git -C "$GIWA_DB_DIR" fetch origin
+git -C "$GIWA_DB_DIR" checkout main
+git -C "$GIWA_DB_DIR" pull --ff-only origin main
 
-git -C ../.worktrees/daejang-auth-integration \
-  merge --no-ff --no-edit \
-  wi11y-giwa-40-사용자-흐름-flow-frontend
-```
+git -C "$GIWA_APP_DIR" fetch origin
+git -C "$GIWA_APP_DIR" checkout main
+git -C "$GIWA_APP_DIR" pull --ff-only origin main
 
-의존성을 설치한다.
-
-```bash
-cd ../.worktrees/daejang-auth-integration
+cd "$GIWA_APP_DIR"
 npm ci
 ```
 
-## 2. 로컬 PostgreSQL 시작
+## 2. 로컬 PostgreSQL을 시작한다
 
-`daejang-db/.env.example`을 복사해 로컬 전용 `.env`를 만든다. `.env`가 이미 있으면 덮어쓰지 않는다.
+로컬 DB의 실제 환경 파일은 `daejang-db/.env`다. 파일이 없을 때만 로컬 예시를
+복사한다. 운영 password를 로컬 파일에 넣지 않는다.
 
 ```bash
-cd /로컬/경로/daejang-db
+cd "$GIWA_DB_DIR"
+
 test -f .env || cp .env.example .env
 chmod 600 .env
 
 docker compose config --quiet
+make check
 make database-up
 make database-status
 make database-verify
 docker compose ps
 ```
 
-성공 기준은 다음과 같다.
+성공 기준은 PostgreSQL이 `healthy`이고 migration `000001`부터 `000030`까지
+적용되며 runtime role과 Web OAuth·email 검증이 통과하는 것이다. 기본 host port는
+`55432`다.
 
-- PostgreSQL이 `127.0.0.1:55432`에서 `healthy`
-- migration `000015` 적용
-- runtime role 검증 통과
-- OAuth·이메일 저장 제약 검증 통과
+호스트에서 실행하는 Web API는 Docker service name `postgres`가 아니라
+`127.0.0.1:55432`로 접속한다.
 
-호스트에서 실행하는 Web API는 Docker 서비스명 `postgres`가 아니라 loopback 주소를 사용한다.
-
-```dotenv
-DATABASE_URL=postgresql://daejang_web_app:<DAEJANG_WEB_APP_PASSWORD>@127.0.0.1:55432/daejang?sslmode=disable
+```text
+postgresql://daejang_web_app:<로컬 DB 비밀번호>@127.0.0.1:55432/daejang?sslmode=disable
 ```
 
-## 3. 로컬 약관 fixture 등록
+## 3. 로컬 약관 fixture를 등록한다
 
-DB migration은 약관 테이블을 만들지만 약관 전문은 등록하지 않는다. 로컬 가입 E2E에는 `terms`, `privacy`, `identity_verification` 세 문서가 필요하다. 문서가 하나라도 없으면 API는 `503 LEGAL_DOCUMENTS_UNAVAILABLE`을 반환한다.
+Migration은 약관 테이블을 만들지만 약관 전문을 자동 등록하지 않는다. 가입 E2E에는
+현재 `terms`, `privacy`, `identity_verification` 문서가 필요하고, 선택 동의 화면까지
+확인하려면 `marketing`도 등록한다.
 
-로컬 fixture는 운영 migration에 넣지 않는다. DB owner 권한으로 로컬 DB에만 등록하며, 본문에는 운영 약관이 아니라는 표시를 남긴다. 운영 환경에서는 법무 검토가 끝난 전문을 별도로 등록해야 한다.
-
-다음 명령은 같은 버전의 fixture가 이미 있으면 중복 등록하지 않는다.
+아래 fixture는 로컬 전용이다. 운영 DB에는 법무 검토가 끝난 전문을 별도 승인 절차로
+등록해야 한다.
 
 ```bash
-cd /로컬/경로/daejang-db
+cd "$GIWA_DB_DIR"
 
 docker compose exec -T postgres sh -lc \
   'psql --no-psqlrc --set=ON_ERROR_STOP=1 \
@@ -133,9 +126,9 @@ SELECT
   id,
   document_type,
   'ko-KR',
-  'local-e2e-2026-07-28',
+  'local-e2e-2026-07-29',
   encode(sha256(convert_to(content, 'UTF8')), 'hex'),
-  TIMESTAMPTZ '2026-07-28 00:00:00+09'
+  TIMESTAMPTZ '2026-07-29 00:00:00+09'
 FROM local_legal_fixture
 ON CONFLICT (document_type, locale, version) DO NOTHING;
 
@@ -146,27 +139,31 @@ INSERT INTO web_private.legal_document_contents (
 SELECT
   document.id,
   fixture.content
-FROM local_legal_fixture fixture
-JOIN web_private.legal_documents document
+FROM local_legal_fixture AS fixture
+JOIN web_private.legal_documents AS document
   ON document.document_type = fixture.document_type
  AND document.locale = 'ko-KR'
- AND document.version = 'local-e2e-2026-07-28'
+ AND document.version = 'local-e2e-2026-07-29'
 ON CONFLICT (legal_document_id) DO NOTHING;
 
 COMMIT;
 SQL
 ```
 
-등록 후 다음 요청이 세 필수 문서를 포함한 JSON을 반환해야 한다.
+## 4. Web API 환경 파일을 만든다
+
+Web API의 로컬 환경 파일은 `daejang/apps/web-api/.env`다. 예시를 복사한 뒤 실제
+로컬 값으로 바꾼다.
 
 ```bash
-curl -i \
-  'http://127.0.0.1:3000/api/v1/legal-documents/current?locale=ko-KR'
+cd "$GIWA_APP_DIR"
+
+test -f apps/web-api/.env || \
+  cp apps/web-api/.env.example apps/web-api/.env
+chmod 600 apps/web-api/.env
 ```
 
-## 4. Web API 환경변수
-
-통합 worktree의 `apps/web-api/.env.example`을 기준으로 `apps/web-api/.env`를 만든다. `npm run dev:api`는 이 파일을 자동으로 읽는다.
+최소한 다음 항목을 확인한다.
 
 ```dotenv
 NODE_ENV=development
@@ -175,11 +172,13 @@ PORT=3000
 PUBLIC_ORIGIN=http://localhost:5173
 
 DATABASE_URL=postgresql://daejang_web_app:<로컬 DB 비밀번호>@127.0.0.1:55432/daejang?sslmode=disable
-RATE_LIMIT_HMAC_SECRET=<32바이트 이상 로컬 전용 secret>
+SIGNUP_ENABLED=true
+IDENTITY_VERIFICATION_MODE=disabled
+UPBIT_PDF_IMPORT_ENABLED=false
 
 OAUTH_ENABLED_PROVIDERS=naver,google,kakao
 OAUTH_STATE_HMAC_SECRET=<32바이트 이상 로컬 전용 secret>
-OAUTH_TRANSACTION_ENCRYPTION_KEY=<base64로 인코딩한 정확히 32바이트 key>
+OAUTH_TRANSACTION_ENCRYPTION_KEY=<base64로 인코딩한 32바이트 key>
 
 NAVER_CLIENT_ID=<값>
 NAVER_CLIENT_SECRET=<값>
@@ -192,61 +191,72 @@ EMAIL_AUTH_ENABLED=true
 RESEND_API_KEY=<값>
 EMAIL_FROM=GIWA <no-reply@auth.backwardlabs.io>
 EMAIL_VERIFICATION_HMAC_SECRET=<32바이트 이상 로컬 전용 secret>
-
-SIGNUP_ENABLED=true
-IDENTITY_VERIFICATION_MODE=disabled
 ```
 
-OAuth Client Secret과 Resend API Key는 `VITE_*` 변수에 넣으면 안 된다. 실제 값은 Git, PR, 로그, 채팅에 붙이지 않는다.
+`SIGNUP_ENABLED=true`와 `IDENTITY_VERIFICATION_MODE=disabled`는 가입과 필수 약관
+동의를 허용하지만 본인확인 완료 claim을 만들지 않는다.
+`UPBIT_PDF_IMPORT_ENABLED=false`도 유지한다.
 
-로컬 secret 생성 예시는 다음과 같다. 각 용도에 서로 다른 값을 사용한다.
+OAuth secret과 Resend API key는 `VITE_*` 변수에 넣지 않는다. 용도마다 서로 다른
+로컬 secret을 만들 수 있다.
 
 ```bash
-openssl rand -hex 32
 openssl rand -hex 32
 openssl rand -hex 32
 openssl rand -base64 32
 ```
 
-## 5. 프런트 환경변수
+## 5. 프런트 환경 파일을 만든다
 
-`apps/web/.env`에는 브라우저에 공개해도 되는 값만 둔다.
+프런트 환경 파일은 `daejang/apps/web/.env`다. 브라우저에 공개해도 되는 값만 둔다.
+
+```bash
+cd "$GIWA_APP_DIR"
+
+test -f apps/web/.env || cp apps/web/.env.example apps/web/.env
+chmod 600 apps/web/.env
+```
 
 ```dotenv
 VITE_WEB_API_BASE_URL=/api/v1
 VITE_API_PROXY_TARGET=http://127.0.0.1:3000
 ```
 
-## 6. 실행
+## 6. Web API와 프런트를 실행한다
 
-터미널 1에서 Web API를 실행한다.
+인증 E2E에는 Engine이 필요하지 않다. `UPBIT_PDF_IMPORT_ENABLED=false`를 유지하기
+위해 Web API와 프런트를 각각 실행한다.
+
+터미널 1:
 
 ```bash
-cd /로컬/경로/daejang-auth-integration
+cd "$GIWA_APP_DIR"
 npm run dev:api
 ```
 
-터미널 2에서 프런트를 실행한다.
+터미널 2:
 
 ```bash
-cd /로컬/경로/daejang-auth-integration
+cd "$GIWA_APP_DIR"
 npm run dev --workspace @daejang/web -- \
   --host 127.0.0.1 \
   --port 5173 \
   --strictPort
 ```
 
-브라우저는 반드시 다음 주소로 연다.
+브라우저는 다음 주소로 연다.
 
 ```text
 http://localhost:5173
 ```
 
-`127.0.0.1:5173`으로 열면 OAuth 거래 cookie의 host와 callback host가 달라질 수 있다.
+`127.0.0.1:5173`으로 열면 OAuth transaction cookie의 host와 callback host가
+달라질 수 있다.
 
-## 7. OAuth callback
+## 7. OAuth callback을 확인한다
 
-각 공급자 콘솔에는 다음 로컬 callback이 정확히 등록돼 있어야 한다. 끝에 `/`를 추가하지 않는다.
+각 provider 개발자 console에는 다음 로컬 callback이 정확히 등록돼 있어야 한다.
+끝에 `/`를 추가하지 않는다.
 
 ```text
 http://localhost:5173/api/v1/auth/oauth/naver/callback
@@ -254,14 +264,17 @@ http://localhost:5173/api/v1/auth/oauth/google/callback
 http://localhost:5173/api/v1/auth/oauth/kakao/callback
 ```
 
-운영 callback만 등록된 상태에서는 로컬 OAuth callback을 완료할 수 없다.
+운영 callback만 등록돼 있으면 provider 로그인 화면까지는 열려도 로컬 callback을
+완료할 수 없다.
 
-## 8. smoke test
+## 8. API smoke test를 실행한다
 
 ```bash
 curl -i http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/readyz
 curl -i http://localhost:5173/api/v1/me
+curl -i \
+  'http://localhost:5173/api/v1/legal-documents/current?locale=ko-KR'
 
 for provider in naver google kakao; do
   curl -sS -D - -o /dev/null \
@@ -271,47 +284,49 @@ done
 
 성공 기준:
 
-- `/healthz`: `200 {"status":"ok"}`
-- `/readyz`: `200 {"status":"ready"}`
+- `/healthz`: `200`과 `{"status":"ok"}`
+- `/readyz`: `200`과 `{"status":"ready"}`
 - 비로그인 `/api/v1/me`: HTML이 아닌 JSON `401`
+- 약관 endpoint: 현재 로컬 fixture를 포함한 JSON
 - Naver: `nid.naver.com`으로 향하는 `302`
 - Google: `accounts.google.com`으로 향하는 `302`
 - Kakao: `kauth.kakao.com`으로 향하는 `302`
-- OAuth 시작 응답에 `HttpOnly; SameSite=Lax` 거래 cookie 포함
+- OAuth 시작 응답: `HttpOnly; SameSite=Lax` transaction cookie 포함
 
-## 9. 브라우저 E2E 완료 기준
+## 9. 브라우저에서 사용자 흐름을 확인한다
 
-각 소셜 공급자에서 다음을 한 번씩 확인한다.
+각 OAuth provider에서 다음 흐름을 한 번씩 완료한다.
 
-1. 실제 공급자 로그인 화면으로 이동
-2. 공급자 동의 후 GIWA callback 복귀
-3. 가입 의도에서는 pending GIWA 계정 생성
-4. 약관 전문 표시와 필수 동의
-5. 필수 약관 동의 후 `/dashboard` 이동
-6. 새로고침 후 Session 유지
-7. 로그아웃
-8. 같은 공급자로 다시 로그인
-9. `/dashboard` 재진입
+1. 가입 화면에서 provider 선택
+2. 실제 provider 인증 화면으로 이동
+3. provider 동의 후 GIWA callback 복귀
+4. pending GIWA 계정 생성
+5. 필수 약관 전문 확인과 동의
+6. `/dashboard` 진입
+7. 새로고침 후 session 유지
+8. 로그아웃 후 이전 session으로 보호 API 접근 불가
+9. 같은 provider로 다시 인증하고 기존 GIWA 계정으로 로그인
 
-이메일 가입에서는 실제 인증번호 수신, 인증번호 만료·오입력, 비밀번호 규칙, 로그아웃 후 재로그인을 함께 확인한다.
+이메일에서는 다음 happy path와 edge case를 함께 확인한다.
 
-## 10. PR 승인 후
+- 새 이메일로 인증번호 수신, 비밀번호 설정, 필수 약관 동의, 가입 완료
+- 잘못된 인증번호와 만료된 인증번호가 입력란 가까이에 표시됨
+- 이미 가입한 이메일은 새 인증번호를 보내지 않고 기존 계정 안내
+- 로그아웃 후 이메일과 비밀번호로 재로그인
 
-로컬 통합 검증이 끝나도 `local/giwa-40-auth-integration`을 push하지 않는다.
-`BackwardLabs/daejang-db#17`의 병합 commit에 Engine을 고정하고 CI를 다시
-통과시킨 뒤 통합 PR `BackwardLabs/daejang#20`만 병합한다. App PR #17, #18,
-#19는 #20에 포함된 superseded PR이므로 별도로 병합하지 않고 닫는다.
+마지막으로 DB에 verified subject name claim을 임의 생성하지 않았고 PDF 가져오기가
+비활성인지 확인한다. 외부 NICE 연동이 없는 로컬 가입 성공을 본인확인 성공으로
+해석하지 않는다.
 
-서버에서는 두 저장소의 `main`만 `pull --ff-only`로 갱신한다. 서버에서 같은 변경을 다시 commit하거나 push하지 않는다.
+## 10. 종료한다
 
-모든 관련 worktree가 clean이고 더 이상 프로세스가 실행 중이지 않을 때만 로컬 worktree를 제거할 수 있다.
+Web API와 프런트 터미널에서 `Ctrl+C`를 누른다. PostgreSQL data를 유지하려면
+container만 멈춘다.
 
 ```bash
-git -C /로컬/경로/daejang worktree list
-git -C /로컬/경로/각-worktree status --short
-
-git -C /로컬/경로/daejang \
-  worktree remove /로컬/경로/각-worktree
+cd "$GIWA_DB_DIR"
+docker compose stop postgres
 ```
 
-`git worktree remove --force`는 사용하지 않는다.
+`docker compose down --volumes`는 로컬 DB data를 삭제하므로 데이터를 버리려는
+의도가 명확할 때만 사용한다.

@@ -1,286 +1,302 @@
-# 계정 인증·Review 통합 배포 실행 순서
+# GIWA MVP 서버 배포 가이드
 
-이 문서는 계정 인증과 Review 응답 기능을 DB부터 Web API·Engine·프론트까지
-배포하는 순서를 정의한다. 기준 변경은 다음 두 PR이다.
-
-- DB: [BackwardLabs/daejang-db#17](https://github.com/BackwardLabs/daejang-db/pull/17)
-- App·Engine·Web: [BackwardLabs/daejang#20](https://github.com/BackwardLabs/daejang/pull/20)
-
-DB #17을 먼저 병합하고, 그 **병합 커밋**으로 Engine 모듈을 다시 pin한 PR #20만
-배포한다. PR #20의 중간 `daejang-db` 커밋 pin이나 로컬 checkout을 운영 계약으로
+이 문서는 서버의 기존 checkout을 그대로 사용해 PostgreSQL을 먼저 갱신하고,
+그 다음 GIWA API stack을 배포하는 절차다. 서버에서는 로컬 개발용 `git worktree`를
 사용하지 않는다.
 
-## 1. 배포 전 필수 게이트
+배포 대상 경로는 다음 두 곳이다.
 
-다음 조건을 모두 충족하기 전에는 PR #20을 ready로 바꾸거나 병합하지 않는다.
+| 구분 | 서버 경로 | 실제 환경 파일 |
+| --- | --- | --- |
+| DB | `/Users/Shared/Projects/01_Daejang/daejang-db` | `daejang-db/.env` |
+| App·API·Engine | `/Users/Shared/Projects/01_Daejang/daejang` | `daejang/deploy/production.env` |
 
-1. DB #17의 migration `000015`-`000018`, runtime role 권한과 CI를 리뷰한다.
-2. DB #17을 병합하고 병합 커밋과 migration digest를 기록한다.
-3. `services/engine/go.mod`와 `go.sum`을 그 병합 커밋으로 갱신한다.
-4. GitHub Actions의 `Node quality`, `Engine quality`가 모두 성공한다.
-5. 기존 DB라면 migration 17 적용 전에 OPEN Review를 0건으로 만든다.
-6. 운영 Compose, DB role, Engine mTLS 인증서 SAN과 비공개 network를 확인한다.
+Git pull은 코드, migration, Compose 설정만 갱신한다. `.env`, 인증서, API key,
+실행 중인 container와 PostgreSQL data volume은 Git으로 전송되지 않는다.
+`daejang-db`를 다시 clone하거나 migration contract를 별도로 복사할 필요도 없다.
+최종 DB 변경이 병합된 `daejang-db/main`을 pull하면 migration `000001`부터
+`000030`까지 함께 들어온다.
 
-`DAEJANG_DB_READ_TOKEN`은 GitHub Actions에서 private Go module을 읽는 전용
-secret이다. `BackwardLabs/daejang-db`의 Contents read 권한만 부여하고 코드나
-환경 예시 파일에 값을 넣지 않는다.
+## 이번 MVP의 운영 결정
 
-## 2. 런타임 경계
+이번 MVP는 외부 본인확인 provider 없이 가입 절차를 연다.
 
-```mermaid
-flowchart LR
-  Browser["브라우저"] --> Edge["Cloudflare Worker"]
-  Edge --> Nginx["비공개 NGINX origin"]
-  Nginx --> API["Fastify Web API"]
-  API -->|"web role"| DB[("PostgreSQL")]
-  API -->|"mTLS gRPC"| Engine["Engine"]
-  Engine -->|"source/query/report/review roles"| DB
-  Engine --> Artifacts["subject-private artifact store"]
+```dotenv
+SIGNUP_ENABLED=true
+IDENTITY_VERIFICATION_MODE=disabled
+UPBIT_PDF_IMPORT_ENABLED=false
 ```
 
-- 브라우저 인증은 opaque server session cookie를 사용한다.
-- Web API는 `web_private`만 직접 사용하고 도메인 조회·변경은 Engine gRPC로 보낸다.
-- PostgreSQL과 Engine 포트는 공개하지 않는다.
-- Engine 서버 인증서 SAN은 Web API가 사용하는 `ENGINE_GRPC_SERVER_NAME`과
-  일치해야 한다. Web API client 인증서 SAN은
-  `ENGINE_WEB_API_CLIENT_DNS_NAME`과 일치해야 한다.
+`IDENTITY_VERIFICATION_MODE=disabled`는 사용자를 본인확인 완료 상태로 만드는 설정이
+아니다. 가입과 필수 약관 동의만 완료할 수 있게 한다. NICE 결과가 없으므로
+verified subject name claim을 임의로 만들거나
+`account:provision-subject-claim`으로 우회해서는 안 된다. 이름 일치가 필요한
+Upbit PDF 가져오기도 `UPBIT_PDF_IMPORT_ENABLED=false`로 유지한다.
 
-## 3. 저장소와 도구 확인
+## 배포를 멈춰야 하는 경우
 
-배포 계정은 두 저장소와 Docker daemon을 사용할 수 있어야 한다. 기존 checkout을
-삭제하거나 dirty 상태에서 pull하지 않는다.
+다음 중 하나라도 해당하면 pull이나 migration을 진행하지 않는다.
+
+- DB 또는 App checkout에 누가 만든 것인지 모르는 미커밋 변경이 있다.
+- 두 checkout 중 하나가 `main`이 아니거나 remote가 예상한 GitHub 저장소가 아니다.
+- 현재 App stack이 어느 Compose 파일과 env source로 실행됐는지 확인되지 않았다.
+- PostgreSQL backup과 복구 책임자가 정해지지 않았다.
+- `wi11y` 계정이 저장소 파일을 읽고 쓸 수 없거나 Docker를 사용할 수 없다.
+- 최종 DB PR과 최종 App PR이 아직 `main`에 병합되지 않았다.
+
+특히 현재 서버 확인 결과에서는 `daejang-db/.env`가 존재하지만,
+`daejang/deploy/production.env`는 관찰되지 않았다. 현재 stack이 다른 env source를
+사용할 수 있으므로, 실행 경로를 확인하기 전에 예시 파일을 복사해 새
+`production.env`를 만들지 않는다.
+
+## 1. 서버 관리자가 공유 권한을 한 번 정리한다
+
+현재 일부 파일은 `wiimdy:daejang` 소유이면서 mode가 `600`이라 같은
+`daejang` 그룹의 다른 사용자가 읽을 수 없다. 아래 블록은 서버 관리자 또는 파일
+소유자만 실행한다.
+
+먼저 사용자가 그룹에 들어 있는지 확인한다.
 
 ```bash
-export GIWA_DEPLOY_ROOT=/Users/Shared/Projects/01_Daejang
+id -Gn wi11y
+```
 
-git -C "$GIWA_DEPLOY_ROOT/daejang-db" status --short --branch
-git -C "$GIWA_DEPLOY_ROOT/daejang" status --short --branch
+출력에 `daejang`이 없다면 macOS 서버 관리자가 추가한 뒤 `wi11y`가 SSH에 다시
+접속한다.
+
+```bash
+sudo dseditgroup -o edit -a wi11y -t user daejang
+```
+
+그 다음 두 checkout을 그룹 공동 작업 형태로 맞춘다.
+
+```bash
+export GIWA_SERVER_ROOT=/Users/Shared/Projects/01_Daejang
+
+sudo chgrp -R daejang \
+  "$GIWA_SERVER_ROOT/daejang" \
+  "$GIWA_SERVER_ROOT/daejang-db"
+
+sudo chmod -R g+rwX \
+  "$GIWA_SERVER_ROOT/daejang" \
+  "$GIWA_SERVER_ROOT/daejang-db"
+
+sudo find \
+  "$GIWA_SERVER_ROOT/daejang" \
+  "$GIWA_SERVER_ROOT/daejang-db" \
+  -type d -exec chmod g+s {} +
+
+sudo -u wiimdy git -C "$GIWA_SERVER_ROOT/daejang" \
+  config core.sharedRepository group
+sudo -u wiimdy git -C "$GIWA_SERVER_ROOT/daejang-db" \
+  config core.sharedRepository group
+
+sudo chmod 660 "$GIWA_SERVER_ROOT/daejang-db/.env"
+if [ -f "$GIWA_SERVER_ROOT/daejang/deploy/production.env" ]; then
+  sudo chmod 660 "$GIWA_SERVER_ROOT/daejang/deploy/production.env"
+fi
+```
+
+`chmod 777`은 사용하지 않는다. 비밀 파일은 `daejang` 그룹만 읽고 쓸 수 있는
+`660`으로 두고, 디렉터리의 setgid bit로 새 파일이 같은 그룹을 상속하게 한다.
+새 pull 이후 owner-only 파일이 다시 생기면 서버 관리자가 해당 파일에만
+`g+rw`를 추가한다.
+
+별도로 `wi11y`는 다음 권한이 필요하다.
+
+- 두 private GitHub 저장소를 fetch할 SSH/GitHub 권한
+- Docker daemon과 Docker Compose를 사용할 권한
+- App image build 중 private `daejang-db` Go module을 읽을 GitHub token
+- 운영 secret과 인증서 경로를 읽을 `daejang` 그룹 권한
+
+## 2. 현재 서버 상태를 읽기 전용으로 확인한다
+
+SSH 접속 직후 아래 명령만 실행한다. 이 단계는 파일이나 container를 바꾸지 않는다.
+
+```bash
+ssh -A giwa
+
+export GIWA_SERVER_ROOT=/Users/Shared/Projects/01_Daejang
+export GIWA_DB_DIR="$GIWA_SERVER_ROOT/daejang-db"
+export GIWA_APP_DIR="$GIWA_SERVER_ROOT/daejang"
+
+id
+
+git -C "$GIWA_DB_DIR" status --short --branch
+git -C "$GIWA_DB_DIR" branch --show-current
+git -C "$GIWA_DB_DIR" remote get-url origin
+
+git -C "$GIWA_APP_DIR" status --short --branch
+git -C "$GIWA_APP_DIR" branch --show-current
+git -C "$GIWA_APP_DIR" remote get-url origin
+
 docker version
 docker compose version
+docker compose ls
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+
+test -f "$GIWA_DB_DIR/.env" \
+  && echo "DB env: found" \
+  || echo "DB env: missing"
+
+test -f "$GIWA_APP_DIR/deploy/production.env" \
+  && echo "App env: found" \
+  || echo "App env: missing"
 ```
 
-두 저장소가 clean하지 않거나 Docker Compose를 사용할 수 없으면 중단한다.
+`docker compose ls`의 project name과 config file을 현재 운영자에게 확인한다.
+실행 중인 App stack이 다른 checkout, 별도 service manager 또는 별도 env file을
+사용한다면 그 경로가 이번 배포의 기준이다. 값을 확인하려고
+`docker inspect`의 전체 환경변수를 채팅이나 이슈에 붙이지 않는다.
 
-## 4. DB #17 병합 커밋과 digest 고정
+초기 SSH에서
+`Could not resolve hostname backward-labs.tail344fa1.ts.net`가 나오고 재시도에
+성공했다면 일시적인 Tailscale MagicDNS 상태일 수 있다. 반복되면 권한 변경보다 먼저
+Tailscale 연결과 `giwa` SSH alias의 hostname을 확인한다.
 
-DB #17이 병합된 뒤 DB 저장소의 `main`을 fast-forward로 갱신한다. App 저장소는
-아직 PR #20이 병합되기 전이므로 PR 작업 checkout을 사용한다.
+## 3. DB 코드를 먼저 갱신한다
+
+최종 DB PR이 병합된 뒤에만 실행한다. server checkout이 clean한 상태에서
+`main`을 fast-forward한다.
 
 ```bash
-git -C "$GIWA_DEPLOY_ROOT/daejang-db" fetch origin
-git -C "$GIWA_DEPLOY_ROOT/daejang-db" checkout main
-git -C "$GIWA_DEPLOY_ROOT/daejang-db" pull --ff-only origin main
-
-git -C "$GIWA_DEPLOY_ROOT/daejang-db" rev-parse HEAD
-shasum -a 256 "$GIWA_DEPLOY_ROOT"/daejang-db/migrations/0000{15,16,17,18,19}_*.sql
+git -C "$GIWA_DB_DIR" fetch origin
+git -C "$GIWA_DB_DIR" checkout main
+git -C "$GIWA_DB_DIR" pull --ff-only origin main
+git -C "$GIWA_DB_DIR" rev-parse HEAD
 ```
 
-기록한 DB 병합 커밋으로 Engine module을 갱신하고 PR #20의 검증을 다시 실행한다.
-병합 전 임시 커밋이나 `replace` directive를 남기지 않는다.
-현재 검증된 pin은 DB merge commit
-`aadb1eabf98e0848276f8d7d95bfc19d9d48b6c5`의 pseudo-version
-`v0.0.0-20260728124403-aadb1eabf98e`다.
+여기까지는 PostgreSQL data를 바꾸지 않는다. migration 적용 전에 운영 DB backup과
+복구 위치를 운영 책임자와 확인한다. 운영 데이터가 들어 있다면 backup 없이 다음
+단계로 넘어가지 않는다.
+
+## 4. 기존 DB env에 필요한 값만 보충한다
+
+`daejang-db/.env`는 이미 있으므로 `.env.example`로 덮어쓰지 않는다. 먼저 값 자체를
+출력하지 않고 필요한 key의 존재 여부만 확인한다.
 
 ```bash
-cd /PR-20-작업-checkout/services/engine
-GOPRIVATE=github.com/BackwardLabs/* \
-  go get github.com/BackwardLabs/daejang-db@<DB_17_MERGE_COMMIT>
-go mod tidy
-go test ./...
-go vet ./...
-go build ./...
+cd "$GIWA_DB_DIR"
+
+for key in \
+  POSTGRES_DB \
+  POSTGRES_PORT \
+  POSTGRES_USER \
+  POSTGRES_PASSWORD \
+  DAEJANG_WEB_APP_PASSWORD \
+  DAEJANG_IDENTITY_PROVISIONER_PASSWORD \
+  DAEJANG_JIT_APP_PASSWORD \
+  DAEJANG_SOURCE_APP_PASSWORD \
+  DAEJANG_QUERY_APP_PASSWORD \
+  DAEJANG_EVENT_APP_PASSWORD \
+  DAEJANG_LOT_APP_PASSWORD \
+  DAEJANG_TAX_APP_PASSWORD
+do
+  grep -q "^${key}=" .env || echo "MISSING: ${key}"
+done
 ```
 
-이 pin 변경과 CI가 성공한 뒤 PR #20을 병합한다. 실제 배포 서버의 App `main`은
-그 이후에만 `pull --ff-only origin main`으로 갱신한다.
-
-## 5. 기존 운영 DB migration 17 cutover
-
-새 DB는 migration 15-19를 순서대로 적용하면 된다. 기존 데이터가 있는 DB는
-migration 17이 OPEN Review를 발견하면 의도적으로 중단하므로 아래 순서를 지킨다.
-
-1. Review를 새로 만드는 writer와 Review 해결 API를 maintenance 상태로 전환한다.
-2. migration 15와 16까지만 적용한다.
-3. 현재 pointer가 가리키는 OPEN Review를 조회한다.
-
-```sql
-SELECT
-  item.subject_id,
-  item.review_id,
-  item.current_revision_id,
-  item.pointer_version
-FROM review.review_item AS item
-JOIN review.review_revision AS revision
-  ON revision.subject_id = item.subject_id
- AND revision.review_id = item.review_id
- AND revision.revision_id = item.current_revision_id
-WHERE revision.status = 'OPEN'
-ORDER BY item.subject_id, item.review_id;
-```
-
-4. 조회 결과가 0건이면 migration 17, 18과 19를 적용한다.
-5. 1건 이상이면 **여기서 배포를 중단한다.** DB PR #17의 migration-16
-   `ResolveV2` 기반은 commit
-   `596d51603a0d4e2d7fe14cc702ae49ca46ec38bc`에 있지만, 그 계약으로
-   Review를 해결하는 버전된 cutover 명령·바이너리는 PR #20에 존재하지
-   않는다. PR #20의 Engine pin `aadb1eabf98e0848276f8d7d95bfc19d9d48b6c5`은
-   migration 17을 요구하므로 pre-17 resolver로 사용하지 않는다.
-6. OPEN Review가 있는 운영 DB를 전환하려면 별도 후속 변경으로 다음을
-   먼저 제공하고 동료 리뷰를 받는다.
-   - 위 DB commit에 고정된 `review-cutover-v16` 소스와 재현 가능한 build 명령
-   - subject, review, 예상 revision·pointer, 허용 option, schema digest를 검증하는
-     입력 manifest 계약
-   - `--dry-run`과 실행 명령, 바이너리 digest, 실행 주체·시각·결과 audit log
-   - migration 16 복제 DB에서 같은 manifest로 검증한 통합 테스트
-7. 승인된 명령으로 해결한 뒤 위 SQL이 0건임을 독립적으로 재확인한다.
-   자동 삭제, 상태 강제 변경, 검증되지 않은 SQL 수정은 하지 않는다.
-8. migration 17·18·19, runtime role, Review evidence query 검증을 실행한다.
-9. 병합 DB commit으로 pin한 Engine을 배포한 뒤 writer를 다시 연다.
-
-운영 데이터가 기록된 migration을 down하지 않는다. 실패는 새 migration으로
-forward-fix한다.
-
-## 6. DB와 역할 준비
-
-기존 `daejang-db/.env`는 secret 파일이다. 없을 때만 예시를 복사하고 권한을
-제한한다.
+`MISSING`으로 나온 key만 기존 `.env`에 추가한다. 실제 password는
+`.env.example`의 로컬 기본값이 아니라 운영용으로 생성한 서로 다른 값을 사용한다.
+편집이 끝나면 값은 출력하지 말고 권한만 확인한다.
 
 ```bash
-cd "$GIWA_DEPLOY_ROOT/daejang-db"
-test -f .env || cp .env.example .env
-chmod 600 .env
+chmod 660 .env
+ls -l .env
 ```
 
-App stack에는 역할별 DSN을 주입한다.
+## 5. migration 1~30을 적용하고 검증한다
 
-| 설정 | 최소 역할 | 용도 |
-| --- | --- | --- |
-| `WEB_DATABASE_URL` | `daejang_web_app` | session, OAuth/email, 동의 |
-| `SOURCE_DATABASE_URL` | `daejang_source_app` | source·sync job |
-| `QUERY_DATABASE_URL` | `daejang_query_app` | ledger·Review evidence 조회 |
-| `REPORT_DATABASE_URL` | `daejang_event_app` | report snapshot 조회 |
-| `REVIEW_DATABASE_URL` | `daejang_event_app` | Review CAS·V2 delivery |
-| `REVIEW_ARTIFACT_DATABASE_URL` | 현재 `daejang_source_app` | artifact metadata writer |
-
-artifact-only role이 DB에 추가되면 마지막 DSN을 더 좁은 역할로 교체한다.
+DB Compose project가 PostgreSQL, runtime role bootstrap과 migration job을
+관리한다. App이 schema migration을 대신 실행하지 않는다.
 
 ```bash
-cd "$GIWA_DEPLOY_ROOT/daejang-db"
+cd "$GIWA_DB_DIR"
+
 docker compose config --quiet
+make check
 make database-up
 make database-status
 make database-verify
 docker compose ps
 ```
 
-성공 기준은 PostgreSQL `healthy`, migrations 15-19 적용, runtime role 검증과
-Review evidence access 검증 성공이다.
+다음이 모두 확인되어야 App 단계로 넘어간다.
 
-## 7. App 운영 환경
+- PostgreSQL container가 `healthy`
+- migration `000001`부터 `000030`까지 적용됨
+- runtime role 검증 성공
+- Web OAuth·email persistence 검증 성공
+- Docker network `daejang-db_default`가 존재함
 
 ```bash
-cd "$GIWA_DEPLOY_ROOT/daejang"
-test -f deploy/production.env || \
-  cp deploy/production.env.example deploy/production.env
-chmod 600 deploy/production.env
+docker network inspect daejang-db_default >/dev/null
 ```
 
-현재 운영에는 production identity verifier가 없으므로 `SIGNUP_ENABLED=false`와
-`IDENTITY_VERIFICATION_MODE=disabled`를 유지한다. `disabled`는 운영 본인확인을
-대체하지 않으며 이 상태에서 신규 가입을 열지 않는다. 실사용 provider와 callback 검증,
-실패·재시도·감사 기록을 구현하고 운영 환경에서 검증한 뒤에만 가입을 활성화한다.
-신규 가입이 닫혀 있어도 기존 계정 로그인은 계속 사용할 수 있다.
+실패한 migration을 `down`으로 되돌리거나 운영 volume을 삭제하지 않는다.
+`docker compose down --volumes`도 실행하지 않는다. 원인을 수정한 새 migration으로
+forward-fix하는 것이 원칙이다.
 
-신규 가입을 닫은 상태에서 운영용 이메일 계정이 필요하면 migration이나 프런트에
-계정·비밀번호를 넣지 않고 one-shot provisioning 명령을 사용한다. 명령은 일반
-`web_private.users`, `user_emails`, `email_credentials` 행만 만들고 비밀번호는
-Argon2id로만 저장한다. 검증 명의 claim은 런타임 Web DB 역할이 발급할 수 없고,
-아래의 별도 identity provisioner 역할과 one-shot 명령으로만 추가한다. 계정 명령은
-비밀번호 변경 수단으로 사용하지 않는다.
+## 6. App의 실제 env source를 확정한다
+
+현재 `deploy/production.env`가 없는 상태라면 여기서 운영 책임자에게 현재 App stack이
+사용한 env source를 확인한다. 다른 파일이나 secret manager가 기준이면 그 값을
+`production.env`로 임의 복사하지 말고 기존 배포 방식을 유지한다.
+
+운영 책임자가 `daejang/deploy/production.env`를 이번 Compose의 기준으로 확정했고
+파일이 실제로 없을 때만 다음과 같이 만든다.
 
 ```bash
-read -r -s -p "Account password: " GIWA_ACCOUNT_PASSWORD
-echo
+cd "$GIWA_APP_DIR"
 
-DATABASE_URL="$WEB_DATABASE_URL" \
-PROVISION_ACCOUNT_USER_ID="<운영 사용자 UUID>" \
-PROVISION_ACCOUNT_DISPLAY_NAME="<운영 표시명>" \
-PROVISION_ACCOUNT_EMAIL="<운영 이메일>" \
-PROVISION_ACCOUNT_CONFIRM_EMAIL="<운영 이메일>" \
-PROVISION_ACCOUNT_PASSWORD="$GIWA_ACCOUNT_PASSWORD" \
-npm run account:provision --workspace @daejang/web-api
-
-unset GIWA_ACCOUNT_PASSWORD
+umask 007
+cp deploy/production.env.example deploy/production.env
+chmod 660 deploy/production.env
 ```
 
-운영에서는 가능하면 `PROVISION_ACCOUNT_PASSWORD_FILE`에 secret mount 경로를
-지정하고 `PROVISION_ACCOUNT_PASSWORD`는 생략한다. 성공 출력에는 상태와 user ID만
-포함되며 표시명, 이메일, 비밀번호와 해시는 출력하지 않는다. 실행 후 일반 로그인 화면에서
-이메일과 지정한 비밀번호를 입력해 로그인한다. 별도로 발급한 검증 실명과 검증 기록 참조값은
-로그인 응답이나 일반 프로필 화면에 노출하지 않는다.
+복사 직후의 파일에는 placeholder가 있으므로 아직 App을 시작하면 안 된다.
+실제 값을 입력할 때는 다음 범주를 모두 확인한다.
 
-이미 존재하는 active 운영 계정에는 별도 one-shot 명령으로 최초 claim만 추가한다.
-사용자 UUID와 검증된 기본 이메일을 모두 대조하며, 같은 사용자의 claim이 이미 있으면
-수정하지 않고 실패한다.
-`IDENTITY_PROVISIONER_DATABASE_URL`은 `daejang_identity_provisioner` 전용 secret이며 Web API
-컨테이너 환경에 주입하지 않는다. 명령은 현재 DB 역할이 전용 provisioner인지,
-migration 30 계약과 최소 column 권한만 가지는지를 실행 전에 검사한다.
+- 공개 origin과 NGINX TLS 인증서
+- DB 역할별 DSN과 `DAEJANG_DB_NETWORK=daejang-db_default`
+- session, rate-limit, OAuth transaction용 서로 다른 secret
+- Naver, Google, Kakao client ID·secret
+- Resend API key와 `EMAIL_FROM`
+- Engine·Web API·health probe의 mTLS 인증서
+- JIT bridge 설정과 mTLS 인증서
+- private Go module build용 GitHub token은 파일이 아니라 build shell에만 주입
 
-```bash
-export IDENTITY_PROVISIONER_DATABASE_URL="<secret manager에서 주입한 provisioner DSN>"
+이번 MVP flag는 다음 값이어야 한다.
 
-PROVISION_SUBJECT_CLAIM_USER_ID="<운영 사용자 UUID>" \
-PROVISION_SUBJECT_CLAIM_CONFIRM_USER_ID="<운영 사용자 UUID>" \
-PROVISION_SUBJECT_CLAIM_EMAIL="<검증된 기본 이메일>" \
-PROVISION_SUBJECT_CLAIM_CONFIRM_EMAIL="<검증된 기본 이메일>" \
-PROVISION_SUBJECT_CLAIM_NAME="<운영 본인확인에서 검증한 실명>" \
-PROVISION_SUBJECT_CLAIM_CONFIRM_NAME="<운영 본인확인에서 검증한 실명>" \
-PROVISION_SUBJECT_CLAIM_VERIFICATION_METHOD="MANUAL_KYC" \
-PROVISION_SUBJECT_CLAIM_ASSURANCE_LEVEL="SUBSTANTIAL" \
-PROVISION_SUBJECT_CLAIM_VERIFIER_REFERENCE="<운영 검증 기록 참조값>" \
-PROVISION_SUBJECT_CLAIM_VERIFIED_AT="<검증 시각 ISO-8601>" \
-npm run account:provision-subject-claim --workspace @daejang/web-api
-
-unset IDENTITY_PROVISIONER_DATABASE_URL
+```dotenv
+SIGNUP_ENABLED=true
+IDENTITY_VERIFICATION_MODE=disabled
+UPBIT_PDF_IMPORT_ENABLED=false
 ```
 
-TLS private key, DB password, OAuth secret, Resend key와 `GH_PAT`는 Git에 넣지 않는다.
-Engine image의 private module fetch에 쓰는 `GH_PAT`는 build 중에만 secret mount로
-전달한다.
+필수 약관 전문은 migration이 자동으로 만들지 않는다. 법무 검토가 끝난 현재
+`terms`, `privacy`, `identity_verification` 문서를 운영 DB에 등록하는 승인된
+one-shot 절차가 별도로 필요하다. 이 문서가 없으면 가입 과정은
+`LEGAL_DOCUMENTS_UNAVAILABLE`로 중단된다. 로컬 fixture를 운영 DB에 넣지 않는다.
 
-### Upbit PDF 활성화 게이트와 비공개 저장소
+## 7. App 코드를 갱신하고 Compose를 검증한다
 
-현재 Upbit PDF 등록은 비활성 상태를 유지한다. UI만 열거나 환경 변수만 바꿔 우회하지
-않으며, 다음 조건을 모두 구현하고 운영 환경에서 검증하기 전에는 파일을 접수하지 않는다.
-
-1. 지원 대상 Upbit 문서 레이아웃을 판별하고 실패를 닫힌 상태로 처리하는 parser가 있다.
-2. 암호화 PDF 비밀번호는 TLS 요청 body로 한 번만 전달하고, DB·로그·파일·object
-   metadata에 저장하지 않는다. Engine은 DB·TLS 비밀·artifact volume이 없는
-   networkless parser sidecar에 UDS로 전달하고 요청 종료 즉시 메모리를 지운다.
-3. Web API가 확인한 object를 Engine이 durable하게 인수했다는 상태 계약이 있으며,
-   timeout·재시도·정리 작업이 처리 중인 object를 먼저 삭제하지 않는다.
-4. 운영 비공개 object storage가 아래 보안·복구 요건을 충족하고 실제 배포 설정과
-   복구 시험으로 입증된다.
-
-운영 비공개 object storage는 저장 데이터 암호화(encryption at rest), 서비스 계정별
-최소 권한과 네트워크 접근 통제, 감사 가능한 접근 기록을 제공해야 한다. 또한 backup,
-object versioning, 보존·삭제 기한과 복구 절차를 하나의 retention 정책으로 정의하고
-정기적으로 복구와 만료 삭제를 시험한다. 로컬 파일시스템이나 Compose named volume을
-사용한다는 사실만으로 이 요건을 충족했다고 간주하지 않는다. 개인정보가 backup이나
-이전 version에 무기한 남지 않도록 동일한 보존·삭제 정책을 적용한다.
-
-위 조건이 하나라도 충족되지 않으면 Upbit capability는 비활성으로 응답하고, Web API는
-업로드 body를 저장하거나 upload row를 만들기 전에 요청을 거절한다.
-현재 구현은 `UPBIT_PDF_IMPORT_ENABLED=false`를 운영 기본값으로 강제하며,
-Compose named volume만 사용하는 운영 모드에서 `true`로 설정하면 애플리케이션이
-기동하지 않는다. 개발 E2E에서만 명시적으로 `true`를 설정한다.
-
-## 8. App stack 시작
+최종 App PR이 병합된 뒤에만 실행한다.
 
 ```bash
-cd "$GIWA_DEPLOY_ROOT/daejang"
+git -C "$GIWA_APP_DIR" fetch origin
+git -C "$GIWA_APP_DIR" checkout main
+git -C "$GIWA_APP_DIR" pull --ff-only origin main
+git -C "$GIWA_APP_DIR" rev-parse HEAD
+```
 
-read -s -p "GH_PAT: " GH_PAT
+App image build는 private `BackwardLabs/daejang-db` Go module을 읽는다.
+Contents read 권한만 가진 token을 shell에 일시적으로 입력하고 파일에 저장하지 않는다.
+
+```bash
+cd "$GIWA_APP_DIR"
+
+read -r -s -p "GitHub token: " GH_PAT
 echo
 export GH_PAT
 
@@ -295,6 +311,16 @@ docker compose \
   build
 
 unset GH_PAT
+```
+
+`config --quiet` 또는 build가 실패하면 기존 container는 건드리지 않고 중단한다.
+
+## 8. App stack을 갱신한다
+
+DB 검증과 App build가 모두 끝난 뒤에만 실행한다.
+
+```bash
+cd "$GIWA_APP_DIR"
 
 docker compose \
   --env-file deploy/production.env \
@@ -307,51 +333,55 @@ docker compose \
   ps
 ```
 
-`web-api`, `engine`, `sync-worker`, `nginx`가 정상 상태여야 한다. 현재 aggregate
-Engine health는 Source·Query·Report·Review·artifact 중 하나가 실패해도 전체를
-`NOT_SERVING`으로 만들며 Web API 가용성까지 막을 수 있다. 이는 이번 배포의
-fail-closed 선택이고, per-service health 분리는 후속 가용성 작업이다.
+`nginx`, `web-api`, `engine`, `pdf-parser`, `sync-worker`가 실행되어야 한다.
+Web API는 DB와 Engine이 준비되지 않으면 `/readyz`에서 `503`을 반환하도록
+fail-closed되어 있다.
 
-## 9. Edge 연결과 smoke test
+## 9. 서버 API를 검증한다
 
-공개 사이트 주소를 `WEB_API_ORIGIN`으로 다시 넣으면 Worker가 자기 자신을 호출한다.
-NGINX 8443으로 연결되는 별도 비공개 API hostname과 Cloudflare Access service token을
-사용한다.
+먼저 서버 내부에서 상태를 확인하고, 그 다음 공개 edge를 확인한다. 실제 내부 API
+hostname은 현재 운영 구성을 사용한다.
 
 ```bash
 curl -i https://daejang.backwardlabs.io/api/v1/me
 curl -i https://daejang.backwardlabs.io/api/v1/auth/capabilities
-curl -i \
-  'https://daejang.backwardlabs.io/api/v1/auth/oauth/naver/start?intent=login'
+
+for provider in naver google kakao; do
+  curl -sS -D - -o /dev/null \
+    "https://daejang.backwardlabs.io/api/v1/auth/oauth/${provider}/start?intent=signup"
+done
 ```
 
-성공 기준:
+성공 기준은 다음과 같다.
 
-- `/me`는 HTML이 아닌 JSON `401`과 `Cache-Control: no-store`를 반환한다.
-- capability는 `signup.enabled=false`와 서버가 현재 허용하는 가입 method를 반환한다.
-  로그인 provider 목록은 이 endpoint의 계약이 아니다.
-- 활성 OAuth login은 provider로 향하는 `302`와 보호된 transaction cookie를 반환한다.
-- signup API와 UI는 안정적인 unavailable 상태로 닫혀 있다.
-- 브라우저 실제 login callback 뒤 이전 session cookie는 거절되고 새 cookie만 유효하다.
+- 비로그인 `/api/v1/me`는 HTML이 아닌 JSON `401` 반환
+- capabilities에서 signup이 활성화되고 email과 설정된 OAuth provider가 표시됨
+- Naver, Google, Kakao 시작 요청은 각 provider의 공식 인증 주소로 `302`
+- OAuth callback 후 새 GIWA 계정 생성, 필수 약관 동의, dashboard 진입 가능
+- 기존 이메일로 다시 가입할 때 새 인증번호를 보내지 않고 기존 계정 안내
+- 로그아웃한 session cookie로 보호 API에 다시 접근할 수 없음
+- `UPBIT_PDF_IMPORT_ENABLED=false` 상태에서 PDF 가져오기 경로가 열리지 않음
 
-## 10. Review delivery와 artifact 운영 경계
+실제 provider 로그인, Resend 수신, callback과 cookie 회전은 단순 `curl`만으로
+완료 검증할 수 없다. 브라우저에서 provider별로 가입과 재로그인을 한 번씩 확인한다.
 
-Review 해결 성공은 immutable revision, V2 event와 consumer delivery row가 durable하다는
-뜻이다. recalculation, anchoring, receipt, report delivery 완료를 의미하지 않는다.
+## 10. Cloudflare 프런트 배포는 별도다
 
-CAS 또는 DB 실패 전에 기록된 content-addressed subject-private artifact는 pin되지 않은
-채 남을 수 있다. 현재 artifact API에는 안전한 cross-store transaction이나 삭제/list
-계약이 없으므로 이 PR은 원자성을 가장하지 않는다.
+서버의 `deploy/compose.production.yaml`은 NGINX, Web API, Engine과 worker를
+운영한다. 프런트 정적 build와 Cloudflare edge는 이 Compose에 포함되지 않는다.
 
-- subject-private ACL을 유지한다.
-- artifact volume 사용량을 모니터링한다.
-- storage owner가 retention을 정하고 reconciliation/GC 후속 작업을 추적한다.
-- downstream 완료 표시는 delivery worker와 proof/report gate가 실제 완료 신호를 저장한
-  뒤에만 제공한다.
+따라서 App PR을 merge하고 서버에서 `main`을 pull해도 공개 웹 화면이 자동으로
+바뀌지는 않는다. 서버 API 검증이 끝난 뒤 기존 Cloudflare 배포 workflow로 같은
+App commit의 프런트와 edge를 별도 배포해야 한다. Cloudflare의 API origin은 공개
+웹 주소 자체가 아니라 서버 NGINX로 연결되는 기존 비공개 origin 설정을 유지한다.
 
-## 11. 롤백 원칙
+## 롤백과 금지 사항
 
-- App 문제는 직전 정상 image/commit으로 되돌리되 DB migration은 down하지 않는다.
-- Review writer를 다시 열기 전에 DB schema와 Engine module pin이 일치하는지 확인한다.
-- `docker compose down --volumes`는 운영 DB와 artifact를 지울 수 있으므로 실행하지 않는다.
-- production signup을 임시 우회, `disabled` identity mode 또는 mock으로 열지 않는다.
+- App 문제는 직전 정상 App image 또는 commit으로 되돌릴 수 있다.
+- 적용된 DB migration은 `down`하지 않고 새 migration으로 forward-fix한다.
+- 운영 PostgreSQL·artifact volume에 `docker compose down --volumes`를 실행하지 않는다.
+- `.env`를 Git에 add, commit, PR 또는 채팅으로 올리지 않는다.
+- `IDENTITY_VERIFICATION_MODE=mock`을 운영에서 사용하지 않는다.
+- NICE 결과 없이 verified subject name claim을 만들지 않는다.
+- 운영 약관 대신 로컬 fixture를 등록하지 않는다.
+- 현재 stack과 env source를 확인하지 않은 상태에서 새 stack을 나란히 띄우지 않는다.

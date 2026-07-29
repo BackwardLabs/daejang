@@ -37,7 +37,7 @@ class FailOnceSender implements VerificationEmailSender {
 }
 
 describe('EmailAuthService', () => {
-  it('returns the public acceptance response without creating or sending a code for an existing account', async () => {
+  it('reports an existing account without creating or sending a signup code', async () => {
     class ExistingAccountStore extends MemoryAccountAuthStore {
       challengeCreationAttempted = false
 
@@ -83,13 +83,15 @@ describe('EmailAuthService', () => {
       },
     )
 
-    await expect(service.sendSignupCode('user@example.com')).resolves.toEqual({
-      expiresInSeconds: 300,
-      resendAfterSeconds: 60,
+    await expect(
+      service.sendSignupCode('user@example.com'),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'ACCOUNT_ALREADY_EXISTS',
     })
     expect(store.challengeCreationAttempted).toBe(false)
     expect(deliveryAttempted).toBe(false)
-    expect(waits).toEqual([350])
+    expect(waits).toEqual([])
   })
 
   it('abandons a failed delivery and permits an immediate same-clock retry', async () => {
@@ -104,9 +106,11 @@ describe('EmailAuthService', () => {
       immediateResponseTiming,
     )
 
-    await expect(service.sendSignupCode('user@example.com')).resolves.toEqual({
-      expiresInSeconds: 300,
-      resendAfterSeconds: 60,
+    await expect(
+      service.sendSignupCode('user@example.com'),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'EMAIL_DELIVERY_FAILED',
     })
     await expect(service.sendSignupCode('user@example.com')).resolves.toMatchObject({
       resendAfterSeconds: 60,
@@ -154,9 +158,11 @@ describe('EmailAuthService', () => {
       immediateResponseTiming,
     )
 
-    await expect(service.sendSignupCode('private@example.com')).resolves.toEqual({
-      expiresInSeconds: 300,
-      resendAfterSeconds: 60,
+    await expect(
+      service.sendSignupCode('private@example.com'),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'EMAIL_DELIVERY_FAILED',
     })
     expect(compensationObserved).toMatchObject({
       challengeId: expect.any(String),

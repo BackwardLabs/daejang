@@ -343,11 +343,6 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     false,
     'SIGNUP_ENABLED',
   )
-  if (production && signupRequested && identityVerificationMode === 'disabled') {
-    throw new Error(
-      'SIGNUP_ENABLED=true requires a production identity verification provider',
-    )
-  }
   const signupMethods = {
     email: emailAuth.enabled,
     oauthProviders: [...oauth.enabledProviders],

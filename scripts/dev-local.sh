@@ -248,7 +248,7 @@ start_api() {
       PORT="$API_PORT" \
       PUBLIC_ORIGIN="http://localhost:${WEB_PORT}" \
       DATABASE_URL="$WEB_DATABASE_URL" \
-      SIGNUP_ENABLED=false \
+      SIGNUP_ENABLED=true \
       IDENTITY_VERIFICATION_MODE=disabled \
       UPBIT_PDF_IMPORT_ENABLED=true \
       ENGINE_GRPC_INSECURE_TARGET="$(

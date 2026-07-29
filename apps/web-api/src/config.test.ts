@@ -248,8 +248,8 @@ describe('web api configuration', () => {
     })
   })
 
-  it('keeps production signup closed without a real identity provider', () => {
-    expect(() =>
+  it('allows explicit production signup without an external identity provider', () => {
+    expect(
       loadConfig({
         NODE_ENV: 'production',
         PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
@@ -266,6 +266,12 @@ describe('web api configuration', () => {
         EMAIL_FROM: 'GIWA <test@example.com>',
         IDENTITY_VERIFICATION_MODE: 'disabled',
       }),
-    ).toThrow('requires a production identity verification provider')
+    ).toMatchObject({
+      signup: {
+        enabled: true,
+        identityVerificationRequired: false,
+        methods: { email: true, oauthProviders: [] },
+      },
+    })
   })
 })

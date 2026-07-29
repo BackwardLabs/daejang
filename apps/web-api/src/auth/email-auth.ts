@@ -252,7 +252,7 @@ export class EmailAuthService {
       this.store.getEligibleEmailChallenge(email, 'signup', now),
     ])
     if (existingCredential) {
-      return accept()
+      throw accountAlreadyExists()
     }
     if (latest && latest.resendAfter.getTime() > now.getTime()) {
       return accept()
@@ -260,7 +260,7 @@ export class EmailAuthService {
 
     const pending = await this.store.findOrCreatePendingDirectEmail(email)
     if (pending.loginEnabled) {
-      return accept()
+      throw accountAlreadyExists()
     }
     const challengeId = randomUUID()
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0')
@@ -310,7 +310,7 @@ export class EmailAuthService {
         challengeId,
         error: deliveryError,
       })
-      return accept()
+      throw emailDeliveryFailed()
     }
     return accept()
   }
