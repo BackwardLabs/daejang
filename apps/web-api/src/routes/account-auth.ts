@@ -64,7 +64,7 @@ const requiredLegalDocumentTypes = (
   options: AccountAuthRoutesOptions,
 ): ReadonlyArray<LegalDocumentType> => [
   'terms',
-  'privacy',
+  'privacy_collection',
   ...(options.config.signup.identityVerificationRequired
     ? (['identity_verification'] as const)
     : []),
@@ -73,6 +73,17 @@ const applicableLegalDocumentTypes = (
   options: AccountAuthRoutesOptions,
 ): ReadonlyArray<LegalDocumentType> => [
   ...requiredLegalDocumentTypes(options),
+  'marketing',
+]
+const publishedLegalDocumentTypes = (
+  options: AccountAuthRoutesOptions,
+): ReadonlyArray<LegalDocumentType> => [
+  'terms',
+  'privacy',
+  'privacy_collection',
+  ...(options.config.signup.identityVerificationRequired
+    ? (['identity_verification'] as const)
+    : []),
   'marketing',
 ]
 const currentTime = (options: AccountAuthRoutesOptions) =>
@@ -648,6 +659,7 @@ export const registerAccountAuthRoutes = async (
       },
     },
     async (request) => {
+      const publishedTypes = new Set(publishedLegalDocumentTypes(options))
       const applicableTypes = new Set(applicableLegalDocumentTypes(options))
       const requiredTypes = new Set(requiredLegalDocumentTypes(options))
       const documents = (
@@ -655,7 +667,7 @@ export const registerAccountAuthRoutes = async (
           request.query.locale ?? 'ko-KR',
           currentTime(options),
         )
-      ).filter((document) => applicableTypes.has(document.documentType))
+      ).filter((document) => publishedTypes.has(document.documentType))
       const availableTypes = new Set(
         documents.map((document) => document.documentType),
       )
@@ -674,6 +686,11 @@ export const registerAccountAuthRoutes = async (
         documents: documents.map((document) => ({
           ...document,
           required: requiredTypes.has(document.documentType),
+          consentMode: !applicableTypes.has(document.documentType)
+            ? ('notice' as const)
+            : requiredTypes.has(document.documentType)
+              ? ('required' as const)
+              : ('optional' as const),
         })),
       }
     },

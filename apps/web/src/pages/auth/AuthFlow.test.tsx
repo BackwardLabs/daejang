@@ -30,6 +30,7 @@ const documents = [
     content: '# 서비스 이용약관\n\n서버에서 제공한 이용약관 본문입니다',
     effectiveAt: '2026-07-26T00:00:00.000Z',
     required: true,
+    consentMode: 'required',
   },
   {
     id: 'legal-privacy',
@@ -39,7 +40,19 @@ const documents = [
     contentHash: 'hash-privacy',
     content: '# 개인정보 처리방침\n\n서버에서 제공한 개인정보 처리방침입니다',
     effectiveAt: '2026-07-26T00:00:00.000Z',
+    required: false,
+    consentMode: 'notice',
+  },
+  {
+    id: 'legal-privacy-collection',
+    documentType: 'privacy_collection',
+    locale: 'ko-KR',
+    version: '1.0',
+    contentHash: 'hash-privacy-collection',
+    content: '# 개인정보 수집·이용 동의\n\n서버에서 제공한 필수 동의 안내입니다',
+    effectiveAt: '2026-07-26T00:00:00.000Z',
     required: true,
+    consentMode: 'required',
   },
   {
     id: 'legal-identity',
@@ -50,6 +63,7 @@ const documents = [
     content: '# 본인확인 안내\n\n서버에서 제공한 본인확인 안내입니다',
     effectiveAt: '2026-07-26T00:00:00.000Z',
     required: true,
+    consentMode: 'required',
   },
   {
     id: 'legal-marketing',
@@ -60,6 +74,7 @@ const documents = [
     content: '# 마케팅 수신 안내\n\n서버에서 제공한 선택 동의 안내입니다',
     effectiveAt: '2026-07-26T00:00:00.000Z',
     required: false,
+    consentMode: 'optional',
   },
 ]
 
@@ -615,7 +630,7 @@ describe('authentication flows', () => {
     await screen.findByText('[필수] 서비스 이용약관')
     for (const name of [
       '서비스 이용약관',
-      '개인정보 수집·이용 안내',
+      '개인정보 수집·이용 동의',
       '본인확인 정보 처리 안내',
     ]) {
       fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(name) }))
@@ -631,16 +646,20 @@ describe('authentication flows', () => {
 
     await waitFor(() => expect(submittedDecisions).toHaveLength(2))
     expect(submittedDecisions[0]).toEqual(
-      documents.map(({ id }) => ({
-        legalDocumentId: id,
-        action: 'accepted',
-      })),
+      documents
+        .filter(({ consentMode }) => consentMode !== 'notice')
+        .map(({ id }) => ({
+          legalDocumentId: id,
+          action: 'accepted',
+        })),
     )
     expect(submittedDecisions[1]).toEqual(
-      documents.map(({ id, required }) => ({
-        legalDocumentId: id,
-        action: required ? 'accepted' : 'withdrawn',
-      })),
+      documents
+        .filter(({ consentMode }) => consentMode !== 'notice')
+        .map(({ id, required }) => ({
+          legalDocumentId: id,
+          action: required ? 'accepted' : 'withdrawn',
+        })),
     )
   })
 

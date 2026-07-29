@@ -320,6 +320,7 @@ describe('documented normal user journey', () => {
     for (const [index, documentType] of [
       'terms',
       'privacy',
+      'privacy_collection',
       'identity_verification',
     ].entries()) {
       const content = `${documentType} acceptance content`
@@ -417,7 +418,7 @@ describe('documented normal user journey', () => {
       }>()
       .documents.filter((document) => document.required)
     expect(requiredDocuments.map(({ documentType }) => documentType).sort()).toEqual([
-      'privacy',
+      'privacy_collection',
       'terms',
     ])
 

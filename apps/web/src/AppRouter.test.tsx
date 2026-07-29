@@ -221,6 +221,7 @@ describe('AppRouter', () => {
               content: '# 서비스 이용약관',
               effectiveAt: '2026-07-26T00:00:00.000Z',
               required: true,
+              consentMode: 'required',
             },
             {
               id: 'legal-privacy',
@@ -230,7 +231,8 @@ describe('AppRouter', () => {
               contentHash: 'privacy-hash',
               content: '# 개인정보 처리방침',
               effectiveAt: '2026-07-26T00:00:00.000Z',
-              required: true,
+              required: false,
+              consentMode: 'notice',
             },
           ],
         })

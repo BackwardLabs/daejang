@@ -7,6 +7,7 @@ export type ConsentAction = 'accepted' | 'withdrawn'
 export type LegalDocumentType =
   | 'terms'
   | 'privacy'
+  | 'privacy_collection'
   | 'identity_verification'
   | 'marketing'
 

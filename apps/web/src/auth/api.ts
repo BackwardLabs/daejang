@@ -336,13 +336,19 @@ export async function logout() {
 
 export type LegalDocument = {
   id: string
-  documentType: 'terms' | 'privacy' | 'identity_verification' | 'marketing'
+  documentType:
+    | 'terms'
+    | 'privacy'
+    | 'privacy_collection'
+    | 'identity_verification'
+    | 'marketing'
   locale: string
   version: string
   contentHash: string
   content: string
   effectiveAt: string
   required: boolean
+  consentMode: 'required' | 'optional' | 'notice'
 }
 
 export function getCurrentLegalDocuments() {

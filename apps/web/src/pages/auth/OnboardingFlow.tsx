@@ -85,8 +85,12 @@ const documentCopy: Record<
     summary: 'Daejang 서비스 이용에 필요한 기본 조건',
   },
   privacy: {
-    title: '개인정보 수집·이용 안내',
-    summary: '계정 생성과 로그인에 필요한 정보의 처리 기준',
+    title: '개인정보 처리방침',
+    summary: 'Daejang이 개인정보를 처리하는 전체 기준',
+  },
+  privacy_collection: {
+    title: '개인정보 수집·이용 동의',
+    summary: '계정 생성과 서비스 제공에 필요한 정보의 처리 기준',
   },
   identity_verification: {
     title: '본인확인 정보 처리 안내',
@@ -686,7 +690,11 @@ function ConsentScreen({
     setError('')
     try {
       const response = await getCurrentLegalDocuments()
-      setDocuments(response.documents)
+      setDocuments(
+        response.documents.filter(
+          (document) => document.consentMode !== 'notice',
+        ),
+      )
     } catch (caught) {
       setError(errorMessage(caught, '약관을 불러오지 못했습니다'))
     } finally {
