@@ -15,7 +15,7 @@ import type { Pool } from 'pg'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { PostgresFileUploadStore } from './postgres-file-upload-store.js'
-import { UploadValidationError, type UploadSession } from './upload-store.js'
+import type { UploadSession } from './upload-store.js'
 
 type UploadRowFixture = {
   id: string
@@ -415,56 +415,43 @@ describe('PostgresFileUploadStore state and file boundary', () => {
     expect(pool.row.state).toBe('CONFIRMED')
   })
 
-  it('marks and removes an encrypted upload before confirmation', async () => {
+  it('confirms and retains an encrypted original for the private import boundary', async () => {
     const encryptedPdf = Buffer.from('%PDF-1.7\ntrailer\n<< /Encrypt 3 0 R >>\n%%EOF\n')
     const row = uploadRow(encryptedPdf, 'UPLOADED')
     const { pool, store, objectPath } = await fixture(row)
     await mkdir(path.dirname(objectPath), { recursive: true })
     await writeFile(objectPath, encryptedPdf)
 
-    await expect(
-      store.confirm(userId, uploadId, new Date('2027-01-01T00:00:00Z')),
-    ).rejects.toEqual(expect.objectContaining<Partial<UploadValidationError>>({
-      code: 'ENCRYPTED_PDF',
-    }))
-    expect(pool.row.state).toBe('FAILED')
-    expect(pool.row.object_key).toBe(`discarded/${uploadId}`)
-    expect(pool.row.original_filename).toBe('discarded.pdf')
-    await expect(access(objectPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    const confirmed = await store.confirm(
+      userId,
+      uploadId,
+      new Date('2027-01-01T00:00:00Z'),
+    )
+    expect(confirmed).toMatchObject({
+      state: 'CONFIRMED',
+      verifiedDigest: createHash('sha256').update(encryptedPdf).digest('hex'),
+      verifiedBytes: encryptedPdf.length,
+    })
+    expect(pool.row.state).toBe('CONFIRMED')
+    await expect(store.readConfirmed(userId, uploadId)).resolves.toMatchObject({
+      session: { state: 'CONFIRMED' },
+      contents: encryptedPdf,
+    })
+    await expect(readFile(objectPath)).resolves.toEqual(encryptedPdf)
   })
 
-  it('retries an unlink failure during the periodic abandoned-upload sweep', async () => {
+  it('fails closed when a confirmed encrypted original changes on disk', async () => {
     const encryptedPdf = Buffer.from('%PDF-1.7\n<< /Encrypt 3 0 R >>\n%%EOF\n')
     const row = uploadRow(encryptedPdf, 'UPLOADED')
-    let failObjectUnlink = true
-    let expectedObjectPath = ''
-    const flakyUnlink: typeof unlinkFile = async (value) => {
-      if (path.resolve(String(value)) === expectedObjectPath && failObjectUnlink) {
-        failObjectUnlink = false
-        const error = new Error('simulated private storage failure') as NodeJS.ErrnoException
-        error.code = 'EACCES'
-        throw error
-      }
-      await unlinkFile(value)
-    }
-    const { pool, store, objectPath } = await fixture(row, { unlink: flakyUnlink })
-    expectedObjectPath = objectPath
+    const { pool, store, objectPath } = await fixture(row)
     await mkdir(path.dirname(objectPath), { recursive: true })
     await writeFile(objectPath, encryptedPdf)
 
-    await expect(
-      store.confirm(userId, uploadId, new Date('2027-01-01T00:00:00Z')),
-    ).rejects.toMatchObject({ code: 'ENCRYPTED_PDF' })
-    expect(pool.row.state).toBe('FAILED')
-    expect(pool.row.object_key).toContain('upbit/')
-    expect(pool.row.original_filename).toBe('discarded.pdf')
-    await expect(access(objectPath)).resolves.toBeUndefined()
+    await store.confirm(userId, uploadId, new Date('2027-01-01T00:00:00Z'))
+    await writeFile(objectPath, Buffer.from('%PDF-1.7\nchanged\n%%EOF\n'))
 
-    await expect(
-      store.cleanupAbandoned(new Date('2027-01-01T00:01:00Z')),
-    ).resolves.toEqual({ examined: 1, removed: 1, missing: 0, retryPending: 0 })
-    expect(pool.row.object_key).toBe(`discarded/${uploadId}`)
-    await expect(access(objectPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(store.readConfirmed(userId, uploadId)).resolves.toBeUndefined()
+    expect(pool.row.state).toBe('CONFIRMED')
   })
 
   it('cleans expired pending temporary files and tombstones their object key', async () => {

@@ -21,6 +21,7 @@ import {
   provisionEmailAccount,
   type ProvisionEmailAccountInput,
 } from './provision-email-account.js'
+import { provisionSubjectNameClaim } from './provision-subject-name-claim.js'
 import { SessionService } from './session.js'
 import { PostgresWalletSourceStore } from '../sources/postgres-wallet-source-store.js'
 import { MemoryWalletSourceStore } from '../sources/wallet-source-store.js'
@@ -102,6 +103,7 @@ const postgresAuthConfig: AppConfig = {
     methods: { email: false, oauthProviders: ['naver'] },
   },
   identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: false,
   engineMtls: undefined,
 }
 
@@ -189,6 +191,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       '000013_create_source_jobs_and_reports.sql',
       '000014_grant_query_runtime_access.sql',
       '000015_create_web_oauth_email_persistence.sql',
+      '000029_create_verified_subject_name_claim.sql',
     ]) {
       const migrationUrl = process.env.WEB_AUTH_MIGRATION_DIRECTORY
         ? pathToFileURL(resolve(process.env.WEB_AUTH_MIGRATION_DIRECTORY, filename))
@@ -200,6 +203,9 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       }
       await pool.query(upMigration)
     }
+    await pool.query(
+      'REVOKE INSERT ON web_private.subject_name_claims FROM daejang_web_app',
+    )
 
     await users.upsertUser({ id: USER_ID, displayName: '김대장' })
     await users.setStatus(USER_ID, 'active')
@@ -408,6 +414,14 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       email: 'provisioned-user@example.com',
       password: 'ProductionAccount1234!',
     } satisfies ProvisionEmailAccountInput
+    const verifiedSubjectName = {
+      value: '운영 사용자',
+      normalizedValue: '운영 사용자',
+      verificationMethod: 'MANUAL_KYC' as const,
+      assuranceLevel: 'SUBSTANTIAL' as const,
+      verifierReference: 'kyc-case:test-provisioning',
+      verifiedAt: new Date('2027-07-19T00:00:00.000Z'),
+    }
     const buildProvisionedAccountApp = () =>
       buildApp({
         config: postgresAuthConfig,
@@ -419,6 +433,11 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       })
 
     await provisionEmailAccount(pool, provisionedAccount)
+    await provisionSubjectNameClaim(pool, {
+      userId: provisionedAccount.id,
+      email: provisionedAccount.email,
+      claim: verifiedSubjectName,
+    })
     let context = await buildProvisionedAccountApp()
     const login = await context.app.inject({
       method: 'POST',
@@ -452,6 +471,10 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
         normalized_email: string
         password_algorithm: string
         session_count: string
+        subject_name: string
+        normalized_name: string
+        verification_method: string
+        assurance_level: string
       }>(
         `
           SELECT
@@ -460,6 +483,10 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
             user_record.status,
             user_email.normalized_email,
             credential.password_algorithm,
+            subject_claim.subject_name,
+            subject_claim.normalized_name,
+            subject_claim.verification_method,
+            subject_claim.assurance_level,
             count(session_record.id)::text AS session_count
           FROM web_private.users user_record
           JOIN web_private.user_emails user_email
@@ -469,11 +496,17 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
             ON credential.user_email_id = user_email.id
           LEFT JOIN web_private.sessions session_record
             ON session_record.user_id = user_record.id
+          JOIN web_private.subject_name_claims subject_claim
+            ON subject_claim.user_id = user_record.id
           WHERE user_record.id = $1
           GROUP BY
             user_record.id,
             user_email.normalized_email,
-            credential.password_algorithm
+            credential.password_algorithm,
+            subject_claim.subject_name,
+            subject_claim.normalized_name,
+            subject_claim.verification_method,
+            subject_claim.assurance_level
         `,
         [PROVISIONED_USER_ID],
       ),
@@ -485,6 +518,10 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
           status: 'active',
           normalized_email: provisionedAccount.email,
           password_algorithm: 'argon2id',
+          subject_name: verifiedSubjectName.value,
+          normalized_name: verifiedSubjectName.normalizedValue,
+          verification_method: 'MANUAL_KYC',
+          assurance_level: 'SUBSTANTIAL',
           session_count: '1',
         },
       ],
@@ -700,11 +737,25 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
   })
 
   it('fails schema preflight when an append-only guard is disabled', async () => {
-    await expect(assertWebAuthSchema(pool)).resolves.toBeUndefined()
+    const client = await pool.connect()
+    await client.query('BEGIN')
+    await client.query('SET LOCAL ROLE daejang_web_app')
+    await expect(
+      assertWebAuthSchema(client as unknown as Pool),
+    ).resolves.toBeUndefined()
+    await client.query('ROLLBACK')
+    client.release()
     await pool.query(
       'ALTER TABLE web_private.user_consents DISABLE TRIGGER user_consents_append_only',
     )
-    await expect(assertWebAuthSchema(pool)).rejects.toThrow('migration contract')
+    const disabledClient = await pool.connect()
+    await disabledClient.query('BEGIN')
+    await disabledClient.query('SET LOCAL ROLE daejang_web_app')
+    await expect(
+      assertWebAuthSchema(disabledClient as unknown as Pool),
+    ).rejects.toThrow('migration contract')
+    await disabledClient.query('ROLLBACK')
+    disabledClient.release()
     await pool.query(
       'ALTER TABLE web_private.user_consents ENABLE TRIGGER user_consents_append_only',
     )

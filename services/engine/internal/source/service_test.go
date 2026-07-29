@@ -2,24 +2,43 @@ package source
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/BackwardLabs/daejang-db/pkg/sourcejobstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type recordingStore struct {
-	registered RegisterWalletParams
-	document   RegisterDocumentParams
-	source     WalletSource
+type recordingImporter struct {
+	params UpbitDocumentImportParams
+	calls  int
 }
 
-func (s *recordingStore) RegisterDocument(_ context.Context, params RegisterDocumentParams) (DocumentSource, error) {
-	s.document = params
-	return DocumentSource{ID: "22222222-2222-4222-8222-222222222222", Provider: "UPBIT", CoverageStart: params.CoverageStart, CoverageEnd: params.CoverageEnd, CreatedAt: time.Now(), UpdatedAt: time.Now()}, nil
+func (i *recordingImporter) ImportUpbitDocument(_ context.Context, params UpbitDocumentImportParams) (UpbitDocumentImportResult, error) {
+	i.calls++
+	i.params = params
+	now := time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+	return UpbitDocumentImportResult{
+		Document: sourcejobstore.DocumentSource{
+			ID: testSourceID, Provider: "UPBIT", OriginalFilename: params.OriginalFilename,
+			MediaType: params.MediaType, ByteLength: params.ByteLength, ArtifactDigest: params.ArtifactDigest,
+			CoverageStart: params.CoverageStart, CoverageEnd: params.CoverageEnd, Status: "ACTIVE", CreatedAt: now, UpdatedAt: now,
+		},
+		Job: sourcejobstore.SyncJob{
+			ID: testJobID, SourceKind: "UPBIT_PDF", SourceID: testSourceID, State: "SUCCEEDED", Phase: "COMPLETE",
+			CreatedAt: now, UpdatedAt: now,
+		},
+		EvidenceTerminalStatus: "PARTIAL", SourceRecordCount: 3,
+	}, nil
+}
+
+type recordingStore struct {
+	registered RegisterWalletParams
+	source     WalletSource
 }
 
 func (s *recordingStore) ListDocuments(context.Context, string) ([]DocumentSource, error) {
@@ -67,6 +86,53 @@ func TestRegisterWalletRejectsMissingIdempotencyKey(t *testing.T) {
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("missing idempotency key returned %v", err)
+	}
+}
+
+func TestRegisterDocumentAlwaysRequiresVerifiedParser(t *testing.T) {
+	_, err := (&Service{Store: &recordingStore{}}).RegisterDocument(
+		context.Background(),
+		&enginev1.RegisterDocumentRequest{Context: validContext()},
+	)
+	if status.Code(err) != codes.FailedPrecondition || status.Convert(err).Message() != "DOCUMENT_IMPORT_REQUIRES_VERIFIED_PARSER" {
+		t.Fatalf("legacy document registration was not fail-closed: %v", err)
+	}
+}
+
+func TestImportUpbitDocumentValidatesDigestAndClearsDecryptedRequest(t *testing.T) {
+	importer := &recordingImporter{}
+	original := []byte("%PDF-1.7 encrypted")
+	password := []byte("transient-password")
+	request := &enginev1.ImportUpbitDocumentRequest{
+		Context: validContext(), UploadId: testUploadID, ObjectKey: "private/source.pdf",
+		ArtifactDigest: digestBytes(original), OriginalFilename: "statement.pdf", MediaType: "application/pdf",
+		ByteLength: int64(len(original)), CoverageStart: "2026-01-01", CoverageEnd: "2026-06-30",
+		ExpectedSubjectName: "홍길동", EncryptedOriginalPdf: original, PdfPasswordUtf8: password,
+	}
+	response, err := (&Service{Importer: importer}).ImportUpbitDocument(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if importer.calls != 1 || importer.params.SubjectID != validContext().Actor.UserId ||
+		response.GetEvidenceTerminalStatus() != "PARTIAL" || response.GetJob().GetState() != "SUCCEEDED" {
+		t.Fatalf("import request was not mapped safely: params=%#v response=%#v", importer.params, response)
+	}
+	if !allZero(original) || !allZero(password) {
+		t.Fatal("RPC boundary retained PDF request bytes")
+	}
+}
+
+func TestImportUpbitDocumentRejectsMismatchedEncryptedDigestBeforeClaim(t *testing.T) {
+	importer := &recordingImporter{}
+	password := make([]byte, 257)
+	_, err := (&Service{Importer: importer}).ImportUpbitDocument(context.Background(), &enginev1.ImportUpbitDocumentRequest{
+		Context: validContext(), UploadId: testUploadID, ObjectKey: "private/source.pdf",
+		ArtifactDigest: strings.Repeat("a", 64), OriginalFilename: "statement.pdf", MediaType: "application/pdf",
+		ByteLength: int64(len("%PDF-1.7 encrypted")), CoverageStart: "2026-01-01", CoverageEnd: "2026-06-30",
+		ExpectedSubjectName: "홍길동", EncryptedOriginalPdf: []byte("%PDF-1.7 encrypted"), PdfPasswordUtf8: password,
+	})
+	if status.Code(err) != codes.InvalidArgument || importer.calls != 0 || !allZero(password) {
+		t.Fatalf("digest mismatch crossed the claim boundary: err=%v calls=%d", err, importer.calls)
 	}
 }
 

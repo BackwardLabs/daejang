@@ -15,16 +15,19 @@ import { UploadValidationError, type UploadStore } from '../uploads/upload-store
 
 export type EngineDataClient = {
   readonly upbitPdfImportSupported?: boolean
-  registerDocument(input: {
+  importUpbitDocument?(input: {
     context: SourceRequestContext
     uploadId: string
     objectKey: string
     artifactDigest: string
     originalFilename: string
-    mediaType: string
+    mediaType: 'application/pdf'
     byteLength: number
     coverageStart: string
     coverageEnd: string
+    expectedSubjectName: string
+    encryptedOriginalPdf: Buffer
+    pdfPasswordUtf8: Buffer
   }): Promise<Record<string, unknown>>
   listAllSources(context: SourceRequestContext): Promise<{ wallets: unknown[]; documents: unknown[] }>
   enqueueSync(context: SourceRequestContext, input: {
@@ -65,7 +68,7 @@ const unavailableEngineMethod = async (): Promise<never> => {
 
 const unavailableEngineDataClient: EngineDataClient = {
   upbitPdfImportSupported: false,
-  registerDocument: unavailableEngineMethod,
+  importUpbitDocument: unavailableEngineMethod,
   listAllSources: unavailableEngineMethod,
   enqueueSync: unavailableEngineMethod,
   getSyncJob: unavailableEngineMethod,
@@ -155,6 +158,34 @@ const mapUploadValidationError = (error: unknown): never => {
   throw new ApiError(422, 'INVALID_PDF', 'PDF 파일이 손상되었거나 형식을 확인할 수 없습니다.')
 }
 
+const mapUpbitImportEngineError = (error: unknown): never => {
+  if (!(error instanceof EngineRpcError)) throw error
+  if (error.grpcCode === grpcStatus.FAILED_PRECONDITION) {
+    switch (error.grpcDetails) {
+      case 'SUBJECT_MISMATCH':
+        throw new ApiError(422, 'SUBJECT_MISMATCH', '문서 명의가 로그인한 계정 정보와 일치하지 않습니다.')
+      case 'SUBJECT_CLAIM_UNAVAILABLE':
+        throw new ApiError(422, 'UPBIT_PDF_LAYOUT_UNSUPPORTED', '문서에서 계정 명의를 확인할 수 없습니다.')
+      case 'PARSER_DOCUMENT_REJECTED':
+        throw new ApiError(422, 'INVALID_PDF', 'PDF 파일을 열거나 지원 문서로 확인할 수 없습니다.')
+      case 'PDF_PASSWORD_INVALID':
+        throw new ApiError(422, 'PDF_PASSWORD_INVALID', 'PDF 암호가 일치하지 않습니다.')
+      case 'CONFIRMED_UPLOAD_NOT_FOUND':
+        throw resourceNotFound()
+    }
+  }
+  if (error.grpcCode === grpcStatus.ABORTED && error.grpcDetails === 'IMPORT_IN_PROGRESS') {
+    throw new ApiError(409, 'IMPORT_IN_PROGRESS', '같은 PDF 등록 요청을 처리하고 있습니다.')
+  }
+  if (error.grpcCode === grpcStatus.ALREADY_EXISTS && error.grpcDetails === 'IMPORT_IDEMPOTENCY_CONFLICT') {
+    throw new ApiError(409, 'DUPLICATE_SOURCE', '같은 등록 키가 다른 문서에 사용되었습니다.')
+  }
+  if (error.grpcCode === grpcStatus.INVALID_ARGUMENT) {
+    throw new ApiError(400, 'INVALID_PDF', 'PDF 등록 정보가 유효하지 않습니다.')
+  }
+  throw error
+}
+
 const validExpectedPointerVersion = (value: string) => {
   if (!/^[1-9][0-9]*$/.test(value)) return false
   const pointer = BigInt(value)
@@ -204,6 +235,8 @@ const publicTaxReport = (value: Record<string, unknown>) => {
 }
 
 const maximumUploadBytes = 20 * 1024 * 1024
+const maximumPasswordEnvelopeBytes = 257
+const passwordEnvelopeVersion = 1
 
 const upbitPdfImportUnavailable = () =>
   new ApiError(
@@ -245,6 +278,7 @@ export const registerDataRoutes = async (
   options: {
     uploadStore?: UploadStore
     uploadAdmissionRateLimiter: UploadAdmissionRateLimiter
+    upbitPdfImportEnabled: boolean
     engine?: EngineDataClient
     now?: () => Date
   },
@@ -252,8 +286,19 @@ export const registerDataRoutes = async (
   const now = options.now ?? (() => new Date())
   const configuredEngine = options.engine
   const engine = configuredEngine ?? unavailableEngineDataClient
+
+  // Binary request bodies can contain an encrypted document or its one-time
+  // password envelope. Fastify schema validation may reject a request before
+  // the route handler runs, so zeroization belongs to the route lifecycle.
+  app.addHook('onSend', async (request, _reply, payload) => {
+    if (Buffer.isBuffer(request.body)) request.body.fill(0)
+    return payload
+  })
   const assertUpbitPdfImport = () => {
-    if (configuredEngine?.upbitPdfImportSupported !== true) {
+    if (
+      !options.upbitPdfImportEnabled ||
+      configuredEngine?.upbitPdfImportSupported !== true
+    ) {
       throw upbitPdfImportUnavailable()
     }
   }
@@ -267,9 +312,16 @@ export const registerDataRoutes = async (
     }
     return options.uploadStore
   }
-  const requireUpbitPdfUpload: onRequestHookHandler = async () => {
+  const requireUpbitPdfUpload: onRequestHookHandler = async (request) => {
     assertUpbitPdfImport()
     availableUploadStore()
+    if (!request.authSession?.verifiedSubjectName) {
+      throw new ApiError(
+        403,
+        'VERIFIED_IDENTITY_REQUIRED',
+        '검증된 본인 명의가 있어야 거래내역서를 등록할 수 있습니다.',
+      )
+    }
   }
   const admitUploadCreate: onRequestHookHandler = async (request) => {
     const context = contextFor(request)
@@ -292,6 +344,7 @@ export const registerDataRoutes = async (
     )
   }
   app.addContentTypeParser('application/pdf', { parseAs: 'buffer' }, (_request, body, done) => done(null, body))
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) => done(null, body))
 
   app.post<{ Body: { filename: string; mediaType: 'application/pdf'; sizeBytes: number; intentKey: string } }>(
     '/api/v1/uploads',
@@ -322,58 +375,125 @@ export const registerDataRoutes = async (
       const uploadStore = availableUploadStore()
       const context = contextFor(request)
       if (!Buffer.isBuffer(request.body)) throw resourceNotFound()
-      if (request.body.byteLength !== uploadContentLength(request.headers['content-length'])) {
-        throw new ApiError(
-          400,
-          'CONTENT_LENGTH_MISMATCH',
-          '업로드 파일 크기가 요청 정보와 일치하지 않습니다.',
-        )
+      try {
+        if (request.body.byteLength !== uploadContentLength(request.headers['content-length'])) {
+          throw new ApiError(
+            400,
+            'CONTENT_LENGTH_MISMATCH',
+            '업로드 파일 크기가 요청 정보와 일치하지 않습니다.',
+          )
+        }
+        const session = await uploadStore.write(context.userId, request.params.uploadId, request.body, now())
+        if (!session) throw resourceNotFound()
+        return reply.status(204).send()
+      } finally {
+        request.body.fill(0)
       }
-      const session = await uploadStore.write(context.userId, request.params.uploadId, request.body, now())
-      if (!session) throw resourceNotFound()
-      return reply.status(204).send()
     },
   )
 
-  app.post<{ Params: { uploadId: string }; Body: { coverageStart: string; coverageEnd: string } }>(
-    '/api/v1/uploads/:uploadId/confirm',
-    { onRequest: requireUpbitPdfUpload, schema: {
-      params: { type: 'object', required: ['uploadId'], properties: { uploadId: { type: 'string', format: 'uuid' } } },
-      body: { type: 'object', additionalProperties: false, required: ['coverageStart','coverageEnd'], properties: {
-        coverageStart: { type: 'string', format: 'date' }, coverageEnd: { type: 'string', format: 'date' },
-      } },
-    } },
+  app.post<{
+    Params: { uploadId: string }
+    Querystring: { coverageStart: string; coverageEnd: string }
+    Body: Buffer
+  }>(
+    '/api/v1/uploads/:uploadId/import',
+    {
+      onRequest: [requireUpbitPdfUpload, admitUploadContent],
+      bodyLimit: maximumPasswordEnvelopeBytes,
+      schema: {
+        params: {
+          type: 'object',
+          required: ['uploadId'],
+          properties: { uploadId: { type: 'string', format: 'uuid' } },
+        },
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['coverageStart', 'coverageEnd'],
+          properties: {
+            coverageStart: { type: 'string', format: 'date' },
+            coverageEnd: { type: 'string', format: 'date' },
+          },
+        },
+      },
+    },
     async (request, reply) => {
-      assertUpbitPdfImport()
-      const uploadStore = availableUploadStore()
-      if (!validDateRange(request.body.coverageStart, request.body.coverageEnd)) {
-        throw new ApiError(400, 'INVALID_COVERAGE_PERIOD', '문서 포함 종료일은 시작일보다 빠를 수 없습니다.')
+      const passwordEnvelope = Buffer.isBuffer(request.body)
+        ? request.body
+        : undefined
+      let retainedContents: Buffer | undefined
+      try {
+        assertUpbitPdfImport()
+        if (
+          !passwordEnvelope ||
+          passwordEnvelope.byteLength === 0 ||
+          passwordEnvelope[0] !== passwordEnvelopeVersion
+        ) {
+          throw resourceNotFound()
+        }
+        if (
+          passwordEnvelope.byteLength !== uploadContentLength(request.headers['content-length']) ||
+          passwordEnvelope.byteLength > maximumPasswordEnvelopeBytes
+        ) {
+          throw new ApiError(
+            400,
+            'CONTENT_LENGTH_MISMATCH',
+            '처리 문서 크기가 요청 정보와 일치하지 않습니다.',
+          )
+        }
+        if (!validDateRange(request.query.coverageStart, request.query.coverageEnd)) {
+          throw new ApiError(400, 'INVALID_COVERAGE_PERIOD', '문서 포함 종료일은 시작일보다 빠를 수 없습니다.')
+        }
+        const verifiedSubjectName = request.authSession?.verifiedSubjectName
+        if (!verifiedSubjectName) {
+          throw new ApiError(
+            403,
+            'VERIFIED_IDENTITY_REQUIRED',
+            '검증된 본인 명의가 있어야 거래내역서를 등록할 수 있습니다.',
+          )
+        }
+        const uploadStore = availableUploadStore()
+        const sessionContext = contextFor(request, `import:${request.params.uploadId}`)
+        const pdfPasswordUtf8 = passwordEnvelope.subarray(1)
+        const session = await uploadStore
+          .confirm(sessionContext.userId, request.params.uploadId, now())
+          .catch(mapUploadValidationError)
+        if (!uploadStore.readConfirmed || !engine.importUpbitDocument) {
+          throw new ApiError(503, 'ENGINE_UNAVAILABLE', '문서 처리 서비스를 사용할 수 없습니다.')
+        }
+        const retained = await uploadStore.readConfirmed(
+          sessionContext.userId,
+          request.params.uploadId,
+        )
+        retainedContents = retained?.contents
+        if (
+          !session?.verifiedDigest ||
+          session.verifiedBytes === undefined ||
+          !retained ||
+          retained.session.verifiedDigest !== session.verifiedDigest
+        ) {
+          throw resourceNotFound()
+        }
+        const imported = await engine.importUpbitDocument({
+          context: sessionContext,
+          uploadId: session.id,
+          objectKey: session.objectKey,
+          artifactDigest: session.verifiedDigest,
+          originalFilename: session.originalFilename,
+          mediaType: session.mediaType,
+          byteLength: session.verifiedBytes,
+          coverageStart: request.query.coverageStart,
+          coverageEnd: request.query.coverageEnd,
+          expectedSubjectName: verifiedSubjectName.normalizedValue,
+          encryptedOriginalPdf: retained.contents,
+          pdfPasswordUtf8,
+        }).catch(mapUpbitImportEngineError)
+        return reply.status(201).send(imported)
+      } finally {
+        retainedContents?.fill(0)
+        passwordEnvelope?.fill(0)
       }
-      const context = contextFor(request, `upload:${request.params.uploadId}`)
-      const session = await uploadStore
-        .confirm(context.userId, request.params.uploadId, now())
-        .catch(mapUploadValidationError)
-      if (!session?.verifiedDigest || session.verifiedBytes === undefined) throw resourceNotFound()
-      if (!configuredEngine) {
-        const discarded = await uploadStore.discard(context.userId, session.id)
-        if (!discarded) throw new Error('Unavailable Engine upload discard failed')
-        throw new ApiError(503, 'ENGINE_UNAVAILABLE', '데이터 처리 서비스를 사용할 수 없습니다.')
-      }
-      if (engine.upbitPdfImportSupported !== true) {
-        const discarded = await uploadStore.discard(context.userId, session.id)
-        if (!discarded) throw new Error('Unsupported PDF upload discard failed')
-        throw upbitPdfImportUnavailable()
-      }
-      const source = await engine.registerDocument({ context, uploadId: session.id, objectKey: session.objectKey,
-        artifactDigest: session.verifiedDigest, originalFilename: session.originalFilename,
-        mediaType: session.mediaType, byteLength: session.verifiedBytes,
-        coverageStart: request.body.coverageStart, coverageEnd: request.body.coverageEnd })
-      const job = await engine.enqueueSync({ ...context, idempotencyKey: `sync:${session.id}` }, {
-        sourceKind: 'UPBIT_PDF', sourceId: String(source.id),
-        requestedCoverageStart: request.body.coverageStart, requestedCoverageEnd: request.body.coverageEnd,
-        trigger: 'USER_REQUEST',
-      })
-      return reply.status(201).send({ source, job })
     },
   )
 
@@ -398,7 +518,8 @@ export const registerDataRoutes = async (
   }, async (request, reply) => {
     if (
       request.body.sourceKind === 'UPBIT_PDF' &&
-      configuredEngine?.upbitPdfImportSupported !== true
+      (!options.upbitPdfImportEnabled ||
+        configuredEngine?.upbitPdfImportSupported !== true)
     ) {
       throw upbitPdfImportUnavailable()
     }

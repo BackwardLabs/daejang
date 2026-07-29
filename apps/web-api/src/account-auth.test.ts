@@ -56,6 +56,7 @@ const config: AppConfig = {
     methods: { email: true, oauthProviders: ['naver'] },
   },
   identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: false,
   engineMtls: undefined,
 }
 

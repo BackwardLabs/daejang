@@ -193,9 +193,10 @@ chmod 600 deploy/production.env
 
 신규 가입을 닫은 상태에서 운영용 이메일 계정이 필요하면 migration이나 프런트에
 계정·비밀번호를 넣지 않고 one-shot provisioning 명령을 사용한다. 명령은 일반
-`web_private.users`, `user_emails`, `email_credentials` 행을 만들며 비밀번호는
-Argon2id로만 저장한다. 동일한 사용자 ID나 이메일이 이미 있으면 전체 transaction이
-실패한다. 이 명령은 비밀번호 변경 수단으로 사용하지 않는다.
+`web_private.users`, `user_emails`, `email_credentials` 행만 만들고 비밀번호는
+Argon2id로만 저장한다. 검증 명의 claim은 런타임 Web DB 역할이 발급할 수 없고,
+아래의 별도 identity provisioner 역할과 one-shot 명령으로만 추가한다. 계정 명령은
+비밀번호 변경 수단으로 사용하지 않는다.
 
 ```bash
 read -r -s -p "Account password: " GIWA_ACCOUNT_PASSWORD
@@ -215,7 +216,33 @@ unset GIWA_ACCOUNT_PASSWORD
 운영에서는 가능하면 `PROVISION_ACCOUNT_PASSWORD_FILE`에 secret mount 경로를
 지정하고 `PROVISION_ACCOUNT_PASSWORD`는 생략한다. 성공 출력에는 상태와 user ID만
 포함되며 표시명, 이메일, 비밀번호와 해시는 출력하지 않는다. 실행 후 일반 로그인 화면에서
-이메일과 지정한 비밀번호를 입력해 로그인한다.
+이메일과 지정한 비밀번호를 입력해 로그인한다. 별도로 발급한 검증 실명과 검증 기록 참조값은
+로그인 응답이나 일반 프로필 화면에 노출하지 않는다.
+
+이미 존재하는 active 운영 계정에는 별도 one-shot 명령으로 최초 claim만 추가한다.
+사용자 UUID와 검증된 기본 이메일을 모두 대조하며, 같은 사용자의 claim이 이미 있으면
+수정하지 않고 실패한다.
+`IDENTITY_PROVISIONER_DATABASE_URL`은 `daejang_identity_provisioner` 전용 secret이며 Web API
+컨테이너 환경에 주입하지 않는다. 명령은 현재 DB 역할이 전용 provisioner인지,
+migration 30 계약과 최소 column 권한만 가지는지를 실행 전에 검사한다.
+
+```bash
+export IDENTITY_PROVISIONER_DATABASE_URL="<secret manager에서 주입한 provisioner DSN>"
+
+PROVISION_SUBJECT_CLAIM_USER_ID="<운영 사용자 UUID>" \
+PROVISION_SUBJECT_CLAIM_CONFIRM_USER_ID="<운영 사용자 UUID>" \
+PROVISION_SUBJECT_CLAIM_EMAIL="<검증된 기본 이메일>" \
+PROVISION_SUBJECT_CLAIM_CONFIRM_EMAIL="<검증된 기본 이메일>" \
+PROVISION_SUBJECT_CLAIM_NAME="<운영 본인확인에서 검증한 실명>" \
+PROVISION_SUBJECT_CLAIM_CONFIRM_NAME="<운영 본인확인에서 검증한 실명>" \
+PROVISION_SUBJECT_CLAIM_VERIFICATION_METHOD="MANUAL_KYC" \
+PROVISION_SUBJECT_CLAIM_ASSURANCE_LEVEL="SUBSTANTIAL" \
+PROVISION_SUBJECT_CLAIM_VERIFIER_REFERENCE="<운영 검증 기록 참조값>" \
+PROVISION_SUBJECT_CLAIM_VERIFIED_AT="<검증 시각 ISO-8601>" \
+npm run account:provision-subject-claim --workspace @daejang/web-api
+
+unset IDENTITY_PROVISIONER_DATABASE_URL
+```
 
 TLS private key, DB password, OAuth secret, Resend key와 `GH_PAT`는 Git에 넣지 않는다.
 Engine image의 private module fetch에 쓰는 `GH_PAT`는 build 중에만 secret mount로
@@ -227,8 +254,9 @@ Engine image의 private module fetch에 쓰는 `GH_PAT`는 build 중에만 secre
 않으며, 다음 조건을 모두 구현하고 운영 환경에서 검증하기 전에는 파일을 접수하지 않는다.
 
 1. 지원 대상 Upbit 문서 레이아웃을 판별하고 실패를 닫힌 상태로 처리하는 parser가 있다.
-2. 암호화 PDF의 비밀번호는 브라우저의 격리된 처리 경계에서만 사용하고 API, 로그,
-   DB와 object metadata로 전송하거나 저장하지 않는다.
+2. 암호화 PDF 비밀번호는 TLS 요청 body로 한 번만 전달하고, DB·로그·파일·object
+   metadata에 저장하지 않는다. Engine은 DB·TLS 비밀·artifact volume이 없는
+   networkless parser sidecar에 UDS로 전달하고 요청 종료 즉시 메모리를 지운다.
 3. Web API가 확인한 object를 Engine이 durable하게 인수했다는 상태 계약이 있으며,
    timeout·재시도·정리 작업이 처리 중인 object를 먼저 삭제하지 않는다.
 4. 운영 비공개 object storage가 아래 보안·복구 요건을 충족하고 실제 배포 설정과
@@ -243,6 +271,9 @@ object versioning, 보존·삭제 기한과 복구 절차를 하나의 retention
 
 위 조건이 하나라도 충족되지 않으면 Upbit capability는 비활성으로 응답하고, Web API는
 업로드 body를 저장하거나 upload row를 만들기 전에 요청을 거절한다.
+현재 구현은 `UPBIT_PDF_IMPORT_ENABLED=false`를 운영 기본값으로 강제하며,
+Compose named volume만 사용하는 운영 모드에서 `true`로 설정하면 애플리케이션이
+기동하지 않는다. 개발 E2E에서만 명시적으로 `true`를 설정한다.
 
 ## 8. App stack 시작
 

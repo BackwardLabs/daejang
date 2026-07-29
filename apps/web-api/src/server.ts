@@ -23,9 +23,12 @@ const pool = config.databaseUrl
     })
   : undefined
 const engineClient = config.engineMtls
-  ? await EngineMtlsClient.connect(config.engineMtls)
+  ? await EngineMtlsClient.connect(config.engineMtls, config.upbitPdfImportEnabled)
   : config.engineInsecureTarget
-    ? EngineMtlsClient.connectInsecureForDevelopment(config.engineInsecureTarget)
+    ? EngineMtlsClient.connectInsecureForDevelopment(
+        config.engineInsecureTarget,
+        config.upbitPdfImportEnabled,
+      )
     : undefined
 const uploadStore = pool && config.privateObjectRoot
   ? new PostgresFileUploadStore(pool, config.privateObjectRoot)

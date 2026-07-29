@@ -18,6 +18,9 @@ buf generate
 | 환경 변수 | 용도 |
 | --- | --- |
 | `DAEJANG_SOURCE_DATABASE_URL` | `daejang_source_app` PostgreSQL DSN |
+| `DAEJANG_SOURCE_ARTIFACT_DATABASE_URL` | PDF source evidence artifact writer PostgreSQL DSN. 미설정 시 source DSN 사용 |
+| `DAEJANG_SOURCE_ARTIFACT_ROOT` | 암호화 원본·subject-private parser evidence artifact root |
+| `DAEJANG_SOURCE_ARTIFACT_TEMP` | 같은 filesystem에 있는 source artifact 임시 디렉터리 |
 | `DAEJANG_QUERY_DATABASE_URL` | ledger·review read model 및 subject-scoped tax report 조회 PostgreSQL DSN (`daejang_query_app`) |
 | `DAEJANG_REPORT_DATABASE_URL` | immutable report snapshot PostgreSQL DSN |
 | `DAEJANG_REVIEW_DATABASE_URL` | Review revision·reference·outbox write PostgreSQL DSN |
@@ -31,6 +34,9 @@ buf generate
 | `ENGINE_TLS_KEY_PATH` | Engine server private key |
 | `ENGINE_TLS_CLIENT_CA_PATH` | Web API client certificate를 검증할 CA |
 | `ENGINE_WEB_API_CLIENT_DNS_NAME` | application RPC를 허용할 Web API 인증서 DNS SAN |
+| `ENGINE_PDF_PARSER_SOCKET_PATH` | networkless parser sidecar와 공유하는 UDS의 절대 경로 |
+| `ENGINE_PDF_PARSER_TIMEOUT` | UDS parser 요청 제한 시간. 기본 `30s` |
+| `ENGINE_PDF_IMPORT_LEASE_DURATION` | 동기 PDF import job lease. 기본 `2m`, parser timeout보다 길어야 함 |
 
 TLS 네 값은 함께 설정해야 합니다. CA가 발급한 다른 인증서가 사용자
 `RequestContext`를 위조하지 못하도록 health RPC를 제외한 모든 RPC는 이 DNS
@@ -151,11 +157,17 @@ client 인증서는 분리한다. Web client 인증서 DNS SAN에는
 `ENGINE_WEB_API_CLIENT_DNS_NAME`의 값이 포함되어야 한다.
 
 Engine 이미지 빌드는 private `BackwardLabs/daejang-db` module을 내려받기 위해
-BuildKit secret `github_token`이 필요하다. Compose는 현재 shell의 `GH_PAT`을 이
-secret으로 전달하며 이미지 layer나 build argument에는 토큰을 남기지 않는다.
+BuildKit secret `github_token`이 필요하다. 같은 secret으로 고정 커밋의 private
+`BackwardLabs/pdf-parser` Python package도 별도 `parser-runtime` target에만 설치한다.
+Engine runtime에는 Python·parser package가 포함되지 않는다. Parser service는 DB·TLS
+환경변수와 artifact volume 없이 UDS volume만 공유하고, `network_mode: none`, read-only
+root filesystem, tmpfs, capability 제거, no-new-privileges 및 자원 제한으로 실행된다.
+연결마다 fork한 child가 한 요청만 처리한 뒤 종료하므로 password와 PDF parser 내부
+복사본이 다음 요청까지 남지 않는다. Compose는 현재 shell의 `GH_PAT`을 build secret으로
+전달하며 runtime 환경, image layer 또는 build argument에는 토큰을 남기지 않는다.
 
 ```bash
 GH_PAT="$(gh auth token)" docker compose \
   --env-file deploy/production.env \
-  -f deploy/compose.production.yaml build engine sync-worker
+  -f deploy/compose.production.yaml build engine pdf-parser sync-worker
 ```

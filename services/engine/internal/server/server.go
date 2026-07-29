@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/BackwardLabs/daejang-db/pkg/artifactstore"
+	"github.com/BackwardLabs/daejang-db/pkg/evidencestore"
 	"github.com/BackwardLabs/daejang-db/pkg/readmodelstore"
 	"github.com/BackwardLabs/daejang-db/pkg/reportstore"
 	"github.com/BackwardLabs/daejang-db/pkg/reviewstore"
@@ -14,6 +15,7 @@ import (
 	"github.com/BackwardLabs/daejang-db/pkg/sourcestore"
 	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/pdfparser"
 	"github.com/BackwardLabs/daejang/services/engine/internal/query"
 	"github.com/BackwardLabs/daejang/services/engine/internal/review"
 	"github.com/BackwardLabs/daejang/services/engine/internal/source"
@@ -36,6 +38,22 @@ func Run(ctx context.Context, config Config) error {
 		return fmt.Errorf("open source job persistence: %w", err)
 	}
 	defer jobRuntime.Close()
+	sourceArtifactRuntime, err := artifactstore.Open(ctx, artifactstore.Options{
+		DatabaseURL: config.SourceArtifactDatabaseURL, ApplicationName: "daejang-engine-source-artifacts",
+		ArtifactRoot: config.SourceArtifactRoot, ArtifactTemp: config.SourceArtifactTemp,
+	})
+	if err != nil {
+		return fmt.Errorf("open source artifact persistence: %w", err)
+	}
+	defer sourceArtifactRuntime.Close()
+	sourceEvidenceRuntime, err := evidencestore.OpenSourceEvidenceWriter(ctx, evidencestore.Options{
+		DatabaseURL: config.SourceArtifactDatabaseURL, ApplicationName: "daejang-engine-source-evidence",
+		ArtifactRoot: config.SourceArtifactRoot, ArtifactTemp: config.SourceArtifactTemp,
+	})
+	if err != nil {
+		return fmt.Errorf("open source evidence persistence: %w", err)
+	}
+	defer sourceEvidenceRuntime.Close()
 	readRuntime, err := readmodelstore.Open(ctx, readmodelstore.Options{DatabaseURL: config.QueryDatabaseURL, ApplicationName: "daejang-engine-query-api"})
 	if err != nil {
 		return fmt.Errorf("open read model persistence: %w", err)
@@ -84,7 +102,10 @@ func Run(ctx context.Context, config Config) error {
 	}
 	defer listener.Close()
 
-	var options []grpc.ServerOption
+	options := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(32 << 20),
+		grpc.MaxSendMsgSize(32 << 20),
+	}
 	if config.TLSCertificatePath != "" {
 		credentials, err := loadServerCredentials(config)
 		if err != nil {
@@ -100,8 +121,17 @@ func Run(ctx context.Context, config Config) error {
 	grpcServer := grpc.NewServer(options...)
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	parserClient := pdfparser.Client{
+		SocketPath: config.PDFParserSocketPath,
+		Timeout:    config.PDFParserTimeout,
+	}
 	enginev1.RegisterSourceServiceServer(grpcServer, &source.Service{
 		Store: source.PostgresStore{Store: sourceRuntime.Store, DocumentStore: jobRuntime.Store},
+		Importer: &source.DocumentImporter{
+			Jobs: jobRuntime.Store, Artifacts: sourceArtifactRuntime.Store, Evidence: sourceEvidenceRuntime.Store,
+			Parser:        parserClient,
+			LeaseDuration: config.PDFImportLeaseDuration,
+		},
 	})
 	enginev1.RegisterWorkflowServiceServer(grpcServer, &workflow.Service{Store: jobRuntime.Store})
 	enginev1.RegisterQueryServiceServer(grpcServer, &query.Service{
@@ -124,7 +154,13 @@ func Run(ctx context.Context, config Config) error {
 		if err := sourceRuntime.Ping(checkCtx); err != nil {
 			return err
 		}
+		if err := parserClient.Ready(checkCtx); err != nil {
+			return err
+		}
 		if err := jobRuntime.Ping(checkCtx); err != nil {
+			return err
+		}
+		if err := sourceArtifactRuntime.Ping(checkCtx); err != nil {
 			return err
 		}
 		if err := readRuntime.Ping(checkCtx); err != nil {

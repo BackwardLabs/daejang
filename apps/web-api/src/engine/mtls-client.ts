@@ -95,7 +95,7 @@ type UnaryMethod = (
 
 type SourceServiceClient = Client & {
   registerWallet: UnaryMethod
-  registerDocument: UnaryMethod
+  importUpbitDocument: UnaryMethod
   listSources: UnaryMethod
   disconnectSource: UnaryMethod
 }
@@ -183,7 +183,7 @@ const requestContext = (value: SourceRequestContext) => ({
 
 export class EngineMtlsClient implements WalletSourceRegistry {
   readonly durable = true
-  readonly upbitPdfImportSupported = false
+  readonly upbitPdfImportSupported: boolean
   readonly #client: SourceServiceClient
   readonly #workflowClient: WorkflowServiceClient
   readonly #queryClient: QueryServiceClient
@@ -194,31 +194,45 @@ export class EngineMtlsClient implements WalletSourceRegistry {
     workflowClient: WorkflowServiceClient,
     queryClient: QueryServiceClient,
     reviewClient: ReviewServiceClient,
+    upbitPdfImportSupported: boolean,
   ) {
     this.#client = client
     this.#workflowClient = workflowClient
     this.#queryClient = queryClient
     this.#reviewClient = reviewClient
+    this.upbitPdfImportSupported = upbitPdfImportSupported
   }
 
-  static async connect(config: EngineMtlsConfig) {
+  static async connect(config: EngineMtlsConfig, upbitPdfImportEnabled: boolean) {
     const credentials = await createEngineMtlsCredentials(config)
-    return EngineMtlsClient.#create(config.target, credentials, config.serverNameOverride)
+    return EngineMtlsClient.#create(
+      config.target,
+      credentials,
+      upbitPdfImportEnabled,
+      config.serverNameOverride,
+    )
   }
 
-  static connectInsecureForDevelopment(target: string) {
-    return EngineMtlsClient.#create(target, grpcCredentials.createInsecure())
+  static connectInsecureForDevelopment(target: string, upbitPdfImportEnabled: boolean) {
+    return EngineMtlsClient.#create(
+      target,
+      grpcCredentials.createInsecure(),
+      upbitPdfImportEnabled,
+    )
   }
 
   static #create(
     target: string,
     credentials: ChannelCredentials,
+    upbitPdfImportSupported: boolean,
     serverNameOverride?: string,
   ) {
     const channelOptions: ChannelOptions = {
       'grpc.keepalive_time_ms': 30_000,
       'grpc.keepalive_timeout_ms': 10_000,
       'grpc.keepalive_permit_without_calls': 0,
+      'grpc.max_receive_message_length': 32 * 1024 * 1024,
+      'grpc.max_send_message_length': 32 * 1024 * 1024,
     }
     if (serverNameOverride) {
       channelOptions['grpc.ssl_target_name_override'] = serverNameOverride
@@ -234,6 +248,7 @@ export class EngineMtlsClient implements WalletSourceRegistry {
       new WorkflowService(target, credentials, channelOptions) as unknown as WorkflowServiceClient,
       new QueryService(target, credentials, channelOptions) as unknown as QueryServiceClient,
       new ReviewService(target, credentials, channelOptions) as unknown as ReviewServiceClient,
+      upbitPdfImportSupported,
     )
   }
 
@@ -250,25 +265,47 @@ export class EngineMtlsClient implements WalletSourceRegistry {
     })
   }
 
-  async registerDocument(input: {
+  async importUpbitDocument(input: {
     context: SourceRequestContext
     uploadId: string
     objectKey: string
     artifactDigest: string
     originalFilename: string
-    mediaType: string
+    mediaType: 'application/pdf'
     byteLength: number
     coverageStart: string
     coverageEnd: string
+    expectedSubjectName: string
+    encryptedOriginalPdf: Buffer
+    pdfPasswordUtf8: Buffer
   }) {
-    const response = (await this.#unaryOn(this.#client, 'registerDocument', {
-      context: requestContext(input.context), uploadId: input.uploadId,
-      objectKey: input.objectKey, artifactDigest: input.artifactDigest,
-      originalFilename: input.originalFilename, mediaType: input.mediaType,
-      byteLength: input.byteLength, coverageStart: input.coverageStart,
+    const response = await this.#unaryOn(this.#client, 'importUpbitDocument', {
+      context: requestContext(input.context),
+      uploadId: input.uploadId,
+      objectKey: input.objectKey,
+      artifactDigest: input.artifactDigest,
+      originalFilename: input.originalFilename,
+      mediaType: input.mediaType,
+      byteLength: input.byteLength,
+      coverageStart: input.coverageStart,
       coverageEnd: input.coverageEnd,
-    })) as { source: ProtoDocumentSource }
-    return this.#documentSource(response.source)
+      expectedSubjectName: input.expectedSubjectName,
+      encryptedOriginalPdf: input.encryptedOriginalPdf,
+      pdfPasswordUtf8: input.pdfPasswordUtf8,
+    }, 90_000) as {
+      source: ProtoDocumentSource
+      job: Record<string, unknown>
+      evidenceTerminalStatus: string
+      sourceRecordCount: string | number
+      normalizedRecordCount: string | number
+    }
+    return {
+      source: this.#documentSource(response.source),
+      job: normalizeProtoValue(response.job) as Record<string, unknown>,
+      evidenceTerminalStatus: response.evidenceTerminalStatus,
+      sourceRecordCount: Number(response.sourceRecordCount),
+      normalizedRecordCount: Number(response.normalizedRecordCount),
+    }
   }
 
   async listAllSources(context: SourceRequestContext) {
@@ -445,12 +482,13 @@ export class EngineMtlsClient implements WalletSourceRegistry {
     client: Client,
     method: string,
     request: Record<string, unknown>,
+    timeoutMilliseconds = 10_000,
   ) {
     return new Promise<unknown>((resolve, reject) => {
       const unary = (client as unknown as Record<string, UnaryMethod>)[method] as UnaryMethod
       unary.call(client,
         request,
-        { deadline: new Date(Date.now() + 10_000) },
+        { deadline: new Date(Date.now() + timeoutMilliseconds) },
         (error, response) => {
           if (error) {
             reject(new EngineRpcError(error.code, error.details))

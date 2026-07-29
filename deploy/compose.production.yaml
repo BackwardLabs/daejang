@@ -55,6 +55,7 @@ services:
       EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: ${EMAIL_VERIFICATION_TOKEN_TTL_SECONDS}
       EMAIL_VERIFICATION_RESEND_AFTER_SECONDS: ${EMAIL_VERIFICATION_RESEND_AFTER_SECONDS}
       IDENTITY_VERIFICATION_MODE: ${IDENTITY_VERIFICATION_MODE:-disabled}
+      UPBIT_PDF_IMPORT_ENABLED: ${UPBIT_PDF_IMPORT_ENABLED:-false}
       PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
       ENGINE_GRPC_TARGET: engine:50051
       ENGINE_GRPC_SERVER_NAME: engine.internal
@@ -84,11 +85,15 @@ services:
     build:
       context: ..
       dockerfile: services/engine/Dockerfile
+      target: engine-runtime
       secrets: [github_token]
     restart: unless-stopped
     environment:
       ENGINE_LISTEN: 0.0.0.0:50051
       DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
+      DAEJANG_SOURCE_ARTIFACT_DATABASE_URL: ${SOURCE_ARTIFACT_DATABASE_URL}
+      DAEJANG_SOURCE_ARTIFACT_ROOT: /var/lib/daejang/source-artifacts/objects
+      DAEJANG_SOURCE_ARTIFACT_TEMP: /var/lib/daejang/source-artifacts/tmp
       DAEJANG_QUERY_DATABASE_URL: ${QUERY_DATABASE_URL}
       DAEJANG_REPORT_DATABASE_URL: ${REPORT_DATABASE_URL}
       DAEJANG_REVIEW_DATABASE_URL: ${REVIEW_DATABASE_URL}
@@ -99,6 +104,7 @@ services:
       ENGINE_TLS_KEY_PATH: /run/secrets/engine-server-key.pem
       ENGINE_TLS_CLIENT_CA_PATH: /run/secrets/engine-client-ca.pem
       ENGINE_WEB_API_CLIENT_DNS_NAME: ${ENGINE_WEB_API_CLIENT_DNS_NAME}
+      ENGINE_PDF_PARSER_SOCKET_PATH: /run/daejang/pdf-parser/parser.sock
       ENGINE_HEALTH_CA_PATH: /run/secrets/engine-ca.pem
       ENGINE_HEALTH_CERT_PATH: /run/secrets/probe-client-cert.pem
       ENGINE_HEALTH_KEY_PATH: /run/secrets/probe-client-key.pem
@@ -111,6 +117,10 @@ services:
       - ${ENGINE_PROBE_CERT_PATH}:/run/secrets/probe-client-cert.pem:ro
       - ${ENGINE_PROBE_KEY_PATH}:/run/secrets/probe-client-key.pem:ro
       - review_artifacts:/var/lib/daejang/review-artifacts
+      - source_artifacts:/var/lib/daejang/source-artifacts
+      - pdf_parser_socket:/run/daejang/pdf-parser:ro
+    depends_on:
+      pdf-parser: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "/usr/local/bin/engine-healthcheck"]
       interval: 15s
@@ -119,10 +129,43 @@ services:
       start_period: 10s
     networks: [backend, database]
 
+  pdf-parser:
+    build:
+      context: ..
+      dockerfile: services/engine/Dockerfile
+      target: parser-runtime
+      secrets: [github_token]
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 8
+    mem_limit: 768m
+    cpus: 1.0
+    volumes:
+      - pdf_parser_socket:/run/daejang/pdf-parser
+    healthcheck:
+      test:
+        - CMD
+        - /opt/daejang-pdf-parser/bin/python
+        - -I
+        - -c
+        - "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect('/run/daejang/pdf-parser/parser.sock'); s.sendall(b'DJPING01'); s.shutdown(socket.SHUT_WR); r=s.makefile('rb'); assert r.read(8)==b'DJPONG01' and r.read(1)==b''"
+      interval: 15s
+      timeout: 2s
+      retries: 3
+      start_period: 5s
+
   sync-worker:
     build:
       context: ..
       dockerfile: services/engine/Dockerfile
+      target: engine-runtime
       secrets: [github_token]
     entrypoint: ["/usr/local/bin/sync-worker"]
     restart: unless-stopped
@@ -148,7 +191,9 @@ networks:
     name: ${DAEJANG_DB_NETWORK:-daejang-db_default}
 volumes:
   private_objects: {}
+  source_artifacts: {}
   review_artifacts: {}
+  pdf_parser_socket: {}
 secrets:
   github_token:
     environment: GH_PAT

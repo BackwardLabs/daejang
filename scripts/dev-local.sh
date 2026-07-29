@@ -15,6 +15,10 @@ API_PORT="${GIWA_API_PORT:-3000}"
 ENGINE_PORT="${GIWA_ENGINE_PORT:-50051}"
 START_TIMEOUT_SECONDS="${GIWA_DEV_START_TIMEOUT_SECONDS:-90}"
 ARTIFACT_BASE="${GIWA_REVIEW_ARTIFACT_BASE:-${TMPDIR:-/tmp}/giwa-final-review-artifacts}"
+SOURCE_ARTIFACT_BASE="${GIWA_SOURCE_ARTIFACT_BASE:-${TMPDIR:-/tmp}/giwa-source-artifacts}"
+PDF_PARSER_PYTHON="${GIWA_PDF_PARSER_PYTHON_PATH:-${ENGINE_DIR}/.venv-pdf-parser/bin/python}"
+PDF_PARSER_RUNTIME_BASE="${GIWA_PDF_PARSER_RUNTIME_BASE:-${TMPDIR:-/tmp}/giwa-pdf-parser-runtime}"
+PDF_PARSER_SOCKET="${PDF_PARSER_RUNTIME_BASE}/parser.sock"
 START_ENGINE=0
 CHECK_ONLY=0
 
@@ -59,6 +63,9 @@ Optional overrides:
   GIWA_ENGINE_PORT
   GIWA_DEV_START_TIMEOUT_SECONDS
   GIWA_REVIEW_ARTIFACT_BASE
+  GIWA_SOURCE_ARTIFACT_BASE
+  GIWA_PDF_PARSER_PYTHON_PATH
+  GIWA_PDF_PARSER_RUNTIME_BASE
   GIWA_WEB_DATABASE_URL
   GIWA_SOURCE_DATABASE_URL
   GIWA_QUERY_DATABASE_URL
@@ -110,6 +117,8 @@ preflight() {
   require_command pgrep
   if ((START_ENGINE == 1)); then
     require_command go
+    require_file "$PDF_PARSER_PYTHON"
+    require_file "${ENGINE_DIR}/python/pdf_parser_server.py"
   fi
 
   require_file "$API_ENV_FILE"
@@ -138,7 +147,9 @@ preflight() {
   fi
 
   if ((START_ENGINE == 1)); then
-    mkdir -p "${ARTIFACT_BASE}/objects" "${ARTIFACT_BASE}/tmp"
+    mkdir -p "${ARTIFACT_BASE}/objects" "${ARTIFACT_BASE}/tmp" \
+      "${SOURCE_ARTIFACT_BASE}/objects" "${SOURCE_ARTIFACT_BASE}/tmp" \
+      "$PDF_PARSER_RUNTIME_BASE"
   fi
 
   printf 'Preflight passed\n'
@@ -150,6 +161,18 @@ preflight() {
   fi
   printf '  Web API:    http://127.0.0.1:%s\n' "$API_PORT"
   printf '  Frontend:   http://localhost:%s\n' "$WEB_PORT"
+}
+
+start_pdf_parser() {
+  printf 'Starting isolated PDF parser sidecar...\n'
+  (
+    exec "$PDF_PARSER_PYTHON" -I -B "${ENGINE_DIR}/python/pdf_parser_server.py" \
+      --socket "$PDF_PARSER_SOCKET" \
+      --request-timeout-seconds 25
+  ) &
+  LAST_STARTED_PID="$!"
+  PIDS+=("$LAST_STARTED_PID")
+  LABELS+=("PDF parser")
 }
 
 terminate_tree() {
@@ -198,12 +221,16 @@ start_engine() {
       ENGINE_LISTEN="127.0.0.1:${ENGINE_PORT}" \
       ENGINE_ALLOW_INSECURE_LOOPBACK=true \
       DAEJANG_SOURCE_DATABASE_URL="$SOURCE_DATABASE_URL" \
+      DAEJANG_SOURCE_ARTIFACT_DATABASE_URL="$SOURCE_DATABASE_URL" \
+      DAEJANG_SOURCE_ARTIFACT_ROOT="${SOURCE_ARTIFACT_BASE}/objects" \
+      DAEJANG_SOURCE_ARTIFACT_TEMP="${SOURCE_ARTIFACT_BASE}/tmp" \
       DAEJANG_QUERY_DATABASE_URL="$QUERY_DATABASE_URL" \
       DAEJANG_REPORT_DATABASE_URL="$EVENT_DATABASE_URL" \
       DAEJANG_REVIEW_DATABASE_URL="$EVENT_DATABASE_URL" \
       DAEJANG_REVIEW_ARTIFACT_DATABASE_URL="$SOURCE_DATABASE_URL" \
       DAEJANG_REVIEW_ARTIFACT_ROOT="${ARTIFACT_BASE}/objects" \
       DAEJANG_REVIEW_ARTIFACT_TEMP="${ARTIFACT_BASE}/tmp" \
+      ENGINE_PDF_PARSER_SOCKET_PATH="$PDF_PARSER_SOCKET" \
       go run ./cmd/engine-api
   ) &
   LAST_STARTED_PID="$!"
@@ -223,6 +250,7 @@ start_api() {
       DATABASE_URL="$WEB_DATABASE_URL" \
       SIGNUP_ENABLED=false \
       IDENTITY_VERIFICATION_MODE=disabled \
+      UPBIT_PDF_IMPORT_ENABLED=true \
       ENGINE_GRPC_INSECURE_TARGET="$(
         if ((START_ENGINE == 1)); then
           printf '127.0.0.1:%s' "$ENGINE_PORT"
@@ -273,6 +301,28 @@ wait_for_port() {
   done
 
   fail "${label} did not open ${host}:${port} within ${START_TIMEOUT_SECONDS}s"
+}
+
+wait_for_socket() {
+  local label="$1"
+  local path="$2"
+  local pid="$3"
+  local elapsed=0
+
+  while ((elapsed < START_TIMEOUT_SECONDS)); do
+    if [[ -S "$path" ]]; then
+      printf '%s is ready at %s\n' "$label" "$path"
+      return
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+      fail "${label} exited before creating ${path}"
+    fi
+    sleep 1
+    ((elapsed += 1))
+  done
+
+  fail "${label} did not create ${path} within ${START_TIMEOUT_SECONDS}s"
 }
 
 wait_for_http() {
@@ -362,6 +412,8 @@ main() {
   preflight
 
   if ((START_ENGINE == 1)); then
+    start_pdf_parser
+    wait_for_socket "PDF parser" "$PDF_PARSER_SOCKET" "$LAST_STARTED_PID"
     start_engine
     wait_for_port "Engine" 127.0.0.1 "$ENGINE_PORT" "$LAST_STARTED_PID"
   fi

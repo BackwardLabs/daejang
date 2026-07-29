@@ -59,7 +59,7 @@ export const faqs = [
     id: 'credentials',
     question: 'API 키나 개인키가 필요한가요?',
     answer:
-      '개인지갑은 공개 주소 입력 방식이며 API Key·Secret, 개인키, 시드 문구는 요청하거나 저장하지 않습니다. 거래소 문서 비밀번호도 서버로 전송하거나 저장하지 않습니다.',
+      '개인지갑은 공개 주소 입력 방식이며 API Key·Secret, 개인키, 시드 문구는 요청하거나 저장하지 않습니다. 거래소 문서 암호는 TLS로 서버의 격리 파서에 한 번만 전달하며 로그·DB·파일에 저장하지 않습니다.',
   },
   {
     id: 'background-processing',

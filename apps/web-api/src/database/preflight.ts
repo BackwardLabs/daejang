@@ -5,6 +5,129 @@ const webAuthContractDigest =
 const oauthEmailContractDigest =
   '19cb27f0bdae2d9d42419ae05b3253ecfee2aeaeddf8317bfe95073f6dfa97c1'
 
+export const assertSubjectNameProvisionerSchema = async (pool: Pool) => {
+  const result = await pool.query<{
+    role_name: string
+    contract_version: string | null
+    migration_version: string | null
+    users_table: string | null
+    user_emails_table: string | null
+    claims_table: string | null
+    claims_guard: boolean
+    web_usage: boolean
+    meta_usage: boolean
+    schema_create: boolean
+    users_id_select: boolean
+    users_status_select: boolean
+    email_user_id_select: boolean
+    email_normalized_select: boolean
+    email_primary_select: boolean
+    email_login_select: boolean
+    email_verified_select: boolean
+    claim_id_select: boolean
+    claim_user_id_select: boolean
+    claim_id_insert: boolean
+    claim_user_id_insert: boolean
+    claim_name_insert: boolean
+    claim_normalized_insert: boolean
+    claim_method_insert: boolean
+    claim_assurance_insert: boolean
+    claim_verifier_insert: boolean
+    claim_verified_at_insert: boolean
+    dangerous_table_write: boolean
+  }>(`
+    SELECT
+      current_user AS role_name,
+      (
+        SELECT contract_version::text
+        FROM daejang_meta.schema_contract
+        WHERE component = 'web-subject-name-claim-provisioning'
+      ) AS contract_version,
+      (
+        SELECT migration_version::text
+        FROM daejang_meta.schema_contract
+        WHERE component = 'web-subject-name-claim-provisioning'
+      ) AS migration_version,
+      to_regclass('web_private.users')::text AS users_table,
+      to_regclass('web_private.user_emails')::text AS user_emails_table,
+      to_regclass('web_private.subject_name_claims')::text AS claims_table,
+      EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = to_regclass('web_private.subject_name_claims')
+          AND tgname = 'subject_name_claims_append_only'
+          AND tgenabled IN ('O', 'A')
+          AND NOT tgisinternal
+      ) AS claims_guard,
+      has_schema_privilege(current_user, 'web_private', 'USAGE') AS web_usage,
+      has_schema_privilege(current_user, 'daejang_meta', 'USAGE') AS meta_usage,
+      has_schema_privilege(current_user, 'web_private', 'CREATE')
+        OR has_schema_privilege(current_user, 'daejang_meta', 'CREATE') AS schema_create,
+      has_column_privilege(current_user, 'web_private.users', 'id', 'SELECT') AS users_id_select,
+      has_column_privilege(current_user, 'web_private.users', 'status', 'SELECT') AS users_status_select,
+      has_column_privilege(current_user, 'web_private.user_emails', 'user_id', 'SELECT') AS email_user_id_select,
+      has_column_privilege(current_user, 'web_private.user_emails', 'normalized_email', 'SELECT') AS email_normalized_select,
+      has_column_privilege(current_user, 'web_private.user_emails', 'is_primary', 'SELECT') AS email_primary_select,
+      has_column_privilege(current_user, 'web_private.user_emails', 'login_enabled', 'SELECT') AS email_login_select,
+      has_column_privilege(current_user, 'web_private.user_emails', 'giwa_verified_at', 'SELECT') AS email_verified_select,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'claim_id', 'SELECT') AS claim_id_select,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'user_id', 'SELECT') AS claim_user_id_select,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'claim_id', 'INSERT') AS claim_id_insert,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'user_id', 'INSERT') AS claim_user_id_insert,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'subject_name', 'INSERT') AS claim_name_insert,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'normalized_name', 'INSERT') AS claim_normalized_insert,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'verification_method', 'INSERT') AS claim_method_insert,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'assurance_level', 'INSERT') AS claim_assurance_insert,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'verifier_ref', 'INSERT') AS claim_verifier_insert,
+      has_column_privilege(current_user, 'web_private.subject_name_claims', 'verified_at', 'INSERT') AS claim_verified_at_insert,
+      has_table_privilege(
+        current_user,
+        'web_private.subject_name_claims',
+        'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ) OR has_table_privilege(
+        current_user,
+        'web_private.users',
+        'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ) OR has_table_privilege(
+        current_user,
+        'web_private.user_emails',
+        'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ) AS dangerous_table_write
+  `)
+  const row = result.rows[0]
+  if (
+    row?.role_name !== 'daejang_identity_provisioner' ||
+    row.contract_version !== '1' ||
+    row.migration_version !== '30' ||
+    row.users_table !== 'web_private.users' ||
+    row.user_emails_table !== 'web_private.user_emails' ||
+    row.claims_table !== 'web_private.subject_name_claims' ||
+    !row.claims_guard ||
+    !row.web_usage ||
+    !row.meta_usage ||
+    row.schema_create ||
+    !row.users_id_select ||
+    !row.users_status_select ||
+    !row.email_user_id_select ||
+    !row.email_normalized_select ||
+    !row.email_primary_select ||
+    !row.email_login_select ||
+    !row.email_verified_select ||
+    !row.claim_id_select ||
+    !row.claim_user_id_select ||
+    !row.claim_id_insert ||
+    !row.claim_user_id_insert ||
+    !row.claim_name_insert ||
+    !row.claim_normalized_insert ||
+    !row.claim_method_insert ||
+    !row.claim_assurance_insert ||
+    !row.claim_verifier_insert ||
+    !row.claim_verified_at_insert ||
+    row.dangerous_table_write
+  ) {
+    throw new Error('subject-name claim provisioner migration contract is invalid')
+  }
+}
+
 export const assertWebAuthSchema = async (pool: Pool) => {
   const preflight = await pool.query<{
     users_table: string | null
@@ -33,6 +156,11 @@ export const assertWebAuthSchema = async (pool: Pool) => {
     user_email_source_guard: boolean
     email_credential_source_guard: boolean
     auth_identity_composite_guard: boolean
+    subject_name_claims_table: string | null
+    subject_name_claim_migration_version: string | null
+    subject_name_claim_guard: boolean
+    subject_name_claim_select: boolean
+    subject_name_claim_insert: boolean
   }>(
     `
       SELECT
@@ -133,7 +261,37 @@ export const assertWebAuthSchema = async (pool: Pool) => {
           WHERE conrelid = to_regclass('web_private.auth_identities')
             AND conname = 'auth_identities_id_user_id_unique'
             AND contype = 'u'
-        ) AS auth_identity_composite_guard
+        ) AS auth_identity_composite_guard,
+        to_regclass('web_private.subject_name_claims')::text
+          AS subject_name_claims_table,
+        (
+          SELECT migration_version
+          FROM daejang_meta.schema_contract
+          WHERE component = 'web-subject-name-claim-persistence'
+            AND contract_version = 1
+        ) AS subject_name_claim_migration_version,
+        EXISTS (
+          SELECT 1
+          FROM pg_trigger
+          WHERE tgrelid = to_regclass('web_private.subject_name_claims')
+            AND tgname = 'subject_name_claims_append_only'
+            AND tgenabled IN ('O', 'A')
+            AND NOT tgisinternal
+        ) AS subject_name_claim_guard,
+        has_table_privilege(
+          current_user,
+          'web_private.subject_name_claims',
+          'SELECT'
+        ) AS subject_name_claim_select,
+        has_table_privilege(
+          current_user,
+          'web_private.subject_name_claims',
+          'INSERT'
+        ) OR has_any_column_privilege(
+          current_user,
+          'web_private.subject_name_claims',
+          'INSERT'
+        ) AS subject_name_claim_insert
     `,
   )
   const row = preflight.rows[0]
@@ -166,7 +324,12 @@ export const assertWebAuthSchema = async (pool: Pool) => {
       'web_private.consume_oauth_transaction(text)' ||
     row.user_email_source_guard !== true ||
     row.email_credential_source_guard !== true ||
-    row.auth_identity_composite_guard !== true
+    row.auth_identity_composite_guard !== true ||
+    row.subject_name_claims_table !== 'web_private.subject_name_claims' ||
+    row.subject_name_claim_migration_version !== '29' ||
+    row.subject_name_claim_guard !== true ||
+    row.subject_name_claim_select !== true ||
+    row.subject_name_claim_insert
   ) {
     throw new Error('web_private authentication migration contract is invalid')
   }

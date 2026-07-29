@@ -5,6 +5,7 @@ import {
   useState,
   type ChangeEvent,
   type DragEvent,
+  type RefObject,
 } from 'react'
 import pdfStepActive from '../../assets/sources/pdf-step-active.svg'
 import pdfStepComplete from '../../assets/sources/pdf-step-complete.svg'
@@ -68,14 +69,24 @@ const registrationErrorCopy: Record<
     title: '이미 등록된 PDF예요',
   },
   ENCRYPTED_OR_DAMAGED_DOCUMENT: {
-    body: '파일 암호를 입력받아 해제하지 않습니다. 암호화되지 않고 정상적으로 열리는 PDF로 교체해 주세요.',
-    recovery: 'replace',
+    body: '암호화된 파일이면 위 암호 입력란에 PDF 암호를 입력해 다시 시도해 주세요. 암호는 격리된 파서에 일회성으로 전달되며 저장하지 않습니다.',
+    recovery: 'retry',
     title: 'PDF를 열어 확인할 수 없어요',
   },
   INVALID_PERIOD: {
     body: '종료일은 시작일보다 빠를 수 없습니다. 문서에 포함된 기간을 다시 확인해 주세요.',
     recovery: 'retry',
     title: '수집 기간을 확인해 주세요',
+  },
+  IDENTITY_VERIFICATION_REQUIRED: {
+    body: '본인 확인이 완료된 계정에서만 거래내역서를 등록할 수 있습니다. 계정 확인 절차를 완료한 뒤 다시 시도해 주세요.',
+    recovery: 'retry',
+    title: '본인 확인이 필요해요',
+  },
+  PASSWORD_INVALID: {
+    body: '입력한 파일 암호로 PDF를 열 수 없습니다. 암호를 다시 확인해 주세요. 암호는 격리된 파서에 일회성으로 전달되며 저장하지 않습니다.',
+    recovery: 'retry',
+    title: 'PDF 암호가 맞지 않아요',
   },
   PROCESSING_FAILED: {
     body: '문서를 확인하는 동안 일시적인 문제가 발생했습니다. 선택한 파일을 유지한 채 다시 시도할 수 있습니다.',
@@ -86,6 +97,11 @@ const registrationErrorCopy: Record<
     body: '처리 결과 확인 시간이 예상보다 길어졌습니다. 업로드된 파일과 진행 중인 작업을 그대로 이어서 다시 확인할 수 있습니다.',
     recovery: 'retry',
     title: '처리 결과를 아직 확인하지 못했어요',
+  },
+  SUBJECT_MISMATCH: {
+    body: '문서에 표시된 명의와 로그인한 계정 정보가 일치하는지 확인해 주세요. 다른 사람의 거래내역서는 이 계정에 등록할 수 없습니다.',
+    recovery: 'replace',
+    title: '계정 명의와 문서가 일치하지 않아요',
   },
   UNSUPPORTED_DOCUMENT: {
     body: '지원되는 Upbit 거래내역서인지 확인한 뒤 올바른 PDF로 교체해 주세요.',
@@ -331,8 +347,8 @@ function PdfSelectionStep({
           <li>
             <span aria-hidden="true">02</span>
             <div>
-              <strong>암호화되지 않은 PDF</strong>
-              <p>파일 암호를 요청하거나 저장하지 않습니다.</p>
+              <strong>암호화 PDF도 지원</strong>
+              <p>파일 암호는 TLS로 격리 파서에 한 번만 전달하며 로그·DB·파일에 저장하지 않습니다.</p>
             </div>
           </li>
           <li>
@@ -356,7 +372,6 @@ function PdfSelectionStep({
 }
 
 function PdfReviewStep({
-
   coverageEnd,
   coverageStart,
   error,
@@ -366,6 +381,7 @@ function PdfReviewStep({
   onCancel,
   onReplace,
   onSubmit,
+  passwordInputRef,
   status,
   onCoverageEndChange,
   onCoverageStartChange,
@@ -379,14 +395,14 @@ function PdfReviewStep({
   onCancel: () => void
   onReplace: () => void
   onSubmit: () => void
-  status: 'DOCUMENT_PROCESSING' | 'DOCUMENT_UPLOADING' | 'SOURCE_EDITING' | 'SOURCE_SAVE_FAILED' | 'SOURCE_SUBMITTING'
+  passwordInputRef: RefObject<HTMLInputElement | null>
+  status: 'DOCUMENT_PREPARING' | 'DOCUMENT_PROCESSING' | 'DOCUMENT_UPLOADING' | 'SOURCE_EDITING' | 'SOURCE_SAVE_FAILED' | 'SOURCE_SUBMITTING'
   onCoverageEndChange: (value: string) => void
   onCoverageStartChange: (value: string) => void
 }) {
   const recovery = error ? registrationErrorCopy[error.code].recovery : null
   const canRetry = recovery === 'retry'
-  const canCancelUpload =
-    isSubmitting && status === 'DOCUMENT_UPLOADING'
+  const canCancelUpload = isSubmitting
 
   return (
     <div className="pdf-registration-grid">
@@ -445,12 +461,30 @@ function PdfReviewStep({
           </label>
         </fieldset>
 
+        <div className="pdf-coverage-fields">
+          <label>
+            PDF 파일 암호 (필요한 경우)
+            <input
+              ref={passwordInputRef}
+              type="password"
+              autoComplete="off"
+              disabled={isSubmitting}
+              aria-describedby="upbit-pdf-password-note"
+            />
+          </label>
+          <p id="upbit-pdf-password-note" className="pdf-review-list__description">
+            암호는 TLS로 격리된 문서 파서에 일회성으로 전달하고 즉시 지웁니다. 로그·데이터베이스·파일에는 저장하지 않습니다.
+          </p>
+        </div>
+
         {isSubmitting ? (
           <div className="pdf-submit-status" role="status" aria-live="polite">
             <span className="pdf-submit-status__spinner" aria-hidden="true" />
             <div>
               <strong>
-                {status === 'DOCUMENT_UPLOADING'
+                {status === 'DOCUMENT_PREPARING'
+                  ? 'PDF 암호를 안전하게 전달할 준비를 하고 있어요'
+                  : status === 'DOCUMENT_UPLOADING'
                   ? 'PDF를 안전하게 업로드하고 있어요'
                   : status === 'SOURCE_SUBMITTING'
                     ? '서버에서 문서를 확인하고 있어요'
@@ -503,15 +537,15 @@ function PdfReviewStep({
           <li>
             <span aria-hidden="true">01</span>
             <div>
-              <strong>비공개 저장소 업로드</strong>
-              <p>브라우저에 파일이나 파일명을 저장하지 않습니다.</p>
+              <strong>암호화 원본 전송</strong>
+              <p>선택한 암호화 PDF 원본을 비공개 저장소로 안전하게 전송합니다.</p>
             </div>
           </li>
           <li>
             <span aria-hidden="true">02</span>
             <div>
-              <strong>서버 문서 확인</strong>
-              <p>파일 형식과 손상·암호화 여부를 먼저 확인합니다.</p>
+              <strong>격리 파서에서 문서 확인</strong>
+              <p>암호는 TLS와 전용 소켓으로 일회성 전달되며, 복호화 원문은 격리 파서 메모리에서만 처리하고 필요한 추출 근거만 Engine의 비공개 저장소로 전달합니다.</p>
             </div>
           </li>
           <li>
@@ -534,12 +568,18 @@ function PdfReviewStep({
 }
 
 function PdfCompletionStep({
+  evidenceTerminalStatus,
   fileSummary,
+  normalizedRecordCount,
   onReset,
+  sourceRecordCount,
   sourceStatus,
 }: {
+  evidenceTerminalStatus: 'COMPLETE' | 'PARTIAL'
   fileSummary: { name: string; size: number }
+  normalizedRecordCount: number
   onReset: () => void
+  sourceRecordCount: number
   sourceStatus: 'UPLOADED'
 }) {
   return (
@@ -553,7 +593,9 @@ function PdfCompletionStep({
         Upbit 데이터 소스를 등록했어요
       </h2>
       <p>
-        PDF 확인과 데이터 소스 저장 완료. 다음으로 조회 기간을 설정합니다.
+        {evidenceTerminalStatus === 'PARTIAL'
+          ? 'PDF와 추출 결과는 안전하게 등록했습니다. 거래 의미 규칙은 검토가 필요해 세금 계산에는 아직 반영하지 않았습니다.'
+          : 'PDF 확인과 데이터 소스 저장을 완료했습니다.'}
       </p>
 
       <div className="pdf-completion-summary">
@@ -561,7 +603,11 @@ function PdfCompletionStep({
           <span>현재 상태</span>
           <strong className="pdf-source-status">
             <span aria-hidden="true" />
-            {sourceStatus === 'UPLOADED' ? '처리 완료' : sourceStatus}
+            {evidenceTerminalStatus === 'PARTIAL'
+              ? '등록 완료 · 검토 필요'
+              : sourceStatus === 'UPLOADED'
+                ? '처리 완료'
+                : sourceStatus}
           </strong>
         </div>
         <div>
@@ -569,8 +615,8 @@ function PdfCompletionStep({
           <FileSummary name={fileSummary.name} size={fileSummary.size} />
         </div>
         <div>
-          <span>다음 단계</span>
-          <strong>조회 기간 설정</strong>
+          <span>추출 결과</span>
+          <strong>{sourceRecordCount}건 확인 · {normalizedRecordCount}건 반영</strong>
         </div>
       </div>
 
@@ -609,6 +655,7 @@ function UpbitPdfRegistrationFlow({
   const activeRequestRef = useRef(0)
   const abortControllerRef = useRef<AbortController | null>(null)
   const submittingRef = useRef(false)
+  const passwordInputRef = useRef<HTMLInputElement>(null)
   const stepContentRef = useRef<HTMLDivElement>(null)
   const previousStepRef = useRef(1)
   const currentStep = getCurrentStep(state)
@@ -627,6 +674,12 @@ function UpbitPdfRegistrationFlow({
       previousStepRef.current = currentStep
     }
   }, [currentStep])
+
+  useEffect(() => {
+    if (state.view === 'review' && state.error?.code === 'PASSWORD_INVALID') {
+      passwordInputRef.current?.focus()
+    }
+  }, [state])
 
   function handleFilesSelected(files: FileList | null) {
     abortControllerRef.current?.abort()
@@ -672,10 +725,7 @@ function UpbitPdfRegistrationFlow({
   }
 
   function handleCancelUpload() {
-    if (
-      state.view !== 'submitting' ||
-      state.status !== 'DOCUMENT_UPLOADING'
-    ) {
+    if (state.view !== 'submitting') {
       return
     }
 
@@ -697,13 +747,16 @@ function UpbitPdfRegistrationFlow({
     const controller = new AbortController()
     abortControllerRef.current = controller
     const { file, intentKey } = state
+    let password = passwordInputRef.current?.value || null
+    if (passwordInputRef.current) passwordInputRef.current.value = ''
 
     dispatch({ type: 'SUBMIT_STARTED' })
 
     try {
-      const result = await registerPdf({
+      const registration = registerPdf({
         file,
         intentKey,
+        password,
         retry: state.error?.retry,
         coverageStart,
         coverageEnd,
@@ -717,6 +770,8 @@ function UpbitPdfRegistrationFlow({
         },
         signal: controller.signal,
       })
+      password = null
+      const result = await registration
 
       if (
         activeRequestRef.current !== requestId ||
@@ -727,7 +782,10 @@ function UpbitPdfRegistrationFlow({
 
       if (result.ok) {
         dispatch({
+          evidenceTerminalStatus: result.evidenceTerminalStatus,
+          normalizedRecordCount: result.normalizedRecordCount,
           sourceId: result.sourceId,
+          sourceRecordCount: result.sourceRecordCount,
           sourceStatus: result.sourceStatus,
           type: 'SUBMIT_SUCCEEDED',
         })
@@ -745,6 +803,7 @@ function UpbitPdfRegistrationFlow({
         })
       }
     } finally {
+      password = null
       if (activeRequestRef.current === requestId) {
         abortControllerRef.current = null
         submittingRef.current = false
@@ -767,7 +826,7 @@ function UpbitPdfRegistrationFlow({
           }
         : {
             description:
-              '암호화되지 않은 Upbit 거래내역서 PDF 한 개를 등록합니다.',
+              'Upbit 거래내역서 PDF 한 개를 안전한 일회성 처리 경로로 등록합니다.',
             title: 'Upbit PDF 등록',
           }
 
@@ -801,6 +860,7 @@ function UpbitPdfRegistrationFlow({
             onCancel={() => undefined}
             onReplace={handleReplace}
             onSubmit={handleSubmit}
+            passwordInputRef={passwordInputRef}
             status={state.status}
             onCoverageEndChange={setCoverageEnd}
             onCoverageStartChange={setCoverageStart}
@@ -818,6 +878,7 @@ function UpbitPdfRegistrationFlow({
             onCancel={handleCancelUpload}
             onReplace={() => undefined}
             onSubmit={() => undefined}
+            passwordInputRef={passwordInputRef}
             status={state.status}
             onCoverageEndChange={setCoverageEnd}
             onCoverageStartChange={setCoverageStart}
@@ -826,8 +887,11 @@ function UpbitPdfRegistrationFlow({
 
         {state.view === 'complete' ? (
           <PdfCompletionStep
+            evidenceTerminalStatus={state.evidenceTerminalStatus}
             fileSummary={state.fileSummary}
+            normalizedRecordCount={state.normalizedRecordCount}
             onReset={() => dispatch({ type: 'RESET' })}
+            sourceRecordCount={state.sourceRecordCount}
             sourceStatus={state.sourceStatus}
           />
         ) : null}

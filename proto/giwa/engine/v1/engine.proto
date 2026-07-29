@@ -8,7 +8,11 @@ option go_package = "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa
 
 service SourceService {
   rpc RegisterWallet(RegisterWalletRequest) returns (RegisterWalletResponse);
+  // Reserved for wire compatibility. The server always fails closed; document
+  // creation is only available through ImportUpbitDocument after parsing and
+  // verified-subject matching.
   rpc RegisterDocument(RegisterDocumentRequest) returns (RegisterDocumentResponse);
+  rpc ImportUpbitDocument(ImportUpbitDocumentRequest) returns (ImportUpbitDocumentResponse);
   rpc ListSources(ListSourcesRequest) returns (ListSourcesResponse);
   rpc DisconnectSource(DisconnectSourceRequest) returns (DisconnectSourceResponse);
 }
@@ -76,6 +80,29 @@ message RegisterDocumentRequest {
 
 message RegisterDocumentResponse {
   DocumentSource source = 1;
+}
+
+message ImportUpbitDocumentRequest {
+  RequestContext context = 1;
+  string upload_id = 2;
+  string object_key = 3;
+  string artifact_digest = 4;
+  string original_filename = 5;
+  string media_type = 6;
+  int64 byte_length = 7;
+  string coverage_start = 8;
+  string coverage_end = 9;
+  string expected_subject_name = 10;
+  bytes encrypted_original_pdf = 11;
+  bytes pdf_password_utf8 = 12;
+}
+
+message ImportUpbitDocumentResponse {
+  DocumentSource source = 1;
+  SyncJob job = 2;
+  string evidence_terminal_status = 3;
+  int64 source_record_count = 4;
+  int64 normalized_record_count = 5;
 }
 
 message DisconnectSourceRequest {

@@ -1,0 +1,15 @@
+annotated-types==0.8.0
+cffi==2.1.0
+charset-normalizer==3.4.9
+cryptography==49.0.0
+giwa-pdf-parser @ git+https://github.com/BackwardLabs/pdf-parser.git@36209c211f3ed3ff833aba7c74aaa248dc935efc
+pdfminer.six==20251230
+pdfplumber==0.11.9
+pillow==12.3.0
+pycparser==3.0
+pydantic==2.13.4
+pydantic-core==2.46.4
+pypdf==6.10.0
+pypdfium2==5.12.1
+typing-extensions==4.16.0
+typing-inspection==0.4.2

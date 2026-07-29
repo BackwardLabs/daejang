@@ -254,6 +254,7 @@ export class PostgresFileUploadStore implements UploadStore {
           contents = Buffer.alloc(0)
         }
         const digest = createHash('sha256').update(contents).digest('hex')
+        const validationResult = validatePdfContents(contents)
         const validationFailure = (
           contents.length !== session.expectedBytes ||
           (session.state === 'CONFIRMED' && (
@@ -261,7 +262,9 @@ export class PostgresFileUploadStore implements UploadStore {
           ))
         )
           ? 'INVALID_PDF'
-          : validatePdfContents(contents)
+          : validationResult === 'ENCRYPTED_PDF'
+            ? undefined
+            : validationResult
         if (validationFailure) {
           const result = await client.query<UploadRow>(
             `UPDATE web_private.upload_sessions
@@ -306,6 +309,39 @@ export class PostgresFileUploadStore implements UploadStore {
       throw new UploadValidationError(rejected.failure)
     }
     return undefined
+  }
+
+  async readConfirmed(userId: string, uploadId: string) {
+    const client = await this.#pool.connect()
+    try {
+      await client.query('BEGIN')
+      const session = await this.#getLocked(client, userId, uploadId)
+      if (
+        !session ||
+        session.state !== 'CONFIRMED' ||
+        !session.verifiedDigest ||
+        session.verifiedBytes === undefined
+      ) {
+        await client.query('COMMIT')
+        return undefined
+      }
+      const contents = await readFile(this.#path(session.objectKey))
+      const digest = createHash('sha256').update(contents).digest('hex')
+      if (
+        contents.byteLength !== session.verifiedBytes ||
+        digest !== session.verifiedDigest
+      ) {
+        await client.query('ROLLBACK')
+        return undefined
+      }
+      await client.query('COMMIT')
+      return { session, contents }
+    } catch (error) {
+      await this.#rollback(client)
+      throw error
+    } finally {
+      client.release()
+    }
   }
 
   async discard(userId: string, uploadId: string) {

@@ -17,6 +17,7 @@ export type AppConfig = {
   emailAuth: EmailAuthConfig
   signup: SignupCapability
   identityVerificationMode: 'disabled'
+  upbitPdfImportEnabled: boolean
   engineMtls: EngineMtlsConfig | undefined
   engineInsecureTarget?: string
   privateObjectRoot?: string
@@ -322,6 +323,16 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   }
 
   const production = runtimeMode === 'production'
+  const upbitPdfImportEnabled = parseBoolean(
+    environment.UPBIT_PDF_IMPORT_ENABLED,
+    false,
+    'UPBIT_PDF_IMPORT_ENABLED',
+  )
+  if (production && upbitPdfImportEnabled) {
+    throw new Error(
+      'UPBIT_PDF_IMPORT_ENABLED cannot be enabled in production until an encrypted, audited, versioned object storage adapter is configured',
+    )
+  }
   const oauth = loadOAuthConfig(environment, production)
   const emailAuth = loadEmailAuthConfig(environment, production)
   const identityVerificationMode = parseIdentityVerificationMode(
@@ -432,6 +443,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     emailAuth,
     signup,
     identityVerificationMode,
+    upbitPdfImportEnabled,
     engineMtls: loadEngineMtlsConfig(environment, production),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),

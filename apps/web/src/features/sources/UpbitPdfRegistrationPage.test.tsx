@@ -88,8 +88,11 @@ describe('UpbitPdfRegistrationPage', () => {
       onStageChange('SOURCE_SUBMITTING')
 
       return {
+        evidenceTerminalStatus: 'PARTIAL',
+        normalizedRecordCount: 0,
         ok: true,
         sourceId: 'source-upbit-2027',
+        sourceRecordCount: 12,
         sourceStatus: 'UPLOADED',
       }
     }
@@ -109,10 +112,9 @@ describe('UpbitPdfRegistrationPage', () => {
       screen.getByRole('heading', { name: '선택한 파일을 확인하세요' }),
     ).toHaveFocus()
     expect(screen.getByText('upbit-2027.pdf')).toBeInTheDocument()
-    expect(document.querySelector('input[type="password"]')).toBeNull()
     expect(
-      screen.queryByLabelText(/PDF 비밀번호|파일 암호|비밀번호/),
-    ).not.toBeInTheDocument()
+      screen.getByLabelText(/PDF 비밀번호|파일 암호|비밀번호/),
+    ).toHaveAttribute('autocomplete', 'off')
     expect(storedText(window.localStorage)).not.toContain(pdf.name)
     expect(storedText(window.sessionStorage)).not.toContain(pdf.name)
 
@@ -130,7 +132,8 @@ describe('UpbitPdfRegistrationPage', () => {
         name: 'Upbit 데이터 소스를 등록했어요',
       }),
     ).toHaveFocus()
-    expect(screen.getByText('처리 완료')).toBeInTheDocument()
+    expect(screen.getByText('등록 완료 · 검토 필요')).toBeInTheDocument()
+    expect(screen.getByText('12건 확인 · 0건 반영')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '조회 기간 설정' }),
     ).toBeDisabled()
@@ -145,8 +148,11 @@ describe('UpbitPdfRegistrationPage', () => {
     const registerPdf: RegisterUpbitPdf = async () => {
       registrationCalls += 1
       return {
+        evidenceTerminalStatus: 'PARTIAL',
+        normalizedRecordCount: 0,
         ok: true,
         sourceId: 'unexpected-source',
+        sourceRecordCount: 0,
         sourceStatus: 'UPLOADED',
       }
     }
@@ -170,7 +176,7 @@ describe('UpbitPdfRegistrationPage', () => {
     expect(registrationCalls).toBe(0)
   })
 
-  it('renders the fixed encrypted-document recovery without asking for a password', async () => {
+  it('allows an encrypted document to be retried with a transient password', async () => {
     const registerPdf: RegisterUpbitPdf = async () => ({
       error: {
         code: 'ENCRYPTED_OR_DAMAGED_DOCUMENT',
@@ -195,10 +201,8 @@ describe('UpbitPdfRegistrationPage', () => {
     expect(
       screen.getByRole('button', { name: '다른 PDF 선택' }),
     ).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '다시 시도' }),
-    ).not.toBeInTheDocument()
-    expect(document.querySelector('input[type="password"]')).toBeNull()
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/PDF 비밀번호|파일 암호|비밀번호/)).toBeInTheDocument()
   })
 
   it('prevents double submission while the registration request is pending', async () => {
@@ -230,8 +234,11 @@ describe('UpbitPdfRegistrationPage', () => {
 
     await act(async () => {
       deferred.resolve({
+        evidenceTerminalStatus: 'PARTIAL',
+        normalizedRecordCount: 0,
         ok: true,
         sourceId: 'source-upbit-once',
+        sourceRecordCount: 12,
         sourceStatus: 'UPLOADED',
       })
       await deferred.promise
@@ -272,8 +279,11 @@ describe('UpbitPdfRegistrationPage', () => {
       }
 
       return Promise.resolve({
+        evidenceTerminalStatus: 'PARTIAL',
+        normalizedRecordCount: 0,
         ok: true,
         sourceId: 'source-upbit-after-retry',
+        sourceRecordCount: 12,
         sourceStatus: 'UPLOADED',
       })
     }
@@ -328,8 +338,11 @@ describe('UpbitPdfRegistrationPage', () => {
       }
 
       return {
+        evidenceTerminalStatus: 'PARTIAL',
+        normalizedRecordCount: 0,
         ok: true,
         sourceId: 'source-timeout',
+        sourceRecordCount: 12,
         sourceStatus: 'UPLOADED',
       }
     }

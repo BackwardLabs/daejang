@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SourceService_RegisterWallet_FullMethodName   = "/giwa.engine.v1.SourceService/RegisterWallet"
-	SourceService_RegisterDocument_FullMethodName = "/giwa.engine.v1.SourceService/RegisterDocument"
-	SourceService_ListSources_FullMethodName      = "/giwa.engine.v1.SourceService/ListSources"
-	SourceService_DisconnectSource_FullMethodName = "/giwa.engine.v1.SourceService/DisconnectSource"
+	SourceService_RegisterWallet_FullMethodName      = "/giwa.engine.v1.SourceService/RegisterWallet"
+	SourceService_RegisterDocument_FullMethodName    = "/giwa.engine.v1.SourceService/RegisterDocument"
+	SourceService_ImportUpbitDocument_FullMethodName = "/giwa.engine.v1.SourceService/ImportUpbitDocument"
+	SourceService_ListSources_FullMethodName         = "/giwa.engine.v1.SourceService/ListSources"
+	SourceService_DisconnectSource_FullMethodName    = "/giwa.engine.v1.SourceService/DisconnectSource"
 )
 
 // SourceServiceClient is the client API for SourceService service.
@@ -31,6 +32,7 @@ const (
 type SourceServiceClient interface {
 	RegisterWallet(ctx context.Context, in *RegisterWalletRequest, opts ...grpc.CallOption) (*RegisterWalletResponse, error)
 	RegisterDocument(ctx context.Context, in *RegisterDocumentRequest, opts ...grpc.CallOption) (*RegisterDocumentResponse, error)
+	ImportUpbitDocument(ctx context.Context, in *ImportUpbitDocumentRequest, opts ...grpc.CallOption) (*ImportUpbitDocumentResponse, error)
 	ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*ListSourcesResponse, error)
 	DisconnectSource(ctx context.Context, in *DisconnectSourceRequest, opts ...grpc.CallOption) (*DisconnectSourceResponse, error)
 }
@@ -63,6 +65,16 @@ func (c *sourceServiceClient) RegisterDocument(ctx context.Context, in *Register
 	return out, nil
 }
 
+func (c *sourceServiceClient) ImportUpbitDocument(ctx context.Context, in *ImportUpbitDocumentRequest, opts ...grpc.CallOption) (*ImportUpbitDocumentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportUpbitDocumentResponse)
+	err := c.cc.Invoke(ctx, SourceService_ImportUpbitDocument_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sourceServiceClient) ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*ListSourcesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListSourcesResponse)
@@ -89,6 +101,7 @@ func (c *sourceServiceClient) DisconnectSource(ctx context.Context, in *Disconne
 type SourceServiceServer interface {
 	RegisterWallet(context.Context, *RegisterWalletRequest) (*RegisterWalletResponse, error)
 	RegisterDocument(context.Context, *RegisterDocumentRequest) (*RegisterDocumentResponse, error)
+	ImportUpbitDocument(context.Context, *ImportUpbitDocumentRequest) (*ImportUpbitDocumentResponse, error)
 	ListSources(context.Context, *ListSourcesRequest) (*ListSourcesResponse, error)
 	DisconnectSource(context.Context, *DisconnectSourceRequest) (*DisconnectSourceResponse, error)
 	mustEmbedUnimplementedSourceServiceServer()
@@ -106,6 +119,9 @@ func (UnimplementedSourceServiceServer) RegisterWallet(context.Context, *Registe
 }
 func (UnimplementedSourceServiceServer) RegisterDocument(context.Context, *RegisterDocumentRequest) (*RegisterDocumentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterDocument not implemented")
+}
+func (UnimplementedSourceServiceServer) ImportUpbitDocument(context.Context, *ImportUpbitDocumentRequest) (*ImportUpbitDocumentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ImportUpbitDocument not implemented")
 }
 func (UnimplementedSourceServiceServer) ListSources(context.Context, *ListSourcesRequest) (*ListSourcesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSources not implemented")
@@ -170,6 +186,24 @@ func _SourceService_RegisterDocument_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SourceService_ImportUpbitDocument_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportUpbitDocumentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SourceServiceServer).ImportUpbitDocument(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SourceService_ImportUpbitDocument_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SourceServiceServer).ImportUpbitDocument(ctx, req.(*ImportUpbitDocumentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SourceService_ListSources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListSourcesRequest)
 	if err := dec(in); err != nil {
@@ -220,6 +254,10 @@ var SourceService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterDocument",
 			Handler:    _SourceService_RegisterDocument_Handler,
+		},
+		{
+			MethodName: "ImportUpbitDocument",
+			Handler:    _SourceService_ImportUpbitDocument_Handler,
 		},
 		{
 			MethodName: "ListSources",

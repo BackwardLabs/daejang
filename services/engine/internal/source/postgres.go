@@ -14,16 +14,6 @@ type PostgresStore struct {
 	DocumentStore *sourcejobstore.Store
 }
 
-func (s PostgresStore) RegisterDocument(ctx context.Context, params RegisterDocumentParams) (DocumentSource, error) {
-	value, err := s.DocumentStore.RegisterDocument(ctx, sourcejobstore.RegisterDocumentParams{
-		SubjectID: params.SubjectID, UploadID: params.UploadID, ObjectKey: params.ObjectKey,
-		ArtifactDigest: params.ArtifactDigest, OriginalFilename: params.OriginalFilename,
-		MediaType: params.MediaType, ByteLength: params.ByteLength,
-		CoverageStart: params.CoverageStart, CoverageEnd: params.CoverageEnd,
-	})
-	return documentFromDatabase(value), err
-}
-
 func (s PostgresStore) ListDocuments(ctx context.Context, subjectID string) ([]DocumentSource, error) {
 	values, err := s.DocumentStore.ListDocuments(ctx, subjectID)
 	if err != nil {

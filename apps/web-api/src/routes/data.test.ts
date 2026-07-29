@@ -12,13 +12,16 @@ import {
 import type { SessionRecord } from '../auth/session.js'
 import { EngineRpcError } from '../engine/rpc-error.js'
 import { ApiError } from '../errors.js'
-import { UploadValidationError, type UploadSession, type UploadStore } from '../uploads/upload-store.js'
+import type { UploadSession, UploadStore } from '../uploads/upload-store.js'
 import { registerDataRoutes, type EngineDataClient } from './data.js'
 
 const userId = '11111111-1111-4111-8111-111111111111'
 const session: SessionRecord = {
   id: 'session-1',
   user: { id: userId, displayName: '김대장' },
+  verifiedSubjectName: {
+    normalizedValue: '김대장',
+  },
   sessionEpoch: 1,
   createdAt: new Date('2027-01-01T00:00:00Z'),
   lastSeenAt: new Date('2027-01-01T00:00:00Z'),
@@ -39,7 +42,6 @@ const uploadStore: UploadStore = {
 
 const engineClient = (overrides: Partial<EngineDataClient> = {}): EngineDataClient => ({
   upbitPdfImportSupported: true,
-  registerDocument: vi.fn(async () => ({})),
   listAllSources: vi.fn(async () => ({ wallets: [], documents: [] })),
   enqueueSync: vi.fn(async () => ({})),
   getSyncJob: vi.fn(async () => ({})),
@@ -64,6 +66,8 @@ const buildRouteApp = async (
   },
   routeUploadStore: UploadStore = uploadStore,
   rateLimitStore: RateLimitStore = new MemoryRateLimitStore(),
+  observeParsedBody?: (body: Buffer) => void,
+  upbitPdfImportEnabled = true,
 ) => {
   const app = Fastify({ logger: false })
   apps.push(app)
@@ -79,8 +83,14 @@ const buildRouteApp = async (
   })
   await app.register(async (protectedApp) => {
     protectedApp.addHook('onRequest', authenticate)
+    if (observeParsedBody) {
+      protectedApp.addHook('preValidation', async (request) => {
+        if (Buffer.isBuffer(request.body)) observeParsedBody(request.body)
+      })
+    }
     await registerDataRoutes(protectedApp, {
       uploadStore: routeUploadStore,
+      upbitPdfImportEnabled,
       uploadAdmissionRateLimiter: new UploadAdmissionRateLimiter(
         rateLimitStore,
         'test-upload-rate-limit-secret',
@@ -108,6 +118,37 @@ const confirmedUpload = (): UploadSession => ({
 })
 
 describe('upload admission boundary', () => {
+  it('rejects before creating storage state when the deployment feature gate is off', async () => {
+    const create = vi.fn(async () => {
+      throw new Error('feature-disabled request reached storage')
+    })
+    const app = await buildRouteApp(
+      engineClient(),
+      undefined,
+      { ...uploadStore, create },
+      undefined,
+      undefined,
+      false,
+    )
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads',
+      payload: {
+        filename: 'statement.pdf',
+        mediaType: 'application/pdf',
+        sizeBytes: 128,
+        intentKey: 'feature-off',
+      },
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({
+      error: { code: 'UPBIT_PDF_IMPORT_UNAVAILABLE' },
+    })
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['missing Engine', undefined],
     [
@@ -171,7 +212,31 @@ describe('upload admission boundary', () => {
     expect(create).toHaveBeenCalledTimes(12)
   })
 
-  it('blocks content and confirmation without consuming more quota when capability is disabled after create', async () => {
+  it('zeroizes the parsed encrypted upload buffer after persistence returns', async () => {
+    let capturedBody: Buffer | undefined
+    const write = vi.fn(async (_userId: string, _uploadId: string, contents: Buffer) => {
+      capturedBody = contents
+      expect(contents.equals(Buffer.from('%PDF-test'))).toBe(true)
+      return confirmedUpload()
+    })
+    const app = await buildRouteApp(
+      engineClient(),
+      undefined,
+      { ...uploadStore, write },
+    )
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/content',
+      headers: { 'content-type': 'application/pdf' },
+      payload: Buffer.from('%PDF-test'),
+    })
+
+    expect(response.statusCode).toBe(204)
+    expect(capturedBody && [...capturedBody].every((byte) => byte === 0)).toBe(true)
+  })
+
+  it('blocks content and import without consuming more quota when capability is disabled after create', async () => {
     const create = vi.fn(async () => confirmedUpload())
     const write = vi.fn(async () => confirmedUpload())
     const confirm = vi.fn(async () => confirmedUpload())
@@ -205,13 +270,14 @@ describe('upload admission boundary', () => {
       headers: { 'content-type': 'application/pdf' },
       payload: Buffer.from('%PDF-test'),
     })
-    const confirmation = await app.inject({
+    const imported = await app.inject({
       method: 'POST',
-      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/confirm',
-      payload: { coverageStart: '2027-01-01', coverageEnd: '2027-12-31' },
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/import?coverageStart=2027-01-01&coverageEnd=2027-12-31',
+      headers: { 'content-type': 'application/octet-stream' },
+      payload: Buffer.from([1]),
     })
 
-    for (const response of [content, confirmation]) {
+    for (const response of [content, imported]) {
       expect(response.statusCode).toBe(503)
       expect(response.json()).toMatchObject({
         error: { code: 'UPBIT_PDF_IMPORT_UNAVAILABLE' },
@@ -267,12 +333,11 @@ describe('upload admission boundary', () => {
   })
 })
 
-describe('upload confirmation boundary', () => {
-  it('rejects an inverted coverage range before the upload store or Engine', async () => {
+describe('synchronous PDF import boundary', () => {
+  it('does not expose the legacy confirmation route that bypassed parsing', async () => {
     const confirm = vi.fn(async () => confirmedUpload())
-    const registerDocument = vi.fn(async () => ({ id: 'source-1' }))
     const app = await buildRouteApp(
-      engineClient({ registerDocument }),
+      engineClient(),
       undefined,
       { ...uploadStore, confirm },
     )
@@ -280,68 +345,236 @@ describe('upload confirmation boundary', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/confirm',
-      payload: { coverageStart: '2027-12-31', coverageEnd: '2027-01-01' },
+      payload: { coverageStart: '2027-01-01', coverageEnd: '2027-12-31' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('rejects an inverted coverage range before confirming or reading the upload', async () => {
+    const confirm = vi.fn(async () => confirmedUpload())
+    const readConfirmed = vi.fn(async () => ({
+      session: confirmedUpload(),
+      contents: Buffer.alloc(128, 0x45),
+    }))
+    const app = await buildRouteApp(
+      engineClient({ importUpbitDocument: vi.fn(async () => ({})) }),
+      undefined,
+      { ...uploadStore, confirm, readConfirmed },
+    )
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/import?coverageStart=2027-12-31&coverageEnd=2027-01-01',
+      headers: { 'content-type': 'application/octet-stream' },
+      payload: Buffer.from([1]),
     })
 
     expect(response.statusCode).toBe(400)
-    expect(response.json()).toMatchObject({ error: { code: 'INVALID_COVERAGE_PERIOD' } })
+    expect(response.json()).toMatchObject({
+      error: { code: 'INVALID_COVERAGE_PERIOD' },
+    })
     expect(confirm).not.toHaveBeenCalled()
-    expect(registerDocument).not.toHaveBeenCalled()
+    expect(readConfirmed).not.toHaveBeenCalled()
   })
 
-  it('does not register a source or job when the upload store detects encryption', async () => {
-    const confirm = vi.fn(async () => {
-      throw new UploadValidationError('ENCRYPTED_PDF')
-    })
-    const registerDocument = vi.fn(async () => ({ id: 'source-1' }))
-    const enqueueSync = vi.fn(async () => ({ id: 'job-1' }))
+  it.each([
+    {
+      name: 'invalid upload identifier rejected by schema validation',
+      url: '/api/v1/uploads/not-a-uuid/import?coverageStart=2027-01-01&coverageEnd=2027-12-31',
+      payload: Buffer.from([1, 9, 8, 7]),
+      statusCode: 400,
+    },
+    {
+      name: 'unknown envelope version',
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/import?coverageStart=2027-01-01&coverageEnd=2027-12-31',
+      payload: Buffer.from([2, 9, 8, 7]),
+      statusCode: 404,
+    },
+    {
+      name: 'inverted coverage period',
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/import?coverageStart=2027-12-31&coverageEnd=2027-01-01',
+      payload: Buffer.from([1, 9, 8, 7]),
+      statusCode: 400,
+    },
+  ])('zeroizes the parsed password envelope after $name validation fails', async ({
+    url,
+    payload,
+    statusCode,
+  }) => {
+    let parsedBody: Buffer | undefined
     const app = await buildRouteApp(
-      engineClient({ registerDocument, enqueueSync }),
+      engineClient({ importUpbitDocument: vi.fn(async () => ({})) }),
       undefined,
-      { ...uploadStore, confirm },
+      uploadStore,
+      undefined,
+      (body) => { parsedBody = body },
     )
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/confirm',
-      payload: { coverageStart: '2027-01-01', coverageEnd: '2027-12-31' },
+      url,
+      headers: { 'content-type': 'application/octet-stream' },
+      payload,
     })
 
-    expect(response.statusCode).toBe(422)
-    expect(response.json()).toMatchObject({ error: { code: 'ENCRYPTED_PDF' } })
-    expect(registerDocument).not.toHaveBeenCalled()
-    expect(enqueueSync).not.toHaveBeenCalled()
+    expect(response.statusCode).toBe(statusCode)
+    expect(parsedBody).toBeDefined()
+    expect(parsedBody && [...parsedBody].every((byte) => byte === 0)).toBe(true)
   })
 
-  it('rejects confirmation before upload validation when the Engine import capability is unavailable', async () => {
+  it('fails closed before reading retained content when the session has no verified subject claim', async () => {
     const confirm = vi.fn(async () => confirmedUpload())
-    const discard = vi.fn(async () => true)
-    const registerDocument = vi.fn(async () => ({ id: 'source-1' }))
-    const enqueueSync = vi.fn(async () => ({ id: 'job-1' }))
+    const readConfirmed = vi.fn(async () => ({
+      session: confirmedUpload(),
+      contents: Buffer.alloc(128, 0x45),
+    }))
     const app = await buildRouteApp(
-      engineClient({
-        upbitPdfImportSupported: false,
-        registerDocument,
-        enqueueSync,
-      }),
-      undefined,
-      { ...uploadStore, confirm, discard },
+      engineClient({ importUpbitDocument: vi.fn(async () => ({})) }),
+      async (request) => {
+        const { verifiedSubjectName: _verifiedSubjectName, ...unverifiedSession } = session
+        request.authSession = {
+          ...unverifiedSession,
+          user: { id: userId, displayName: '김대장' },
+        }
+      },
+      { ...uploadStore, confirm, readConfirmed },
     )
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/confirm',
-      payload: { coverageStart: '2027-01-01', coverageEnd: '2027-12-31' },
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/import?coverageStart=2027-01-01&coverageEnd=2027-12-31',
+      headers: { 'content-type': 'application/octet-stream' },
+      payload: Buffer.from([1]),
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json()).toMatchObject({
+      error: { code: 'VERIFIED_IDENTITY_REQUIRED' },
+    })
+    expect(confirm).not.toHaveBeenCalled()
+    expect(readConfirmed).not.toHaveBeenCalled()
+  })
+
+  it('passes the encrypted PDF and password only in memory and zeroizes both buffers after Engine returns', async () => {
+    const encryptedOriginal = Buffer.alloc(128, 0x45)
+    const confirm = vi.fn(async () => confirmedUpload())
+    const readConfirmed = vi.fn(async () => ({
+      session: confirmedUpload(),
+      contents: encryptedOriginal,
+    }))
+    let capturedOriginal: Buffer | undefined
+    let capturedPassword: Buffer | undefined
+    const importUpbitDocument = vi.fn(async (input: Parameters<NonNullable<EngineDataClient['importUpbitDocument']>>[0]) => {
+      capturedOriginal = input.encryptedOriginalPdf
+      capturedPassword = input.pdfPasswordUtf8
+      expect(input.expectedSubjectName).toBe('김대장')
+      expect(input.context).toMatchObject({
+        userId,
+        sessionId: session.id,
+        idempotencyKey: 'import:22222222-2222-4222-8222-222222222222',
+      })
+      return {
+        source: { id: 'source-1', status: 'ACTIVE' },
+        job: { id: 'job-1', state: 'SUCCEEDED' },
+        evidenceTerminalStatus: 'PARTIAL',
+        sourceRecordCount: 12,
+        normalizedRecordCount: 0,
+      }
+    })
+    const app = await buildRouteApp(
+      engineClient({ importUpbitDocument }),
+      undefined,
+      { ...uploadStore, confirm, readConfirmed },
+    )
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/import?coverageStart=2027-01-01&coverageEnd=2027-12-31',
+      headers: { 'content-type': 'application/octet-stream' },
+      payload: Buffer.concat([Buffer.from([1]), Buffer.from('transient-password')]),
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toMatchObject({
+      job: { state: 'SUCCEEDED' },
+      evidenceTerminalStatus: 'PARTIAL',
+      sourceRecordCount: 12,
+      normalizedRecordCount: 0,
+    })
+    expect(importUpbitDocument).toHaveBeenCalledOnce()
+    expect(capturedOriginal && [...capturedOriginal].every((byte) => byte === 0)).toBe(true)
+    expect(capturedPassword && [...capturedPassword].every((byte) => byte === 0)).toBe(true)
+  })
+
+  it('does not load the retained original when the Engine importer is unavailable', async () => {
+    let capturedBody: Buffer | undefined
+    const unavailableImporter = engineClient()
+    delete unavailableImporter.importUpbitDocument
+    const app = await buildRouteApp(
+      unavailableImporter,
+      undefined,
+      {
+        ...uploadStore,
+        confirm: vi.fn(async () => confirmedUpload()),
+        readConfirmed: vi.fn(async () => {
+          capturedBody = Buffer.alloc(128, 0x45)
+          return { session: confirmedUpload(), contents: capturedBody }
+        }),
+      },
+    )
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/import?coverageStart=2027-01-01&coverageEnd=2027-12-31',
+      headers: { 'content-type': 'application/octet-stream' },
+      payload: Buffer.from([1]),
     })
 
     expect(response.statusCode).toBe(503)
-    expect(response.json()).toMatchObject({
-      error: { code: 'UPBIT_PDF_IMPORT_UNAVAILABLE' },
+    expect(capturedBody).toBeUndefined()
+  })
+
+  it.each([
+    [grpcStatus.FAILED_PRECONDITION, 'PDF_PASSWORD_INVALID', 422, 'PDF_PASSWORD_INVALID'],
+    [grpcStatus.FAILED_PRECONDITION, 'SUBJECT_MISMATCH', 422, 'SUBJECT_MISMATCH'],
+    [grpcStatus.FAILED_PRECONDITION, 'SUBJECT_CLAIM_UNAVAILABLE', 422, 'UPBIT_PDF_LAYOUT_UNSUPPORTED'],
+    [grpcStatus.FAILED_PRECONDITION, 'PARSER_DOCUMENT_REJECTED', 422, 'INVALID_PDF'],
+    [grpcStatus.ABORTED, 'IMPORT_IN_PROGRESS', 409, 'IMPORT_IN_PROGRESS'],
+    [grpcStatus.ALREADY_EXISTS, 'IMPORT_IDEMPOTENCY_CONFLICT', 409, 'DUPLICATE_SOURCE'],
+  ])('maps Engine import failure %s/%s without exposing parser details', async (
+    grpcCode,
+    details,
+    statusCode,
+    publicCode,
+  ) => {
+    const retained = Buffer.alloc(128, 0x45)
+    const app = await buildRouteApp(
+      engineClient({
+        importUpbitDocument: vi.fn(async () => {
+          throw new EngineRpcError(grpcCode, details)
+        }),
+      }),
+      undefined,
+      {
+        ...uploadStore,
+        confirm: vi.fn(async () => confirmedUpload()),
+        readConfirmed: vi.fn(async () => ({ session: confirmedUpload(), contents: retained })),
+      },
+    )
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads/22222222-2222-4222-8222-222222222222/import?coverageStart=2027-01-01&coverageEnd=2027-12-31',
+      headers: { 'content-type': 'application/octet-stream' },
+      payload: Buffer.concat([Buffer.from([1]), Buffer.from('transient-password')]),
     })
-    expect(confirm).not.toHaveBeenCalled()
-    expect(discard).not.toHaveBeenCalled()
-    expect(registerDocument).not.toHaveBeenCalled()
-    expect(enqueueSync).not.toHaveBeenCalled()
+
+    expect(response.statusCode).toBe(statusCode)
+    expect(response.json()).toMatchObject({ error: { code: publicCode } })
+    expect([...retained].every((byte) => byte === 0)).toBe(true)
+    expect(response.body).not.toContain(details === publicCode ? 'parser traceback' : details)
   })
 })
 

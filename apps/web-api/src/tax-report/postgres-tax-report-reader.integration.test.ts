@@ -49,6 +49,7 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
       methods: { email: false, oauthProviders: [] },
     },
     identityVerificationMode: 'disabled',
+    upbitPdfImportEnabled: false,
     engineMtls: undefined,
   }
   let appContext: Awaited<ReturnType<typeof buildApp>>

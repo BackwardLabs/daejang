@@ -7,9 +7,12 @@ export type UpbitPdfSelectionErrorCode =
 export type UpbitPdfRegistrationErrorCode =
   | 'DUPLICATE_SOURCE'
   | 'ENCRYPTED_OR_DAMAGED_DOCUMENT'
+  | 'IDENTITY_VERIFICATION_REQUIRED'
   | 'INVALID_PERIOD'
+  | 'PASSWORD_INVALID'
   | 'PROCESSING_FAILED'
   | 'PROCESSING_TIMEOUT'
+  | 'SUBJECT_MISMATCH'
   | 'UNSUPPORTED_DOCUMENT'
   | 'UPLOAD_CANCELLED'
   | 'UPLOAD_FAILED'
@@ -46,6 +49,7 @@ type SelectedFile = {
 }
 
 export type UpbitPdfRegistrationStage =
+  | 'DOCUMENT_PREPARING'
   | 'DOCUMENT_PROCESSING'
   | 'DOCUMENT_UPLOADING'
   | 'SOURCE_SUBMITTING'
@@ -73,6 +77,9 @@ export type UpbitPdfRegistrationState =
       }
       sourceId: string
       sourceStatus: 'UPLOADED'
+      evidenceTerminalStatus: 'COMPLETE' | 'PARTIAL'
+      sourceRecordCount: number
+      normalizedRecordCount: number
       status: 'SOURCE_SAVED'
       view: 'complete'
     }
@@ -113,6 +120,9 @@ export type UpbitPdfRegistrationAction =
   | {
       sourceId: string
       sourceStatus: 'UPLOADED'
+      evidenceTerminalStatus: 'COMPLETE' | 'PARTIAL'
+      sourceRecordCount: number
+      normalizedRecordCount: number
       type: 'SUBMIT_SUCCEEDED'
     }
   | {
@@ -180,7 +190,7 @@ export function upbitPdfRegistrationReducer(
       return {
         file: state.file,
         intentKey: state.intentKey,
-        status: 'DOCUMENT_UPLOADING',
+        status: 'DOCUMENT_PREPARING',
         view: 'submitting',
       }
     case 'SUBMIT_STAGE_CHANGED':
@@ -228,6 +238,9 @@ export function upbitPdfRegistrationReducer(
         },
         sourceId: action.sourceId,
         sourceStatus: action.sourceStatus,
+        evidenceTerminalStatus: action.evidenceTerminalStatus,
+        sourceRecordCount: action.sourceRecordCount,
+        normalizedRecordCount: action.normalizedRecordCount,
         status: 'SOURCE_SAVED',
         view: 'complete',
       }
@@ -268,6 +281,9 @@ export type UpbitPdfRegistrationResult =
       ok: true
       sourceId: string
       sourceStatus: 'UPLOADED'
+      evidenceTerminalStatus: 'COMPLETE' | 'PARTIAL'
+      sourceRecordCount: number
+      normalizedRecordCount: number
     }
   | {
       error: UpbitPdfRegistrationError
@@ -277,6 +293,7 @@ export type UpbitPdfRegistrationResult =
 export type UpbitPdfRegistrationRequest = {
   file: File
   intentKey: string
+  password: string | null
   retry?: UpbitPdfRetryContext
   coverageStart: string
   coverageEnd: string

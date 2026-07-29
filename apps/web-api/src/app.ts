@@ -342,6 +342,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     })
     await registerDataRoutes(protectedApp, {
       uploadAdmissionRateLimiter,
+      upbitPdfImportEnabled: config.upbitPdfImportEnabled,
       ...(options.uploadStore ? { uploadStore: options.uploadStore } : {}),
       ...(options.engineDataClient ? { engine: options.engineDataClient } : {}),
       ...(options.now ? { now: options.now } : {}),

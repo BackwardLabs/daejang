@@ -44,6 +44,7 @@ const config: AppConfig = {
     methods: { email: false, oauthProviders: [] },
   },
   identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: false,
   engineMtls: undefined,
 }
 

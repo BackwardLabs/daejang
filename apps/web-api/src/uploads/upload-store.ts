@@ -44,6 +44,7 @@ export interface UploadStore {
   create(input: CreateUpload): Promise<UploadSession>
   write(userId: string, uploadId: string, contents: Buffer, now: Date): Promise<UploadSession | undefined>
   confirm(userId: string, uploadId: string, now: Date): Promise<UploadSession | undefined>
+  readConfirmed?(userId: string, uploadId: string): Promise<{ session: UploadSession; contents: Buffer } | undefined>
   discard(userId: string, uploadId: string): Promise<boolean>
   cleanupAbandoned(now: Date, limit?: number): Promise<UploadCleanupResult>
 }

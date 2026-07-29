@@ -154,7 +154,7 @@ export const registerSourceRoutes = async (
                 required: ['registrationEnabled', 'encryptedPdfSupported'],
                 properties: {
                   registrationEnabled: { type: 'boolean' },
-                  encryptedPdfSupported: { type: 'boolean', const: false },
+                  encryptedPdfSupported: { type: 'boolean' },
                 },
               },
             },
@@ -162,13 +162,18 @@ export const registerSourceRoutes = async (
         },
       },
     },
-    async () => ({
-      upbitPdf: {
-        registrationEnabled:
-          options.engineDataClient?.upbitPdfImportSupported === true,
-        encryptedPdfSupported: false as const,
-      },
-    }),
+    async (request) => {
+      const importSupported =
+        options.config.upbitPdfImportEnabled &&
+        options.engineDataClient?.upbitPdfImportSupported === true
+      return {
+        upbitPdf: {
+          registrationEnabled:
+            importSupported && Boolean(request.authSession?.verifiedSubjectName),
+          encryptedPdfSupported: importSupported,
+        },
+      }
+    },
   )
 
   app.get(

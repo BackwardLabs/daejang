@@ -54,6 +54,7 @@ const config: AppConfig = {
     methods: { email: false, oauthProviders: [] },
   },
   identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: true,
   engineMtls: undefined,
 }
 
@@ -96,6 +97,9 @@ describe('web api authentication boundary', () => {
   const createSession = async () => {
     const session = {
       user: { id: USER_ID, displayName: '김대장' },
+      verifiedSubjectName: {
+        normalizedValue: '김대장',
+      },
     } as const
 
     return context.sessionService.create(session)
@@ -550,16 +554,26 @@ describe('web api authentication boundary', () => {
         session = { ...session, state: 'CONFIRMED', verifiedDigest: 'a'.repeat(64), verifiedBytes: pdf.length }
         return session
       }),
+      readConfirmed: vi.fn(async () =>
+        session
+          ? { session, contents: Buffer.from(pdf) }
+          : undefined),
       discard: vi.fn(async () => true),
       cleanupAbandoned: vi.fn(async () => ({
         examined: 0, removed: 0, missing: 0, retryPending: 0,
       })),
     }
-    const registerDocument = vi.fn(async () => ({ id: sourceId }))
-    const enqueueSync = vi.fn(async () => ({ id: '00000000-0000-4000-8000-000000000012', state: 'QUEUED' }))
+    const importUpbitDocument = vi.fn(async () => ({
+      source: { id: sourceId, status: 'ACTIVE' },
+      job: { id: '00000000-0000-4000-8000-000000000012', state: 'SUCCEEDED' },
+      evidenceTerminalStatus: 'PARTIAL',
+      sourceRecordCount: 1,
+      normalizedRecordCount: 0,
+    }))
     const engineDataClient = {
       upbitPdfImportSupported: true,
-      registerDocument, enqueueSync,
+      importUpbitDocument,
+      enqueueSync: vi.fn(async () => ({})),
       listAllSources: vi.fn(async () => ({ wallets: [], documents: [] })),
       getSyncJob: vi.fn(async () => ({})), listSyncJobs: vi.fn(async () => []),
       getDashboard: vi.fn(async () => ({})), listLedgerEvents: vi.fn(async () => []),
@@ -591,17 +605,20 @@ describe('web api authentication boundary', () => {
       headers: { ...headers, 'content-type': 'application/pdf' }, payload: pdf,
     })
     expect(written.statusCode).toBe(204)
-    const confirmed = await context.app.inject({
-      method: 'POST', url: `/api/v1/uploads/${uploadId}/confirm`, headers,
-      payload: { coverageStart: '2026-01-01', coverageEnd: '2026-12-31' },
+    const imported = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/uploads/${uploadId}/import?coverageStart=2026-01-01&coverageEnd=2026-12-31`,
+      headers: { ...headers, 'content-type': 'application/octet-stream' },
+      payload: Buffer.from([1]),
     })
-    expect(confirmed.statusCode).toBe(201)
-    expect(registerDocument).toHaveBeenCalledWith(expect.objectContaining({ uploadId, byteLength: pdf.length }))
-    expect(enqueueSync).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID }), {
-      sourceKind: 'UPBIT_PDF', sourceId,
-      requestedCoverageStart: '2026-01-01', requestedCoverageEnd: '2026-12-31',
-      trigger: 'USER_REQUEST',
-    })
+    expect(imported.statusCode).toBe(201)
+    expect(importUpbitDocument).toHaveBeenCalledWith(expect.objectContaining({
+      uploadId,
+      byteLength: pdf.length,
+      coverageStart: '2026-01-01',
+      coverageEnd: '2026-12-31',
+      expectedSubjectName: '김대장',
+    }))
   })
 
   it('does not create an upload when the Engine importer is unavailable', async () => {
@@ -673,9 +690,9 @@ describe('web api authentication boundary', () => {
 
     const confirmed = await context.app.inject({
       method: 'POST',
-      url: '/api/v1/uploads/00000000-0000-4000-8000-000000000021/confirm',
-      headers,
-      payload: { coverageStart: '2026-01-01', coverageEnd: '2026-12-31' },
+      url: '/api/v1/uploads/00000000-0000-4000-8000-000000000021/import?coverageStart=2026-01-01&coverageEnd=2026-12-31',
+      headers: { ...headers, 'content-type': 'application/octet-stream' },
+      payload: Buffer.from([1]),
     })
     expect(confirmed.statusCode).toBe(503)
     expect(confirmed.json()).toMatchObject({

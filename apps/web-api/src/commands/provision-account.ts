@@ -32,7 +32,6 @@ const email = required('PROVISION_ACCOUNT_EMAIL')
 if (required('PROVISION_ACCOUNT_CONFIRM_EMAIL') !== email) {
   throw new Error('PROVISION_ACCOUNT_CONFIRM_EMAIL must exactly match the target email')
 }
-
 const pool = new Pool({
   connectionString: databaseUrl,
   application_name: 'daejang-account-provisioner',

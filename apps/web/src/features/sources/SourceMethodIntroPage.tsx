@@ -95,7 +95,7 @@ export function SourceMethodIntroPage({
             <strong>보안 원칙</strong>
             <p>
               {isUpbitPdf
-                ? '파일 암호·계정 자격증명을 요청하거나 저장하지 않습니다.'
+                ? '파일 암호는 격리 파서 처리에만 일회성으로 사용하고 로그·DB·파일에 저장하지 않으며, 거래소 계정 자격증명은 요청하지 않습니다.'
                 : 'private key·seed phrase·쓰기·출금 권한을 요청하거나 저장하지 않습니다. 오프체인 서명은 지갑 소유권 확인에만 사용합니다.'}
             </p>
           </div>

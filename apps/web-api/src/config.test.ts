@@ -29,6 +29,7 @@ describe('web api configuration', () => {
         'EMAIL_VERIFICATION_TOKEN_TTL_SECONDS',
         'EMAIL_VERIFICATION_RESEND_AFTER_SECONDS',
         'IDENTITY_VERIFICATION_MODE',
+        'UPBIT_PDF_IMPORT_ENABLED',
       ]),
     )
   })
@@ -147,6 +148,22 @@ describe('web api configuration', () => {
         ENGINE_GRPC_INSECURE_TARGET: 'engine.internal:50051',
       }),
     ).toThrow('loopback')
+  })
+
+  it('keeps Upbit PDF import default-off and rejects filesystem-backed production activation', () => {
+    expect(loadConfig().upbitPdfImportEnabled).toBe(false)
+    expect(
+      loadConfig({
+        NODE_ENV: 'development',
+        UPBIT_PDF_IMPORT_ENABLED: 'true',
+      }).upbitPdfImportEnabled,
+    ).toBe(true)
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        UPBIT_PDF_IMPORT_ENABLED: 'true',
+      }),
+    ).toThrow('cannot be enabled in production')
   })
 
   it('rejects plaintext Engine transport in production', () => {

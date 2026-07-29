@@ -6,6 +6,9 @@ export type SessionRecord = {
     id: string
     displayName: string
   }
+  verifiedSubjectName?: {
+    normalizedValue: string
+  }
   sessionEpoch: number
   createdAt: Date
   lastSeenAt: Date

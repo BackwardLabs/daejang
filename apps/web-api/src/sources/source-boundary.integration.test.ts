@@ -25,7 +25,7 @@ describeWithBoundary('Web-to-Engine source persistence boundary', () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl })
-    engine = EngineMtlsClient.connectInsecureForDevelopment(engineTarget!)
+    engine = EngineMtlsClient.connectInsecureForDevelopment(engineTarget!, true)
     await engine.waitForReady(5_000)
     store = new PostgresWalletSourceStore(pool, engine)
   })
