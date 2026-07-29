@@ -51,7 +51,8 @@ Object.assign(process.env, {
   ENGINE_ALLOW_INSECURE_LOOPBACK: 'true',
   ENGINE_GRPC_INSECURE_TARGET:
     process.env.GIWA_HOST_ENGINE_TARGET ?? '127.0.0.1:50051',
-  UPBIT_PDF_IMPORT_ENABLED: 'true',
+  UPBIT_PDF_IMPORT_ENABLED:
+    process.env.UPBIT_PDF_IMPORT_ENABLED ?? 'false',
 })
 
 for (const name of [

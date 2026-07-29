@@ -46,6 +46,10 @@ npm run backend:stop
 둘은 같은 호스트의 loopback에서만 plaintext gRPC를 허용하며 외부 주소에는
 mTLS 설정이 계속 필수다.
 
+PDF parser 프로세스는 항상 시작하지만, Web API의 PDF 업로드 경로는
+`UPBIT_PDF_IMPORT_ENABLED` 설정을 따른다. 승인된 암호화·감사·버전 object
+storage가 없는 production에서는 기본값 `false`를 유지한다.
+
 경로를 바꿔야 할 때는 다음 환경 변수를 사용한다.
 
 - `GIWA_DATABASE_REPOSITORY`

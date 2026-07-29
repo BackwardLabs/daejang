@@ -419,7 +419,8 @@ const start = async () => {
         PRIVATE_OBJECT_ROOT: join(runtimeRoot, 'private-objects'),
         ENGINE_ALLOW_INSECURE_LOOPBACK: 'true',
         ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
-        UPBIT_PDF_IMPORT_ENABLED: 'true',
+        UPBIT_PDF_IMPORT_ENABLED:
+          process.env.UPBIT_PDF_IMPORT_ENABLED ?? 'false',
         ENGINE_GRPC_TARGET: '',
         ENGINE_GRPC_CA_PATH: '',
         ENGINE_GRPC_CERT_PATH: '',
