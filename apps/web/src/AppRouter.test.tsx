@@ -46,6 +46,20 @@ beforeEach(() => {
 })
 
 describe('AppRouter', () => {
+  it('does not expose authentication implementation copy while checking the session', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)))
+    window.history.pushState({}, '', '/dashboard')
+
+    render(<AppRouter />)
+
+    expect(
+      screen.getByRole('status', { name: '페이지를 불러오는 중' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('로그인 상태를 확인하는 중'),
+    ).not.toBeInTheDocument()
+  })
+
   it('keeps the existing landing page at the root path without a session', async () => {
     vi.stubGlobal(
       'fetch',

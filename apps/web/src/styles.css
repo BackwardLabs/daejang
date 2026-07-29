@@ -133,6 +133,57 @@ body {
   cursor: pointer;
 }
 
+.session-loading {
+  display: grid;
+  min-height: 100vh;
+  margin: 0;
+  place-content: center;
+  justify-items: center;
+  gap: 18px;
+  background: #ffffff;
+}
+
+.session-loading img {
+  width: 148px;
+  height: auto;
+}
+
+.session-loading__bar {
+  position: relative;
+  width: 96px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eceef1;
+}
+
+.session-loading__bar::after {
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: var(--color-accent-bright);
+  content: "";
+  animation: session-loading 900ms ease-in-out infinite;
+}
+
+@keyframes session-loading {
+  from {
+    transform: translateX(-120%);
+  }
+
+  to {
+    transform: translateX(260%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-loading__bar::after {
+    width: 100%;
+    animation: none;
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
