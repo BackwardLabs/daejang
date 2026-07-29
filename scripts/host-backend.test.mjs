@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   privateObjectWriteEnvironment,
+  finishSignalShutdown,
   releaseProcessLock,
   runRestartOperation,
   runSignalShutdown,
@@ -116,4 +117,16 @@ test('signal shutdown waits for the active operation before serialized stop', as
   finishOperation()
   await shutdown
   assert.deepEqual(events, ['pause', 'stop'])
+})
+
+test('supervisor signal shutdown returns through its lock-release finally', () => {
+  const exitCodes = []
+  finishSignalShutdown({
+    supervising: true,
+    exitCode: 143,
+    exit: (code) => exitCodes.push(code),
+  })
+  assert.deepEqual(exitCodes, [])
+  assert.equal(process.exitCode, 143)
+  process.exitCode = undefined
 })

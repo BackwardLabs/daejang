@@ -813,7 +813,7 @@ const supervise = async () => {
     throw new Error(`Backend supervisor is already running as PID ${existing.pid}`)
   }
   try {
-    while (true) {
+    while (!shutdownRequested) {
       if (!existsSync(pauseFile)) {
         await withOperationLock(async () => {
           if (existsSync(pauseFile) || await runtimeHealthy()) return
@@ -915,6 +915,11 @@ export const runSignalShutdown = async ({ pause, activeOperation, stop }) => {
   await stop()
 }
 
+export const finishSignalShutdown = ({ supervising, exitCode, exit }) => {
+  process.exitCode = exitCode
+  if (!supervising) exit(exitCode)
+}
+
 for (const [signal, exitCode] of [
   ['SIGINT', 130],
   ['SIGTERM', 143],
@@ -936,7 +941,11 @@ for (const [signal, exitCode] of [
     } catch (error) {
       console.error(error)
     } finally {
-      process.exit(exitCode)
+      finishSignalShutdown({
+        supervising: process.argv[2] === 'supervise',
+        exitCode,
+        exit: process.exit,
+      })
     }
   })
 }
