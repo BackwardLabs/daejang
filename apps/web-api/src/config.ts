@@ -358,7 +358,7 @@ const loadEngineMtlsConfig = (
   }
 }
 
-const loadDevelopmentEngineTarget = (
+const loadInsecureLoopbackEngineTarget = (
   environment: NodeJS.ProcessEnv,
   production: boolean,
 ) => {
@@ -366,8 +366,15 @@ const loadDevelopmentEngineTarget = (
   if (!target) {
     return undefined
   }
-  if (production) {
-    throw new Error('ENGINE_GRPC_INSECURE_TARGET is not allowed in production')
+  const explicitlyAllowed = parseBoolean(
+    environment.ENGINE_ALLOW_INSECURE_LOOPBACK,
+    false,
+    'ENGINE_ALLOW_INSECURE_LOOPBACK',
+  )
+  if (production && !explicitlyAllowed) {
+    throw new Error(
+      'ENGINE_GRPC_INSECURE_TARGET in production requires ENGINE_ALLOW_INSECURE_LOOPBACK=true',
+    )
   }
   if (
     environment.ENGINE_GRPC_TARGET ||
@@ -434,7 +441,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
         identityVerificationRequired: false,
         methods: { email: false, oauthProviders: [] },
       }
-  const engineInsecureTarget = loadDevelopmentEngineTarget(
+  const engineInsecureTarget = loadInsecureLoopbackEngineTarget(
     environment,
     production,
   )
@@ -508,7 +515,10 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     signup,
     identityVerificationMode,
     upbitPdfImportEnabled,
-    engineMtls: loadEngineMtlsConfig(environment, production),
+    engineMtls: loadEngineMtlsConfig(
+      environment,
+      production && engineInsecureTarget === undefined,
+    ),
     ...(reportPayments ? { reportPayments } : {}),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),

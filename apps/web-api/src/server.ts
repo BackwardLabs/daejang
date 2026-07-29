@@ -27,7 +27,7 @@ const pool = config.databaseUrl
 const engineClient = config.engineMtls
   ? await EngineMtlsClient.connect(config.engineMtls, config.upbitPdfImportEnabled)
   : config.engineInsecureTarget
-    ? EngineMtlsClient.connectInsecureForDevelopment(
+    ? EngineMtlsClient.connectInsecureLoopback(
         config.engineInsecureTarget,
         config.upbitPdfImportEnabled,
       )

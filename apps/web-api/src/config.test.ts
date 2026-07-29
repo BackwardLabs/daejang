@@ -38,6 +38,7 @@ describe('web api configuration', () => {
         'X402_MAX_TIMEOUT_SECONDS',
         'X402_TOKEN_NAME',
         'X402_TOKEN_VERSION',
+        'ENGINE_ALLOW_INSECURE_LOOPBACK',
       ]),
     )
   })
@@ -124,7 +125,7 @@ describe('web api configuration', () => {
     ).toThrow('base64-encoded 32-byte key')
   })
 
-  it('requires durable PostgreSQL, rate-limit, and Engine mTLS settings in production', () => {
+  it('requires durable PostgreSQL, rate-limit, and an Engine transport in production', () => {
     expect(() =>
       loadConfig({
         NODE_ENV: 'production',
@@ -164,7 +165,7 @@ describe('web api configuration', () => {
     ).toThrow('gRPC authority')
   })
 
-  it('allows plaintext Engine transport only on development loopback', () => {
+  it('allows plaintext Engine transport only on loopback', () => {
     expect(
       loadConfig({
         NODE_ENV: 'development',
@@ -196,13 +197,26 @@ describe('web api configuration', () => {
     ).toThrow('cannot be enabled in production')
   })
 
-  it('rejects plaintext Engine transport in production', () => {
+  it('requires an explicit opt-in for production loopback Engine transport', () => {
     expect(() =>
       loadConfig({
         NODE_ENV: 'production',
         ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
       }),
-    ).toThrow('not allowed in production')
+    ).toThrow('ENGINE_ALLOW_INSECURE_LOOPBACK=true')
+
+    const config = loadConfig({
+      NODE_ENV: 'production',
+      PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
+      DATABASE_URL: 'postgresql://example.invalid/daejang',
+      PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
+      RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
+      ENGINE_ALLOW_INSECURE_LOOPBACK: 'true',
+      ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
+    })
+
+    expect(config.engineInsecureTarget).toBe('127.0.0.1:50051')
+    expect(config.engineMtls).toBeUndefined()
   })
 
   it('rejects idle timeouts longer than the absolute timeout', () => {
