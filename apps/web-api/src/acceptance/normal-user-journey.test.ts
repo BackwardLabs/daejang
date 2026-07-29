@@ -49,9 +49,11 @@ const config: AppConfig = {
   },
   signup: {
     enabled: true,
+    identityVerificationRequired: false,
     methods: { email: true, oauthProviders: [] },
   },
-  identityVerificationMode: 'mock',
+  identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: true,
   engineMtls: undefined,
 }
 
@@ -84,7 +86,12 @@ class JourneyUploadStore implements UploadStore {
     return this.session
   }
 
-  async write(userId: string, uploadId: string, contents: Buffer) {
+  async write(
+    userId: string,
+    uploadId: string,
+    contents: Buffer,
+    _now: Date,
+  ) {
     if (
       !this.session ||
       this.session.userId !== userId ||
@@ -98,7 +105,7 @@ class JourneyUploadStore implements UploadStore {
     return this.session
   }
 
-  async confirm(userId: string, uploadId: string) {
+  async confirm(userId: string, uploadId: string, _now: Date) {
     if (
       !this.session ||
       !this.contents ||
@@ -117,16 +124,51 @@ class JourneyUploadStore implements UploadStore {
     }
     return this.session
   }
+
+  async readConfirmed(userId: string, uploadId: string) {
+    if (
+      !this.session ||
+      !this.contents ||
+      this.session.userId !== userId ||
+      this.session.id !== uploadId ||
+      this.session.state !== 'CONFIRMED'
+    ) {
+      return undefined
+    }
+    return { session: this.session, contents: Buffer.from(this.contents) }
+  }
+
+  async discard(userId: string, uploadId: string) {
+    if (
+      !this.session ||
+      this.session.userId !== userId ||
+      this.session.id !== uploadId
+    ) {
+      return false
+    }
+    this.contents = undefined
+    this.session = undefined
+    return true
+  }
+
+  async cleanupAbandoned() {
+    return { examined: 0, removed: 0, missing: 0, retryPending: 0 }
+  }
 }
 
 class JourneyEngine implements EngineDataClient {
+  readonly upbitPdfImportSupported = true
   private documents: Array<Record<string, unknown>> = []
   private jobs: Array<Record<string, unknown>> = []
   private reports: Array<Record<string, unknown>> = []
 
-  async registerDocument(
-    input: Parameters<EngineDataClient['registerDocument']>[0],
-  ) {
+  private createDocument(input: {
+    originalFilename: string
+    byteLength: number
+    artifactDigest: string
+    coverageStart: string
+    coverageEnd: string
+  }) {
     const now = new Date('2027-07-20T00:00:00.000Z')
     const source = {
       id: randomUUID(),
@@ -150,15 +192,35 @@ class JourneyEngine implements EngineDataClient {
     return { wallets: [], documents: [...this.documents] }
   }
 
+  async importUpbitDocument(
+    input: Parameters<NonNullable<EngineDataClient['importUpbitDocument']>>[0],
+  ) {
+    const source = this.createDocument(input)
+    const job = {
+      id: randomUUID(),
+      sourceKind: 'UPBIT_PDF',
+      sourceId: source.id,
+      state: 'SUCCEEDED',
+      stage: 'COMPLETE',
+    }
+    this.jobs.push(job)
+    return {
+      source,
+      job,
+      evidenceTerminalStatus: 'PARTIAL',
+      sourceRecordCount: 1,
+      normalizedRecordCount: 0,
+    }
+  }
+
   async enqueueSync(
     _context: Parameters<EngineDataClient['enqueueSync']>[0],
-    sourceKind: string,
-    sourceId: string,
+    input: Parameters<EngineDataClient['enqueueSync']>[1],
   ) {
     const job = {
       id: randomUUID(),
-      sourceKind,
-      sourceId,
+      sourceKind: input.sourceKind,
+      sourceId: input.sourceId,
       state: 'QUEUED',
       stage: 'COLLECTING',
     }
@@ -228,6 +290,10 @@ class JourneyEngine implements EngineDataClient {
   ) {
     return this.reports.filter((report) => report.taxYear === taxYear)
   }
+
+  async listTaxReportHistory() {
+    return []
+  }
 }
 
 const cookiePair = (
@@ -294,6 +360,7 @@ describe('documented normal user journey', () => {
     expect(capabilities.json()).toEqual({
       signup: {
         enabled: true,
+        identityVerificationRequired: false,
         methods: { email: true, oauthProviders: [] },
       },
     })
@@ -350,7 +417,6 @@ describe('documented normal user journey', () => {
       }>()
       .documents.filter((document) => document.required)
     expect(requiredDocuments.map(({ documentType }) => documentType).sort()).toEqual([
-      'identity_verification',
       'privacy',
       'terms',
     ])
@@ -368,27 +434,59 @@ describe('documented normal user journey', () => {
       },
     })
     expect(consent.statusCode).toBe(200)
-    expect(consent.json()).toEqual({
-      status: 'accepted',
-      nextStep: 'identity_verification',
-    })
-
-    const activation = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/signup/identity-verification/mock-complete',
-      headers: { ...origin, cookie: signupCookie as string },
-    })
-    expect(activation.statusCode).toBe(200)
-    expect(activation.json()).toEqual({
+    const activated = consent.json<{
+      status: string
+      nextPath: string
+      user: { id: string; displayName: string }
+    }>()
+    expect(activated).toEqual({
       status: 'authenticated',
       nextPath: '/dashboard',
+      user: {
+        id: expect.any(String),
+        displayName: 'GIWA 사용자',
+      },
     })
-    const sessionCookie = cookiePair(
+    const unverifiedSessionCookie = cookiePair(
       config.sessionCookieName,
-      activation.headers['set-cookie'],
+      consent.headers['set-cookie'],
     )
-    expect(sessionCookie).toBeTruthy()
+    expect(unverifiedSessionCookie).toBeTruthy()
+    const unverifiedCapabilities = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/sources/capabilities',
+      headers: { cookie: unverifiedSessionCookie as string },
+    })
+    expect(unverifiedCapabilities.json()).toEqual({
+      upbitPdf: {
+        registrationEnabled: false,
+        encryptedPdfSupported: true,
+      },
+    })
+
+    // Production PDF registration requires an independently provisioned,
+    // immutable KYC subject-name claim. The acceptance test injects that
+    // completed operational boundary before exercising the source flow.
+    const verifiedSession = await context.sessionService.create({
+      user: activated.user,
+      verifiedSubjectName: {
+        normalizedValue: 'GIWA 사용자',
+      },
+    })
+    const sessionCookie = `${config.sessionCookieName}=${verifiedSession.token}`
     const authenticatedHeaders = { cookie: sessionCookie as string }
+
+    const verifiedCapabilities = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/sources/capabilities',
+      headers: authenticatedHeaders,
+    })
+    expect(verifiedCapabilities.json()).toEqual({
+      upbitPdf: {
+        registrationEnabled: true,
+        encryptedPdfSupported: true,
+      },
+    })
 
     const me = await context.app.inject({
       method: 'GET',
@@ -437,12 +535,13 @@ describe('documented normal user journey', () => {
 
     const registration = await context.app.inject({
       method: 'POST',
-      url: `/api/v1/uploads/${uploadId}/confirm`,
-      headers: { ...origin, ...authenticatedHeaders },
-      payload: {
-        coverageStart: '2027-01-01',
-        coverageEnd: '2027-12-31',
+      url: `/api/v1/uploads/${uploadId}/import?coverageStart=2027-01-01&coverageEnd=2027-12-31`,
+      headers: {
+        ...origin,
+        ...authenticatedHeaders,
+        'content-type': 'application/octet-stream',
       },
+      payload: Buffer.from([1]),
     })
     expect(registration.statusCode).toBe(201)
     expect(registration.json()).toMatchObject({
@@ -452,7 +551,8 @@ describe('documented normal user journey', () => {
         coverageEnd: '2027-12-31',
         status: 'ACTIVE',
       },
-      job: { state: 'QUEUED', stage: 'COLLECTING' },
+      job: { state: 'SUCCEEDED', stage: 'COMPLETE' },
+      evidenceTerminalStatus: 'PARTIAL',
     })
 
     const sources = await context.app.inject({
@@ -472,7 +572,7 @@ describe('documented normal user journey', () => {
     })
     expect(jobs.statusCode).toBe(200)
     expect(jobs.json()).toMatchObject({
-      items: [{ state: 'QUEUED', stage: 'COLLECTING' }],
+      items: [{ state: 'SUCCEEDED', stage: 'COMPLETE' }],
     })
 
     const dashboard = await context.app.inject({
@@ -485,7 +585,7 @@ describe('documented normal user journey', () => {
       dashboard: {
         taxYear: 2027,
         sourceCount: 1,
-        lastSyncState: 'QUEUED',
+        lastSyncState: 'SUCCEEDED',
       },
     })
 
@@ -534,6 +634,10 @@ describe('documented normal user journey', () => {
     expect(returningLogin.json()).toEqual({
       status: 'authenticated',
       nextPath: '/dashboard',
+      user: {
+        id: expect.any(String),
+        displayName: 'GIWA 사용자',
+      },
     })
     const returningSessionCookie = cookiePair(
       config.sessionCookieName,

@@ -1,4 +1,8 @@
-import type { FastifyReply, preHandlerHookHandler } from 'fastify'
+import type {
+  FastifyReply,
+  onRequestHookHandler,
+  preHandlerHookHandler,
+} from 'fastify'
 
 import type { AppConfig } from '../config.js'
 import { unauthorized } from '../errors.js'
@@ -90,7 +94,7 @@ export const createAuthHooks = (
   signupSessionService: SignupSessionService,
   config: AppConfig,
 ) => {
-  const authenticate: preHandlerHookHandler = async (request, reply) => {
+  const authenticate: onRequestHookHandler = async (request, reply) => {
     const token = request.cookies[config.sessionCookieName]
     if (!token) {
       throw unauthorized()

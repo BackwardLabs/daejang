@@ -1,7 +1,11 @@
 import type { Pool } from 'pg'
 import { describe, expect, it, vi } from 'vitest'
 
-import { assertTaxReportSchema, assertWebAuthSchema } from './preflight.js'
+import {
+  assertSubjectNameProvisionerSchema,
+  assertTaxReportSchema,
+  assertWebAuthSchema,
+} from './preflight.js'
 
 const validWebAuthContract = {
   users_table: 'web_private.users',
@@ -32,6 +36,11 @@ const validWebAuthContract = {
   user_email_source_guard: true,
   email_credential_source_guard: true,
   auth_identity_composite_guard: true,
+  subject_name_claims_table: 'web_private.subject_name_claims',
+  subject_name_claim_migration_version: '29',
+  subject_name_claim_guard: true,
+  subject_name_claim_select: true,
+  subject_name_claim_insert: false,
   wallet_challenges_table: 'web_private.wallet_ownership_challenges',
   upload_sessions_table: 'web_private.upload_sessions',
 }
@@ -39,10 +48,45 @@ const validWebAuthContract = {
 const validTaxReportContract = {
   report_table: 'reporting.tax_report',
   current_table: 'reporting.current_tax_report',
-  inventory_table: 'tax.inventory_run',
-  estimate_table: 'tax.estimate',
   contract_version: '1',
   migration_version: '24',
+  reporting_usage: true,
+  reporting_create: false,
+  report_select: true,
+  report_write: false,
+  current_select: true,
+  current_write: false,
+}
+
+const validSubjectNameProvisionerContract = {
+  role_name: 'daejang_identity_provisioner',
+  contract_version: '1',
+  migration_version: '30',
+  users_table: 'web_private.users',
+  user_emails_table: 'web_private.user_emails',
+  claims_table: 'web_private.subject_name_claims',
+  claims_guard: true,
+  web_usage: true,
+  meta_usage: true,
+  schema_create: false,
+  users_id_select: true,
+  users_status_select: true,
+  email_user_id_select: true,
+  email_normalized_select: true,
+  email_primary_select: true,
+  email_login_select: true,
+  email_verified_select: true,
+  claim_id_select: true,
+  claim_user_id_select: true,
+  claim_id_insert: true,
+  claim_user_id_insert: true,
+  claim_name_insert: true,
+  claim_normalized_insert: true,
+  claim_method_insert: true,
+  claim_assurance_insert: true,
+  claim_verifier_insert: true,
+  claim_verified_at_insert: true,
+  dangerous_table_write: false,
 }
 
 function poolReturning<T>(row: T): Pool {
@@ -86,5 +130,45 @@ describe('tax report schema preflight', () => {
         }),
       ),
     ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+
+  it('rejects a runtime role without the narrow current-report read grant', async () => {
+    await expect(
+      assertTaxReportSchema(
+        poolReturning({
+          ...validTaxReportContract,
+          report_select: false,
+        }),
+      ),
+    ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+})
+
+describe('subject-name provisioner schema preflight', () => {
+  it('accepts only the dedicated migration-30 provisioner contract', async () => {
+    await expect(
+      assertSubjectNameProvisionerSchema(
+        poolReturning(validSubjectNameProvisionerContract),
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  it('rejects the Web runtime role and any dangerous write privilege', async () => {
+    await expect(
+      assertSubjectNameProvisionerSchema(
+        poolReturning({
+          ...validSubjectNameProvisionerContract,
+          role_name: 'daejang_web_app',
+        }),
+      ),
+    ).rejects.toThrow('subject-name claim provisioner migration contract is invalid')
+    await expect(
+      assertSubjectNameProvisionerSchema(
+        poolReturning({
+          ...validSubjectNameProvisionerContract,
+          dangerous_table_write: true,
+        }),
+      ),
+    ).rejects.toThrow('subject-name claim provisioner migration contract is invalid')
   })
 })

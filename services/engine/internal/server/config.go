@@ -4,8 +4,10 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -17,6 +19,12 @@ type Config struct {
 	ReviewArtifactDatabaseURL string
 	ReviewArtifactRoot        string
 	ReviewArtifactTemp        string
+	SourceArtifactDatabaseURL string
+	SourceArtifactRoot        string
+	SourceArtifactTemp        string
+	PDFParserSocketPath       string
+	PDFParserTimeout          time.Duration
+	PDFImportLeaseDuration    time.Duration
 	TLSCertificatePath        string
 	TLSPrivateKeyPath         string
 	TLSClientCAPath           string
@@ -34,6 +42,10 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		ReviewArtifactDatabaseURL: getenv("DAEJANG_REVIEW_ARTIFACT_DATABASE_URL"),
 		ReviewArtifactRoot:        getenv("DAEJANG_REVIEW_ARTIFACT_ROOT"),
 		ReviewArtifactTemp:        getenv("DAEJANG_REVIEW_ARTIFACT_TEMP"),
+		SourceArtifactDatabaseURL: getenv("DAEJANG_SOURCE_ARTIFACT_DATABASE_URL"),
+		SourceArtifactRoot:        getenv("DAEJANG_SOURCE_ARTIFACT_ROOT"),
+		SourceArtifactTemp:        getenv("DAEJANG_SOURCE_ARTIFACT_TEMP"),
+		PDFParserSocketPath:       getenv("ENGINE_PDF_PARSER_SOCKET_PATH"),
 		TLSCertificatePath:        getenv("ENGINE_TLS_CERT_PATH"),
 		TLSPrivateKeyPath:         getenv("ENGINE_TLS_KEY_PATH"),
 		TLSClientCAPath:           getenv("ENGINE_TLS_CLIENT_CA_PATH"),
@@ -54,6 +66,34 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 	if result.QueryDatabaseURL == "" {
 		result.QueryDatabaseURL = result.DatabaseURL
+	}
+	if result.SourceArtifactDatabaseURL == "" {
+		result.SourceArtifactDatabaseURL = result.DatabaseURL
+	}
+	if result.SourceArtifactRoot == "" || result.SourceArtifactTemp == "" || result.PDFParserSocketPath == "" {
+		return Config{}, errors.New("source artifact paths and PDF parser socket path are required")
+	}
+	if !filepath.IsAbs(result.PDFParserSocketPath) {
+		return Config{}, errors.New("ENGINE_PDF_PARSER_SOCKET_PATH must be absolute")
+	}
+	result.PDFParserTimeout = 30 * time.Second
+	if raw := getenv("ENGINE_PDF_PARSER_TIMEOUT"); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil || value <= 0 || value > 60*time.Second {
+			return Config{}, errors.New("ENGINE_PDF_PARSER_TIMEOUT must be between 1ns and 60s")
+		}
+		result.PDFParserTimeout = value
+	}
+	result.PDFImportLeaseDuration = 2 * time.Minute
+	if raw := getenv("ENGINE_PDF_IMPORT_LEASE_DURATION"); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil || value <= 0 {
+			return Config{}, errors.New("ENGINE_PDF_IMPORT_LEASE_DURATION must be a positive duration")
+		}
+		result.PDFImportLeaseDuration = value
+	}
+	if result.PDFImportLeaseDuration <= result.PDFParserTimeout {
+		return Config{}, errors.New("ENGINE_PDF_IMPORT_LEASE_DURATION must exceed ENGINE_PDF_PARSER_TIMEOUT")
 	}
 	if result.ReportDatabaseURL == "" {
 		result.ReportDatabaseURL = result.QueryDatabaseURL

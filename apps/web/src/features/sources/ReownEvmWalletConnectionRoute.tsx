@@ -18,8 +18,10 @@ import {
   reownAppKit,
 } from './reownAppKit.ts'
 import {
+  createSyncJob,
   createWalletChallenge,
   registerWalletSource,
+  watchSyncJob,
 } from './sourceApi.ts'
 
 const directWalletNames = {
@@ -27,6 +29,21 @@ const directWalletNames = {
   metamask: 'metamask',
   walletconnect: 'walletConnect',
 } as const
+
+const unavailableConnectWallet: ConnectWallet = async () => ({
+  error: { code: 'PROVIDER_UNAVAILABLE' },
+  ok: false,
+})
+
+const unavailableOwnershipSignature: RequestOwnershipSignature = async () => ({
+  error: { code: 'SIGNATURE_FAILED' },
+  ok: false,
+})
+
+const unavailableCompleteConnection: CompleteWalletConnection = async () => ({
+  error: { code: 'SOURCE_SAVE_FAILED' },
+  ok: false,
+})
 
 function isUserRejection(error: unknown) {
   return (
@@ -85,18 +102,20 @@ function getDirectWalletName(provider: EvmWalletProviderId) {
 }
 
 function MissingReownConfigurationRoute() {
-  const connectWallet = useCallback<ConnectWallet>(async () => ({
-    error: { code: 'PROVIDER_UNAVAILABLE' },
-    ok: false,
-  }), [])
-
-  return <EvmWalletConnectionPage connectWallet={connectWallet} />
+  return (
+    <EvmWalletConnectionPage
+      completeConnection={unavailableCompleteConnection}
+      connectWallet={unavailableConnectWallet}
+      requestSignature={unavailableOwnershipSignature}
+    />
+  )
 }
 
 function ConfiguredReownRoute() {
   const { open } = useAppKit()
   const walletButton = useAppKitWallet({ namespace: 'eip155' })
   const pendingSignatures = useRef(new Map<string, string>())
+  const pendingSourceIds = useRef(new Map<string, string>())
 
   const connectWallet = useCallback<ConnectWallet>(
     async ({ provider, signal }) => {
@@ -201,32 +220,55 @@ function ConfiguredReownRoute() {
   )
 
   const completeConnection = useCallback<CompleteWalletConnection>(
-    async ({ period, signal, verificationId, wallet }) => {
+    async ({ intentKey, period, signal, verificationId, wallet }) => {
       const signature = pendingSignatures.current.get(verificationId)
       if (!signature) {
         return { error: { code: 'SOURCE_SAVE_FAILED' }, ok: false }
       }
 
+      let sourceId = pendingSourceIds.current.get(verificationId)
       try {
-        const source = await registerWalletSource({
-          challengeId: verificationId,
-          signature,
-          chainIds: [wallet.chainId],
-          signal,
-        })
-        pendingSignatures.current.delete(verificationId)
-        return {
-          jobStatus: 'REGISTERED',
-          normalizedPeriod: normalizeEvmWalletPeriod(period),
-          ok: true,
-          sourceId: source.id,
-          sourceStatus: 'SOURCE_SAVED',
+        if (!sourceId) {
+          const source = await registerWalletSource({
+            challengeId: verificationId,
+            signature,
+            chainIds: [wallet.chainId],
+            signal,
+          })
+          sourceId = source.id
+          pendingSourceIds.current.set(verificationId, sourceId)
         }
       } catch (error) {
         if (signal.aborted) {
           throw error
         }
         return { error: { code: 'SOURCE_SAVE_FAILED' }, ok: false }
+      }
+
+      const normalizedPeriod = normalizeEvmWalletPeriod(period)
+      try {
+        const { job } = await createSyncJob({
+          coverageEnd: normalizedPeriod.endDate,
+          coverageStart: normalizedPeriod.startDate,
+          intentKey,
+          signal,
+          sourceId,
+        })
+        pendingSignatures.current.delete(verificationId)
+        pendingSourceIds.current.delete(verificationId)
+        return {
+          jobId: job.id,
+          jobStatus: 'BACKFILLING',
+          normalizedPeriod,
+          ok: true,
+          sourceId,
+          sourceStatus: 'SOURCE_SAVED',
+        }
+      } catch (error) {
+        if (signal.aborted) {
+          throw error
+        }
+        return { error: { code: 'BACKFILL_FAILED' }, ok: false }
       }
     },
     [],
@@ -237,6 +279,7 @@ function ConfiguredReownRoute() {
       completeConnection={completeConnection}
       connectWallet={connectWallet}
       requestSignature={requestSignature}
+      watchSyncJob={watchSyncJob}
     />
   )
 }

@@ -34,7 +34,10 @@ export function readPublicPath(): PublicPath | null {
   return path as PublicPath
 }
 
-export function navigateTo(path: PublicPath, replace = false) {
+export function navigateTo(path: string, replace = false) {
+  if (!path.startsWith('/') || path.startsWith('//')) {
+    throw new Error('Internal navigation requires a root-relative path')
+  }
   const method = replace ? 'replaceState' : 'pushState'
   window.history[method](null, '', path)
   window.dispatchEvent(new PopStateEvent('popstate'))

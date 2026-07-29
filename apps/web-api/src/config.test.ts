@@ -29,6 +29,7 @@ describe('web api configuration', () => {
         'EMAIL_VERIFICATION_TOKEN_TTL_SECONDS',
         'EMAIL_VERIFICATION_RESEND_AFTER_SECONDS',
         'IDENTITY_VERIFICATION_MODE',
+        'UPBIT_PDF_IMPORT_ENABLED',
       ]),
     )
   })
@@ -149,6 +150,22 @@ describe('web api configuration', () => {
     ).toThrow('loopback')
   })
 
+  it('keeps Upbit PDF import default-off and rejects filesystem-backed production activation', () => {
+    expect(loadConfig().upbitPdfImportEnabled).toBe(false)
+    expect(
+      loadConfig({
+        NODE_ENV: 'development',
+        UPBIT_PDF_IMPORT_ENABLED: 'true',
+      }).upbitPdfImportEnabled,
+    ).toBe(true)
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        UPBIT_PDF_IMPORT_ENABLED: 'true',
+      }),
+    ).toThrow('cannot be enabled in production')
+  })
+
   it('rejects plaintext Engine transport in production', () => {
     expect(() =>
       loadConfig({
@@ -171,43 +188,13 @@ describe('web api configuration', () => {
     expect(() => loadConfig({ NODE_ENV: 'staging' })).toThrow('NODE_ENV')
   })
 
-  it('loads the development bootstrap user only when both values are present', () => {
-    expect(
-      loadConfig({
-        DEV_BOOTSTRAP_USER_ID: '00000000-0000-4000-8000-000000000001',
-        DEV_BOOTSTRAP_DISPLAY_NAME: '김대장',
-      }).devBootstrapUser,
-    ).toEqual({
-      id: '00000000-0000-4000-8000-000000000001',
-      displayName: '김대장',
-    })
-
+  it('rejects mock identity verification in every runtime mode', () => {
     expect(() =>
-      loadConfig({ DEV_BOOTSTRAP_DISPLAY_NAME: '김대장' }),
-    ).toThrow('configured together')
-  })
-
-  it('rejects development session bootstrap in production', () => {
-    expect(() =>
-      loadConfig({
-        NODE_ENV: 'production',
-        PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
-        DATABASE_URL: 'postgresql://example.invalid/daejang',
-        PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
-        DEV_BOOTSTRAP_USER_ID: '00000000-0000-4000-8000-000000000001',
-        DEV_BOOTSTRAP_DISPLAY_NAME: '김대장',
-      }),
-    ).toThrow('must not be enabled in production')
-  })
-
-  it('allows mock identity verification outside production only', () => {
-    expect(
       loadConfig({
         NODE_ENV: 'development',
         IDENTITY_VERIFICATION_MODE: 'mock',
-      }).identityVerificationMode,
-    ).toBe('mock')
-
+      }),
+    ).toThrow('must be disabled')
     expect(() =>
       loadConfig({
         NODE_ENV: 'production',
@@ -217,44 +204,52 @@ describe('web api configuration', () => {
         RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
         IDENTITY_VERIFICATION_MODE: 'mock',
       }),
-    ).toThrow('not allowed in production')
+    ).toThrow('must be disabled')
   })
 
-  it('enables signup only with an explicit method and completion-capable verifier', () => {
+  it('enables identity-disabled signup only with an explicit method', () => {
     const enabled = loadConfig({
       SIGNUP_ENABLED: 'true',
       EMAIL_AUTH_ENABLED: 'true',
       RESEND_API_KEY: 'test-resend-key',
       EMAIL_FROM: 'GIWA <test@example.com>',
-      IDENTITY_VERIFICATION_MODE: 'mock',
+      IDENTITY_VERIFICATION_MODE: 'disabled',
     })
     expect(enabled.signup).toEqual({
       enabled: true,
+      identityVerificationRequired: false,
       methods: { email: true, oauthProviders: [] },
     })
 
     expect(loadConfig().signup).toEqual({
       enabled: false,
+      identityVerificationRequired: false,
       methods: { email: false, oauthProviders: [] },
     })
     expect(() =>
       loadConfig({
         SIGNUP_ENABLED: 'true',
-        IDENTITY_VERIFICATION_MODE: 'mock',
       }),
     ).toThrow('at least one configured signup method')
-    expect(() =>
+    expect(
       loadConfig({
         SIGNUP_ENABLED: 'true',
         EMAIL_AUTH_ENABLED: 'true',
         RESEND_API_KEY: 'test-resend-key',
         EMAIL_FROM: 'GIWA <test@example.com>',
+        IDENTITY_VERIFICATION_MODE: 'disabled',
       }),
-    ).toThrow('completion-capable identity verifier')
+    ).toMatchObject({
+      signup: {
+        enabled: true,
+        identityVerificationRequired: false,
+        methods: { email: true, oauthProviders: [] },
+      },
+    })
   })
 
-  it('rejects production signup while no production verifier exists', () => {
-    expect(() =>
+  it('allows explicit production signup without an external identity provider', () => {
+    expect(
       loadConfig({
         NODE_ENV: 'production',
         PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
@@ -269,7 +264,14 @@ describe('web api configuration', () => {
         EMAIL_AUTH_ENABLED: 'true',
         RESEND_API_KEY: 'test-resend-key',
         EMAIL_FROM: 'GIWA <test@example.com>',
+        IDENTITY_VERIFICATION_MODE: 'disabled',
       }),
-    ).toThrow('completion-capable identity verifier')
+    ).toMatchObject({
+      signup: {
+        enabled: true,
+        identityVerificationRequired: false,
+        methods: { email: true, oauthProviders: [] },
+      },
+    })
   })
 })

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/BackwardLabs/daejang-db/pkg/readmodelstore"
+	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -19,6 +20,23 @@ type fakeReadStore struct {
 	lastSubject string
 	lastCursor  *readmodelstore.OpenReviewCursor
 	lastLimit   int32
+}
+
+type fakeTaxReportStore struct {
+	current     taxreportstore.CurrentReportDetail
+	found       bool
+	err         error
+	lastSubject string
+	lastTaxYear int
+}
+
+func (f *fakeTaxReportStore) GetCurrentReportForYear(_ context.Context, subject string, taxYear int) (taxreportstore.CurrentReportDetail, bool, error) {
+	f.lastSubject, f.lastTaxYear = subject, taxYear
+	return f.current, f.found, f.err
+}
+
+func (f *fakeTaxReportStore) ListReportHistory(context.Context, string, int, int32) ([]taxreportstore.StoredReport, error) {
+	return nil, f.err
 }
 
 func (f *fakeReadStore) Dashboard(context.Context, string, int32) (readmodelstore.Dashboard, error) {
@@ -128,5 +146,76 @@ func TestListReviewsRejectsInvalidPageInputBeforeDatabaseQuery(t *testing.T) {
 				t.Fatalf("database was queried for invalid input: %#v", reads)
 			}
 		})
+	}
+}
+
+func TestGetCurrentTaxReportScopesByActorAndPreservesUnknownAmount(t *testing.T) {
+	issuedAt := time.Date(2028, 1, 10, 0, 0, 0, 0, time.UTC)
+	store := &fakeTaxReportStore{found: true, current: taxreportstore.CurrentReportDetail{
+		StoredReport: taxreportstore.StoredReport{SubjectID: queryTestSubjectID, Report: taxreportstore.Report{
+			ID: "report-1", ResidentID: "resident-1", TaxYear: 2027, Finality: "PROVISIONAL",
+			Status: "PARTIAL", FilingStatus: "BLOCKED", TaxInventoryRunID: "inventory-1",
+			TaxEstimateID: "estimate-1", LotRunID: "lot-1", DenominationAssetID: "asset-krw",
+			IssuedAt: issuedAt, GainLoss: taxreportstore.Amount{Status: "KNOWN", Amount: "0"},
+			TotalTax: taxreportstore.Amount{Status: "UNKNOWN"},
+		}}, PointerVersion: 2, UpdatedAt: issuedAt,
+	}}
+	service := &Service{TaxReports: store}
+	response, err := service.GetCurrentTaxReport(context.Background(), &enginev1.GetCurrentTaxReportRequest{
+		Context: queryTestContext(), TaxYear: 2027,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.lastSubject != queryTestSubjectID || store.lastTaxYear != 2027 {
+		t.Fatalf("query was not actor scoped: subject=%q year=%d", store.lastSubject, store.lastTaxYear)
+	}
+	report := response.GetReport()
+	if report.GetFinality() != "PROVISIONAL" || report.GetFilingStatus() != "BLOCKED" {
+		t.Fatalf("report status was not preserved: %#v", report)
+	}
+	if report.GetTotalTax().GetHasAmount() || report.GetTotalTax().GetAmount() != "" {
+		t.Fatalf("UNKNOWN tax amount was fabricated: %#v", report.GetTotalTax())
+	}
+	if !report.GetGainLoss().GetHasAmount() || report.GetGainLoss().GetAmount() != "0" {
+		t.Fatalf("known zero was not preserved: %#v", report.GetGainLoss())
+	}
+}
+
+func TestGetCurrentTaxReportDoesNotLeakCrossSubjectOrAmbiguousResidency(t *testing.T) {
+	for name, store := range map[string]*fakeTaxReportStore{
+		"missing":   {found: false},
+		"ambiguous": {err: taxreportstore.ErrAmbiguousResident},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service := &Service{TaxReports: store}
+			_, err := service.GetCurrentTaxReport(context.Background(), &enginev1.GetCurrentTaxReportRequest{
+				Context: queryTestContext(), TaxYear: 2027,
+			})
+			want := codes.NotFound
+			if name == "ambiguous" {
+				want = codes.FailedPrecondition
+			}
+			if status.Code(err) != want {
+				t.Fatalf("status=%s, want %s: %v", status.Code(err), want, err)
+			}
+			if store.lastSubject != queryTestSubjectID {
+				t.Fatalf("query escaped actor subject: %#v", store)
+			}
+		})
+	}
+}
+
+func TestLegacyReportCreationIsDisabledInsteadOfSynthesizingZeroKRW(t *testing.T) {
+	service := &Service{}
+	_, err := service.CreateReport(context.Background(), &enginev1.CreateReportRequest{
+		Context: &enginev1.RequestContext{
+			RequestId: "request-legacy", IdempotencyKey: "legacy-report",
+			Actor: &enginev1.ActorContext{UserId: queryTestSubjectID, SessionId: "session-1"},
+		},
+		TaxYear: 2027,
+	})
+	if status.Code(err) != codes.FailedPrecondition || status.Convert(err).Message() != "LEGACY_REPORT_CREATION_DISABLED" {
+		t.Fatalf("legacy report was not segregated: %v", err)
 	}
 }

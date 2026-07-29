@@ -6,14 +6,26 @@ import { pathToFileURL } from 'node:url'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { buildApp } from '../app.js'
+import type { AppConfig } from '../config.js'
 import { assertWebAuthSchema } from '../database/preflight.js'
 import { PostgresAccountAuthStore } from './account-auth-store.js'
+import type {
+  NormalizedOAuthIdentity,
+  OAuthProviderAdapter,
+} from './oauth.js'
 import { AuthRateLimiter, PostgresRateLimitStore } from './rate-limit.js'
 import { PostgresSessionStore } from './postgres-session-store.js'
 import { PostgresUserStore } from './postgres-user-store.js'
+import {
+  provisionEmailAccount,
+  type ProvisionEmailAccountInput,
+} from './provision-email-account.js'
+import { provisionSubjectNameClaim } from './provision-subject-name-claim.js'
 import { SessionService } from './session.js'
 import { PostgresWalletSourceStore } from '../sources/postgres-wallet-source-store.js'
 import { MemoryWalletSourceStore } from '../sources/wallet-source-store.js'
+import { PostgresFileUploadStore } from '../uploads/postgres-file-upload-store.js'
 
 const validateDisposableTestDatabaseUrl = (value: string | undefined) => {
   if (!value) {
@@ -47,6 +59,90 @@ const ACCEPT_CONSENT_ID = '00000000-0000-4000-8000-000000000301'
 const WITHDRAW_CONSENT_ID = '00000000-0000-4000-8000-000000000302'
 const CONTENT_HASH = 'a'.repeat(64)
 const CONSENT_AS_OF = new Date('2027-07-20T00:00:00.000Z')
+const PROVISIONED_USER_ID = '00000000-0000-4000-8000-00000000a001'
+
+const postgresAuthConfig: AppConfig = {
+  runtimeMode: 'test',
+  host: '127.0.0.1',
+  port: 3000,
+  publicOrigin: 'http://localhost:5173',
+  sessionCookieName: 'daejang_session',
+  signupSessionCookieName: 'daejang_signup',
+  sessionAbsoluteTtlSeconds: 3_600,
+  sessionIdleTtlSeconds: 600,
+  signupSessionTtlSeconds: 3_600,
+  bodyLimitBytes: 1_048_576,
+  secureCookies: false,
+  trustProxyHops: 0,
+  databaseUrl,
+  rateLimitHmacSecret: 'postgres-e2e-rate-limit-secret',
+  oauth: {
+    enabledProviders: new Set(['naver']),
+    transactionTtlSeconds: 600,
+    stateHmacSecret: 'postgres-e2e-oauth-state-secret',
+    transactionEncryptionKey: Buffer.alloc(32, 2),
+    providers: {
+      naver: {
+        clientId: 'postgres-e2e-client-id',
+        clientSecret: 'postgres-e2e-client-secret',
+      },
+    },
+  },
+  emailAuth: {
+    enabled: false,
+    resendApiKey: undefined,
+    from: undefined,
+    verificationHmacSecret: 'postgres-e2e-email-verification-secret',
+    verificationTtlSeconds: 300,
+    verificationTokenTtlSeconds: 600,
+    resendAfterSeconds: 60,
+  },
+  signup: {
+    enabled: true,
+    identityVerificationRequired: false,
+    methods: { email: false, oauthProviders: ['naver'] },
+  },
+  identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: false,
+  engineMtls: undefined,
+}
+
+class PostgresE2eNaverAdapter implements OAuthProviderAdapter {
+  readonly provider = 'naver' as const
+
+  constructor(
+    private readonly email = 'postgres-oauth-e2e@example.com',
+  ) {}
+
+  buildAuthorizationUrl(
+    input: Parameters<OAuthProviderAdapter['buildAuthorizationUrl']>[0],
+  ) {
+    const url = new URL('https://provider.example/authorize')
+    url.searchParams.set('state', input.state)
+    return url
+  }
+
+  async exchangeCode(
+    input: Parameters<OAuthProviderAdapter['exchangeCode']>[0],
+  ): Promise<NormalizedOAuthIdentity> {
+    return {
+      provider: 'naver',
+      providerSubject: input.code,
+      email: this.email,
+      emailVerified: true,
+    }
+  }
+}
+
+const responseCookie = (
+  header: string | string[] | undefined,
+  name: string,
+) => {
+  const cookies = Array.isArray(header) ? header : header ? [header] : []
+  return cookies
+    .map((value) => value.split(';', 1)[0])
+    .find((value) => value?.startsWith(`${name}=`))
+}
 
 describeWithPostgres('PostgreSQL Web authentication persistence', () => {
   const pool = new Pool({ connectionString: databaseUrl })
@@ -95,6 +191,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       '000013_create_source_jobs_and_reports.sql',
       '000014_grant_query_runtime_access.sql',
       '000015_create_web_oauth_email_persistence.sql',
+      '000029_create_verified_subject_name_claim.sql',
     ]) {
       const migrationUrl = process.env.WEB_AUTH_MIGRATION_DIRECTORY
         ? pathToFileURL(resolve(process.env.WEB_AUTH_MIGRATION_DIRECTORY, filename))
@@ -106,6 +203,9 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       }
       await pool.query(upMigration)
     }
+    await pool.query(
+      'REVOKE INSERT ON web_private.subject_name_claims FROM daejang_web_app',
+    )
 
     await users.upsertUser({ id: USER_ID, displayName: '김대장' })
     await users.setStatus(USER_ID, 'active')
@@ -152,6 +252,20 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
     })
   })
 
+  it('runs the abandoned-upload cleanup query against PostgreSQL', async () => {
+    const uploads = new PostgresFileUploadStore(
+      pool,
+      '/private/tmp/daejang-unused-integration-objects',
+    )
+
+    await expect(uploads.cleanupAbandoned(new Date())).resolves.toEqual({
+      examined: 0,
+      removed: 0,
+      missing: 0,
+      retryPending: 0,
+    })
+  })
+
   it('does not create a session for a pending user', async () => {
     await expect(
       sessions.create({ user: { id: OTHER_USER_ID, displayName: 'ignored' } }),
@@ -187,6 +301,251 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
         verifiedAt: new Date('2027-07-20T00:00:00.000Z'),
       }),
     ).rejects.toThrow('already linked to another user')
+  })
+
+  it('persists OAuth signup, login, and session resolution across app restarts', async () => {
+    const buildPostgresApp = () =>
+      buildApp({
+        config: postgresAuthConfig,
+        logger: false,
+        accountAuthStore: accounts,
+        sessionStore: new PostgresSessionStore(pool),
+        rateLimitStore: new PostgresRateLimitStore(pool),
+        oauthAdapters: [new PostgresE2eNaverAdapter()],
+      })
+    const startOAuth = async (
+      context: Awaited<ReturnType<typeof buildApp>>,
+      intent: 'signup' | 'login',
+    ) => {
+      const response = await context.app.inject({
+        method: 'GET',
+        url: `/api/v1/auth/oauth/naver/start?intent=${intent}&return_to=%2Fdashboard`,
+      })
+      expect(response.statusCode).toBe(302)
+      const state = new URL(response.headers.location as string).searchParams.get(
+        'state',
+      )
+      const cookie = responseCookie(
+        response.headers['set-cookie'],
+        'daejang_oauth',
+      )
+      expect(state).toBeTruthy()
+      expect(cookie).toBeTruthy()
+      return { state: state as string, cookie: cookie as string }
+    }
+
+    let context = await buildPostgresApp()
+    const signupStart = await startOAuth(context, 'signup')
+    const signup = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/auth/oauth/naver/callback?code=postgres-restart-subject&state=${signupStart.state}`,
+      headers: { cookie: signupStart.cookie },
+    })
+    expect(signup.statusCode).toBe(302)
+    expect(signup.headers.location).toBe('/?onboarding=terms')
+
+    const persistedAccount = await pool.query<{
+      user_id: string
+      status: string
+      normalized_email: string
+    }>(
+      `
+        SELECT
+          identity_record.user_id,
+          user_record.status,
+          user_email.normalized_email
+        FROM web_private.auth_identities identity_record
+        JOIN web_private.users user_record
+          ON user_record.id = identity_record.user_id
+        JOIN web_private.user_emails user_email
+          ON user_email.auth_identity_id = identity_record.id
+        WHERE identity_record.provider = 'naver'
+          AND identity_record.provider_subject = 'postgres-restart-subject'
+      `,
+    )
+    expect(persistedAccount.rows).toEqual([
+      {
+        user_id: expect.any(String),
+        status: 'pending',
+        normalized_email: 'postgres-oauth-e2e@example.com',
+      },
+    ])
+    const userId = persistedAccount.rows[0]?.user_id as string
+    await users.setStatus(userId, 'active')
+    await context.app.close()
+
+    context = await buildPostgresApp()
+    const loginStart = await startOAuth(context, 'login')
+    const login = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/auth/oauth/naver/callback?code=postgres-restart-subject&state=${loginStart.state}`,
+      headers: { cookie: loginStart.cookie },
+    })
+    expect(login.statusCode).toBe(302)
+    expect(login.headers.location).toBe('/dashboard')
+    const sessionCookie = responseCookie(
+      login.headers['set-cookie'],
+      'daejang_session',
+    )
+    expect(sessionCookie).toBeTruthy()
+    await expect(
+      pool.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM web_private.sessions WHERE user_id = $1',
+        [userId],
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: '1' }] })
+    await context.app.close()
+
+    context = await buildPostgresApp()
+    const me = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/me',
+      headers: { cookie: sessionCookie as string },
+    })
+    expect(me.statusCode).toBe(200)
+    expect(me.json()).toMatchObject({ user: { id: userId } })
+    await context.app.close()
+  })
+
+  it('creates a one-shot provisioned account and rejects reprovisioning', async () => {
+    const provisionedAccount = {
+      id: PROVISIONED_USER_ID,
+      displayName: 'Provisioned User',
+      email: 'provisioned-user@example.com',
+      password: 'ProductionAccount1234!',
+    } satisfies ProvisionEmailAccountInput
+    const verifiedSubjectName = {
+      value: '운영 사용자',
+      normalizedValue: '운영 사용자',
+      verificationMethod: 'MANUAL_KYC' as const,
+      assuranceLevel: 'SUBSTANTIAL' as const,
+      verifierReference: 'kyc-case:test-provisioning',
+      verifiedAt: new Date('2027-07-19T00:00:00.000Z'),
+    }
+    const buildProvisionedAccountApp = () =>
+      buildApp({
+        config: postgresAuthConfig,
+        logger: false,
+        accountAuthStore: accounts,
+        sessionStore: new PostgresSessionStore(pool),
+        rateLimitStore: new PostgresRateLimitStore(pool),
+        oauthAdapters: [new PostgresE2eNaverAdapter()],
+      })
+
+    await provisionEmailAccount(pool, provisionedAccount)
+    await provisionSubjectNameClaim(pool, {
+      userId: provisionedAccount.id,
+      email: provisionedAccount.email,
+      claim: verifiedSubjectName,
+    })
+    let context = await buildProvisionedAccountApp()
+    const login = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email/login',
+      headers: { origin: postgresAuthConfig.publicOrigin },
+      payload: {
+        email: provisionedAccount.email,
+        password: provisionedAccount.password,
+        returnTo: '/dashboard',
+      },
+    })
+    expect(login.statusCode).toBe(200)
+    expect(login.json()).toEqual({
+      status: 'authenticated',
+      nextPath: '/dashboard',
+      user: {
+        id: expect.any(String),
+        displayName: provisionedAccount.displayName,
+      },
+    })
+    const sessionCookie = responseCookie(
+      login.headers['set-cookie'],
+      postgresAuthConfig.sessionCookieName,
+    )
+    expect(sessionCookie).toBeTruthy()
+    await expect(
+      pool.query<{
+        id: string
+        display_name: string
+        status: string
+        normalized_email: string
+        password_algorithm: string
+        session_count: string
+        subject_name: string
+        normalized_name: string
+        verification_method: string
+        assurance_level: string
+      }>(
+        `
+          SELECT
+            user_record.id,
+            user_record.display_name,
+            user_record.status,
+            user_email.normalized_email,
+            credential.password_algorithm,
+            subject_claim.subject_name,
+            subject_claim.normalized_name,
+            subject_claim.verification_method,
+            subject_claim.assurance_level,
+            count(session_record.id)::text AS session_count
+          FROM web_private.users user_record
+          JOIN web_private.user_emails user_email
+            ON user_email.user_id = user_record.id
+           AND user_email.login_enabled
+          JOIN web_private.email_credentials credential
+            ON credential.user_email_id = user_email.id
+          LEFT JOIN web_private.sessions session_record
+            ON session_record.user_id = user_record.id
+          JOIN web_private.subject_name_claims subject_claim
+            ON subject_claim.user_id = user_record.id
+          WHERE user_record.id = $1
+          GROUP BY
+            user_record.id,
+            user_email.normalized_email,
+            credential.password_algorithm,
+            subject_claim.subject_name,
+            subject_claim.normalized_name,
+            subject_claim.verification_method,
+            subject_claim.assurance_level
+        `,
+        [PROVISIONED_USER_ID],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          id: PROVISIONED_USER_ID,
+          display_name: 'Provisioned User',
+          status: 'active',
+          normalized_email: provisionedAccount.email,
+          password_algorithm: 'argon2id',
+          subject_name: verifiedSubjectName.value,
+          normalized_name: verifiedSubjectName.normalizedValue,
+          verification_method: 'MANUAL_KYC',
+          assurance_level: 'SUBSTANTIAL',
+          session_count: '1',
+        },
+      ],
+    })
+    await context.app.close()
+
+    const rotatedPassword = 'RotatedProductionAccount5678!'
+    await expect(
+      provisionEmailAccount(pool, {
+        ...provisionedAccount,
+        password: rotatedPassword,
+      }),
+    ).rejects.toBeTruthy()
+    context = await buildProvisionedAccountApp()
+    const me = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/me',
+      headers: { cookie: sessionCookie as string },
+    })
+    expect(me.statusCode).toBe(200)
+    expect(me.json()).toEqual({
+      user: { id: PROVISIONED_USER_ID, displayName: 'Provisioned User' },
+    })
+    await context.app.close()
   })
 
   it('records version-specific consent as append-only history', async () => {
@@ -378,11 +737,25 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
   })
 
   it('fails schema preflight when an append-only guard is disabled', async () => {
-    await expect(assertWebAuthSchema(pool)).resolves.toBeUndefined()
+    const client = await pool.connect()
+    await client.query('BEGIN')
+    await client.query('SET LOCAL ROLE daejang_web_app')
+    await expect(
+      assertWebAuthSchema(client as unknown as Pool),
+    ).resolves.toBeUndefined()
+    await client.query('ROLLBACK')
+    client.release()
     await pool.query(
       'ALTER TABLE web_private.user_consents DISABLE TRIGGER user_consents_append_only',
     )
-    await expect(assertWebAuthSchema(pool)).rejects.toThrow('migration contract')
+    const disabledClient = await pool.connect()
+    await disabledClient.query('BEGIN')
+    await disabledClient.query('SET LOCAL ROLE daejang_web_app')
+    await expect(
+      assertWebAuthSchema(disabledClient as unknown as Pool),
+    ).rejects.toThrow('migration contract')
+    await disabledClient.query('ROLLBACK')
+    disabledClient.release()
     await pool.query(
       'ALTER TABLE web_private.user_consents ENABLE TRIGGER user_consents_append_only',
     )
@@ -516,6 +889,185 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
     ).resolves.toBeUndefined()
   })
 
+  it('activates an identity-disabled signup with terms and privacy consent only', async () => {
+    const documents = [
+      {
+        id: '00000000-0000-4000-8000-000000000611',
+        documentType: 'terms',
+        content: 'terms without identity verification',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000612',
+        documentType: 'privacy',
+        content: 'privacy without identity verification',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000613',
+        documentType: 'identity_verification',
+        content: 'identity verification is not applicable',
+      },
+    ] as const
+    for (const document of documents) {
+      const contentHash = createHash('sha256')
+        .update(document.content)
+        .digest('hex')
+      await pool.query(
+        `
+          INSERT INTO web_private.legal_documents (
+            id,
+            document_type,
+            locale,
+            version,
+            content_hash,
+            effective_at
+          ) VALUES ($1, $2, 'ko-KR', 'identity-disabled', $3, '2000-01-01T00:00:00.000Z')
+        `,
+        [document.id, document.documentType, contentHash],
+      )
+      await pool.query(
+        `
+          INSERT INTO web_private.legal_document_contents (
+            legal_document_id,
+            content
+          ) VALUES ($1, $2)
+        `,
+        [document.id, document.content],
+      )
+    }
+
+    const identityDisabledConfig: AppConfig = {
+      ...postgresAuthConfig,
+      signup: {
+        ...postgresAuthConfig.signup,
+        identityVerificationRequired: false,
+      },
+      identityVerificationMode: 'disabled',
+    }
+    const context = await buildApp({
+      config: identityDisabledConfig,
+      logger: false,
+      accountAuthStore: accounts,
+      sessionStore: new PostgresSessionStore(pool),
+      rateLimitStore: new PostgresRateLimitStore(pool),
+      oauthAdapters: [
+        new PostgresE2eNaverAdapter('postgres-no-identity@example.com'),
+      ],
+    })
+
+    try {
+      const start = await context.app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/oauth/naver/start?intent=signup',
+      })
+      const state = new URL(start.headers.location as string).searchParams.get(
+        'state',
+      )
+      const oauthCookie = responseCookie(
+        start.headers['set-cookie'],
+        'daejang_oauth',
+      )
+      expect(state).toBeTruthy()
+      expect(oauthCookie).toBeTruthy()
+
+      const callback = await context.app.inject({
+        method: 'GET',
+        url: `/api/v1/auth/oauth/naver/callback?code=postgres-no-identity-subject&state=${state}`,
+        headers: { cookie: oauthCookie as string },
+      })
+      expect(callback.statusCode).toBe(302)
+      expect(callback.headers.location).toBe('/?onboarding=terms')
+      const signupCookie = responseCookie(
+        callback.headers['set-cookie'],
+        identityDisabledConfig.signupSessionCookieName,
+      )
+      expect(signupCookie).toBeTruthy()
+
+      const currentDocuments = await context.app.inject({
+        method: 'GET',
+        url: '/api/v1/legal-documents/current?locale=ko-KR',
+      })
+      expect(currentDocuments.statusCode).toBe(200)
+      const applicableDocuments = currentDocuments.json<{
+        documents: Array<{
+          id: string
+          documentType: string
+          required: boolean
+        }>
+      }>().documents
+      expect(
+        applicableDocuments.map(({ documentType, required }) => ({
+          documentType,
+          required,
+        })),
+      ).toEqual([
+        { documentType: 'privacy', required: true },
+        { documentType: 'terms', required: true },
+      ])
+
+      const consent = await context.app.inject({
+        method: 'POST',
+        url: '/api/v1/signup/consents',
+        headers: {
+          origin: identityDisabledConfig.publicOrigin,
+          cookie: signupCookie as string,
+        },
+        payload: {
+          locale: 'ko-KR',
+          decisions: applicableDocuments.map((document) => ({
+            legalDocumentId: document.id,
+            action: 'accepted',
+          })),
+        },
+      })
+      expect(consent.statusCode).toBe(200)
+      expect(consent.json()).toMatchObject({
+        status: 'authenticated',
+        nextPath: '/dashboard',
+      })
+      expect(
+        responseCookie(
+          consent.headers['set-cookie'],
+          identityDisabledConfig.sessionCookieName,
+        ),
+      ).toBeTruthy()
+
+      const persistedUser = await pool.query<{
+        user_id: string
+        status: string
+      }>(
+        `
+          SELECT identity_record.user_id, user_record.status
+          FROM web_private.auth_identities identity_record
+          JOIN web_private.users user_record
+            ON user_record.id = identity_record.user_id
+          WHERE identity_record.provider = 'naver'
+            AND identity_record.provider_subject = 'postgres-no-identity-subject'
+        `,
+      )
+      expect(persistedUser.rows).toEqual([
+        { user_id: expect.any(String), status: 'active' },
+      ])
+      const userId = persistedUser.rows[0]?.user_id as string
+      await expect(
+        pool.query<{ document_type: string }>(
+          `
+            SELECT document.document_type::text AS document_type
+            FROM web_private.user_consents consent_record
+            JOIN web_private.legal_documents document
+              ON document.id = consent_record.legal_document_id
+            WHERE consent_record.user_id = $1
+            ORDER BY document.document_type
+          `,
+          [userId],
+        ),
+      ).resolves.toMatchObject({
+        rows: [{ document_type: 'privacy' }, { document_type: 'terms' }],
+      })
+    } finally {
+      await context.app.close()
+    }
+  })
+
   it('activates signup only after accepting every current legal document version', async () => {
     const userId = '00000000-0000-4000-8000-000000000501'
     const signupTokenHash = 's'.repeat(43)
@@ -590,6 +1142,8 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
     await accounts.recordSignupConsents({
       userId,
       locale: 'ko-KR',
+      applicableDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
       decisions: initialDocuments.map(([legalDocumentId], index) => ({
         id: `00000000-0000-4000-8000-00000000052${index}`,
         legalDocumentId,
@@ -607,12 +1161,19 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       new Date('2027-07-19T00:00:00.000Z'),
     )
     await expect(
-      accounts.completeSignup({ userId, signupTokenHash, now: asOf }),
+      accounts.completeSignup({
+        userId,
+        signupTokenHash,
+        now: asOf,
+        requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      }),
     ).rejects.toThrow('Required legal documents were not accepted')
 
     await accounts.recordSignupConsents({
       userId,
       locale: 'ko-KR',
+      applicableDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
       decisions: [
         currentTermsId,
         initialDocuments[1][0],
@@ -625,10 +1186,20 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       now: asOf,
     })
     await expect(
-      accounts.completeSignup({ userId, signupTokenHash, now: asOf }),
+      accounts.completeSignup({
+        userId,
+        signupTokenHash,
+        now: asOf,
+        requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      }),
     ).resolves.toMatchObject({ id: userId, status: 'active' })
     await expect(
-      accounts.completeSignup({ userId, signupTokenHash, now: asOf }),
+      accounts.completeSignup({
+        userId,
+        signupTokenHash,
+        now: asOf,
+        requiredDocumentTypes: ['terms', 'privacy', 'identity_verification'],
+      }),
     ).resolves.toBeUndefined()
   })
 })

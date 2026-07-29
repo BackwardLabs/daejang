@@ -9,6 +9,9 @@ type SessionRow = {
   id: string
   user_id: string
   display_name: string
+  subject_name_claim_id: string | null
+  subject_name: string | null
+  normalized_subject_name: string | null
   session_epoch: string
   created_at: Date
   last_seen_at: Date
@@ -35,15 +38,45 @@ const parseNonNegativeInteger = (value: string | undefined, field: string) => {
   return parsed
 }
 
-const toSessionRecord = (row: SessionRow): SessionRecord => ({
-  id: row.id,
-  user: { id: row.user_id, displayName: row.display_name },
-  sessionEpoch: parsePositiveInteger(row.session_epoch, 'session_epoch'),
-  createdAt: row.created_at,
-  lastSeenAt: row.last_seen_at,
-  absoluteExpiresAt: row.absolute_expires_at,
-  idleExpiresAt: row.idle_expires_at,
-})
+const normalizedSubjectName = (value: string) =>
+  value.normalize('NFKC').trim().replace(/\s+/gu, ' ')
+
+const toSessionRecord = (row: SessionRow): SessionRecord => {
+  const claim = row.subject_name_claim_id
+    ? {
+        value: row.subject_name,
+        normalizedValue: row.normalized_subject_name,
+      }
+    : undefined
+  if (
+    claim &&
+    (!claim.value ||
+      !claim.normalizedValue ||
+      claim.normalizedValue !== normalizedSubjectName(claim.value))
+  ) {
+    throw new Error('Verified subject name claim is incomplete')
+  }
+
+  return {
+    id: row.id,
+    user: {
+      id: row.user_id,
+      displayName: row.display_name,
+    },
+    ...(claim
+      ? {
+          verifiedSubjectName: {
+            normalizedValue: claim.normalizedValue as string,
+          },
+        }
+      : {}),
+    sessionEpoch: parsePositiveInteger(row.session_epoch, 'session_epoch'),
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+    absoluteExpiresAt: row.absolute_expires_at,
+    idleExpiresAt: row.idle_expires_at,
+  }
+}
 
 const loadSession = async (client: PoolClient, sessionId: string) => {
   const result = await client.query<SessionRow>(
@@ -52,6 +85,9 @@ const loadSession = async (client: PoolClient, sessionId: string) => {
         s.id,
         s.user_id,
         u.display_name,
+        subject_claim.claim_id AS subject_name_claim_id,
+        subject_claim.subject_name,
+        subject_claim.normalized_name AS normalized_subject_name,
         s.session_epoch,
         s.created_at,
         s.last_seen_at,
@@ -62,6 +98,8 @@ const loadSession = async (client: PoolClient, sessionId: string) => {
         ON u.id = s.user_id
         AND u.status = 'active'
         AND u.session_epoch = s.session_epoch
+      LEFT JOIN web_private.subject_name_claims subject_claim
+        ON subject_claim.user_id = u.id
       WHERE s.id = $1
     `,
     [sessionId],

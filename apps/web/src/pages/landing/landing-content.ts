@@ -1,7 +1,7 @@
 export const sourceJourney = [
   { label: '거래소', tone: 'source' },
   { label: '개인지갑', tone: 'source' },
-  { label: '원본 기록', tone: 'neutral' },
+  { label: '처리 근거', tone: 'neutral' },
   { label: '정리 완료', tone: 'result' },
   { label: '검토 필요', tone: 'result' },
   { label: '보고서', tone: 'result' },
@@ -10,8 +10,8 @@ export const sourceJourney = [
 export const principles = [
   {
     number: '01',
-    title: '원본 기록 보존',
-    description: '가져온 원본과 수집 근거 보관',
+    title: '처리 근거 기록',
+    description: '수집 범위와 정리 과정의 근거 기록',
   },
   {
     number: '02',
@@ -29,7 +29,7 @@ export const workflowSteps = [
   {
     number: '01',
     title: '데이터 소스 연결',
-    description: '거래소 거래내역 문서 또는 개인지갑 주소 등록',
+    description: '지원되는 거래소 문서 또는 개인지갑 주소 등록',
   },
   {
     number: '02',
@@ -53,13 +53,13 @@ export const faqs = [
     id: 'data-sources',
     question: '어떤 데이터를 연결할 수 있나요?',
     answer:
-      '거래소에서 발급한 거래내역서와 EVM 호환 개인지갑의 공개 주소를 연결할 수 있습니다. 거래·입출금, 전송·스왑 등 원본 기록을 수집합니다.',
+      '거래소에서 발급한 거래내역서와 EVM 호환 개인지갑의 공개 주소가 지원 대상입니다. 현재는 개인지갑 공개 주소만 연결할 수 있으며, 거래소 문서 등록은 암호화 문서 처리와 운영 보안 요건을 충족한 뒤 제공합니다.',
   },
   {
     id: 'credentials',
     question: 'API 키나 개인키가 필요한가요?',
     answer:
-      '현재 거래소는 문서 업로드, 개인지갑은 공개 주소 입력 방식입니다. API Key·Secret, 개인키, 시드 문구는 요청하거나 저장하지 않습니다.',
+      '개인지갑은 공개 주소 입력 방식이며 API Key·Secret, 개인키, 시드 문구는 요청하거나 저장하지 않습니다. 거래소 문서 암호는 TLS로 서버의 격리 파서에 한 번만 전달하며 로그·DB·파일에 저장하지 않습니다.',
   },
   {
     id: 'background-processing',
@@ -71,18 +71,18 @@ export const faqs = [
     id: 'review-required',
     question: '‘검토 필요’는 처리 실패를 의미하나요?',
     answer:
-      '아닙니다. 자동 계산만으로 확정하기 어려운 항목을 사용자가 확인해야 한다는 뜻입니다. 원본 기록과 검토 이유, 예상 영향을 함께 표시합니다.',
+      '아닙니다. 자동 계산만으로 확정하기 어려운 항목을 사용자가 확인해야 한다는 뜻입니다. 처리 근거와 검토 이유, 예상 영향을 함께 표시합니다.',
   },
   {
     id: 'report-revision',
     question: '보고서는 어떻게 다시 만들 수 있나요?',
     answer:
-      '검토 결과나 분류 기준을 수정하면 새 revision으로 다시 생성할 수 있습니다. 이전 revision과 원본 기록은 유지되어 변경 과정을 확인할 수 있습니다.',
+      '검토 결과나 분류 기준을 수정하면 보고서를 다시 생성할 수 있습니다. 생성 상태와 서비스가 제공하는 변경 이력 범위에서 처리 과정을 확인할 수 있습니다.',
   },
   {
     id: 'support',
     question: '지원 범위는 어떻게 되나요?',
     answer:
-      '거래소 거래내역서 업로드와 EVM 호환 개인지갑의 공개 주소 연결을 지원합니다. 거래·입출금 및 온체인 전송·스왑 기록을 수집하며 조회 기간을 직접 설정할 수 있습니다.',
+      '현재 EVM 호환 개인지갑의 공개 주소 연결을 지원합니다. Upbit PDF 등록은 암호화 문서 파싱, 안전한 처리 인계, 운영 스토리지 요건을 검증한 뒤 활성화합니다.',
   },
 ] as const

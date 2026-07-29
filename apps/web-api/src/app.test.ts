@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Wallet } from 'ethers'
 
@@ -48,9 +50,11 @@ const config: AppConfig = {
   },
   signup: {
     enabled: false,
+    identityVerificationRequired: false,
     methods: { email: false, oauthProviders: [] },
   },
   identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: true,
   engineMtls: undefined,
 }
 
@@ -93,6 +97,9 @@ describe('web api authentication boundary', () => {
   const createSession = async () => {
     const session = {
       user: { id: USER_ID, displayName: '김대장' },
+      verifiedSubjectName: {
+        normalizedValue: '김대장',
+      },
     } as const
 
     return context.sessionService.create(session)
@@ -112,6 +119,97 @@ describe('web api authentication boundary', () => {
     expect(response.json()).toMatchObject({
       error: { code: 'AUTHENTICATION_REQUIRED' },
     })
+  })
+
+  it('rejects an unauthenticated PDF upload before consuming or storing its body', async () => {
+    await context.app.close()
+    let bodyRead = false
+    const payload = new Readable({
+      read() {
+        bodyRead = true
+        this.push(Buffer.alloc(20 * 1024 * 1024))
+        this.push(null)
+      },
+    })
+    const uploadStore: UploadStore = {
+      durable: true,
+      create: vi.fn(async () => {
+        throw new Error('upload store must not be reached')
+      }),
+      write: vi.fn(async () => {
+        throw new Error('upload store must not be reached')
+      }),
+      confirm: vi.fn(async () => {
+        throw new Error('upload store must not be reached')
+      }),
+      discard: vi.fn(async () => {
+        throw new Error('upload store must not be reached')
+      }),
+      cleanupAbandoned: vi.fn(async () => ({
+        examined: 0, removed: 0, missing: 0, retryPending: 0,
+      })),
+    }
+    context = await buildApp({
+      config,
+      logger: false,
+      uploadStore,
+      now: () => now,
+    })
+
+    const response = await context.app.inject({
+      method: 'PUT',
+      url: '/api/v1/uploads/00000000-0000-4000-8000-000000000010/content',
+      headers: {
+        origin: config.publicOrigin,
+        'content-type': 'application/pdf',
+        'content-length': String(20 * 1024 * 1024),
+      },
+      payload,
+    })
+
+    expect(response.statusCode).toBe(401)
+    expect(response.json()).toMatchObject({
+      error: { code: 'AUTHENTICATION_REQUIRED' },
+    })
+    expect(bodyRead).toBe(false)
+    expect(uploadStore.write).not.toHaveBeenCalled()
+  })
+
+  it('resolves authentication once per protected request and not for public routes', async () => {
+    await context.app.close()
+    const sessionStore = new MemorySessionStore()
+    const resolveAndTouch = vi.spyOn(sessionStore, 'resolveAndTouch')
+    context = await buildApp({
+      config,
+      logger: false,
+      sessionStore,
+      taxReportReader: new TestDurableTaxReportReader(),
+      now: () => now,
+    })
+    const { token } = await createSession()
+
+    const protectedResponse = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/sources',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+    expect(protectedResponse.statusCode).toBe(200)
+    expect(resolveAndTouch).toHaveBeenCalledTimes(1)
+
+    const taxReportResponse = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/current',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+    expect(taxReportResponse.statusCode).toBe(404)
+    expect(resolveAndTouch).toHaveBeenCalledTimes(2)
+
+    const publicResponse = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/capabilities',
+    })
+    expect(publicResponse.statusCode).toBe(200)
+    expect(resolveAndTouch).toHaveBeenCalledTimes(2)
   })
 
   it.each([
@@ -145,44 +243,37 @@ describe('web api authentication boundary', () => {
     },
   )
 
-  it('issues a real session for the configured development test user', async () => {
+  it('fails closed when a database is configured without a wallet Engine store', async () => {
     await context.app.close()
-    const developmentUserStore = {
-      upsertUser: vi.fn(async () => undefined),
-      setStatus: vi.fn(async () => undefined),
-    }
     context = await buildApp({
-      config: {
-        ...config,
-        runtimeMode: 'development',
-        devBootstrapUser: { id: USER_ID, displayName: '김대장' },
-      },
+      config: { ...config, databaseUrl: 'postgres://configured.example/daejang' },
       logger: false,
-      developmentUserStore,
       now: () => now,
     })
+    const { token } = await createSession()
+    const cookie = `${config.sessionCookieName}=${token}`
 
-    const bootstrap = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/dev/session',
-      headers: { origin: config.publicOrigin },
-    })
-    expect(bootstrap.statusCode).toBe(201)
-    expect(developmentUserStore.upsertUser).toHaveBeenCalledWith({
-      id: USER_ID,
-      displayName: '김대장',
-    })
-    expect(developmentUserStore.setStatus).toHaveBeenCalledWith(USER_ID, 'active')
-
-    const setCookie = bootstrap.headers['set-cookie']
-    const cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)?.split(';')[0]
-    const me = await context.app.inject({
+    const list = await context.app.inject({
       method: 'GET',
-      url: '/api/v1/me',
+      url: '/api/v1/sources',
       headers: { cookie },
     })
-    expect(me.statusCode).toBe(200)
-    expect(me.json()).toEqual({ user: { id: USER_ID, displayName: '김대장' } })
+    const challenge = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets/challenges',
+      headers: { cookie, origin: config.publicOrigin },
+      payload: {
+        address: '0x1111111111111111111111111111111111111111',
+        chainId: 'eip155:1',
+      },
+    })
+
+    for (const response of [list, challenge]) {
+      expect(response.statusCode).toBe(503)
+      expect(response.json()).toMatchObject({
+        error: { code: 'WALLET_SOURCE_UNAVAILABLE' },
+      })
+    }
   })
 
   it('returns only the identity resolved from the server session', async () => {
@@ -200,6 +291,33 @@ describe('web api authentication boundary', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
       user: { id: USER_ID, displayName: '김대장' },
+    })
+  })
+
+  it('does not expose a development session issuance endpoint', async () => {
+    const response = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/dev/session',
+      headers: { origin: config.publicOrigin },
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  it('reports the Upbit PDF import capability as disabled without a supported Engine', async () => {
+    const { token } = await createSession()
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/sources/capabilities',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      upbitPdf: {
+        registrationEnabled: false,
+        encryptedPdfSupported: false,
+      },
     })
   })
 
@@ -436,11 +554,26 @@ describe('web api authentication boundary', () => {
         session = { ...session, state: 'CONFIRMED', verifiedDigest: 'a'.repeat(64), verifiedBytes: pdf.length }
         return session
       }),
+      readConfirmed: vi.fn(async () =>
+        session
+          ? { session, contents: Buffer.from(pdf) }
+          : undefined),
+      discard: vi.fn(async () => true),
+      cleanupAbandoned: vi.fn(async () => ({
+        examined: 0, removed: 0, missing: 0, retryPending: 0,
+      })),
     }
-    const registerDocument = vi.fn(async () => ({ id: sourceId }))
-    const enqueueSync = vi.fn(async () => ({ id: '00000000-0000-4000-8000-000000000012', state: 'QUEUED' }))
+    const importUpbitDocument = vi.fn(async () => ({
+      source: { id: sourceId, status: 'ACTIVE' },
+      job: { id: '00000000-0000-4000-8000-000000000012', state: 'SUCCEEDED' },
+      evidenceTerminalStatus: 'PARTIAL',
+      sourceRecordCount: 1,
+      normalizedRecordCount: 0,
+    }))
     const engineDataClient = {
-      registerDocument, enqueueSync,
+      upbitPdfImportSupported: true,
+      importUpbitDocument,
+      enqueueSync: vi.fn(async () => ({})),
       listAllSources: vi.fn(async () => ({ wallets: [], documents: [] })),
       getSyncJob: vi.fn(async () => ({})), listSyncJobs: vi.fn(async () => []),
       getDashboard: vi.fn(async () => ({})), listLedgerEvents: vi.fn(async () => []),
@@ -448,8 +581,16 @@ describe('web api authentication boundary', () => {
       resolveReview: vi.fn(async () => ({ review: {}, replayed: false })),
       createReport: vi.fn(async () => ({})),
       listReports: vi.fn(async () => []),
+      listTaxReportHistory: vi.fn(async () => []),
     } satisfies EngineDataClient
-    context = await buildApp({ config, logger: false, now: () => now, uploadStore, engineDataClient })
+    context = await buildApp({
+      config,
+      logger: false,
+      now: () => now,
+      uploadStore,
+      engineDataClient,
+      taxReportReader: new TestDurableTaxReportReader(),
+    })
     const { token } = await createSession()
     const headers = { cookie: `${config.sessionCookieName}=${token}`, origin: config.publicOrigin }
 
@@ -464,13 +605,166 @@ describe('web api authentication boundary', () => {
       headers: { ...headers, 'content-type': 'application/pdf' }, payload: pdf,
     })
     expect(written.statusCode).toBe(204)
-    const confirmed = await context.app.inject({
-      method: 'POST', url: `/api/v1/uploads/${uploadId}/confirm`, headers,
-      payload: { coverageStart: '2026-01-01', coverageEnd: '2026-12-31' },
+    const imported = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/uploads/${uploadId}/import?coverageStart=2026-01-01&coverageEnd=2026-12-31`,
+      headers: { ...headers, 'content-type': 'application/octet-stream' },
+      payload: Buffer.from([1]),
     })
-    expect(confirmed.statusCode).toBe(201)
-    expect(registerDocument).toHaveBeenCalledWith(expect.objectContaining({ uploadId, byteLength: pdf.length }))
-    expect(enqueueSync).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID }), 'UPBIT_PDF', sourceId)
+    expect(imported.statusCode).toBe(201)
+    expect(importUpbitDocument).toHaveBeenCalledWith(expect.objectContaining({
+      uploadId,
+      byteLength: pdf.length,
+      coverageStart: '2026-01-01',
+      coverageEnd: '2026-12-31',
+      expectedSubjectName: '김대장',
+    }))
+  })
+
+  it('does not create an upload when the Engine importer is unavailable', async () => {
+    await context.app.close()
+    const create = vi.fn(async () => {
+      throw new Error('upload store must not be reached')
+    })
+    const uploadStore: UploadStore = {
+      durable: true,
+      create,
+      write: vi.fn(async () => undefined),
+      confirm: vi.fn(async () => undefined),
+      discard: vi.fn(async () => true),
+      cleanupAbandoned: vi.fn(async () => ({
+        examined: 0, removed: 0, missing: 0, retryPending: 0,
+      })),
+    }
+    context = await buildApp({ config, logger: false, now: () => now, uploadStore })
+    const { token } = await createSession()
+    const headers = { cookie: `${config.sessionCookieName}=${token}`, origin: config.publicOrigin }
+
+    const created = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads',
+      headers,
+      payload: {
+        filename: 'statement.pdf',
+        mediaType: 'application/pdf',
+        sizeBytes: 128,
+        intentKey: 'no-engine-upload',
+      },
+    })
+    expect(created.statusCode).toBe(503)
+    expect(created.json()).toMatchObject({
+      error: { code: 'UPBIT_PDF_IMPORT_UNAVAILABLE' },
+    })
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('keeps source and data endpoints gated when only an upload store is available', async () => {
+    await context.app.close()
+    const discard = vi.fn(async () => true)
+    const uploadStore: UploadStore = {
+      durable: true,
+      create: vi.fn(async () => { throw new Error('not used') }),
+      write: vi.fn(async () => undefined),
+      confirm: vi.fn(async (): Promise<UploadSession> => ({
+        id: '00000000-0000-4000-8000-000000000021',
+        userId: USER_ID,
+        provider: 'UPBIT',
+        objectKey: `upbit/${USER_ID}/confirmed.pdf`,
+        originalFilename: 'confirmed.pdf',
+        mediaType: 'application/pdf',
+        expectedBytes: 16,
+        state: 'CONFIRMED',
+        idempotencyKey: 'confirmed-no-engine',
+        expiresAt: new Date(now.getTime() + 60_000),
+        verifiedDigest: 'a'.repeat(64),
+        verifiedBytes: 16,
+      })),
+      discard,
+      cleanupAbandoned: vi.fn(async () => ({
+        examined: 0, removed: 0, missing: 0, retryPending: 0,
+      })),
+    }
+    context = await buildApp({ config, logger: false, now: () => now, uploadStore })
+    const { token } = await createSession()
+    const headers = { cookie: `${config.sessionCookieName}=${token}`, origin: config.publicOrigin }
+
+    const confirmed = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads/00000000-0000-4000-8000-000000000021/import?coverageStart=2026-01-01&coverageEnd=2026-12-31',
+      headers: { ...headers, 'content-type': 'application/octet-stream' },
+      payload: Buffer.from([1]),
+    })
+    expect(confirmed.statusCode).toBe(503)
+    expect(confirmed.json()).toMatchObject({
+      error: { code: 'UPBIT_PDF_IMPORT_UNAVAILABLE' },
+    })
+    expect(discard).not.toHaveBeenCalled()
+
+    const dashboard = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/dashboard?taxYear=2026',
+      headers,
+    })
+    expect(dashboard.statusCode).toBe(503)
+    expect(dashboard.json()).toMatchObject({
+      error: { code: 'ENGINE_UNAVAILABLE' },
+    })
+
+    const reports = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/reports?taxYear=2026',
+      headers,
+    })
+    expect(reports.statusCode).toBe(503)
+    expect(reports.json()).toMatchObject({
+      error: { code: 'ENGINE_UNAVAILABLE' },
+    })
+  })
+
+  it('keeps data endpoints registered when neither Engine nor upload storage is configured', async () => {
+    const unauthenticated = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/dashboard?taxYear=2026',
+    })
+    expect(unauthenticated.statusCode).toBe(401)
+    expect(unauthenticated.json()).toMatchObject({
+      error: { code: 'AUTHENTICATION_REQUIRED' },
+    })
+
+    const { token } = await createSession()
+    const headers = {
+      cookie: `${config.sessionCookieName}=${token}`,
+      origin: config.publicOrigin,
+    }
+
+    for (const url of [
+      '/api/v1/dashboard?taxYear=2026',
+      '/api/v1/ledger?taxYear=2026',
+      '/api/v1/reviews',
+      '/api/v1/reports?taxYear=2026',
+    ]) {
+      const response = await context.app.inject({ method: 'GET', url, headers })
+      expect(response.statusCode).toBe(503)
+      expect(response.json()).toMatchObject({
+        error: { code: 'ENGINE_UNAVAILABLE' },
+      })
+    }
+
+    const upload = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads',
+      headers,
+      payload: {
+        filename: 'statement.pdf',
+        mediaType: 'application/pdf',
+        sizeBytes: 128,
+        intentKey: 'no-upload-storage',
+      },
+    })
+    expect(upload.statusCode).toBe(503)
+    expect(upload.json()).toMatchObject({
+      error: { code: 'UPBIT_PDF_IMPORT_UNAVAILABLE' },
+    })
   })
 
   it('does not clear the winning cookie when concurrent rotation loses', async () => {
@@ -588,12 +882,14 @@ describe('web api authentication boundary', () => {
     expect(response.json()).toMatchObject({ error: { code: 'INTERNAL_ERROR' } })
   })
 
-  it('rejects oversized bodies before authentication', async () => {
+  it('rejects oversized bodies after authenticating the request', async () => {
+    const { token } = await createSession()
     const response = await context.app.inject({
       method: 'POST',
       url: '/api/v1/auth/logout',
       headers: {
         origin: config.publicOrigin,
+        cookie: `${config.sessionCookieName}=${token}`,
         'content-type': 'text/plain',
       },
       payload: 'x'.repeat(config.bodyLimitBytes + 1),

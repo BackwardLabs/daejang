@@ -3,15 +3,20 @@ import {
   sourceMethodDefinitions,
   type SourceMethodId,
 } from './sourceDefinitions.ts'
+import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
+import { useSourceCapabilities } from './useSourceCapabilities.ts'
 
 export function SourceMethodIntroPage({
   methodId,
 }: {
   methodId: SourceMethodId
 }) {
+  const capabilities = useSourceCapabilities()
   const method = sourceMethodDefinitions[methodId]
   const isUpbitPdf = methodId === 'upbit-pdf'
+  const registrationEnabled =
+    !isUpbitPdf || capabilities.upbitPdf.registrationEnabled
   const actionLabel =
     isUpbitPdf ? 'PDF 등록 시작' : '지갑 연결 시작'
 
@@ -51,19 +56,25 @@ export function SourceMethodIntroPage({
           </div>
 
           <div className="source-intro-actions">
-            <a
-              className="source-primary-action"
-              href={
-                isUpbitPdf
-                  ? '/sources/new/upbit/upload'
-                  : '/sources/new/wallet/connect'
-              }
-            >
-              {actionLabel} <span aria-hidden="true">→</span>
-            </a>
-            <a href="/sources/new">
+            {registrationEnabled ? (
+              <AppLink
+                className="source-primary-action"
+                href={
+                  isUpbitPdf
+                    ? '/sources/new/upbit/upload'
+                    : '/sources/new/wallet/connect'
+                }
+              >
+                {actionLabel} <span aria-hidden="true">→</span>
+              </AppLink>
+            ) : (
+              <span className="source-primary-action" aria-disabled="true">
+                Upbit PDF 등록 불가
+              </span>
+            )}
+            <AppLink href="/sources/new">
               <span aria-hidden="true">←</span> 연결 방식 다시 선택
-            </a>
+            </AppLink>
           </div>
         </div>
 
@@ -84,12 +95,18 @@ export function SourceMethodIntroPage({
             <strong>보안 원칙</strong>
             <p>
               {isUpbitPdf
-                ? '파일 암호·계정 자격증명을 요청하거나 저장하지 않습니다.'
+                ? '파일 암호는 격리 파서 처리에만 일회성으로 사용하고 로그·DB·파일에 저장하지 않으며, 거래소 계정 자격증명은 요청하지 않습니다.'
                 : 'private key·seed phrase·쓰기·출금 권한을 요청하거나 저장하지 않습니다. 오프체인 서명은 지갑 소유권 확인에만 사용합니다.'}
             </p>
           </div>
         </aside>
       </section>
+
+      {!registrationEnabled ? (
+        <p className="source-api-notice" role="alert">
+          현재는 안전한 Upbit 문서 처리 경로가 활성화되지 않아 PDF 등록을 받을 수 없습니다.
+        </p>
+      ) : null}
 
       <p className="source-footer-note">{method.intro.footer}</p>
     </SourceFlowLayout>

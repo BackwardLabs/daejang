@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import {
   getAuthCapabilities,
   type AuthCapabilities,
+  type EmailLoginResponse,
 } from './auth/api.ts'
+import { setCurrentUser } from './auth/session-store.ts'
 import {
   consumeOnboardingReturn,
   navigateTo,
@@ -42,7 +44,7 @@ export function App() {
   const [authCapabilities, setAuthCapabilities] = useState<AuthCapabilities>()
   const [onboardingVisible, setOnboardingVisible] = useState(false)
   const [onboardingScreen, setOnboardingScreen] = useState<OnboardingScreen>(
-    returnedFromSignup ? 'consent' : 'method',
+    returnedFromSignup ? 'consent' : 'entry',
   )
   const [onboardingKey, setOnboardingKey] = useState(0)
   const signupAvailable = authCapabilities ? canSignup(authCapabilities) : false
@@ -86,11 +88,13 @@ export function App() {
 
   useEffect(() => {
     document.title = onboardingVisible
-      ? '계정 만들기 | Daejang'
+      ? onboardingScreen === 'entry'
+        ? '시작하기 | Daejang'
+        : '계정 만들기 | Daejang'
       : path
         ? pageTitles[path]
         : '페이지를 찾을 수 없음 | Daejang'
-  }, [onboardingVisible, path])
+  }, [onboardingScreen, onboardingVisible, path])
 
   const navigatePublic = (nextPath: PublicPath) => {
     navigateTo(nextPath)
@@ -113,6 +117,14 @@ export function App() {
     setPath('/')
   }
 
+  const openAuthChoice = () => {
+    navigateTo('/')
+    setPath('/')
+    setOnboardingScreen('entry')
+    setOnboardingKey((current) => current + 1)
+    setOnboardingVisible(true)
+  }
+
   const startOnboarding = () => {
     if (!signupAvailable) return
     navigateTo('/')
@@ -129,7 +141,8 @@ export function App() {
     setPath('/login')
   }
 
-  const continueAfterLogin = async (nextPath: string) => {
+  const continueAfterLogin = async (response: EmailLoginResponse) => {
+    const { nextPath } = response
     if (nextPath === '/?onboarding=terms') {
       let capabilities = authCapabilities
       if (!capabilities) {
@@ -159,7 +172,10 @@ export function App() {
       nextPath.startsWith('/') && !nextPath.startsWith('//')
         ? nextPath
         : '/dashboard'
-    window.location.assign(safePath)
+    if (response.status !== 'authenticated') return
+
+    setCurrentUser(response.user)
+    navigateTo(safePath, true)
   }
 
   const publicPage =
@@ -181,16 +197,15 @@ export function App() {
       <NotFoundPage onHome={exitOnboarding} onNavigate={navigatePublic} />
     ) : (
       <LandingPage
-        onLogin={openLogin}
-        onStart={startOnboarding}
+        onStart={openAuthChoice}
         onNavigate={navigatePublic}
-        signupAvailable={signupAvailable}
       />
     )
 
   return (
     <>
-      {onboardingVisible && signupAvailable && authCapabilities ? (
+      {onboardingVisible &&
+      (onboardingScreen === 'entry' || (signupAvailable && authCapabilities)) ? (
         <OnboardingFlow
           key={onboardingKey}
           initialScreen={onboardingScreen}
@@ -198,7 +213,15 @@ export function App() {
           onExit={exitOnboarding}
           onLogin={openLogin}
           onNavigate={navigatePublic}
-          signupMethods={authCapabilities.signup.methods}
+          signupMethods={
+            authCapabilities?.signup.methods ?? {
+              email: false,
+              oauthProviders: [],
+            }
+          }
+          identityVerificationRequired={
+            authCapabilities?.signup.identityVerificationRequired ?? true
+          }
         />
       ) : publicPage}
     </>

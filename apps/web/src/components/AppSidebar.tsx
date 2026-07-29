@@ -7,6 +7,7 @@ import userAvatar from '../assets/dashboard/user-avatar.svg'
 import { logout } from '../auth/api.ts'
 import { setCurrentUser, useCurrentUser } from '../auth/session-store.ts'
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { AppLink } from './AppLink.tsx'
 import './app-sidebar.css'
 
 export type AppPage = 'dashboard' | 'ledger' | 'reports' | 'settings' | 'sources'
@@ -22,7 +23,7 @@ export type AppSidebarSecondaryItem = {
 
 const navigation: Array<{
   badge?: string
-  href: string
+  href: `/${string}`
   icon: string
   label: string
   page: AppPage
@@ -93,10 +94,10 @@ export function AppSidebar({
 
   return (
     <aside className="app-sidebar">
-      <a className="app-sidebar__brand" href="/" aria-label="Daejang 소개 페이지로 이동">
+      <AppLink className="app-sidebar__brand" href="/" aria-label="Daejang 소개 페이지로 이동">
         <img src="/daejang-logo.svg" alt="" />
         <span>Daejang</span>
-      </a>
+      </AppLink>
 
       <label className="app-sidebar__period">
         <span className="sr-only">조회 기간</span>
@@ -119,7 +120,7 @@ export function AppSidebar({
             return (
               <Fragment key={item.page}>
                 <li className={isActive ? 'is-active' : undefined}>
-                  <a
+                  <AppLink
                     href={item.href}
                     aria-current={isActive ? 'page' : undefined}
                     aria-expanded={hasSecondaryItems ? true : undefined}
@@ -131,7 +132,7 @@ export function AppSidebar({
                         {item.badge}
                       </b>
                     )}
-                  </a>
+                  </AppLink>
                 </li>
                 {hasSecondaryItems && (
                   <li className="app-sidebar__secondary-row">
@@ -170,10 +171,10 @@ export function AppSidebar({
         </ul>
       </nav>
 
-      <a className="app-sidebar__guide" href="/ledger">
+      <AppLink className="app-sidebar__guide" href="/ledger">
         <strong>처음 사용하시나요?</strong>
         <span>장부 만들기 가이드를 확인하세요.</span>
-      </a>
+      </AppLink>
 
       <div className="app-sidebar__user-area" ref={userMenuRef}>
         {isUserMenuOpen && (

@@ -5,12 +5,12 @@ import { PostgresAccountAuthStore } from './auth/account-auth-store.js'
 import { ResendVerificationEmailSender } from './auth/email-auth.js'
 import { PostgresRateLimitStore } from './auth/rate-limit.js'
 import { PostgresSessionStore } from './auth/postgres-session-store.js'
-import { PostgresUserStore } from './auth/postgres-user-store.js'
 import { loadConfig } from './config.js'
 import { assertTaxReportSchema, assertWebAuthSchema } from './database/preflight.js'
 import { EngineMtlsClient } from './engine/mtls-client.js'
 import { PostgresWalletSourceStore } from './sources/postgres-wallet-source-store.js'
 import { PostgresTaxReportReader } from './tax-report/postgres-tax-report-reader.js'
+import { startUploadCleanup } from './uploads/upload-cleanup.js'
 import { assertPrivateObjectRoot, PostgresFileUploadStore } from './uploads/postgres-file-upload-store.js'
 
 const config = loadConfig()
@@ -23,17 +23,20 @@ const pool = config.databaseUrl
     })
   : undefined
 const engineClient = config.engineMtls
-  ? await EngineMtlsClient.connect(config.engineMtls)
+  ? await EngineMtlsClient.connect(config.engineMtls, config.upbitPdfImportEnabled)
   : config.engineInsecureTarget
-    ? EngineMtlsClient.connectInsecureForDevelopment(config.engineInsecureTarget)
+    ? EngineMtlsClient.connectInsecureForDevelopment(
+        config.engineInsecureTarget,
+        config.upbitPdfImportEnabled,
+      )
     : undefined
+const uploadStore = pool && config.privateObjectRoot
+  ? new PostgresFileUploadStore(pool, config.privateObjectRoot)
+  : undefined
 
 if (pool) {
   await assertWebAuthSchema(pool)
   await assertTaxReportSchema(pool)
-}
-if (engineClient) {
-  await engineClient.waitForReady(5_000)
 }
 if (config.privateObjectRoot) {
   await assertPrivateObjectRoot(config.privateObjectRoot)
@@ -59,22 +62,16 @@ const { app } = await buildApp({
           ? {
               walletSourceStore: new PostgresWalletSourceStore(pool, engineClient),
               engineDataClient: engineClient,
-              ...(config.privateObjectRoot
-                ? { uploadStore: new PostgresFileUploadStore(pool, config.privateObjectRoot) }
-                : {}),
             }
           : {}),
-        ...(config.devBootstrapUser
-          ? { developmentUserStore: new PostgresUserStore(pool) }
-          : {}),
+        ...(uploadStore ? { uploadStore } : {}),
       }
     : {}),
-  ...(pool && engineClient
+  ...(pool
     ? {
         readinessCheck: async () => {
           await Promise.all([
             pool.query('SELECT 1'),
-            engineClient.waitForReady(2_000),
             ...(config.privateObjectRoot
               ? [assertPrivateObjectRoot(config.privateObjectRoot)]
               : []),
@@ -84,7 +81,24 @@ const { app } = await buildApp({
     : {}),
 })
 
+const uploadCleanup = uploadStore
+  ? startUploadCleanup({
+      store: uploadStore,
+      onResult: (result) => {
+        if (result.examined === 0) return
+        app.log.info(result, 'abandoned upload cleanup completed')
+      },
+      onError: (error) => {
+        app.log.error(
+          { errorClass: error instanceof Error ? error.name : 'non_error' },
+          'abandoned upload cleanup failed',
+        )
+      },
+    })
+  : undefined
+
 app.addHook('onClose', async () => {
+  await uploadCleanup?.stop()
   engineClient?.close()
   await pool?.end()
 })

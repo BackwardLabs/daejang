@@ -34,7 +34,7 @@ describe('upbitPdfRegistrationReducer', () => {
     expect(state).toMatchObject({
       file,
       intentKey: 'intent-upbit-1',
-      status: 'DOCUMENT_UPLOADING',
+      status: 'DOCUMENT_PREPARING',
       view: 'submitting',
     })
 
@@ -43,7 +43,14 @@ describe('upbitPdfRegistrationReducer', () => {
       type: 'SUBMIT_STAGE_CHANGED',
     })
     state = upbitPdfRegistrationReducer(state, {
+      status: 'DOCUMENT_PROCESSING',
+      type: 'SUBMIT_STAGE_CHANGED',
+    })
+    state = upbitPdfRegistrationReducer(state, {
+      evidenceTerminalStatus: 'PARTIAL',
+      normalizedRecordCount: 0,
       sourceId: 'source-upbit-1',
+      sourceRecordCount: 12,
       sourceStatus: 'UPLOADED',
       type: 'SUBMIT_SUCCEEDED',
     })
@@ -53,7 +60,10 @@ describe('upbitPdfRegistrationReducer', () => {
         name: 'upbit-history.pdf',
         size: file.size,
       },
+      evidenceTerminalStatus: 'PARTIAL',
+      normalizedRecordCount: 0,
       sourceId: 'source-upbit-1',
+      sourceRecordCount: 12,
       sourceStatus: 'UPLOADED',
       status: 'SOURCE_SAVED',
       view: 'complete',
@@ -81,6 +91,11 @@ describe('upbitPdfRegistrationReducer', () => {
       error: {
         code: 'PROCESSING_FAILED',
         requestId: 'request-safe-1',
+        retry: {
+          intentKey: 'intent-job-retry-1',
+          mode: 'restart-job',
+          sourceId: 'source-upbit-retry',
+        },
       },
       type: 'SUBMIT_FAILED',
     })
@@ -89,6 +104,11 @@ describe('upbitPdfRegistrationReducer', () => {
       error: {
         code: 'PROCESSING_FAILED',
         requestId: 'request-safe-1',
+        retry: {
+          intentKey: 'intent-job-retry-1',
+          mode: 'restart-job',
+          sourceId: 'source-upbit-retry',
+        },
       },
       file,
       intentKey: 'intent-upbit-retry',
@@ -102,7 +122,7 @@ describe('upbitPdfRegistrationReducer', () => {
     expect(retryingState).toMatchObject({
       file,
       intentKey: 'intent-upbit-retry',
-      status: 'DOCUMENT_UPLOADING',
+      status: 'DOCUMENT_PREPARING',
       view: 'submitting',
     })
   })

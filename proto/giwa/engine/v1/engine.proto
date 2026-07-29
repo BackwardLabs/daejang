@@ -8,7 +8,11 @@ option go_package = "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa
 
 service SourceService {
   rpc RegisterWallet(RegisterWalletRequest) returns (RegisterWalletResponse);
+  // Reserved for wire compatibility. The server always fails closed; document
+  // creation is only available through ImportUpbitDocument after parsing and
+  // verified-subject matching.
   rpc RegisterDocument(RegisterDocumentRequest) returns (RegisterDocumentResponse);
+  rpc ImportUpbitDocument(ImportUpbitDocumentRequest) returns (ImportUpbitDocumentResponse);
   rpc ListSources(ListSourcesRequest) returns (ListSourcesResponse);
   rpc DisconnectSource(DisconnectSourceRequest) returns (DisconnectSourceResponse);
 }
@@ -25,6 +29,8 @@ service QueryService {
   rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
   rpc CreateReport(CreateReportRequest) returns (CreateReportResponse);
   rpc ListReports(ListReportsRequest) returns (ListReportsResponse);
+  rpc GetCurrentTaxReport(GetCurrentTaxReportRequest) returns (GetCurrentTaxReportResponse);
+  rpc ListTaxReportHistory(ListTaxReportHistoryRequest) returns (ListTaxReportHistoryResponse);
 }
 
 service ReviewService {
@@ -74,6 +80,29 @@ message RegisterDocumentRequest {
 
 message RegisterDocumentResponse {
   DocumentSource source = 1;
+}
+
+message ImportUpbitDocumentRequest {
+  RequestContext context = 1;
+  string upload_id = 2;
+  string object_key = 3;
+  string artifact_digest = 4;
+  string original_filename = 5;
+  string media_type = 6;
+  int64 byte_length = 7;
+  string coverage_start = 8;
+  string coverage_end = 9;
+  string expected_subject_name = 10;
+  bytes encrypted_original_pdf = 11;
+  bytes pdf_password_utf8 = 12;
+}
+
+message ImportUpbitDocumentResponse {
+  DocumentSource source = 1;
+  SyncJob job = 2;
+  string evidence_terminal_status = 3;
+  int64 source_record_count = 4;
+  int64 normalized_record_count = 5;
 }
 
 message DisconnectSourceRequest {
@@ -128,6 +157,11 @@ message EnqueueSyncRequest {
   RequestContext context = 1;
   string source_kind = 2;
   string source_id = 3;
+  // Inclusive calendar DATE in YYYY-MM-DD form, normalized to UTC midnight by Engine.
+  string requested_coverage_start = 4;
+  // Inclusive calendar DATE in YYYY-MM-DD form, normalized to UTC midnight by Engine.
+  string requested_coverage_end = 5;
+  string trigger = 6;
 }
 
 message EnqueueSyncResponse { SyncJob job = 1; }
@@ -153,6 +187,13 @@ message SyncJob {
   google.protobuf.Timestamp started_at = 14;
   google.protobuf.Timestamp completed_at = 15;
   google.protobuf.Timestamp updated_at = 16;
+  string requested_coverage_start = 17;
+  string requested_coverage_end = 18;
+  string trigger = 19;
+  string checkpoint_cursor = 20;
+  string segment_cursor = 21;
+  string upstream_jit_run_id = 22;
+  int64 progress_version = 23;
 }
 
 message GetDashboardRequest { RequestContext context = 1; int32 tax_year = 2; }
@@ -290,3 +331,58 @@ message ReportSnapshot {
 }
 message CreateReportResponse { ReportSnapshot report = 1; }
 message ListReportsResponse { repeated ReportSnapshot items = 1; }
+
+message GetCurrentTaxReportRequest {
+  RequestContext context = 1;
+  int32 tax_year = 2;
+  reserved 3;
+}
+
+message ListTaxReportHistoryRequest {
+  RequestContext context = 1;
+  int32 tax_year = 2;
+  reserved 3;
+  int32 limit = 4;
+}
+
+message TaxAmount {
+  string status = 1;
+  string amount = 2;
+  bool has_amount = 3;
+}
+
+message TaxReportCounts {
+  int32 disposals = 1;
+  int32 transfers = 2;
+  int32 excluded_conversions = 3;
+  int32 limitations = 4;
+}
+
+message TaxReport {
+  string report_id = 1;
+  string resident_id = 2;
+  int32 tax_year = 3;
+  string finality = 4;
+  string status = 5;
+  string filing_status = 6;
+  string tax_inventory_run_id = 7;
+  string tax_estimate_id = 8;
+  string lot_run_id = 9;
+  string input_digest = 10;
+  string schema_digest = 11;
+  string denomination_asset_id = 12;
+  string report_artifact_digest = 13;
+  string evidence_pack_digest = 14;
+  int64 pointer_version = 15;
+  google.protobuf.Timestamp issued_at = 16;
+  google.protobuf.Timestamp updated_at = 17;
+  TaxReportCounts counts = 18;
+  TaxAmount gain_loss = 19;
+  TaxAmount taxable_base = 20;
+  TaxAmount national_tax = 21;
+  TaxAmount local_tax = 22;
+  TaxAmount total_tax = 23;
+}
+
+message GetCurrentTaxReportResponse { TaxReport report = 1; }
+message ListTaxReportHistoryResponse { repeated TaxReport items = 1; }

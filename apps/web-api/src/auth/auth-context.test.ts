@@ -43,9 +43,11 @@ const config: AppConfig = {
   },
   signup: {
     enabled: false,
+    identityVerificationRequired: false,
     methods: { email: false, oauthProviders: [] },
   },
   identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: false,
   engineMtls: {
     target: 'jit-engine.internal:8443',
     caPath: '/run/secrets/engine-ca.pem',

@@ -10,7 +10,7 @@ export type SourceMethodDefinition = {
   badge: string
   bullets: string[]
   description: string
-  href: string
+  href: `/${string}`
   id: SourceMethodId
   intro: {
     badge: string
@@ -52,7 +52,7 @@ export const sourceMethodDefinitions: Record<
     intro: {
       badge: 'PDF 업로드',
       description:
-        'MVP에서는 암호화되지 않은 Upbit 거래내역서 PDF만 등록하면 됩니다. 입출금 증명서나 별도 자산 자료는 필수가 아닙니다.',
+        '지원되는 Upbit 거래내역서 PDF만 등록합니다. 입출금 증명서나 별도 자산 자료는 필수가 아닙니다.',
       eyebrow: 'DATA SOURCES · UPBIT',
       footer:
         '소스 등록이 끝나면 조회 기간과 문서 포함 기간을 확인한 뒤 수집을 시작합니다.',
@@ -88,8 +88,8 @@ export const sourceMethodDefinitions: Record<
     badge: '읽기 전용',
     bullets: [
       '공개 온체인 거래만 수집',
-      '최근 90일 우선 처리 후 선택 범위 전체 수집',
-      '매일 자동 동기화 + 필요할 때 수동 새로고침',
+      '사용자가 지정한 선택 범위를 한 건의 작업으로 수집',
+      '수집 요청 후 대기·처리·완료 상태 확인',
     ],
     description:
       '브라우저 지갑을 연결해 공개 온체인 거래를 읽기 전용으로 동기화합니다.',

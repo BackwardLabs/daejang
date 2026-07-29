@@ -105,6 +105,7 @@ export class NaverOAuthAdapter implements OAuthProviderAdapter {
       client_id: input.client.clientId,
       redirect_uri: input.redirectUri,
       state: input.state,
+      auth_type: 'reauthenticate',
     }).toString()
     return url
   }
@@ -165,6 +166,7 @@ type OidcAdapterOptions = {
   jwksUri: string
   issuer: string | string[]
   scope: string
+  prompt: 'login' | 'select_account'
 }
 
 class OidcOAuthAdapter implements OAuthProviderAdapter {
@@ -196,6 +198,7 @@ class OidcOAuthAdapter implements OAuthProviderAdapter {
       nonce: input.nonce,
       code_challenge: input.codeChallenge,
       code_challenge_method: 'S256',
+      prompt: this.options.prompt,
     }).toString()
     return url
   }
@@ -252,6 +255,7 @@ export class GoogleOidcAdapter extends OidcOAuthAdapter {
         jwksUri: 'https://www.googleapis.com/oauth2/v3/certs',
         issuer: ['accounts.google.com', 'https://accounts.google.com'],
         scope: 'openid email',
+        prompt: 'select_account',
       },
       fetcher,
     )
@@ -268,6 +272,7 @@ export class KakaoOidcAdapter extends OidcOAuthAdapter {
         jwksUri: 'https://kauth.kakao.com/.well-known/jwks.json',
         issuer: 'https://kauth.kakao.com',
         scope: 'openid,account_email',
+        prompt: 'login',
       },
       fetcher,
     )

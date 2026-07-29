@@ -36,12 +36,52 @@ describe('OAuth provider adapters', () => {
     expect(url.origin).toBe('https://kauth.kakao.com')
     expect(url.pathname).toBe('/oauth/authorize')
     expect(url.searchParams.get('scope')).toBe('openid,account_email')
+    expect(url.searchParams.get('prompt')).toBe('login')
     expect(url.searchParams.get('state')).toBe('oauth-state')
     expect(url.searchParams.get('nonce')).toBe('oidc-nonce')
     expect(url.searchParams.get('code_challenge')).toBe(
       'pkce-code-challenge',
     )
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
+  })
+
+  it('forces Naver reauthentication even when a provider session exists', () => {
+    const adapter = new NaverOAuthAdapter()
+
+    const url = adapter.buildAuthorizationUrl({
+      client: {
+        clientId: 'naver-client-id',
+        clientSecret: 'naver-client-secret',
+      },
+      redirectUri:
+        'https://daejang.backwardlabs.io/api/v1/auth/oauth/naver/callback',
+      state: 'oauth-state',
+      nonce: undefined,
+      codeChallenge: undefined,
+    })
+
+    expect(url.origin).toBe('https://nid.naver.com')
+    expect(url.pathname).toBe('/oauth2.0/authorize')
+    expect(url.searchParams.get('auth_type')).toBe('reauthenticate')
+  })
+
+  it('requires explicit Google account selection for every authorization', () => {
+    const adapter = new GoogleOidcAdapter()
+
+    const url = adapter.buildAuthorizationUrl({
+      client: {
+        clientId: 'google-client-id',
+        clientSecret: 'google-client-secret',
+      },
+      redirectUri:
+        'https://daejang.backwardlabs.io/api/v1/auth/oauth/google/callback',
+      state: 'oauth-state',
+      nonce: 'oidc-nonce',
+      codeChallenge: 'pkce-code-challenge',
+    })
+
+    expect(url.origin).toBe('https://accounts.google.com')
+    expect(url.searchParams.get('prompt')).toBe('select_account')
   })
 
   it('returns the original state to the Naver token endpoint', async () => {

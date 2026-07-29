@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/BackwardLabs/daejang-db/pkg/sourcejobstore"
@@ -29,14 +30,37 @@ func (s *Service) EnqueueSync(ctx context.Context, request *enginev1.EnqueueSync
 	if err != nil {
 		return nil, err
 	}
+	coverageStart, coverageEnd, err := requestedCoverage(
+		request.GetRequestedCoverageStart(), request.GetRequestedCoverageEnd(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	trigger := strings.TrimSpace(request.GetTrigger())
+	if trigger != "USER_REQUEST" && trigger != "SCHEDULED" && trigger != "BACKFILL" {
+		return nil, status.Error(codes.InvalidArgument, "sync trigger is invalid")
+	}
 	value, err := s.Store.Enqueue(ctx, sourcejobstore.EnqueueParams{
 		SubjectID: subjectID, SourceKind: request.GetSourceKind(), SourceID: request.GetSourceId(),
-		IdempotencyKey: request.GetContext().GetIdempotencyKey(),
+		IdempotencyKey:         request.GetContext().GetIdempotencyKey(),
+		RequestedCoverageStart: coverageStart, RequestedCoverageEnd: coverageEnd, Trigger: trigger,
 	})
 	if err != nil {
 		return nil, mapError(err)
 	}
 	return &enginev1.EnqueueSyncResponse{Job: toProto(value)}, nil
+}
+
+func requestedCoverage(start, end string) (time.Time, time.Time, error) {
+	coverageStart, err := time.Parse("2006-01-02", start)
+	if err != nil {
+		return time.Time{}, time.Time{}, status.Error(codes.InvalidArgument, "requested coverage start must be an ISO date")
+	}
+	coverageEnd, err := time.Parse("2006-01-02", end)
+	if err != nil || coverageEnd.Before(coverageStart) {
+		return time.Time{}, time.Time{}, status.Error(codes.InvalidArgument, "requested coverage end must be an ISO date on or after the start")
+	}
+	return coverageStart.UTC(), coverageEnd.UTC(), nil
 }
 
 func (s *Service) GetSyncJob(ctx context.Context, request *enginev1.GetSyncJobRequest) (*enginev1.GetSyncJobResponse, error) {
@@ -78,6 +102,9 @@ func mapError(err error) error {
 	if errors.Is(err, sourcejobstore.ErrJobNotFound) {
 		return status.Error(codes.NotFound, "sync job not found")
 	}
+	if errors.Is(err, sourcejobstore.ErrImmutableIdentityMismatch) {
+		return status.Error(codes.AlreadyExists, "SYNC_IDEMPOTENCY_CONFLICT")
+	}
 	return status.Error(codes.Internal, "sync job operation failed")
 }
 
@@ -85,7 +112,15 @@ func toProto(value sourcejobstore.SyncJob) *enginev1.SyncJob {
 	result := &enginev1.SyncJob{Id: value.ID, SourceKind: value.SourceKind, SourceId: value.SourceID, State: value.State,
 		Phase: value.Phase, Attempts: value.Attempts, ProcessedRecords: value.ProcessedRecords,
 		FailureCode: value.FailureCode, FailureMessage: value.FailureMessage, OutputFragmentId: value.OutputFragmentID,
+		Trigger: value.Trigger, CheckpointCursor: value.CheckpointCursor, SegmentCursor: value.SegmentCursor,
+		UpstreamJitRunId: value.UpstreamJITRunID, ProgressVersion: value.ProgressVersion,
 		CreatedAt: timestamppb.New(value.CreatedAt), UpdatedAt: timestamppb.New(value.UpdatedAt)}
+	if value.RequestedCoverageStart != nil {
+		result.RequestedCoverageStart = value.RequestedCoverageStart.Format("2006-01-02")
+	}
+	if value.RequestedCoverageEnd != nil {
+		result.RequestedCoverageEnd = value.RequestedCoverageEnd.Format("2006-01-02")
+	}
 	if value.TotalRecords != nil {
 		result.TotalRecords = *value.TotalRecords
 		result.HasTotalRecords = true

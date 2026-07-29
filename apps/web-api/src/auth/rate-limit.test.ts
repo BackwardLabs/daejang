@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { AuthRateLimiter, MemoryRateLimitStore } from './rate-limit.js'
+import {
+  AuthRateLimiter,
+  MemoryRateLimitStore,
+  UploadAdmissionRateLimiter,
+} from './rate-limit.js'
 
 describe('AuthRateLimiter', () => {
   it('enforces the stricter SIWE completion policy by IP and identity', async () => {
@@ -102,5 +106,103 @@ describe('AuthRateLimiter', () => {
         })
       ).allowed,
     ).toBe(false)
+  })
+})
+
+describe('UploadAdmissionRateLimiter', () => {
+  const now = new Date('2027-07-20T00:00:00.000Z')
+
+  it('limits create requests by user across rotating IP addresses', async () => {
+    const limiter = new UploadAdmissionRateLimiter(
+      new MemoryRateLimitStore(),
+      'test-secret',
+      () => now,
+    )
+
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      expect(
+        (
+          await limiter.consumeCreate({
+            userId: 'user-1',
+            ip: `203.0.113.${attempt + 1}`,
+          })
+        ).allowed,
+      ).toBe(true)
+    }
+
+    expect(
+      (
+        await limiter.consumeCreate({
+          userId: 'user-1',
+          ip: '203.0.113.200',
+        })
+      ).allowed,
+    ).toBe(false)
+  })
+
+  it('limits create requests by IP across rotating users', async () => {
+    const limiter = new UploadAdmissionRateLimiter(
+      new MemoryRateLimitStore(),
+      'test-secret',
+      () => now,
+    )
+
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      expect(
+        (
+          await limiter.consumeCreate({
+            userId: `user-${attempt}`,
+            ip: '203.0.113.10',
+          })
+        ).allowed,
+      ).toBe(true)
+    }
+
+    expect(
+      (
+        await limiter.consumeCreate({
+          userId: 'user-over-limit',
+          ip: '203.0.113.10',
+        })
+      ).allowed,
+    ).toBe(false)
+  })
+
+  it('charges declared PUT bytes separately from the PUT request count', async () => {
+    const limiter = new UploadAdmissionRateLimiter(
+      new MemoryRateLimitStore(),
+      'test-secret',
+      () => now,
+    )
+    const input = {
+      userId: 'user-1',
+      ip: '203.0.113.10',
+      byteLength: 20 * 1024 * 1024,
+    }
+
+    for (let upload = 0; upload < 5; upload += 1) {
+      expect((await limiter.consumeContent(input)).allowed).toBe(true)
+    }
+
+    const rejected = await limiter.consumeContent(input)
+    expect(rejected).toEqual({ allowed: false, retryAfterSeconds: 3_600 })
+  })
+
+  it('limits PUT request count even when byte usage is small', async () => {
+    const limiter = new UploadAdmissionRateLimiter(
+      new MemoryRateLimitStore(),
+      'test-secret',
+      () => now,
+    )
+    const input = {
+      userId: 'user-1',
+      ip: '203.0.113.10',
+      byteLength: 1,
+    }
+
+    for (let upload = 0; upload < 12; upload += 1) {
+      expect((await limiter.consumeContent(input)).allowed).toBe(true)
+    }
+    expect((await limiter.consumeContent(input)).allowed).toBe(false)
   })
 })

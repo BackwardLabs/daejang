@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "account:provision": "node --import tsx src/commands/provision-account.ts",
+    "account:provision-subject-claim": "node --import tsx src/commands/provision-subject-name-claim.ts",
     "dev": "node --env-file=.env --watch --import tsx src/server.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "lint": "oxlint src",
     "typecheck": "tsc -p tsconfig.json --pretty false",

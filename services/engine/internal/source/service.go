@@ -49,18 +49,6 @@ type DocumentSource struct {
 	UpdatedAt        time.Time
 }
 
-type RegisterDocumentParams struct {
-	SubjectID        string
-	UploadID         string
-	ObjectKey        string
-	ArtifactDigest   string
-	OriginalFilename string
-	MediaType        string
-	ByteLength       int64
-	CoverageStart    time.Time
-	CoverageEnd      time.Time
-}
-
 type RegisterWalletParams struct {
 	SubjectID           string
 	Address             string
@@ -74,38 +62,21 @@ type Store interface {
 	RegisterWallet(context.Context, RegisterWalletParams) (WalletSource, error)
 	ListWallets(context.Context, string) ([]WalletSource, error)
 	DisconnectWallet(context.Context, string, string, time.Time) (WalletSource, error)
-	RegisterDocument(context.Context, RegisterDocumentParams) (DocumentSource, error)
 	ListDocuments(context.Context, string) ([]DocumentSource, error)
 }
 
-func (s *Service) RegisterDocument(ctx context.Context, request *enginev1.RegisterDocumentRequest) (*enginev1.RegisterDocumentResponse, error) {
-	subjectID, err := validateContext(request.GetContext(), true)
-	if err != nil {
-		return nil, err
-	}
-	coverageStart, err := parseDate(request.GetCoverageStart(), "coverage_start")
-	if err != nil {
-		return nil, err
-	}
-	coverageEnd, err := parseDate(request.GetCoverageEnd(), "coverage_end")
-	if err != nil {
-		return nil, err
-	}
-	value, err := s.Store.RegisterDocument(ctx, RegisterDocumentParams{
-		SubjectID: subjectID, UploadID: request.GetUploadId(), ObjectKey: request.GetObjectKey(),
-		ArtifactDigest: request.GetArtifactDigest(), OriginalFilename: request.GetOriginalFilename(),
-		MediaType: request.GetMediaType(), ByteLength: request.GetByteLength(),
-		CoverageStart: coverageStart, CoverageEnd: coverageEnd,
-	})
-	if err != nil {
-		return nil, mapStoreError(err)
-	}
-	return &enginev1.RegisterDocumentResponse{Source: documentToProto(value)}, nil
+type UpbitDocumentImporter interface {
+	ImportUpbitDocument(context.Context, UpbitDocumentImportParams) (UpbitDocumentImportResult, error)
+}
+
+func (s *Service) RegisterDocument(context.Context, *enginev1.RegisterDocumentRequest) (*enginev1.RegisterDocumentResponse, error) {
+	return nil, status.Error(codes.FailedPrecondition, "DOCUMENT_IMPORT_REQUIRES_VERIFIED_PARSER")
 }
 
 type Service struct {
 	enginev1.UnimplementedSourceServiceServer
-	Store Store
+	Store    Store
+	Importer UpbitDocumentImporter
 }
 
 func (s *Service) RegisterWallet(ctx context.Context, request *enginev1.RegisterWalletRequest) (*enginev1.RegisterWalletResponse, error) {

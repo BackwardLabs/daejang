@@ -37,6 +37,8 @@ type IncrementInput = {
   keyHash: string
   windowStartedAt: Date
   windowExpiresAt: Date
+  cost: number
+  ceiling: number
 }
 
 export interface RateLimitStore {
@@ -51,7 +53,10 @@ export class MemoryRateLimitStore implements RateLimitStore {
   async increment(input: IncrementInput) {
     const key = `${input.scope}:${input.keyHash}:${input.windowStartedAt.toISOString()}`
     const current = this.#buckets.get(key)
-    const attempts = (current?.attempts ?? 0) + 1
+    const attempts = Math.min(
+      (current?.attempts ?? 0) + input.cost,
+      input.ceiling,
+    )
     this.#buckets.set(key, { attempts, expiresAt: input.windowExpiresAt.getTime() })
     return attempts
   }
@@ -71,12 +76,22 @@ export class PostgresRateLimitStore implements RateLimitStore {
           window_started_at,
           window_expires_at,
           attempts
-        ) VALUES ($1, $2, $3, $4, 1)
+        ) VALUES ($1, $2, $3, $4, LEAST($5::integer, $6::integer))
         ON CONFLICT (scope, key_hash, window_started_at) DO UPDATE
-        SET attempts = web_private.auth_rate_limit_buckets.attempts + 1
+        SET attempts = LEAST(
+          web_private.auth_rate_limit_buckets.attempts + $5::integer,
+          $6::integer
+        )
         RETURNING attempts
       `,
-      [input.scope, input.keyHash, input.windowStartedAt, input.windowExpiresAt],
+      [
+        input.scope,
+        input.keyHash,
+        input.windowStartedAt,
+        input.windowExpiresAt,
+        input.cost,
+        input.ceiling,
+      ],
     )
 
     const attempts = result.rows[0]?.attempts
@@ -128,6 +143,8 @@ export class AuthRateLimiter {
             .digest('base64url'),
           windowStartedAt,
           windowExpiresAt,
+          cost: 1,
+          ceiling: policy.limit + 1,
         }),
       ),
     )
@@ -140,6 +157,170 @@ export class AuthRateLimiter {
       retryAfterSeconds: Math.max(
         1,
         Math.ceil((windowExpiresAt.getTime() - now.getTime()) / 1_000),
+      ),
+    }
+  }
+}
+
+type UploadAdmissionDimension = 'user' | 'ip'
+
+type UploadAdmissionPolicy = RateLimitPolicy & {
+  maxCost: number
+}
+
+const uploadAdmissionPolicies = {
+  createRequests: {
+    user: { limit: 12, windowSeconds: 3_600, maxCost: 1 },
+    ip: { limit: 60, windowSeconds: 3_600, maxCost: 1 },
+  },
+  contentRequests: {
+    user: { limit: 12, windowSeconds: 3_600, maxCost: 1 },
+    ip: { limit: 60, windowSeconds: 3_600, maxCost: 1 },
+  },
+  contentBytes: {
+    user: {
+      limit: 100 * 1024 * 1024,
+      windowSeconds: 3_600,
+      maxCost: 20 * 1024 * 1024,
+    },
+    ip: {
+      limit: 500 * 1024 * 1024,
+      windowSeconds: 3_600,
+      maxCost: 20 * 1024 * 1024,
+    },
+  },
+} as const satisfies Record<
+  string,
+  Record<UploadAdmissionDimension, UploadAdmissionPolicy>
+>
+
+export type UploadAdmissionDecision = {
+  allowed: boolean
+  retryAfterSeconds: number
+}
+
+type UploadAdmissionEntry = {
+  scope: string
+  dimension: UploadAdmissionDimension
+  value: string
+  cost: number
+  policy: UploadAdmissionPolicy
+}
+
+export class UploadAdmissionRateLimiter {
+  constructor(
+    private readonly store: RateLimitStore,
+    private readonly hmacSecret: string,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  consumeCreate(input: {
+    userId: string
+    ip: string
+  }): Promise<UploadAdmissionDecision> {
+    return this.#consume(
+      this.#dimensionEntries(
+        'upload:create:requests',
+        input,
+        1,
+        uploadAdmissionPolicies.createRequests,
+      ),
+      this.now(),
+    )
+  }
+
+  async consumeContent(input: {
+    userId: string
+    ip: string
+    byteLength: number
+  }): Promise<UploadAdmissionDecision> {
+    const now = this.now()
+    const requestDecision = await this.#consume(
+      this.#dimensionEntries(
+        'upload:content:requests',
+        input,
+        1,
+        uploadAdmissionPolicies.contentRequests,
+      ),
+      now,
+    )
+    if (!requestDecision.allowed) return requestDecision
+
+    return this.#consume(
+      this.#dimensionEntries(
+        'upload:content:bytes',
+        input,
+        input.byteLength,
+        uploadAdmissionPolicies.contentBytes,
+      ),
+      now,
+    )
+  }
+
+  #dimensionEntries(
+    scope: string,
+    input: { userId: string; ip: string },
+    cost: number,
+    policies: Record<UploadAdmissionDimension, UploadAdmissionPolicy>,
+  ): UploadAdmissionEntry[] {
+    return [
+      {
+        scope,
+        dimension: 'user',
+        value: input.userId,
+        cost,
+        policy: policies.user,
+      },
+      {
+        scope,
+        dimension: 'ip',
+        value: input.ip,
+        cost,
+        policy: policies.ip,
+      },
+    ]
+  }
+
+  async #consume(
+    entries: UploadAdmissionEntry[],
+    now: Date,
+  ): Promise<UploadAdmissionDecision> {
+    const results = await Promise.all(
+      entries.map(async (entry) => {
+        const windowMilliseconds = entry.policy.windowSeconds * 1_000
+        const windowStartedAt = new Date(
+          Math.floor(now.getTime() / windowMilliseconds) * windowMilliseconds,
+        )
+        const windowExpiresAt = new Date(
+          windowStartedAt.getTime() + windowMilliseconds,
+        )
+        const usage = await this.store.increment({
+          scope: `${entry.scope}:${entry.dimension}`,
+          keyHash: createHmac('sha256', this.hmacSecret)
+            .update(`${entry.dimension}\0${entry.value}`)
+            .digest('base64url'),
+          windowStartedAt,
+          windowExpiresAt,
+          cost: entry.cost,
+          ceiling: entry.policy.limit + entry.policy.maxCost,
+        })
+        return {
+          allowed: usage <= entry.policy.limit,
+          retryAfterSeconds: Math.max(
+            1,
+            Math.ceil((windowExpiresAt.getTime() - now.getTime()) / 1_000),
+          ),
+        }
+      }),
+    )
+
+    const denied = results.filter((result) => !result.allowed)
+    return {
+      allowed: denied.length === 0,
+      retryAfterSeconds: Math.max(
+        ...((denied.length > 0 ? denied : results).map(
+          (result) => result.retryAfterSeconds,
+        )),
       ),
     }
   }

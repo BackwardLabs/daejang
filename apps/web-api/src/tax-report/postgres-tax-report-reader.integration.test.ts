@@ -45,9 +45,11 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
     },
     signup: {
       enabled: false,
+      identityVerificationRequired: false,
       methods: { email: false, oauthProviders: [] },
     },
     identityVerificationMode: 'disabled',
+    upbitPdfImportEnabled: false,
     engineMtls: undefined,
   }
   let appContext: Awaited<ReturnType<typeof buildApp>>
@@ -75,13 +77,10 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
     await pool.end()
   })
 
-  it('reads one repeatable snapshot with exact child counts and no UNKNOWN zero fabrication', async () => {
+  it('reads one published summary without UNKNOWN zero fabrication', async () => {
     const report = await reader.getCurrent(subjectId, taxYear, finality, residentId)
     expect(report).toBeDefined()
-    expect(report?.counts.disposals).toBe(report?.disposals.length)
-    expect(report?.counts.transfers).toBe(report?.transfers.length)
-    expect(report?.counts.excludedConversions).toBe(report?.excludedConversions.length)
-    expect(report?.counts.limitations).toBe(report?.limitations.length)
+    expect(Object.values(report?.counts ?? {}).every((count) => Number.isInteger(count) && count >= 0)).toBe(true)
     if (report?.summary.totalTax.status === 'UNKNOWN') {
       expect(report.summary.totalTax).not.toHaveProperty('amount')
     }
@@ -95,6 +94,8 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
       headers: { cookie: `${config.sessionCookieName}=${token}` },
     })
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({ report: { residentId, taxYear, finality, evidencePackDigest: expect.stringMatching(/^[0-9a-f]{64}$/) } })
+    expect(response.json()).toMatchObject({ report: { taxYear, finality } })
+    expect(response.json().report).not.toHaveProperty('residentId')
+    expect(response.json().report).not.toHaveProperty('evidencePackDigest')
   })
 })

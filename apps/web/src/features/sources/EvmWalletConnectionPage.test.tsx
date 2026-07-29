@@ -8,7 +8,13 @@ import type {
   ConnectedWallet,
   ConnectWallet,
   RequestOwnershipSignature,
+  WatchWalletSyncJob,
 } from './evmWalletFlow.ts'
+import {
+  completeWalletConnectionTestFixture,
+  connectWalletTestFixture,
+  requestOwnershipSignatureTestFixture,
+} from './evmWalletFlow.test-fixtures.ts'
 
 const connectedWallet: ConnectedWallet = {
   address: '0x1234567890abcdef1234567890abcdef12345678',
@@ -16,6 +22,17 @@ const connectedWallet: ConnectedWallet = {
   network: 'Ethereum',
   provider: 'metamask',
 }
+
+type WalletPageProps = Parameters<typeof EvmWalletConnectionPage>[0]
+
+const withTestFixtures = (
+  overrides: Partial<WalletPageProps> = {},
+): WalletPageProps => ({
+  completeConnection: completeWalletConnectionTestFixture,
+  connectWallet: connectWalletTestFixture,
+  requestSignature: requestOwnershipSignatureTestFixture,
+  ...overrides,
+})
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -35,9 +52,9 @@ function serializeStorage(storage: Storage) {
 }
 
 async function moveToOwnership(
-  props: Parameters<typeof EvmWalletConnectionPage>[0] = {},
+  props: Partial<WalletPageProps> = {},
 ) {
-  render(<EvmWalletConnectionPage {...props} />)
+  render(<EvmWalletConnectionPage {...withTestFixtures(props)} />)
   fireEvent.click(screen.getByRole('radio', { name: 'MetaMask' }))
   fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
 
@@ -45,7 +62,7 @@ async function moveToOwnership(
 }
 
 async function moveToScope(
-  props: Parameters<typeof EvmWalletConnectionPage>[0] = {},
+  props: Partial<WalletPageProps> = {},
 ) {
   await moveToOwnership(props)
   fireEvent.click(
@@ -62,7 +79,7 @@ afterEach(() => {
 
 describe('EvmWalletConnectionPage', () => {
   it('completes the Figma wallet connection, signature, scope, and backfill flow', async () => {
-    render(<EvmWalletConnectionPage />)
+    render(<EvmWalletConnectionPage {...withTestFixtures()} />)
 
     expect(
       screen.getByRole('heading', { name: 'EVM Wallet 연결' }),
@@ -90,14 +107,19 @@ describe('EvmWalletConnectionPage', () => {
       '2027',
     )
     expect(
-      screen.getByText(/매일 자동 \+ 수동 새로고침/),
+      screen.getByText(/사용자 요청 시 선택 범위 수집/),
     ).toBeInTheDocument()
+    expect(screen.queryByText(/최근 90일/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/매일 자동/)).not.toBeInTheDocument()
+    expect(screen.getByText('공개 지갑 주소를 서비스에 저장')).toBeInTheDocument()
+    expect(screen.getByText(/개인키나 서명 권한은 저장하지 않습니다/)).toBeInTheDocument()
+    expect(screen.queryByText('사용자 지갑 주소를 기록하지 않음')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '연결 완료' }))
 
     await screen.findByRole('heading', { name: '지갑 연결이 완료됐어요' })
     expect(screen.getByText('BACKFILLING')).toBeInTheDocument()
-    expect(screen.getByText('최근 90일 수집 중')).toBeInTheDocument()
+    expect(screen.getByText('선택 기간 수집 중')).toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: '수집 진행 상태 보기' }),
     ).toHaveAttribute('href', '/dashboard')
@@ -120,7 +142,11 @@ describe('EvmWalletConnectionPage', () => {
       ok: false,
     })
 
-    render(<EvmWalletConnectionPage connectWallet={connectWallet} />)
+    render(
+      <EvmWalletConnectionPage
+        {...withTestFixtures({ connectWallet })}
+      />,
+    )
     fireEvent.click(screen.getByRole('radio', { name: 'Rabby Wallet' }))
     fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
 
@@ -288,5 +314,35 @@ describe('EvmWalletConnectionPage', () => {
     const secondIntentKey = completeConnection.mock.calls[1]?.[0].intentKey
     expect(firstIntentKey).toBeTruthy()
     expect(secondIntentKey).toBe(firstIntentKey)
+  })
+
+  it('uses the returned real job id and renders terminal polling updates', async () => {
+    const completeConnection = vi.fn<CompleteWalletConnection>(async ({ period }) => ({
+      jobId: 'job-real-1',
+      jobStatus: 'BACKFILLING',
+      normalizedPeriod: {
+        mode: 'TAX_YEAR',
+        taxYear: period.mode === 'TAX_YEAR' ? period.taxYear : '2027',
+        startDate: '2027-01-01',
+        endDate: '2027-12-31',
+      },
+      ok: true,
+      sourceId: 'source-real-1',
+      sourceStatus: 'SOURCE_SAVED',
+    }))
+    const watchSyncJob = vi.fn<WatchWalletSyncJob>(async ({ jobId, onUpdate }) => {
+      onUpdate({ id: jobId, state: 'RUNNING', processedRecords: 5 })
+      const terminal = { id: jobId, state: 'SUCCEEDED' as const, processedRecords: 12 }
+      onUpdate(terminal)
+      return terminal
+    })
+
+    await moveToScope({ completeConnection, watchSyncJob })
+    fireEvent.click(screen.getByRole('button', { name: '연결 완료' }))
+
+    expect(await screen.findByText('SUCCEEDED')).toBeInTheDocument()
+    expect(screen.getByText('수집 완료')).toBeInTheDocument()
+    expect(screen.getByText('job-real-1')).toBeInTheDocument()
+    expect(watchSyncJob).toHaveBeenCalledWith(expect.objectContaining({ jobId: 'job-real-1' }))
   })
 })

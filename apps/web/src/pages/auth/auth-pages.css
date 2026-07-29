@@ -2,7 +2,7 @@
 .public-page {
   --auth-ink: #1a1a1a;
   --auth-secondary: #5f6368;
-  --auth-muted: #8a8f98;
+  --auth-muted: #6b7280;
   --auth-border: #d9dce1;
   --auth-border-soft: #eceef1;
   --auth-subtle: #f3f4f6;
@@ -231,6 +231,74 @@
 
 .auth-card--wide {
   width: min(760px, 100%);
+}
+
+.auth-entry-card {
+  width: min(600px, 100%);
+}
+
+.auth-entry-options {
+  display: grid;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.auth-entry-options > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 86px;
+  padding: 18px 22px;
+  border: 1px solid var(--auth-border);
+  border-radius: 12px;
+  color: var(--auth-ink);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.auth-entry-options > button:hover {
+  border-color: #c7cbd1;
+  box-shadow: 0 10px 24px rgba(20, 25, 31, 0.1);
+  transform: translateY(-1px);
+}
+
+.auth-entry-options > button:first-child {
+  border-color: #1a1a1a;
+  color: #fff;
+  background: #1a1a1a;
+}
+
+.auth-entry-options > button:first-child:hover {
+  border-color: #2b2b2d;
+  background: #2b2b2d;
+}
+
+.auth-entry-options span {
+  display: grid;
+  gap: 5px;
+}
+
+.auth-entry-options strong {
+  font-size: 17px;
+}
+
+.auth-entry-options small {
+  color: var(--auth-secondary);
+  font-size: 13px;
+}
+
+.auth-entry-options > button:first-child small {
+  color: #c9cbd0;
+}
+
+.auth-entry-options b {
+  font-size: 20px;
+  font-weight: 400;
 }
 
 .auth-eyebrow,
@@ -594,20 +662,33 @@
 }
 
 .auth-alert {
-  padding: 12px 14px;
-  border-radius: 8px;
+  padding: 0;
+  border-radius: 0;
   font-size: 13px;
   line-height: 20px;
+  word-break: keep-all;
 }
 
 .auth-alert--error {
-  color: #991b1b;
-  background: #fef2f2;
+  color: var(--auth-negative);
+  background: transparent;
 }
 
 .auth-alert--success {
-  color: #166534;
-  background: #f0fdf4;
+  color: var(--auth-positive);
+  background: transparent;
+}
+
+.auth-lead + .auth-alert {
+  margin-top: 14px;
+}
+
+.auth-lead + .auth-alert + .auth-provider-list {
+  margin-top: 18px;
+}
+
+.auth-form > .auth-alert {
+  margin-top: -10px;
 }
 
 .auth-state {
@@ -1468,9 +1549,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .auth-entry-options > button,
   .auth-provider,
   .auth-primary-button,
   .auth-secondary-button {
     transition: none;
+  }
+
+  .auth-entry-options > button:hover {
+    transform: none;
   }
 }

@@ -1,5 +1,5 @@
-github.com/BackwardLabs/daejang-db v0.0.0-20260728124403-aadb1eabf98e h1:GObRsqj5OG00vW6uhRNdP5PciinD/9sy5CRu9U0ubyI=
-github.com/BackwardLabs/daejang-db v0.0.0-20260728124403-aadb1eabf98e/go.mod h1:QOZAPfGAZTNwHQ1SoENdN/xyEPA6QWUpHkoXElnGMHU=
+github.com/BackwardLabs/daejang-db v0.0.0-20260729072115-cd184b6ba884 h1:yTUjy8CYmNcg/Iup7CqHAjDTojb3vX3kUOUSwfpuVNM=
+github.com/BackwardLabs/daejang-db v0.0.0-20260729072115-cd184b6ba884/go.mod h1:QOZAPfGAZTNwHQ1SoENdN/xyEPA6QWUpHkoXElnGMHU=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467 h1:uX1JmpONuD549D73r6cgnxyUu18Zb7yHAy5AYU0Pm4Q=

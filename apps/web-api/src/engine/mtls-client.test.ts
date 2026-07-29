@@ -73,7 +73,7 @@ describeWithOpenSsl('EngineMtlsClient', () => {
       certPath: join(directory, 'client.pem'),
       keyPath: join(directory, 'client.key'),
       serverNameOverride: 'localhost',
-    })
+    }, true)
 
     await expect(client.waitForReady(5_000)).resolves.toBeUndefined()
     expect(client.getConnectivityState()).toBe('READY')

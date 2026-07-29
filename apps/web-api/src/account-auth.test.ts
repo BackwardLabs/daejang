@@ -52,10 +52,18 @@ const config: AppConfig = {
   },
   signup: {
     enabled: true,
+    identityVerificationRequired: false,
     methods: { email: true, oauthProviders: ['naver'] },
   },
-  identityVerificationMode: 'mock',
+  identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: false,
   engineMtls: undefined,
+}
+
+const immediateSignupCodeResponseTiming = {
+  minimumDurationMilliseconds: 0,
+  monotonicNow: () => 0,
+  wait: async () => {},
 }
 
 class FakeNaverAdapter implements OAuthProviderAdapter {
@@ -119,6 +127,7 @@ describe('account authentication routes', () => {
       accountAuthStore: store,
       oauthAdapters: [new FakeNaverAdapter()],
       verificationEmailSender: sender,
+      signupCodeResponseTiming: immediateSignupCodeResponseTiming,
       now: () => now,
     })
   })
@@ -167,6 +176,40 @@ describe('account authentication routes', () => {
     expect(firstUser?.id).toBeTruthy()
     expect(secondUser?.id).toBeTruthy()
     expect(firstUser?.id).not.toBe(secondUser?.id)
+  })
+
+  it('creates a platform account during social signup and reuses it for social login', async () => {
+    const signupStart = await startOAuth('signup')
+    const signup = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/auth/oauth/naver/callback?code=returning-subject&state=${signupStart.state}`,
+      headers: { cookie: signupStart.cookie },
+    })
+
+    expect(signup.statusCode).toBe(302)
+    expect(signup.headers.location).toBe('/?onboarding=terms')
+    const created = await store.findUserByIdentity(
+      'naver',
+      'returning-subject',
+    )
+    expect(created).toMatchObject({ status: 'pending' })
+
+    store.setUserStatus(created?.id as string, 'active')
+    const loginStart = await startOAuth('login')
+    const login = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/auth/oauth/naver/callback?code=returning-subject&state=${loginStart.state}`,
+      headers: { cookie: loginStart.cookie },
+    })
+
+    expect(login.statusCode).toBe(302)
+    expect(login.headers.location).toBe('/dashboard')
+    expect(cookieHeaderText(login.headers['set-cookie'])).toContain(
+      'daejang_session=',
+    )
+    expect(
+      await store.findUserByIdentity('naver', 'returning-subject'),
+    ).toMatchObject({ id: created?.id, status: 'active' })
   })
 
   it('does not create a user for login intent when the provider identity is unknown', async () => {
@@ -355,6 +398,10 @@ describe('account authentication routes', () => {
     expect(activeLogin.json()).toEqual({
       status: 'authenticated',
       nextPath: '/dashboard',
+      user: {
+        id: credential?.user.id,
+        displayName: credential?.user.displayName,
+      },
     })
     const activeLoginCookies = cookieHeaderText(
       activeLogin.headers['set-cookie'],
@@ -365,16 +412,98 @@ describe('account authentication routes', () => {
       await context.sessionService.resolve(previousSession.token),
     ).toBeUndefined()
 
-    now = new Date(now.getTime() + 61_000)
-    const genericExisting = await context.app.inject({
+    const existingSignup = await context.app.inject({
       method: 'POST',
       url: '/api/v1/auth/email/send-code',
       headers: originHeaders,
       payload: { email: 'user@example.com', intent: 'signup' },
     })
-    expect(genericExisting.statusCode).toBe(202)
-    expect(genericExisting.json()).toMatchObject({ status: 'accepted' })
+    expect(existingSignup.statusCode).toBe(409)
+    expect(existingSignup.json()).toMatchObject({
+      error: { code: 'ACCOUNT_ALREADY_EXISTS' },
+    })
     expect(sender.calls).toBe(1)
+    await expect(
+      store.getEligibleEmailChallenge('user@example.com', 'signup', now),
+    ).resolves.toBeUndefined()
+  })
+
+  it('distinguishes existing accounts from temporary email delivery failures', async () => {
+    class ExistingEmailStore extends MemoryAccountAuthStore {
+      readonly challengeEmails: string[] = []
+
+      override async findEmailCredential(email: string) {
+        if (email === 'existing@example.com') {
+          return {
+            user: {
+              id: '00000000-0000-4000-8000-000000000041',
+              displayName: '기존 사용자',
+              status: 'active' as const,
+            },
+            passwordHash: 'not-used',
+          }
+        }
+        return super.findEmailCredential(email)
+      }
+
+      override async createEmailChallenge(
+        record: Parameters<MemoryAccountAuthStore['createEmailChallenge']>[0],
+      ) {
+        this.challengeEmails.push(record.email)
+        return super.createEmailChallenge(record)
+      }
+    }
+
+    const outageStore = new ExistingEmailStore()
+    let deliveryCalls = 0
+    const outageContext = await buildApp({
+      config,
+      logger: false,
+      accountAuthStore: outageStore,
+      oauthAdapters: [new FakeNaverAdapter()],
+      verificationEmailSender: {
+        async sendVerificationCode() {
+          deliveryCalls += 1
+          throw new Error('sender unavailable')
+        },
+      },
+      signupCodeResponseTiming: immediateSignupCodeResponseTiming,
+      now: () => now,
+    })
+
+    try {
+      const sendCode = (email: string) =>
+        outageContext.app.inject({
+          method: 'POST',
+          url: '/api/v1/auth/email/send-code',
+          headers: { origin: config.publicOrigin },
+          payload: { email, intent: 'signup' },
+        })
+      const existing = await sendCode('existing@example.com')
+      const unregistered = await sendCode('unregistered@example.com')
+
+      expect(existing.statusCode).toBe(409)
+      expect(existing.json()).toMatchObject({
+        error: { code: 'ACCOUNT_ALREADY_EXISTS' },
+      })
+      expect(unregistered.statusCode).toBe(503)
+      expect(unregistered.json()).toMatchObject({
+        error: { code: 'EMAIL_DELIVERY_FAILED' },
+      })
+      expect(deliveryCalls).toBe(1)
+      expect(outageStore.challengeEmails).toEqual([
+        'unregistered@example.com',
+      ])
+      await expect(
+        outageStore.getEligibleEmailChallenge(
+          'unregistered@example.com',
+          'signup',
+          now,
+        ),
+      ).resolves.toBeUndefined()
+    } finally {
+      await outageContext.app.close()
+    }
   })
 
   it('publishes signup methods from the server capability', async () => {
@@ -387,6 +516,7 @@ describe('account authentication routes', () => {
     expect(response.json()).toEqual({
       signup: {
         enabled: true,
+        identityVerificationRequired: false,
         methods: { email: true, oauthProviders: ['naver'] },
       },
     })
@@ -429,6 +559,7 @@ describe('account authentication routes', () => {
         ...config,
         signup: {
           enabled: false,
+          identityVerificationRequired: false,
           methods: { email: false, oauthProviders: [] },
         },
       },
@@ -446,6 +577,7 @@ describe('account authentication routes', () => {
       expect(capability.json()).toEqual({
         signup: {
           enabled: false,
+          identityVerificationRequired: false,
           methods: { email: false, oauthProviders: [] },
         },
       })
@@ -510,11 +642,6 @@ describe('account authentication routes', () => {
               action: 'accepted',
             })),
           },
-        },
-        {
-          method: 'POST' as const,
-          url: '/api/v1/signup/identity-verification/mock-complete',
-          headers: originHeaders,
         },
       ]) {
         const response = await disabledContext.app.inject(request)
@@ -585,131 +712,124 @@ describe('account authentication routes', () => {
     })
   })
 
-  it('records only current required legal document ids for a restricted signup session', async () => {
-    const originHeaders = { origin: config.publicOrigin }
-    await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/email/send-code',
-      headers: originHeaders,
-      payload: { email: 'legal@example.com', intent: 'signup' },
-    })
-    const verification = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/email/verify-code',
-      headers: originHeaders,
-      payload: {
-        email: 'legal@example.com',
-        intent: 'signup',
-        code: sender.code,
+  it('activates signup after required consent when identity verification is disabled', async () => {
+    const noIdentityStore = new MemoryAccountAuthStore()
+    const noIdentityConfig: AppConfig = {
+      ...config,
+      signup: {
+        ...config.signup,
+        identityVerificationRequired: false,
       },
-    })
-    const signup = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/email/signup',
-      headers: originHeaders,
-      payload: {
-        email: 'legal@example.com',
-        password: 'Password1!',
-        passwordConfirmation: 'Password1!',
-        verificationToken: verification.json<{
-          verificationToken: string
-        }>().verificationToken,
-      },
-    })
-    const signupCookie = cookiePair(signup.headers['set-cookie'])
-    expect(signupCookie).toBeTruthy()
-
-    const documents: CurrentLegalDocument[] = [
-      ['terms', '00000000-0000-4000-8000-000000000011'],
-      ['privacy', '00000000-0000-4000-8000-000000000012'],
-      ['identity_verification', '00000000-0000-4000-8000-000000000013'],
-      ['marketing', '00000000-0000-4000-8000-000000000014'],
-    ].map(([documentType, id]) => {
-      const content = `${documentType} test content`
-      return {
-        id: id as string,
-        documentType: documentType as CurrentLegalDocument['documentType'],
-        locale: 'ko-KR',
-        version: '1.0.0',
-        contentHash: createHash('sha256').update(content).digest('hex'),
-        content,
-        effectiveAt: now,
-      }
-    })
-    for (const document of documents) {
-      store.seedLegalDocument(document)
+      identityVerificationMode: 'disabled',
     }
-
-    const current = await context.app.inject({
-      method: 'GET',
-      url: '/api/v1/legal-documents/current?locale=ko-KR',
-    })
-    expect(current.statusCode).toBe(200)
-    expect(current.json<{ documents: unknown[] }>().documents).toHaveLength(4)
-
-    const consent = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/signup/consents',
-      headers: {
-        ...originHeaders,
-        cookie: signupCookie,
-      },
-      payload: {
-        locale: 'ko-KR',
-        decisions: documents.map(({ id, documentType }) => ({
-          legalDocumentId: id,
-          action: documentType === 'marketing' ? 'withdrawn' : 'accepted',
-        })),
-      },
-    })
-    expect(consent.statusCode).toBe(200)
-    expect(consent.json()).toEqual({
-      status: 'accepted',
-      nextStep: 'identity_verification',
+    const noIdentityContext = await buildApp({
+      config: noIdentityConfig,
+      logger: false,
+      accountAuthStore: noIdentityStore,
+      oauthAdapters: [new FakeNaverAdapter()],
+      verificationEmailSender: new CapturingEmailSender(),
+      now: () => now,
     })
 
-    await expect(
-      buildApp({
-        config: { ...config, identityVerificationMode: 'disabled' },
-        logger: false,
-        accountAuthStore: store,
-        oauthAdapters: [new FakeNaverAdapter()],
-        verificationEmailSender: sender,
-        now: () => now,
-      }),
-    ).rejects.toThrow('Signup capability')
+    try {
+      const start = await noIdentityContext.app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/oauth/naver/start?intent=signup',
+      })
+      const authorizationUrl = new URL(start.headers.location as string)
+      const state = authorizationUrl.searchParams.get('state') as string
+      const oauthCookie = cookiePair(start.headers['set-cookie']) as string
+      const callback = await noIdentityContext.app.inject({
+        method: 'GET',
+        url: `/api/v1/auth/oauth/naver/callback?code=no-identity-subject&state=${state}`,
+        headers: { cookie: oauthCookie },
+      })
+      const signupCookie = /daejang_signup=[^;\n]+/u.exec(
+        cookieHeaderText(callback.headers['set-cookie']),
+      )?.[0] as string
+      expect(signupCookie).toBeTruthy()
 
-    const completion = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/signup/identity-verification/mock-complete',
-      headers: {
-        ...originHeaders,
-        cookie: signupCookie,
-      },
-    })
-    expect(completion.statusCode).toBe(200)
-    expect(completion.json()).toEqual({
-      status: 'authenticated',
-      nextPath: '/dashboard',
-    })
-    const sessionCookie = cookiePair(completion.headers['set-cookie'])
-    expect(sessionCookie).toMatch(/^daejang_session=/u)
+      for (const [documentType, id] of [
+        ['terms', '00000000-0000-4000-8000-000000000031'],
+        ['privacy', '00000000-0000-4000-8000-000000000032'],
+        [
+          'identity_verification',
+          '00000000-0000-4000-8000-000000000033',
+        ],
+        ['marketing', '00000000-0000-4000-8000-000000000034'],
+      ] as const) {
+        const content = `${documentType} no identity test content`
+        noIdentityStore.seedLegalDocument({
+          id,
+          documentType,
+          locale: 'ko-KR',
+          version: '1.0.0',
+          contentHash: createHash('sha256').update(content).digest('hex'),
+          content,
+          effectiveAt: now,
+        })
+      }
 
-    const me = await context.app.inject({
-      method: 'GET',
-      url: '/api/v1/me',
-      headers: { cookie: sessionCookie },
-    })
-    expect(me.statusCode).toBe(200)
+      const documentsResponse = await noIdentityContext.app.inject({
+        method: 'GET',
+        url: '/api/v1/legal-documents/current?locale=ko-KR',
+      })
+      const applicableDocuments = documentsResponse.json<{
+        documents: Array<CurrentLegalDocument & { required: boolean }>
+      }>().documents
+      expect(applicableDocuments.map(({ documentType }) => documentType)).toEqual([
+        'terms',
+        'privacy',
+        'marketing',
+      ])
+      expect(
+        applicableDocuments
+          .filter(({ required }) => required)
+          .map(({ documentType }) => documentType),
+      ).toEqual(['terms', 'privacy'])
 
-    const replay = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/signup/identity-verification/mock-complete',
-      headers: {
-        ...originHeaders,
-        cookie: signupCookie,
-      },
-    })
-    expect(replay.statusCode).toBe(401)
+      const removedMockCompletion = await noIdentityContext.app.inject({
+        method: 'POST',
+        url: '/api/v1/signup/identity-verification/mock-complete',
+        headers: {
+          origin: noIdentityConfig.publicOrigin,
+          cookie: signupCookie,
+        },
+      })
+      expect(removedMockCompletion.statusCode).toBe(404)
+
+      const consent = await noIdentityContext.app.inject({
+        method: 'POST',
+        url: '/api/v1/signup/consents',
+        headers: {
+          origin: noIdentityConfig.publicOrigin,
+          cookie: signupCookie,
+        },
+        payload: {
+          locale: 'ko-KR',
+          decisions: applicableDocuments.map(({ id, documentType }) => ({
+            legalDocumentId: id,
+            action: documentType === 'marketing' ? 'withdrawn' : 'accepted',
+          })),
+        },
+      })
+      expect(consent.statusCode).toBe(200)
+      expect(consent.json()).toEqual({
+        status: 'authenticated',
+        nextPath: '/dashboard',
+        user: {
+          id: expect.any(String),
+          displayName: 'GIWA 사용자',
+        },
+      })
+      expect(cookieHeaderText(consent.headers['set-cookie'])).toContain(
+        'daejang_session=',
+      )
+      await expect(
+        noIdentityStore.findUserByIdentity('naver', 'no-identity-subject'),
+      ).resolves.toMatchObject({ status: 'active' })
+    } finally {
+      await noIdentityContext.app.close()
+    }
   })
 })

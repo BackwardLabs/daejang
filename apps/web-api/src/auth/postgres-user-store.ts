@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import type { Pool, PoolClient } from 'pg'
 
 export type UserStatus = 'pending' | 'active' | 'suspended' | 'deleted'
@@ -126,6 +128,65 @@ export class PostgresUserStore {
     }
     const row = await this.#loadUser(userId)
     return row ? toUserRecord(row) : undefined
+  }
+
+  async provisionEmailAccount(input: {
+    id: string
+    displayName: string
+    email: string
+    passwordHash: string
+    now: Date
+  }) {
+    return this.#transaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `provisioned-email-account:${input.email}`,
+      ])
+      await client.query(
+        `
+          INSERT INTO web_private.users (id, display_name)
+          VALUES ($1, $2)
+        `,
+        [input.id, input.displayName],
+      )
+
+      const userEmailId = randomUUID()
+      await client.query(
+        `
+          INSERT INTO web_private.user_emails (
+            id,
+            user_id,
+            normalized_email,
+            source,
+            giwa_verified_at,
+            login_enabled,
+            is_primary
+          ) VALUES ($1, $2, $3, 'email', $4, true, true)
+        `,
+        [userEmailId, input.id, input.email, input.now],
+      )
+
+      await client.query(
+        `
+          INSERT INTO web_private.email_credentials (
+            user_email_id,
+            password_hash,
+            password_algorithm,
+            created_at,
+            password_updated_at
+          ) VALUES ($1, $2, 'argon2id', $3, $3)
+        `,
+        [userEmailId, input.passwordHash, input.now],
+      )
+      await client.query('SELECT web_private.set_user_status($1::uuid, $2)', [
+        input.id,
+        'active',
+      ])
+      const row = await this.#loadUserWithClient(client, input.id)
+      if (!row) {
+        throw new Error('Provisioned user could not be reloaded')
+      }
+      return toUserRecord(row)
+    })
   }
 
   async linkIdentity(input: {
@@ -270,6 +331,18 @@ export class PostgresUserStore {
 
   async #loadUser(userId: string) {
     const result = await this.pool.query<UserRow>(
+      `
+        SELECT id, display_name, status, session_epoch, created_at, updated_at
+        FROM web_private.users
+        WHERE id = $1
+      `,
+      [userId],
+    )
+    return result.rows[0]
+  }
+
+  async #loadUserWithClient(client: PoolClient, userId: string) {
+    const result = await client.query<UserRow>(
       `
         SELECT id, display_name, status, session_epoch, created_at, updated_at
         FROM web_private.users

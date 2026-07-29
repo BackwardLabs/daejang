@@ -16,18 +16,16 @@ export type AppConfig = {
   oauth: OAuthConfig
   emailAuth: EmailAuthConfig
   signup: SignupCapability
-  identityVerificationMode: 'disabled' | 'mock'
+  identityVerificationMode: 'disabled'
+  upbitPdfImportEnabled: boolean
   engineMtls: EngineMtlsConfig | undefined
   engineInsecureTarget?: string
   privateObjectRoot?: string
-  devBootstrapUser?: {
-    id: string
-    displayName: string
-  }
 }
 
 export type SignupCapability = {
   enabled: boolean
+  identityVerificationRequired: boolean
   methods: {
     email: boolean
     oauthProviders: ReadonlyArray<OAuthProviderName>
@@ -120,16 +118,12 @@ const parseBoolean = (value: string | undefined, fallback: boolean, name: string
 
 const parseIdentityVerificationMode = (
   value: string | undefined,
-  production: boolean,
 ) => {
   const mode = value ?? 'disabled'
-  if (!['disabled', 'mock'].includes(mode)) {
-    throw new Error('IDENTITY_VERIFICATION_MODE must be disabled or mock')
+  if (mode !== 'disabled') {
+    throw new Error('IDENTITY_VERIFICATION_MODE must be disabled')
   }
-  if (production && mode === 'mock') {
-    throw new Error('IDENTITY_VERIFICATION_MODE=mock is not allowed in production')
-  }
-  return mode as AppConfig['identityVerificationMode']
+  return 'disabled' as const
 }
 
 const oauthProviderNames = ['naver', 'google', 'kakao'] as const
@@ -329,11 +323,20 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   }
 
   const production = runtimeMode === 'production'
+  const upbitPdfImportEnabled = parseBoolean(
+    environment.UPBIT_PDF_IMPORT_ENABLED,
+    false,
+    'UPBIT_PDF_IMPORT_ENABLED',
+  )
+  if (production && upbitPdfImportEnabled) {
+    throw new Error(
+      'UPBIT_PDF_IMPORT_ENABLED cannot be enabled in production until an encrypted, audited, versioned object storage adapter is configured',
+    )
+  }
   const oauth = loadOAuthConfig(environment, production)
   const emailAuth = loadEmailAuthConfig(environment, production)
   const identityVerificationMode = parseIdentityVerificationMode(
     environment.IDENTITY_VERIFICATION_MODE,
-    production,
   )
   const signupRequested = parseBoolean(
     environment.SIGNUP_ENABLED,
@@ -351,15 +354,15 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   ) {
     throw new Error('SIGNUP_ENABLED=true requires at least one configured signup method')
   }
-  if (signupRequested && (production || identityVerificationMode !== 'mock')) {
-    throw new Error(
-      'SIGNUP_ENABLED=true requires a completion-capable identity verifier',
-    )
-  }
   const signup: SignupCapability = signupRequested
-    ? { enabled: true, methods: signupMethods }
+    ? {
+        enabled: true,
+        identityVerificationRequired: false,
+        methods: signupMethods,
+      }
     : {
         enabled: false,
+        identityVerificationRequired: false,
         methods: { email: false, oauthProviders: [] },
       }
   const engineInsecureTarget = loadDevelopmentEngineTarget(
@@ -382,32 +385,6 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   if (production && environment.PRIVATE_OBJECT_ROOT === undefined) {
     throw new Error('PRIVATE_OBJECT_ROOT is required in production')
   }
-  if (
-    production &&
-    (environment.DEV_BOOTSTRAP_USER_ID || environment.DEV_BOOTSTRAP_DISPLAY_NAME)
-  ) {
-    throw new Error('Development session bootstrap must not be enabled in production')
-  }
-
-  const devBootstrapUserId = environment.DEV_BOOTSTRAP_USER_ID
-  const devBootstrapDisplayName = environment.DEV_BOOTSTRAP_DISPLAY_NAME
-  if (
-    (devBootstrapUserId === undefined) !==
-    (devBootstrapDisplayName === undefined)
-  ) {
-    throw new Error(
-      'DEV_BOOTSTRAP_USER_ID and DEV_BOOTSTRAP_DISPLAY_NAME must be configured together',
-    )
-  }
-  if (
-    devBootstrapUserId &&
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      devBootstrapUserId,
-    )
-  ) {
-    throw new Error('DEV_BOOTSTRAP_USER_ID must be a UUID')
-  }
-
   const rateLimitHmacSecret =
     environment.RATE_LIMIT_HMAC_SECRET ?? 'development-only-rate-limit-secret'
   if (production && Buffer.byteLength(rateLimitHmacSecret, 'utf8') < 32) {
@@ -461,16 +438,9 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     emailAuth,
     signup,
     identityVerificationMode,
+    upbitPdfImportEnabled,
     engineMtls: loadEngineMtlsConfig(environment, production),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
-    ...(devBootstrapUserId && devBootstrapDisplayName
-      ? {
-          devBootstrapUser: {
-            id: devBootstrapUserId,
-            displayName: devBootstrapDisplayName,
-          },
-        }
-      : {}),
   }
 }

@@ -33,7 +33,6 @@ import { ApiError } from '../errors.js'
 import {
   accountAlreadyExists,
   accountUnavailable,
-  identityVerificationUnavailable,
   invalidOAuthTransaction,
   legalDocumentsUnavailable,
   oauthAccountNotFound,
@@ -61,11 +60,21 @@ const oauthProviders = new Set<OAuthProviderName>([
   'kakao',
 ])
 const oauthIntents = new Set<OAuthIntent>(['signup', 'login'])
-const requiredLegalDocumentTypes = new Set<LegalDocumentType>([
+const requiredLegalDocumentTypes = (
+  options: AccountAuthRoutesOptions,
+): ReadonlyArray<LegalDocumentType> => [
   'terms',
   'privacy',
-  'identity_verification',
-])
+  ...(options.config.signup.identityVerificationRequired
+    ? (['identity_verification'] as const)
+    : []),
+]
+const applicableLegalDocumentTypes = (
+  options: AccountAuthRoutesOptions,
+): ReadonlyArray<LegalDocumentType> => [
+  ...requiredLegalDocumentTypes(options),
+  'marketing',
+]
 const currentTime = (options: AccountAuthRoutesOptions) =>
   options.now?.() ?? new Date()
 
@@ -149,6 +158,43 @@ const completeActiveLogin = async (
     options.config,
   )
   clearSignupSessionCookie(reply, options.config)
+  return completed.session.user
+}
+
+const completeSignupSession = async (
+  reply: FastifyReply,
+  input: {
+    user: AccountUser
+    signupToken: string
+  },
+  options: AccountAuthRoutesOptions,
+) => {
+  const activatedUser = await options.signupSessionService.complete(
+    input.signupToken,
+    input.user.id,
+    requiredLegalDocumentTypes(options),
+  )
+  if (!activatedUser) {
+    throw signupAuthenticationRequired()
+  }
+  const session = await options.sessionService.create({
+    user: {
+      id: activatedUser.id,
+      displayName: activatedUser.displayName,
+    },
+  })
+  setSessionCookie(
+    reply,
+    session.token,
+    session.session.absoluteExpiresAt,
+    options.config,
+  )
+  clearSignupSessionCookie(reply, options.config)
+  return {
+    status: 'authenticated' as const,
+    nextPath: '/dashboard' as const,
+    user: session.session.user,
+  }
 }
 
 export const registerAccountAuthRoutes = async (
@@ -158,6 +204,8 @@ export const registerAccountAuthRoutes = async (
   app.get('/api/v1/auth/capabilities', async () => ({
     signup: {
       enabled: options.config.signup.enabled,
+      identityVerificationRequired:
+        options.config.signup.identityVerificationRequired,
       methods: {
         email: options.config.signup.methods.email,
         oauthProviders: [...options.config.signup.methods.oauthProviders],
@@ -562,7 +610,7 @@ export const registerAccountAuthRoutes = async (
       if (user.status !== 'active') {
         throw accountUnavailable()
       }
-      await completeActiveLogin(
+      const authenticatedUser = await completeActiveLogin(
         reply,
         {
           provider: 'email',
@@ -577,6 +625,7 @@ export const registerAccountAuthRoutes = async (
       return {
         status: 'authenticated',
         nextPath: normalizeReturnPath(request.body.returnTo),
+        user: authenticatedUser,
       }
     },
   )
@@ -599,15 +648,19 @@ export const registerAccountAuthRoutes = async (
       },
     },
     async (request) => {
-      const documents = await options.accountStore.listCurrentLegalDocuments(
-        request.query.locale ?? 'ko-KR',
-        currentTime(options),
-      )
+      const applicableTypes = new Set(applicableLegalDocumentTypes(options))
+      const requiredTypes = new Set(requiredLegalDocumentTypes(options))
+      const documents = (
+        await options.accountStore.listCurrentLegalDocuments(
+          request.query.locale ?? 'ko-KR',
+          currentTime(options),
+        )
+      ).filter((document) => applicableTypes.has(document.documentType))
       const availableTypes = new Set(
         documents.map((document) => document.documentType),
       )
       if (
-        [...requiredLegalDocumentTypes].some(
+        [...requiredTypes].some(
           (documentType) => !availableTypes.has(documentType),
         ) ||
         documents.some(
@@ -620,7 +673,7 @@ export const registerAccountAuthRoutes = async (
       return {
         documents: documents.map((document) => ({
           ...document,
-          required: requiredLegalDocumentTypes.has(document.documentType),
+          required: requiredTypes.has(document.documentType),
         })),
       }
     },
@@ -650,7 +703,7 @@ export const registerAccountAuthRoutes = async (
             locale: { type: 'string', const: 'ko-KR' },
             decisions: {
               type: 'array',
-              minItems: 3,
+              minItems: requiredLegalDocumentTypes(options).length,
               maxItems: 4,
               uniqueItems: true,
               items: {
@@ -670,14 +723,17 @@ export const registerAccountAuthRoutes = async (
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const user = request.signupUser
-      if (!user) {
+      const signupToken = request.signupSessionToken
+      if (!user || !signupToken) {
         throw signupAuthenticationRequired()
       }
       await options.accountStore.recordSignupConsents({
         userId: user.id,
         locale: request.body.locale,
+        applicableDocumentTypes: applicableLegalDocumentTypes(options),
+        requiredDocumentTypes: requiredLegalDocumentTypes(options),
         decisions: request.body.decisions.map((decision) => ({
           id: randomUUID(),
           legalDocumentId: decision.legalDocumentId,
@@ -685,53 +741,16 @@ export const registerAccountAuthRoutes = async (
         })),
         now: currentTime(options),
       })
+      if (!options.config.signup.identityVerificationRequired) {
+        return completeSignupSession(
+          reply,
+          { user, signupToken },
+          options,
+        )
+      }
       return {
         status: 'accepted',
         nextStep: 'identity_verification',
-      }
-    },
-  )
-
-  app.post(
-    '/api/v1/signup/identity-verification/mock-complete',
-    {
-      preHandler: [
-        async () => assertSignupEnabled(options),
-        options.authenticateSignup,
-      ],
-    },
-    async (request, reply) => {
-      if (options.config.identityVerificationMode !== 'mock') {
-        throw identityVerificationUnavailable()
-      }
-      const user = request.signupUser
-      const signupToken = request.signupSessionToken
-      if (!user || !signupToken) {
-        throw signupAuthenticationRequired()
-      }
-      const activatedUser = await options.signupSessionService.complete(
-        signupToken,
-        user.id,
-      )
-      if (!activatedUser) {
-        throw signupAuthenticationRequired()
-      }
-      const session = await options.sessionService.create({
-        user: {
-          id: activatedUser.id,
-          displayName: activatedUser.displayName,
-        },
-      })
-      setSessionCookie(
-        reply,
-        session.token,
-        session.session.absoluteExpiresAt,
-        options.config,
-      )
-      clearSignupSessionCookie(reply, options.config)
-      return {
-        status: 'authenticated',
-        nextPath: '/dashboard',
       }
     },
   )
