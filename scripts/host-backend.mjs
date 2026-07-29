@@ -9,6 +9,7 @@ import {
   lstatSync,
   linkSync,
   openSync,
+  readlinkSync,
   readFileSync,
   rmSync,
   statSync,
@@ -17,7 +18,7 @@ import {
 } from 'node:fs'
 import net from 'node:net'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { loadEnvFile } from 'node:process'
 import { fileURLToPath } from 'node:url'
 
@@ -501,10 +502,99 @@ const createRuntimeBridgeConfig = (source) => {
   const output = join(configRoot, 'jit-bridge.runtime.json')
   const config = JSON.parse(readFileSync(source, 'utf8'))
   config.endpoint = `unix://${join(socketRoot, 'jit.sock')}`
+  const chainStores = new Map([
+    ['eip155:1', 'ethereum-mainnet-tail'],
+    ['eip155:10', 'optimism-mainnet-bulk-bedrock-tail'],
+  ])
+  for (const chain of config.chains ?? []) {
+    if (chainStores.has(chain.chainId)) {
+      chain.chainStore = chainStores.get(chain.chainId)
+    }
+  }
   writeFileSync(output, `${JSON.stringify(config, null, 2)}\n`, {
     mode: 0o600,
   })
   return output
+}
+
+export const createRuntimeSubjectACL = (
+  source,
+  output,
+  uid = process.getuid?.(),
+) => {
+  if (!Number.isSafeInteger(uid) || uid < 0) {
+    throw new Error('Current service UID is unavailable')
+  }
+  const document = JSON.parse(readFileSync(source, 'utf8'))
+  if (document?.version !== 1 || !Array.isArray(document.grants)) {
+    throw new Error('JIT subject ACL must be a version 1 grants document')
+  }
+  const localGrants = document.grants.filter(
+    (grant) => typeof grant?.identity === 'string' && /^uid:\d+$/.test(grant.identity),
+  )
+  if (localGrants.length !== 1) {
+    throw new Error('JIT subject ACL must contain exactly one local UID grant')
+  }
+  localGrants[0].identity = `uid:${uid}`
+  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
+  chmodSync(output, 0o600)
+  return output
+}
+
+export const createRuntimeIndexerConfig = (
+  localSource,
+  bulkSource,
+  output,
+  dataDir,
+) => {
+  const local = JSON.parse(readFileSync(localSource, 'utf8'))
+  const bulk = JSON.parse(readFileSync(bulkSource, 'utf8'))
+  const ethereum = local.chains?.find((chain) => chain?.name === 'ethereum-mainnet')
+  const optimism = bulk.chains?.find((chain) => chain?.name === 'optimism-mainnet-bulk-bedrock')
+  if (!ethereum || !optimism || !isAbsolute(dataDir)) {
+    throw new Error('EVM indexer config is missing a required JIT chain or absolute dataDir')
+  }
+  const ethereumTail = structuredClone(ethereum)
+  ethereumTail.name = 'ethereum-mainnet-tail'
+  ethereumTail.sourceKind = 'remote-finalized-single-source'
+  ethereumTail.startBlock = 25559129
+  delete ethereumTail.liveSource
+  delete ethereumTail.livePath
+  const optimismTail = structuredClone(optimism)
+  optimismTail.name = 'optimism-mainnet-bulk-bedrock-tail'
+  optimismTail.startBlock = 154465211
+  // Candidate queries are offline reads. Keep required supplemental-RPC syntax
+  // closed on loopback instead of forwarding an unrelated production secret.
+  optimismTail.supplementalRpcUrl = 'http://127.0.0.1:1'
+  const document = {
+    ...local,
+    dataDir,
+    sharedRead: true,
+    chains: [ethereumTail, optimismTail],
+  }
+  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
+  chmodSync(output, 0o600)
+  return output
+}
+
+export const ensureRuntimeIndexerView = (root, stores) => {
+  if (!isAbsolute(root)) throw new Error('EVM indexer view root must be absolute')
+  mkdirSync(root, { recursive: true, mode: 0o700 })
+  chmodSync(root, 0o700)
+  for (const [name, source] of Object.entries(stores)) {
+    if (!/^[a-z0-9-]+$/.test(name) || !isAbsolute(source) || !statSync(source).isDirectory()) {
+      throw new Error(`Invalid EVM indexer view store ${name}`)
+    }
+    const destination = join(root, name)
+    if (!existsSync(destination)) {
+      symlinkSync(source, destination, 'dir')
+      continue
+    }
+    if (!lstatSync(destination).isSymbolicLink() || resolve(dirname(destination), readlinkSync(destination)) !== resolve(source)) {
+      throw new Error(`EVM indexer view store ${name} changed unexpectedly`)
+    }
+  }
+  return root
 }
 
 const startServices = async ({ buildArtifacts = true } = {}) => {
@@ -592,6 +682,27 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     if (!ethereumRPC) throw new Error('ENV_RPC_URL_ETHEREUM_MAINNET is missing')
 
     const jitConfig = createCombinedJITConfig()
+    const subjectACL = createRuntimeSubjectACL(
+      join(jitRuntime, 'configs', 'subject-acl.json'),
+      join(configRoot, 'subject-acl.runtime.json'),
+    )
+    const indexerView = ensureRuntimeIndexerView(
+      join(configRoot, 'evm-indexer-view'),
+      {
+        'ethereum-mainnet-tail': process.env.GIWA_ETHEREUM_INDEX_STORE ??
+          '/Users/Shared/Projects/00_Backlight/evm-indexer-data/index/ethereum-mainnet-tail',
+        'optimism-mainnet-bulk-bedrock-tail': process.env.GIWA_OPTIMISM_INDEX_STORE ??
+          '/Users/Shared/Projects/00_Backlight/evm-indexer-data/index-bulk/optimism-mainnet-bulk-bedrock-tail',
+      },
+    )
+    const indexerConfig = createRuntimeIndexerConfig(
+      process.env.GIWA_EVM_INDEXER_CONFIG ??
+        '/Users/Shared/Projects/00_Backlight/evm-indexer/configs/local-nodes.json',
+      process.env.GIWA_EVM_BULK_INDEXER_CONFIG ??
+        '/Users/Shared/Projects/00_Backlight/evm-indexer/configs/bulk-portal.json',
+      join(configRoot, 'evm-indexer.runtime.json'),
+      indexerView,
+    )
     spawnService(
       'jit',
       join(jitRuntime, 'bin', 'jitd'),
@@ -604,16 +715,15 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         process.env.GIWA_EVM_INDEXER_BINARY ??
           '/Users/Shared/Projects/00_Backlight/evm-indexer/bin/evm-indexer',
         '--indexer-config',
-        process.env.GIWA_EVM_INDEXER_CONFIG ??
-          '/Users/Shared/Projects/00_Backlight/evm-indexer/configs/local-nodes.json',
+        indexerConfig,
         '--schema-dir',
         join(jitRuntime, 'schema'),
         '--cue-binary',
         join(jitRuntime, 'bin', 'cue'),
         '--subject-acl',
-        join(jitRuntime, 'configs', 'subject-acl.json'),
+        subjectACL,
       ],
-      serviceEnvironment([], ['ENV_RPC_URL_', 'ETHEREUM_', 'OPTIMISM_'], {
+      serviceEnvironment(['EVM_INDEXER_DATA_DIR'], ['ENV_RPC_URL_', 'ETHEREUM_', 'OPTIMISM_'], {
         ENV_POSTGRES_DSN: jitURL,
         ENV_RPC_URL_ETHEREUM_MAINNET: ethereumRPC,
         ENV_RPC_URL_OPTIMISM_MAINNET: optimismRPC,

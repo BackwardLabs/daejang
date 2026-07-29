@@ -122,8 +122,9 @@ export const EVM_WALLET_ALLOWED_TAX_YEARS = [
 ] as const
 export const EVM_WALLET_LATEST_ALLOWED_DATE = '2027-12-31'
 export const DEFAULT_EVM_WALLET_PERIOD: EvmWalletPeriodDraft = {
-  mode: 'TAX_YEAR',
-  taxYear: '2027',
+  endDate: '2026-07-28',
+  mode: 'CUSTOM',
+  startDate: '2026-07-28',
 }
 
 type SelectState = {

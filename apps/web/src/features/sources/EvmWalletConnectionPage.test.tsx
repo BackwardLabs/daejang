@@ -79,7 +79,12 @@ afterEach(() => {
 
 describe('EvmWalletConnectionPage', () => {
   it('completes the Figma wallet connection, signature, scope, and backfill flow', async () => {
-    render(<EvmWalletConnectionPage {...withTestFixtures()} />)
+    const completeConnection = vi.fn(completeWalletConnectionTestFixture)
+    render(
+      <EvmWalletConnectionPage
+        {...withTestFixtures({ completeConnection })}
+      />,
+    )
 
     expect(
       screen.getByRole('heading', { name: 'EVM Wallet 연결' }),
@@ -103,9 +108,8 @@ describe('EvmWalletConnectionPage', () => {
     )
 
     await screen.findByRole('heading', { name: '연결 및 수집 범위' })
-    expect(screen.getByRole('combobox', { name: '과세연도' })).toHaveValue(
-      '2027',
-    )
+    expect(screen.getByLabelText('시작일')).toHaveValue('2026-07-28')
+    expect(screen.getByLabelText('종료일')).toHaveValue('2026-07-28')
     expect(
       screen.getByText(/사용자 요청 시 선택 범위 수집/),
     ).toBeInTheDocument()
@@ -118,6 +122,15 @@ describe('EvmWalletConnectionPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '연결 완료' }))
 
     await screen.findByRole('heading', { name: '지갑 연결이 완료됐어요' })
+    expect(completeConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        period: {
+          endDate: '2026-07-28',
+          mode: 'CUSTOM',
+          startDate: '2026-07-28',
+        },
+      }),
+    )
     expect(screen.getByText('BACKFILLING')).toBeInTheDocument()
     expect(screen.getByText('선택 기간 수집 중')).toBeInTheDocument()
     expect(
