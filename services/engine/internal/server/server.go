@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/BackwardLabs/daejang-db/pkg/artifactstore"
@@ -96,11 +98,26 @@ func Run(ctx context.Context, config Config) error {
 		}
 	}
 
-	listener, err := net.Listen("tcp", config.Listen)
+	network := "tcp"
+	address := config.Listen
+	if strings.HasPrefix(config.Listen, "unix://") {
+		network = "unix"
+		address = strings.TrimPrefix(config.Listen, "unix://")
+		if err := os.Remove(address); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove stale Engine socket: %w", err)
+		}
+	}
+	listener, err := net.Listen(network, address)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", config.Listen, err)
 	}
 	defer listener.Close()
+	if network == "unix" {
+		if err := os.Chmod(address, 0o600); err != nil {
+			return fmt.Errorf("protect Engine socket: %w", err)
+		}
+		defer os.Remove(address)
+	}
 
 	options := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(32 << 20),
@@ -128,7 +145,13 @@ func Run(ctx context.Context, config Config) error {
 	enginev1.RegisterSourceServiceServer(grpcServer, &source.Service{
 		Store: source.PostgresStore{Store: sourceRuntime.Store, DocumentStore: jobRuntime.Store},
 		Importer: &source.DocumentImporter{
-			Jobs: jobRuntime.Store, Artifacts: sourceArtifactRuntime.Store, Evidence: sourceEvidenceRuntime.Store,
+			Jobs: jobRuntime.Store,
+			Artifacts: source.EncryptingArtifactStore{
+				Store: sourceArtifactRuntime.Store,
+				Key:   config.PrivateObjectKey,
+				KeyID: config.PrivateObjectKeyID,
+			},
+			Evidence:      sourceEvidenceRuntime.Store,
 			Parser:        parserClient,
 			LeaseDuration: config.PDFImportLeaseDuration,
 		},

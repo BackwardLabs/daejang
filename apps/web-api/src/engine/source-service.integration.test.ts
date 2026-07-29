@@ -15,7 +15,7 @@ describeWithEngine('SourceService integration', () => {
   let client: EngineMtlsClient
 
   beforeAll(async () => {
-    client = EngineMtlsClient.connectInsecureForDevelopment(engineTarget!, true)
+    client = EngineMtlsClient.connectInsecureLoopback(engineTarget!, true)
     await client.waitForReady(5_000)
   })
 

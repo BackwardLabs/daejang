@@ -22,6 +22,10 @@ export type AppConfig = {
   engineInsecureTarget?: string
   privateObjectRoot?: string
   reportPayments?: ReportPaymentConfig
+  privateObjectEncryptionKey?: Buffer
+  privateObjectEncryptionKeyId?: string
+  privateObjectLegacyKeyId?: string
+  privateObjectDecryptionKeys?: ReadonlyMap<string, Buffer>
 }
 
 export type ReportPaymentConfig = {
@@ -229,6 +233,44 @@ const parseEncryptionKey = (
   return key
 }
 
+const parsePrivateObjectEncryptionKey = (value: string | undefined) => {
+  if (!value) return undefined
+  const key = Buffer.from(value, 'base64')
+  if (
+    key.length !== 32 ||
+    key.toString('base64').replace(/=+$/, '') !== value.replace(/=+$/, '')
+  ) {
+    throw new Error(
+      'PRIVATE_OBJECT_ENCRYPTION_KEY must be a base64-encoded 32-byte key',
+    )
+  }
+  return key
+}
+
+const parsePrivateObjectDecryptionKeys = (value: string | undefined) => {
+  const keys = new Map<string, Buffer>()
+  if (!value) return keys
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    throw new Error('PRIVATE_OBJECT_DECRYPTION_KEYS must be a JSON object')
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error('PRIVATE_OBJECT_DECRYPTION_KEYS must be a JSON object')
+  }
+  for (const [keyId, encodedKey] of Object.entries(parsed)) {
+    const key = parsePrivateObjectEncryptionKey(
+      typeof encodedKey === 'string' ? encodedKey : undefined,
+    )
+    if (!key || !/^[A-Za-z0-9._-]{1,64}$/.test(keyId)) {
+      throw new Error('PRIVATE_OBJECT_DECRYPTION_KEYS contains an invalid entry')
+    }
+    keys.set(keyId, key)
+  }
+  return keys
+}
+
 const loadOAuthConfig = (
   environment: NodeJS.ProcessEnv,
   production: boolean,
@@ -358,7 +400,7 @@ const loadEngineMtlsConfig = (
   }
 }
 
-const loadDevelopmentEngineTarget = (
+const loadInsecureLoopbackEngineTarget = (
   environment: NodeJS.ProcessEnv,
   production: boolean,
 ) => {
@@ -366,16 +408,27 @@ const loadDevelopmentEngineTarget = (
   if (!target) {
     return undefined
   }
-  if (production) {
-    throw new Error('ENGINE_GRPC_INSECURE_TARGET is not allowed in production')
-  }
   if (
     environment.ENGINE_GRPC_TARGET ||
     environment.ENGINE_GRPC_CA_PATH ||
     environment.ENGINE_GRPC_CERT_PATH ||
     environment.ENGINE_GRPC_KEY_PATH
   ) {
-    throw new Error('Configure either Engine mTLS or insecure loopback, not both')
+    throw new Error('Configure either Engine mTLS or a local Engine transport, not both')
+  }
+  const unixSocket = /^unix:(\/.+)$/.exec(target)
+  if (unixSocket) {
+    if (
+      unixSocket[1]?.includes('/../') ||
+      unixSocket[1]?.endsWith('/..') ||
+      unixSocket[1]?.includes('/./')
+    ) {
+      throw new Error('ENGINE_GRPC_INSECURE_TARGET Unix socket path must be normalized')
+    }
+    return target
+  }
+  if (production) {
+    throw new Error('plaintext TCP Engine transport is not allowed in production')
   }
   const match = /^(?:127\.0\.0\.1|localhost|\[::1\]):([1-9][0-9]{0,4})$/.exec(target)
   if (!match || Number(match[1]) > 65_535) {
@@ -396,9 +449,33 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     false,
     'UPBIT_PDF_IMPORT_ENABLED',
   )
-  if (production && upbitPdfImportEnabled) {
+  const privateObjectEncryptionKey = parsePrivateObjectEncryptionKey(
+    environment.PRIVATE_OBJECT_ENCRYPTION_KEY,
+  )
+  const privateObjectEncryptionKeyId = environment.PRIVATE_OBJECT_ENCRYPTION_KEY_ID
+  const privateObjectLegacyKeyId = environment.PRIVATE_OBJECT_LEGACY_KEY_ID
+  const privateObjectDecryptionKeys = parsePrivateObjectDecryptionKeys(
+    environment.PRIVATE_OBJECT_DECRYPTION_KEYS,
+  )
+  if (
+    privateObjectLegacyKeyId &&
+    (!/^[A-Za-z0-9._-]{1,64}$/.test(privateObjectLegacyKeyId) ||
+      (privateObjectLegacyKeyId !== privateObjectEncryptionKeyId &&
+        !privateObjectDecryptionKeys.has(privateObjectLegacyKeyId)))
+  ) {
     throw new Error(
-      'UPBIT_PDF_IMPORT_ENABLED cannot be enabled in production until an encrypted, audited, versioned object storage adapter is configured',
+      'PRIVATE_OBJECT_LEGACY_KEY_ID must identify the current key or an entry in PRIVATE_OBJECT_DECRYPTION_KEYS',
+    )
+  }
+  if (
+    production &&
+    upbitPdfImportEnabled &&
+    (!privateObjectEncryptionKey ||
+      !privateObjectEncryptionKeyId ||
+      !/^[A-Za-z0-9._-]{1,64}$/.test(privateObjectEncryptionKeyId))
+  ) {
+    throw new Error(
+      'PRIVATE_OBJECT_ENCRYPTION_KEY and PRIVATE_OBJECT_ENCRYPTION_KEY_ID are required when PDF import is enabled in production',
     )
   }
   const oauth = loadOAuthConfig(environment, production)
@@ -434,7 +511,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
         identityVerificationRequired: false,
         methods: { email: false, oauthProviders: [] },
       }
-  const engineInsecureTarget = loadDevelopmentEngineTarget(
+  const engineInsecureTarget = loadInsecureLoopbackEngineTarget(
     environment,
     production,
   )
@@ -508,9 +585,16 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     signup,
     identityVerificationMode,
     upbitPdfImportEnabled,
-    engineMtls: loadEngineMtlsConfig(environment, production),
+    engineMtls: loadEngineMtlsConfig(
+      environment,
+      production && engineInsecureTarget === undefined,
+    ),
     ...(reportPayments ? { reportPayments } : {}),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
+    ...(privateObjectEncryptionKey ? { privateObjectEncryptionKey } : {}),
+    ...(privateObjectEncryptionKeyId ? { privateObjectEncryptionKeyId } : {}),
+    ...(privateObjectLegacyKeyId ? { privateObjectLegacyKeyId } : {}),
+    ...(privateObjectDecryptionKeys.size > 0 ? { privateObjectDecryptionKeys } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
   }
 }

@@ -13,6 +13,11 @@ import {
   type UploadStore,
 } from './upload-store.js'
 import { validatePdfContents } from './pdf-validation.js'
+import {
+  decryptPrivateObject,
+  encryptPrivateObject,
+  type PrivateObjectKeyring,
+} from './private-object-crypto.js'
 
 type UploadRow = {
   id: string
@@ -87,16 +92,35 @@ export class PostgresFileUploadStore implements UploadStore {
   readonly #objectRoot: string
   readonly #renameFile: typeof rename
   readonly #unlinkFile: typeof unlink
+  readonly #keyring: PrivateObjectKeyring | undefined
 
   constructor(
     pool: Pool,
     objectRoot: string,
-    fileOperations: { rename?: typeof rename; unlink?: typeof unlink } = {},
+    options: {
+      rename?: typeof rename
+      unlink?: typeof unlink
+      encryptionKey?: Buffer
+      encryptionKeyId?: string
+      legacyKeyId?: string
+      decryptionKeys?: ReadonlyMap<string, Buffer>
+    } = {},
   ) {
     this.#pool = pool
     this.#objectRoot = path.resolve(objectRoot)
-    this.#renameFile = fileOperations.rename ?? rename
-    this.#unlinkFile = fileOperations.unlink ?? unlink
+    this.#renameFile = options.rename ?? rename
+    this.#unlinkFile = options.unlink ?? unlink
+    if (options.encryptionKey) {
+      const currentKeyId = options.encryptionKeyId ?? 'primary'
+      this.#keyring = {
+        currentKeyId,
+        ...(options.legacyKeyId ? { legacyKeyId: options.legacyKeyId } : {}),
+        keys: new Map([
+          ...(options.decryptionKeys?.entries() ?? []),
+          [currentKeyId, options.encryptionKey],
+        ]),
+      }
+    }
   }
 
   async create(input: CreateUpload) {
@@ -157,7 +181,10 @@ export class PostgresFileUploadStore implements UploadStore {
         if (staleTemporaryRemoval === 'retry') {
           throw new Error('temporary cleanup failed')
         }
-        await writeFile(temporary, contents, { mode: 0o600, flag: 'wx' })
+        const storedContents = this.#keyring
+          ? encryptPrivateObject(contents, this.#keyring, session.objectKey)
+          : contents
+        await writeFile(temporary, storedContents, { mode: 0o600, flag: 'wx' })
         await this.#renameFile(temporary, destination)
         publishedObject = true
       } catch {
@@ -246,7 +273,7 @@ export class PostgresFileUploadStore implements UploadStore {
       } else {
         let contents: Buffer
         try {
-          contents = await readFile(this.#path(session.objectKey))
+          contents = await this.#readObject(session.objectKey)
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
             throw new Error('Private upload object read failed')
@@ -325,7 +352,7 @@ export class PostgresFileUploadStore implements UploadStore {
         await client.query('COMMIT')
         return undefined
       }
-      const contents = await readFile(this.#path(session.objectKey))
+      const contents = await this.#readObject(session.objectKey)
       const digest = createHash('sha256').update(contents).digest('hex')
       if (
         contents.byteLength !== session.verifiedBytes ||
@@ -470,7 +497,7 @@ export class PostgresFileUploadStore implements UploadStore {
       return { status: 'unknown' as const }
     }
     try {
-      const publishedContents = await readFile(this.#path(current.objectKey))
+      const publishedContents = await this.#readObject(current.objectKey)
       return publishedContents.equals(expectedContents)
         ? { status: 'applied' as const, session: current }
         : { status: 'unknown' as const }
@@ -525,6 +552,13 @@ export class PostgresFileUploadStore implements UploadStore {
 
   #temporaryPath(destination: string) {
     return `${destination}.pending`
+  }
+
+  async #readObject(objectKey: string) {
+    const storedContents = await readFile(this.#path(objectKey))
+    return this.#keyring
+      ? decryptPrivateObject(storedContents, this.#keyring, objectKey)
+      : storedContents
   }
 
   #path(objectKey: string) {

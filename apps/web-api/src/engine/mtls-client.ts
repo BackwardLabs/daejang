@@ -23,7 +23,7 @@ import type {
 } from '../sources/wallet-source-store.js'
 import { EngineRpcError } from './rpc-error.js'
 
-const protoPath = fileURLToPath(
+const protoPath = process.env.ENGINE_PROTO_PATH ?? fileURLToPath(
   new URL('../../../../proto/giwa/engine/v1/engine.proto', import.meta.url),
 )
 
@@ -213,7 +213,7 @@ export class EngineMtlsClient implements WalletSourceRegistry {
     )
   }
 
-  static connectInsecureForDevelopment(target: string, upbitPdfImportEnabled: boolean) {
+  static connectInsecureLoopback(target: string, upbitPdfImportEnabled: boolean) {
     return EngineMtlsClient.#create(
       target,
       grpcCredentials.createInsecure(),
