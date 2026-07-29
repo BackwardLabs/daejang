@@ -86,12 +86,60 @@ esac
 
 package_namespace="$repo_root/node_modules/@backward-labs"
 package_link="$package_namespace/daejang-contracts"
-if [[ -e "$package_link" || -L "$package_link" ]]; then
-  echo "Refusing to replace an existing @backward-labs/daejang-contracts package." >&2
-  exit 2
-fi
+temporary_parent="${TMPDIR:-/tmp}"
+temporary_parent="${temporary_parent%/}"
+temporary_parent="$(CDPATH= cd -- "$temporary_parent" && pwd -P)"
+
+recover_stale_package_link() {
+  if [[ ! -L "$package_link" ]]; then
+    if [[ -e "$package_link" ]]; then
+      echo "Refusing to replace an existing @backward-labs/daejang-contracts package." >&2
+      exit 2
+    fi
+    return
+  fi
+
+  link_target="$(readlink "$package_link")"
+  if [[ ! -e "$link_target" ]]; then
+    echo "Refusing to remove an unrecognized broken contracts symlink." >&2
+    exit 2
+  fi
+  resolved_target="$(
+    CDPATH= cd -- "$(dirname -- "$link_target")" &&
+      printf '%s/%s\n' "$(pwd -P)" "$(basename -- "$link_target")"
+  )"
+  stale_root="${resolved_target%/consumer/node_modules/@backward-labs/daejang-contracts}"
+  if (
+    [[ "$stale_root" == "$resolved_target" ]] ||
+    [[ "$(dirname -- "$stale_root")" != "$temporary_parent" ]] ||
+    [[ "$(basename -- "$stale_root")" != giwa28-local-v1.* ]]
+  ); then
+    echo "Refusing to replace an unrecognized contracts symlink." >&2
+    exit 2
+  fi
+
+  owner_pid=''
+  if [[ -f "$stale_root/owner.pid" ]]; then
+    owner_pid="$(sed -n '1p' "$stale_root/owner.pid")"
+  fi
+  if (
+    [[ "$owner_pid" != '' ]] &&
+    [[ "$owner_pid" != *[!0-9]* ]] &&
+    kill -0 "$owner_pid" 2>/dev/null
+  ); then
+    echo "Another GIWA-28 local runner still owns the contracts package." >&2
+    exit 2
+  fi
+
+  unlink "$package_link"
+  rm -rf "$stale_root"
+  echo "Recovered a stale GIWA-28 local contracts package."
+}
+
+recover_stale_package_link
 
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/giwa28-local-v1.XXXXXX")"
+printf '%s\n' "$$" > "$temporary_root/owner.pid"
 before_pids="$temporary_root/anvil-before.txt"
 after_pids="$temporary_root/anvil-after.txt"
 expected_link_target=''
