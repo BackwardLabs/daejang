@@ -1,3 +1,4 @@
+import { createCipheriv } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -30,5 +31,31 @@ describe('private object envelope key rotation', () => {
       currentKeyId: 'key-2027',
       keys: new Map([['key-2027', nextKey]]),
     }, objectKey)).toThrow('key-2026')
+  })
+
+  it('uses the explicit legacy key ID for a GIWAOBJ1 envelope', () => {
+    const legacyKey = Buffer.alloc(32, 3)
+    const currentKey = Buffer.alloc(32, 4)
+    const objectKey = 'upbit/subject/legacy.pdf'
+    const contents = Buffer.from('%PDF-1.7 legacy')
+    const nonce = Buffer.alloc(12, 5)
+    const cipher = createCipheriv('aes-256-gcm', legacyKey, nonce)
+    cipher.setAAD(Buffer.from(objectKey))
+    const envelope = Buffer.concat([
+      Buffer.from('GIWAOBJ1'),
+      nonce,
+      cipher.update(contents),
+      cipher.final(),
+      cipher.getAuthTag(),
+    ])
+
+    expect(decryptPrivateObject(envelope, {
+      currentKeyId: 'current',
+      legacyKeyId: 'legacy',
+      keys: new Map([
+        ['current', currentKey],
+        ['legacy', legacyKey],
+      ]),
+    }, objectKey)).toEqual(contents)
   })
 })

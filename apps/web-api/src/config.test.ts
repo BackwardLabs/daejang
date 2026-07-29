@@ -40,6 +40,7 @@ describe('web api configuration', () => {
         'X402_TOKEN_VERSION',
         'PRIVATE_OBJECT_ENCRYPTION_KEY',
         'PRIVATE_OBJECT_ENCRYPTION_KEY_ID',
+        'PRIVATE_OBJECT_LEGACY_KEY_ID',
         'PRIVATE_OBJECT_DECRYPTION_KEYS',
         'ENGINE_ALLOW_INSECURE_LOOPBACK',
       ]),

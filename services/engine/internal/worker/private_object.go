@@ -15,10 +15,11 @@ var (
 	errPrivateObjectNotFound = errors.New("private object not found")
 )
 
-const maxPrivateObjectBytes = 20<<20 + 64
+const maxPrivateObjectBytes = 20<<20 + 101
 
 type PrivateObjectKeyring struct {
 	CurrentKeyID string
+	LegacyKeyID  string
 	Keys         map[string][]byte
 }
 
@@ -40,7 +41,10 @@ func readPrivateObject(path string, keyring PrivateObjectKeyring, objectKey stri
 	if len(keyring.Keys) == 0 {
 		return envelope, nil
 	}
-	keyID := keyring.CurrentKeyID
+	keyID := keyring.LegacyKeyID
+	if keyID == "" {
+		keyID = keyring.CurrentKeyID
+	}
 	nonceStart := len(privateObjectMagic)
 	if len(envelope) >= len(privateObjectMagic)+1 && bytes.Equal(envelope[:len(privateObjectMagic)], privateObjectMagic) {
 		keyIDLength := int(envelope[len(privateObjectMagic)])

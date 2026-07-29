@@ -371,7 +371,7 @@ done
 - OAuth callback 후 새 GIWA 계정 생성, 필수 약관 동의, dashboard 진입 가능
 - 기존 이메일로 다시 가입할 때 새 인증번호를 보내지 않고 기존 계정 안내
 - 로그아웃한 session cookie로 보호 API에 다시 접근할 수 없음
-- 업로드된 PDF 원문이 private object root에 `GIWAOBJ1` 암호화 envelope로만 저장됨
+- 업로드된 PDF 원문이 private object root에 key ID가 포함된 `GIWAOBJ2` 암호화 envelope로만 저장됨
 
 실제 provider 로그인, Resend 수신, callback과 cookie 회전은 단순 `curl`만으로
 완료 검증할 수 없다. 브라우저에서 provider별로 가입과 재로그인을 한 번씩 확인한다.

@@ -23,17 +23,6 @@ func main() {
 		log.Fatal("DAEJANG_SOURCE_DATABASE_URL, DAEJANG_PRIVATE_OBJECT_ROOT, and DAEJANG_JIT_BRIDGE_CONFIG are required")
 	}
 	objectKeyring := worker.PrivateObjectKeyring{Keys: map[string][]byte{}}
-	if encodedKey := os.Getenv("PRIVATE_OBJECT_ENCRYPTION_KEY"); encodedKey != "" {
-		decodedKey, decodeErr := base64.StdEncoding.DecodeString(encodedKey)
-		if decodeErr != nil || len(decodedKey) != 32 {
-			log.Fatal("PRIVATE_OBJECT_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
-		}
-		objectKeyring.CurrentKeyID = os.Getenv("PRIVATE_OBJECT_ENCRYPTION_KEY_ID")
-		if objectKeyring.CurrentKeyID == "" {
-			log.Fatal("PRIVATE_OBJECT_ENCRYPTION_KEY_ID is required with PRIVATE_OBJECT_ENCRYPTION_KEY")
-		}
-		objectKeyring.Keys[objectKeyring.CurrentKeyID] = decodedKey
-	}
 	if encodedKeys := os.Getenv("PRIVATE_OBJECT_DECRYPTION_KEYS"); encodedKeys != "" {
 		var values map[string]string
 		if err := json.Unmarshal([]byte(encodedKeys), &values); err != nil {
@@ -45,6 +34,23 @@ func main() {
 				log.Fatal("PRIVATE_OBJECT_DECRYPTION_KEYS contains an invalid entry")
 			}
 			objectKeyring.Keys[keyID] = decodedKey
+		}
+	}
+	if encodedKey := os.Getenv("PRIVATE_OBJECT_ENCRYPTION_KEY"); encodedKey != "" {
+		decodedKey, decodeErr := base64.StdEncoding.DecodeString(encodedKey)
+		if decodeErr != nil || len(decodedKey) != 32 {
+			log.Fatal("PRIVATE_OBJECT_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
+		}
+		objectKeyring.CurrentKeyID = os.Getenv("PRIVATE_OBJECT_ENCRYPTION_KEY_ID")
+		if objectKeyring.CurrentKeyID == "" {
+			log.Fatal("PRIVATE_OBJECT_ENCRYPTION_KEY_ID is required with PRIVATE_OBJECT_ENCRYPTION_KEY")
+		}
+		objectKeyring.Keys[objectKeyring.CurrentKeyID] = decodedKey
+	}
+	objectKeyring.LegacyKeyID = os.Getenv("PRIVATE_OBJECT_LEGACY_KEY_ID")
+	if objectKeyring.LegacyKeyID != "" {
+		if _, exists := objectKeyring.Keys[objectKeyring.LegacyKeyID]; !exists {
+			log.Fatal("PRIVATE_OBJECT_LEGACY_KEY_ID must identify a configured key")
 		}
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

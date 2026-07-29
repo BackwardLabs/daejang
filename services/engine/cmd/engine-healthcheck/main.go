@@ -6,10 +6,12 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -21,22 +23,28 @@ func main() {
 }
 func run() error {
 	target := env("ENGINE_HEALTH_TARGET", "127.0.0.1:50051")
-	serverName := env("ENGINE_HEALTH_SERVER_NAME", "engine.internal")
-	ca, err := os.ReadFile(os.Getenv("ENGINE_HEALTH_CA_PATH"))
-	if err != nil {
-		return err
-	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(ca) {
-		return fmt.Errorf("invalid health CA")
-	}
-	certificate, err := tls.LoadX509KeyPair(os.Getenv("ENGINE_HEALTH_CERT_PATH"), os.Getenv("ENGINE_HEALTH_KEY_PATH"))
-	if err != nil {
-		return err
+	var transport credentials.TransportCredentials
+	if strings.HasPrefix(target, "unix://") {
+		transport = insecure.NewCredentials()
+	} else {
+		serverName := env("ENGINE_HEALTH_SERVER_NAME", "engine.internal")
+		ca, err := os.ReadFile(os.Getenv("ENGINE_HEALTH_CA_PATH"))
+		if err != nil {
+			return err
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(ca) {
+			return fmt.Errorf("invalid health CA")
+		}
+		certificate, err := tls.LoadX509KeyPair(os.Getenv("ENGINE_HEALTH_CERT_PATH"), os.Getenv("ENGINE_HEALTH_KEY_PATH"))
+		if err != nil {
+			return err
+		}
+		transport = credentials.NewTLS(&tls.Config{RootCAs: roots, Certificates: []tls.Certificate{certificate}, ServerName: serverName, MinVersion: tls.VersionTLS12})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	connection, err := grpc.DialContext(ctx, target, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{RootCAs: roots, Certificates: []tls.Certificate{certificate}, ServerName: serverName, MinVersion: tls.VersionTLS12})), grpc.WithBlock())
+	connection, err := grpc.DialContext(ctx, target, grpc.WithTransportCredentials(transport), grpc.WithBlock())
 	if err != nil {
 		return err
 	}

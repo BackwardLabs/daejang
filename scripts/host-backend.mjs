@@ -1,11 +1,15 @@
 import { spawn, spawnSync } from 'node:child_process'
 import {
   closeSync,
+  chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import net from 'node:net'
@@ -14,12 +18,18 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { loadEnvFile } from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const scriptRepositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const repositoryRoot = resolve(
+  process.env.GIWA_APP_REPOSITORY ?? scriptRepositoryRoot,
+)
 const repositoryParent = resolve(repositoryRoot, '..')
 const projectRoot =
   basename(repositoryParent) === '.worktrees'
     ? resolve(repositoryParent, '..')
     : repositoryParent
+const canonicalRepositoryRoot = resolve(
+  process.env.GIWA_CANONICAL_APP_REPOSITORY ?? join(projectRoot, 'daejang'),
+)
 const databaseRepository = resolve(
   process.env.GIWA_DATABASE_REPOSITORY ?? join(projectRoot, 'daejang-db'),
 )
@@ -47,6 +57,8 @@ const socketRoot = resolve(
 const configRoot = join(stateRoot, 'config')
 const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
+const pauseFile = join(stateRoot, 'paused')
+const supervisorLockFile = join(stateRoot, 'supervisor.lock')
 
 const pathIsWithin = (parent, candidate) =>
   candidate === parent || candidate.startsWith(`${parent}/`)
@@ -76,6 +88,11 @@ const ensureRuntimeDirectories = () => {
     join(stateRoot, 'selections'),
   ]) {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
+    const metadata = statSync(directory)
+    if (!metadata.isDirectory() || metadata.uid !== process.getuid()) {
+      throw new Error(`Runtime directory is not owned by this service account: ${directory}`)
+    }
+    chmodSync(directory, 0o700)
   }
 }
 
@@ -206,6 +223,16 @@ const serviceEnvironment = (exactNames, prefixes, overrides = {}) => ({
   ...overrides,
 })
 
+export const privateObjectWriteEnvironment = (environment) =>
+  environment.PRIVATE_OBJECT_ENCRYPTION_KEY
+    ? {
+        PRIVATE_OBJECT_ENCRYPTION_KEY:
+          environment.PRIVATE_OBJECT_ENCRYPTION_KEY,
+        PRIVATE_OBJECT_ENCRYPTION_KEY_ID:
+          environment.PRIVATE_OBJECT_ENCRYPTION_KEY_ID ?? 'primary',
+      }
+    : {}
+
 const sleep = (milliseconds) =>
   new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds))
 
@@ -273,6 +300,44 @@ const parserReady = () => {
   })
 }
 
+const engineReady = () => {
+  const engineSocket = join(socketRoot, 'engine.sock')
+  const healthcheck = join(binaryRoot, 'engine-healthcheck')
+  if (!existsSync(engineSocket) || !existsSync(healthcheck)) return false
+  const result = spawnSync(healthcheck, [], {
+    env: serviceEnvironment([], [], {
+      ENGINE_HEALTH_TARGET: `unix://${engineSocket}`,
+    }),
+    stdio: 'ignore',
+  })
+  return result.status === 0
+}
+
+const webReady = async () => {
+  try {
+    return (
+      await fetch(
+        `http://127.0.0.1:${process.env.GIWA_HOST_API_PORT ?? '3001'}/readyz`,
+      )
+    ).ok
+  } catch {
+    return false
+  }
+}
+
+const runtimeHealthy = async () => {
+  if (!serviceOrder.every(isRunning)) return false
+  const jitSocket = join(socketRoot, 'jit.sock')
+  return (
+    await parserReady() &&
+    existsSync(jitSocket) &&
+    await unixReady(jitSocket) &&
+    engineReady() &&
+    existsSync(join(stateRoot, 'worker.ready')) &&
+    await webReady()
+  )
+}
+
 const databaseURL = (role, password) => {
   if (!password) throw new Error(`Database password for ${role} is missing`)
   const url = new URL('postgresql://127.0.0.1:55432/daejang')
@@ -285,19 +350,33 @@ const databaseURL = (role, password) => {
 const build = () => {
   run('npm', ['run', 'build', '--workspace', '@daejang/web-api'], {
     cwd: repositoryRoot,
+    env: baseEnvironment(),
   })
   for (const [command, output] of [
     ['./cmd/engine-api', join(binaryRoot, 'engine-api')],
+    ['./cmd/engine-healthcheck', join(binaryRoot, 'engine-healthcheck')],
     ['./cmd/sync-worker', join(binaryRoot, 'sync-worker')],
   ]) {
     run('go', ['build', '-o', output, command], {
       cwd: join(repositoryRoot, 'services', 'engine'),
       env: {
-        ...process.env,
+        ...baseEnvironment(),
         GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
       },
     })
   }
+  const webAPIRuntime = join(runtimeRoot, 'app', 'web-api')
+  rmSync(webAPIRuntime, { recursive: true, force: true })
+  mkdirSync(dirname(webAPIRuntime), { recursive: true, mode: 0o700 })
+  cpSync(join(repositoryRoot, 'apps', 'web-api', 'dist'), webAPIRuntime, {
+    recursive: true,
+  })
+  const runtimeProto = join(runtimeRoot, 'proto')
+  rmSync(runtimeProto, { recursive: true, force: true })
+  cpSync(join(repositoryRoot, 'proto'), runtimeProto, { recursive: true })
+  const runtimeNodeModules = join(runtimeRoot, 'app', 'node_modules')
+  rmSync(runtimeNodeModules, { recursive: true, force: true })
+  symlinkSync(join(repositoryRoot, 'node_modules'), runtimeNodeModules, 'dir')
 }
 
 const createCombinedJITConfig = () => {
@@ -328,19 +407,29 @@ const createRuntimeBridgeConfig = (source) => {
   return output
 }
 
-const start = async () => {
+const start = async ({ buildArtifacts = true } = {}) => {
   if (serviceOrder.some(isRunning))
     throw new Error('Backend services are already running; use backend:restart')
-  loadRuntimeEnvironment()
   assertExternalRuntimeRoot()
   ensureRuntimeDirectories()
+  if (buildArtifacts) build()
+  for (const requiredArtifact of [
+    join(binaryRoot, 'engine-api'),
+    join(binaryRoot, 'engine-healthcheck'),
+    join(binaryRoot, 'sync-worker'),
+    join(runtimeRoot, 'app', 'web-api', 'server.js'),
+  ]) {
+    if (!existsSync(requiredArtifact)) {
+      throw new Error(`Prebuilt backend artifact is missing: ${requiredArtifact}`)
+    }
+  }
+  loadRuntimeEnvironment()
 
   try {
     run('docker', ['compose', 'up', '-d', 'postgres'], {
       cwd: databaseRepository,
     })
     await waitFor('PostgreSQL', () => tcpReady(55432), 30_000)
-    build()
     const parserSocket = join(socketRoot, 'pdf-parser.sock')
     const jitSocket = join(socketRoot, 'jit.sock')
     const engineSocket = join(socketRoot, 'engine.sock')
@@ -440,7 +529,7 @@ const start = async () => {
       60_000,
     )
 
-    spawnService('engine', join(binaryRoot, 'engine-api'), [], serviceEnvironment([], [], {
+    const engineEnvironment = serviceEnvironment([], [], {
       ENGINE_LISTEN: `unix://${engineSocket}`,
       DAEJANG_SOURCE_DATABASE_URL: sourceURL,
       DAEJANG_SOURCE_ARTIFACT_DATABASE_URL: sourceURL,
@@ -453,14 +542,10 @@ const start = async () => {
       DAEJANG_REVIEW_ARTIFACT_ROOT: join(artifactRoot, 'review', 'root'),
       DAEJANG_REVIEW_ARTIFACT_TEMP: join(artifactRoot, 'review', 'tmp'),
       ENGINE_PDF_PARSER_SOCKET_PATH: parserSocket,
-      PRIVATE_OBJECT_ENCRYPTION_KEY: process.env.PRIVATE_OBJECT_ENCRYPTION_KEY,
-      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: process.env.PRIVATE_OBJECT_ENCRYPTION_KEY_ID ?? 'primary',
-    }))
-    await waitFor(
-      'Engine',
-      () => existsSync(engineSocket) ? unixReady(engineSocket) : Promise.resolve(false),
-      30_000,
-    )
+      ...privateObjectWriteEnvironment(process.env),
+    })
+    spawnService('engine', join(binaryRoot, 'engine-api'), [], engineEnvironment)
+    await waitFor('Engine', () => Promise.resolve(engineReady()), 30_000)
 
     const bridgeConfigSource = resolve(
       process.env.GIWA_JIT_BRIDGE_CONFIG ?? join(configRoot, 'jit-bridge.json'),
@@ -476,8 +561,8 @@ const start = async () => {
       DAEJANG_PRIVATE_OBJECT_ROOT: join(runtimeRoot, 'private-objects'),
       DAEJANG_JIT_BRIDGE_CONFIG: bridgeConfig,
       DAEJANG_WORKER_READY_FILE: workerReadyFile,
-      PRIVATE_OBJECT_ENCRYPTION_KEY: process.env.PRIVATE_OBJECT_ENCRYPTION_KEY,
-      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: process.env.PRIVATE_OBJECT_ENCRYPTION_KEY_ID ?? 'primary',
+      ...privateObjectWriteEnvironment(process.env),
+      PRIVATE_OBJECT_LEGACY_KEY_ID: process.env.PRIVATE_OBJECT_LEGACY_KEY_ID,
       PRIVATE_OBJECT_DECRYPTION_KEYS: process.env.PRIVATE_OBJECT_DECRYPTION_KEYS,
     }))
     await waitFor(
@@ -493,6 +578,7 @@ const start = async () => {
         'PRIVATE_OBJECT_DECRYPTION_KEYS',
         'PRIVATE_OBJECT_ENCRYPTION_KEY',
         'PRIVATE_OBJECT_ENCRYPTION_KEY_ID',
+        'PRIVATE_OBJECT_LEGACY_KEY_ID',
         'PUBLIC_ORIGIN',
         'RATE_LIMIT_HMAC_SECRET',
         'SESSION_ABSOLUTE_TTL_SECONDS',
@@ -509,9 +595,16 @@ const start = async () => {
       PORT: process.env.GIWA_HOST_API_PORT ?? '3001',
       DATABASE_URL: webURL,
       PRIVATE_OBJECT_ROOT: join(runtimeRoot, 'private-objects'),
-      PRIVATE_OBJECT_ENCRYPTION_KEY_ID:
-        process.env.PRIVATE_OBJECT_ENCRYPTION_KEY_ID ?? 'primary',
+      ...privateObjectWriteEnvironment(process.env),
       ENGINE_GRPC_INSECURE_TARGET: `unix:${engineSocket}`,
+      ENGINE_PROTO_PATH: join(
+        runtimeRoot,
+        'proto',
+        'giwa',
+        'engine',
+        'v1',
+        'engine.proto',
+      ),
       UPBIT_PDF_IMPORT_ENABLED:
         process.env.UPBIT_PDF_IMPORT_ENABLED ?? 'false',
       },
@@ -519,35 +612,26 @@ const start = async () => {
     spawnService(
       'web-api',
       process.execPath,
-      [join(repositoryRoot, 'apps', 'web-api', 'dist', 'server.js')],
+      [join(runtimeRoot, 'app', 'web-api', 'server.js')],
       webAPIEnvironment,
     )
     await waitFor(
       'Web API',
-      async () => {
-        try {
-          return (
-            await fetch(
-              `http://127.0.0.1:${process.env.GIWA_HOST_API_PORT ?? '3001'}/readyz`,
-            )
-          ).ok
-        } catch {
-          return false
-        }
-      },
+      webReady,
       30_000,
     )
 
+    rmSync(pauseFile, { force: true })
     console.log(
       'Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, worker, Web API',
     )
   } catch (error) {
-    await stop()
+    await stopServices()
     throw error
   }
 }
 
-const stop = async () => {
+const stopServices = async () => {
   for (const name of [...serviceOrder].reverse()) {
     const state = readProcessState(name)
     if (!isRunning(name)) {
@@ -567,6 +651,12 @@ const stop = async () => {
   console.log('Backend services stopped; PostgreSQL remains running')
 }
 
+const stop = async () => {
+  ensureRuntimeDirectories()
+  writeFileSync(pauseFile, 'paused\n', { mode: 0o600 })
+  await stopServices()
+}
+
 const status = () => {
   for (const name of serviceOrder)
     console.log(`${name}: ${isRunning(name) ? 'running' : 'stopped'}`)
@@ -581,17 +671,55 @@ const logs = () => {
 }
 
 const supervise = async () => {
-  while (true) {
-    const running = serviceOrder.filter(isRunning)
-    if (running.length !== serviceOrder.length) {
-      if (running.length > 0) await stop()
-      try {
-        await start()
-      } catch (error) {
-        console.error(error)
-      }
+  ensureRuntimeDirectories()
+  try {
+    const descriptor = openSync(supervisorLockFile, 'wx', 0o600)
+    const commandLine = spawnSync(
+      'ps',
+      ['-ww', '-p', String(process.pid), '-o', 'command='],
+      { encoding: 'utf8' },
+    ).stdout.trim()
+    writeFileSync(
+      descriptor,
+      `${JSON.stringify({ pid: process.pid, commandLine })}\n`,
+    )
+    closeSync(descriptor)
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+    const existing = JSON.parse(
+      readFileSync(supervisorLockFile, 'utf8'),
+    )
+    const observed = spawnSync(
+      'ps',
+      ['-ww', '-p', String(existing.pid), '-o', 'command='],
+      { encoding: 'utf8' },
+    )
+    if (
+      observed.status === 0 &&
+      observed.stdout.trim() === existing.commandLine
+    ) {
+      throw new Error(`Backend supervisor is already running as PID ${existing.pid}`)
     }
-    await sleep(5_000)
+    rmSync(supervisorLockFile, { force: true })
+    return supervise()
+  }
+  try {
+    while (true) {
+      if (!existsSync(pauseFile)) {
+        const running = serviceOrder.filter(isRunning)
+        if (!(await runtimeHealthy())) {
+          if (running.length > 0) await stopServices()
+          try {
+            await start({ buildArtifacts: false })
+          } catch (error) {
+            console.error(error)
+          }
+        }
+      }
+      await sleep(5_000)
+    }
+  } finally {
+    rmSync(supervisorLockFile, { force: true })
   }
 }
 
@@ -613,7 +741,7 @@ const installCronAutostart = (script) => {
     .split(/\r?\n/)
     .filter((line) => line && !line.includes(marker))
   retained.push(
-    `@reboot cd ${shellQuote(repositoryRoot)} && ${shellQuote(process.execPath)} ${shellQuote(script)} supervise >> ${shellQuote(join(logRoot, 'supervisor.log'))} 2>&1 ${marker}`,
+    `@reboot cd ${shellQuote(canonicalRepositoryRoot)} && GIWA_APP_REPOSITORY=${shellQuote(canonicalRepositoryRoot)} ${shellQuote(process.execPath)} ${shellQuote(script)} supervise >> ${shellQuote(join(logRoot, 'supervisor.log'))} 2>&1 ${marker}`,
   )
   const installed = spawnSync('crontab', ['-'], {
     input: `${retained.join('\n')}\n`,
@@ -633,7 +761,8 @@ const installAutostart = () => {
   const launchAgents = join(homedir(), 'Library', 'LaunchAgents')
   mkdirSync(launchAgents, { recursive: true, mode: 0o700 })
   const plist = join(launchAgents, 'io.backwardlabs.giwa-host-backend.plist')
-  const script = fileURLToPath(import.meta.url)
+  const script = join(stateRoot, 'host-backend.mjs')
+  cpSync(fileURLToPath(import.meta.url), script)
   writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -643,7 +772,7 @@ const installAutostart = () => {
     <string>${xmlEscape(script)}</string>
     <string>supervise</string>
   </array>
-  <key>WorkingDirectory</key><string>${xmlEscape(repositoryRoot)}</string>
+  <key>WorkingDirectory</key><string>${xmlEscape(canonicalRepositoryRoot)}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
@@ -652,6 +781,7 @@ const installAutostart = () => {
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>${xmlEscape(process.env.PATH ?? '')}</string>
     <key>GIWA_HOST_RUNTIME_ROOT</key><string>${xmlEscape(runtimeRoot)}</string>
+    <key>GIWA_APP_REPOSITORY</key><string>${xmlEscape(canonicalRepositoryRoot)}</string>
   </dict>
 </dict></plist>
 `, { mode: 0o600 })
@@ -685,14 +815,16 @@ for (const [signal, exitCode] of [
   })
 }
 
-const command = process.argv[2]
-if (command === 'start') await start()
-else if (command === 'stop') await stop()
-else if (command === 'restart') {
-  await stop()
-  await start()
-} else if (command === 'status') status()
-else if (command === 'logs') logs()
-else if (command === 'supervise') await supervise()
-else if (command === 'install-autostart') installAutostart()
-else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|supervise|install-autostart')
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const command = process.argv[2]
+  if (command === 'start') await start()
+  else if (command === 'stop') await stop()
+  else if (command === 'restart') {
+    await stopServices()
+    await start()
+  } else if (command === 'status') status()
+  else if (command === 'logs') logs()
+  else if (command === 'supervise') await supervise()
+  else if (command === 'install-autostart') installAutostart()
+  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|supervise|install-autostart')
+}

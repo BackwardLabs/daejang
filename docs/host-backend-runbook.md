@@ -45,7 +45,15 @@ npm run backend:install-autostart
 프로세스를 정리한다. PID 상태에는 실행 명령 신원도 함께 기록하여 재부팅 후 PID가
 재사용된 경우 다른 프로세스를 종료하지 않는다. `backend:install-autostart`는 macOS
 LaunchAgent를 설치하고, 로그인/재부팅 후 supervisor가 전체 서비스를 다시 올리며
-중간 프로세스가 종료되면 전체 dependency set을 재시작한다.
+중간 프로세스가 종료되거나 readiness가 실패하면 전체 dependency set을 prebuilt
+artifact로 재시작한다. 이 호스트처럼 LaunchAgent domain이 비활성화된 경우에는
+동일한 stable runtime launcher를 사용자 crontab의 `@reboot`에 등록한다.
+
+`backend:stop`은 pause marker를 먼저 기록하므로 supervisor가 서비스를 즉시 다시
+올리지 않는다. `backend:start` 또는 `backend:restart`가 전체 readiness를 통과한
+뒤 pause를 해제한다. supervisor singleton lock은 monitor가 둘 이상 PID와 socket을
+동시에 조작하지 못하게 한다. build는 명시적인 start/restart 때만 수행하며 장애
+복구 loop는 runtime root의 prebuilt Go binaries, Web API dist, proto를 재사용한다.
 
 Web API만 `127.0.0.1:3001`을 listen한다. Engine은 외부 TCP 포트를 열지 않고
 권한 `0700` socket directory 안의 소유자 전용 Unix socket(`0600`)으로만 Web API와
@@ -58,7 +66,9 @@ PDF parser 프로세스는 항상 시작한다. production PDF 업로드를 켤 
 포함된 AES-256-GCM envelope로만 저장된다. worker는 필요한 시점에 메모리에서만
 복호화한다. object key를 인증 데이터로 묶으므로 파일 경로가 바뀌면 복호화가
 실패한다. 키를 교체할 때 이전 key ID와 key는 `PRIVATE_OBJECT_DECRYPTION_KEYS` JSON
-객체에 유지하여 기존 object를 계속 읽을 수 있게 한 뒤 별도 재암호화 작업을 수행한다.
+객체에 유지한다. 기존 `GIWAOBJ1` object가 있으면 그 key ID를
+`PRIVATE_OBJECT_LEGACY_KEY_ID`로 명시해야 한다. 기존 object의 재암호화가 끝날 때까지
+이전 key를 제거하지 않는다.
 
 경로를 바꿔야 할 때는 다음 환경 변수를 사용한다.
 
@@ -74,6 +84,7 @@ PDF parser 프로세스는 항상 시작한다. production PDF 업로드를 켤 
 - `GIWA_EVM_INDEXER_ENV_FILE`
 - `PRIVATE_OBJECT_ENCRYPTION_KEY`
 - `PRIVATE_OBJECT_ENCRYPTION_KEY_ID`
+- `PRIVATE_OBJECT_LEGACY_KEY_ID`
 - `PRIVATE_OBJECT_DECRYPTION_KEYS`
 
 Optimism 전용 RPC가 없으면 `https://mainnet.optimism.io`를 사용한다. 지속적인

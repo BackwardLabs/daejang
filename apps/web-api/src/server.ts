@@ -45,6 +45,9 @@ const uploadStore = pool && config.privateObjectRoot
             ...(config.privateObjectDecryptionKeys
               ? { decryptionKeys: config.privateObjectDecryptionKeys }
               : {}),
+            ...(config.privateObjectLegacyKeyId
+              ? { legacyKeyId: config.privateObjectLegacyKeyId }
+              : {}),
           }
         : {},
     )

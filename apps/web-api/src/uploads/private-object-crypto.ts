@@ -11,6 +11,7 @@ const tagBytes = 16
 
 export type PrivateObjectKeyring = {
   currentKeyId: string
+  legacyKeyId?: string
   keys: ReadonlyMap<string, Buffer>
 }
 
@@ -51,7 +52,7 @@ export const decryptPrivateObject = (
   keyring: PrivateObjectKeyring,
   objectKey: string,
 ) => {
-  let keyId = keyring.currentKeyId
+  let keyId = keyring.legacyKeyId ?? keyring.currentKeyId
   let nonceStart = magic.length
   if (envelope.subarray(0, magic.length).equals(magic)) {
     const keyIdLength = envelope[magic.length] ?? 0

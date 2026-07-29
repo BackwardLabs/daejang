@@ -30,6 +30,7 @@ buf generate
 | `DAEJANG_PRIVATE_OBJECT_ROOT` | `sync-worker`가 검증하는 subject-private upload root |
 | `PRIVATE_OBJECT_ENCRYPTION_KEY` | Web API와 공유하는 base64 32-byte AES-256-GCM object key |
 | `PRIVATE_OBJECT_ENCRYPTION_KEY_ID` | 새 private object envelope에 기록할 현재 key ID |
+| `PRIVATE_OBJECT_LEGACY_KEY_ID` | key ID가 없는 GIWAOBJ1 object를 읽을 때 사용할 이전 key ID |
 | `PRIVATE_OBJECT_DECRYPTION_KEYS` | key rotation 중 이전 key ID와 base64 key를 담는 JSON object |
 | `DAEJANG_JIT_BRIDGE_CONFIG` | EVM source job을 `jitd`에 연결하는 JSON 설정 파일의 절대 경로 |
 | `ENGINE_LISTEN` | gRPC listen 주소. 같은 host 통합 실행은 `unix:///absolute/path/engine.sock` 사용 |

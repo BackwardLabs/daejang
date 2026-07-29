@@ -25,7 +25,7 @@
     "build": "npm run build --workspace @daejang/web --workspace @daejang/web-api --workspace @daejang/edge --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && node --test scripts/host-backend.test.mjs",
     "preview": "npm run preview --workspace @daejang/web"
   }
 }

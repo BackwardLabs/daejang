@@ -102,6 +102,7 @@ export class PostgresFileUploadStore implements UploadStore {
       unlink?: typeof unlink
       encryptionKey?: Buffer
       encryptionKeyId?: string
+      legacyKeyId?: string
       decryptionKeys?: ReadonlyMap<string, Buffer>
     } = {},
   ) {
@@ -113,6 +114,7 @@ export class PostgresFileUploadStore implements UploadStore {
       const currentKeyId = options.encryptionKeyId ?? 'primary'
       this.#keyring = {
         currentKeyId,
+        ...(options.legacyKeyId ? { legacyKeyId: options.legacyKeyId } : {}),
         keys: new Map([
           ...(options.decryptionKeys?.entries() ?? []),
           [currentKeyId, options.encryptionKey],

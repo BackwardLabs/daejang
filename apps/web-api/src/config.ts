@@ -24,6 +24,7 @@ export type AppConfig = {
   reportPayments?: ReportPaymentConfig
   privateObjectEncryptionKey?: Buffer
   privateObjectEncryptionKeyId?: string
+  privateObjectLegacyKeyId?: string
   privateObjectDecryptionKeys?: ReadonlyMap<string, Buffer>
 }
 
@@ -452,9 +453,20 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     environment.PRIVATE_OBJECT_ENCRYPTION_KEY,
   )
   const privateObjectEncryptionKeyId = environment.PRIVATE_OBJECT_ENCRYPTION_KEY_ID
+  const privateObjectLegacyKeyId = environment.PRIVATE_OBJECT_LEGACY_KEY_ID
   const privateObjectDecryptionKeys = parsePrivateObjectDecryptionKeys(
     environment.PRIVATE_OBJECT_DECRYPTION_KEYS,
   )
+  if (
+    privateObjectLegacyKeyId &&
+    (!/^[A-Za-z0-9._-]{1,64}$/.test(privateObjectLegacyKeyId) ||
+      (privateObjectLegacyKeyId !== privateObjectEncryptionKeyId &&
+        !privateObjectDecryptionKeys.has(privateObjectLegacyKeyId)))
+  ) {
+    throw new Error(
+      'PRIVATE_OBJECT_LEGACY_KEY_ID must identify the current key or an entry in PRIVATE_OBJECT_DECRYPTION_KEYS',
+    )
+  }
   if (
     production &&
     upbitPdfImportEnabled &&
@@ -581,6 +593,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(privateObjectEncryptionKey ? { privateObjectEncryptionKey } : {}),
     ...(privateObjectEncryptionKeyId ? { privateObjectEncryptionKeyId } : {}),
+    ...(privateObjectLegacyKeyId ? { privateObjectLegacyKeyId } : {}),
     ...(privateObjectDecryptionKeys.size > 0 ? { privateObjectDecryptionKeys } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
   }
