@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -31,15 +33,20 @@ type ReadStore interface {
 type ReportStore interface {
 	List(context.Context, string, int32, int32) ([]reportstore.Snapshot, error)
 }
+type ObservationReadStore interface {
+	CountUnmaterialized(context.Context, string, int32) (int64, error)
+	ListUnmaterialized(context.Context, string, int32, int32) ([]readmodelstore.LedgerEvent, error)
+}
 type TaxReportStore interface {
 	GetCurrentReportForYear(context.Context, string, int) (taxreportstore.CurrentReportDetail, bool, error)
 	ListReportHistory(context.Context, string, int, int32) ([]taxreportstore.StoredReport, error)
 }
 type Service struct {
 	enginev1.UnimplementedQueryServiceServer
-	Reads      ReadStore
-	Reports    ReportStore
-	TaxReports TaxReportStore
+	Reads        ReadStore
+	Reports      ReportStore
+	TaxReports   TaxReportStore
+	Observations ObservationReadStore
 }
 
 func (s *Service) GetDashboard(ctx context.Context, req *enginev1.GetDashboardRequest) (*enginev1.GetDashboardResponse, error) {
@@ -50,6 +57,14 @@ func (s *Service) GetDashboard(ctx context.Context, req *enginev1.GetDashboardRe
 	value, err := s.Reads.Dashboard(ctx, subject, req.GetTaxYear())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "dashboard query failed")
+	}
+	if s.Observations != nil {
+		pending, observationErr := s.Observations.CountUnmaterialized(ctx, subject, req.GetTaxYear())
+		if observationErr != nil {
+			log.Printf("observation dashboard projection failed: %v", observationErr)
+			return nil, status.Error(codes.Internal, "observation dashboard query failed")
+		}
+		value.TransactionCount += pending
 	}
 	result := &enginev1.Dashboard{SourceCount: value.SourceCount, TransactionCount: value.TransactionCount, OpenReviewCount: value.OpenReviewCount, CompletedCount: value.CompletedCount, ExceptionCount: value.ExceptionCount, LastSyncState: value.LastSyncState}
 	if value.LastSyncUpdatedAt != nil {
@@ -70,6 +85,18 @@ func (s *Service) ListLedgerEvents(ctx context.Context, req *enginev1.ListLedger
 	values, err := s.Reads.ListLedgerEvents(ctx, subject, req.GetTaxYear(), limit)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "ledger query failed")
+	}
+	if s.Observations != nil {
+		fallback, observationErr := s.Observations.ListUnmaterialized(ctx, subject, req.GetTaxYear(), limit)
+		if observationErr != nil {
+			log.Printf("observation ledger projection failed: %v", observationErr)
+			return nil, status.Error(codes.Internal, "observation ledger query failed")
+		}
+		values = append(values, fallback...)
+		sort.SliceStable(values, func(i, j int) bool { return values[i].EffectiveAt.After(values[j].EffectiveAt) })
+		if len(values) > int(limit) {
+			values = values[:limit]
+		}
 	}
 	items := make([]*enginev1.LedgerEvent, 0, len(values))
 	for _, v := range values {
