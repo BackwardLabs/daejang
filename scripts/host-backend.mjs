@@ -1,10 +1,13 @@
 import { spawn, spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
   closeSync,
   chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
+  lstatSync,
+  linkSync,
   openSync,
   readFileSync,
   rmSync,
@@ -59,6 +62,7 @@ const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
 const pauseFile = join(stateRoot, 'paused')
 const supervisorLockFile = join(stateRoot, 'supervisor.lock')
+const operationLockFile = join(stateRoot, 'operation.lock')
 
 const pathIsWithin = (parent, candidate) =>
   candidate === parent || candidate.startsWith(`${parent}/`)
@@ -75,6 +79,9 @@ const assertExternalRuntimeRoot = () => {
 
 const ensureRuntimeDirectories = () => {
   for (const directory of [
+    runtimeRoot,
+    stateRoot,
+    artifactRoot,
     logRoot,
     pidRoot,
     socketRoot,
@@ -88,6 +95,10 @@ const ensureRuntimeDirectories = () => {
     join(stateRoot, 'selections'),
   ]) {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
+    const linkMetadata = lstatSync(directory)
+    if (linkMetadata.isSymbolicLink()) {
+      throw new Error(`Runtime directory must not be a symbolic link: ${directory}`)
+    }
     const metadata = statSync(directory)
     if (!metadata.isDirectory() || metadata.uid !== process.getuid()) {
       throw new Error(`Runtime directory is not owned by this service account: ${directory}`)
@@ -185,7 +196,7 @@ const run = (command, args, options = {}) => {
     throw new Error(`${command} failed with status ${result.status}`)
 }
 
-const spawnService = (name, command, args, environment) => {
+const spawnService = (name, command, args, environment, options = {}) => {
   if (isRunning(name)) throw new Error(`${name} is already running`)
   if (command.includes('/') && !existsSync(command)) {
     throw new Error(`${name} executable is missing: ${command}`)
@@ -196,6 +207,7 @@ const spawnService = (name, command, args, environment) => {
     detached: true,
     env: environment,
     stdio: ['ignore', descriptor, descriptor],
+    ...options,
   })
   child.unref()
   closeSync(descriptor)
@@ -243,6 +255,94 @@ const waitFor = async (label, probe, timeout = 30_000) => {
     await sleep(200)
   }
   throw new Error(`${label} did not become ready within ${timeout}ms`)
+}
+
+const observedCommandLine = (pid) => spawnSync(
+  'ps',
+  ['-ww', '-p', String(pid), '-o', 'command='],
+  { encoding: 'utf8' },
+)
+
+export const tryAcquireProcessLock = (
+  path,
+  observe = observedCommandLine,
+) => {
+  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+  const observation = observe(process.pid)
+  if (observation.status !== 0 || typeof observation.stdout !== 'string') {
+    throw new Error(`Unable to inspect process identity for lock: ${path}`)
+  }
+  const lockContent = `${JSON.stringify({
+    pid: process.pid,
+    commandLine: observation.stdout.trim(),
+    token: randomUUID(),
+  })}\n`
+  try {
+    const descriptor = openSync(temporaryPath, 'wx', 0o600)
+    try {
+      writeFileSync(descriptor, lockContent)
+    } catch (error) {
+      throw error
+    } finally {
+      closeSync(descriptor)
+    }
+    linkSync(temporaryPath, path)
+    return lockContent
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+    let existing
+    try {
+      existing = JSON.parse(readFileSync(path, 'utf8'))
+    } catch {
+      throw new Error(`Malformed backend lock requires manual removal: ${path}`)
+    }
+    const observed = observe(existing.pid)
+    if (
+      observed.status === 0 &&
+      observed.stdout.trim() === existing.commandLine
+    ) return null
+    throw new Error(`Stale backend lock requires manual removal: ${path}`)
+  } finally {
+    rmSync(temporaryPath, { force: true })
+  }
+}
+
+export const releaseProcessLock = (path, lockContent) => {
+  if (readFileSync(path, 'utf8') !== lockContent) {
+    throw new Error(`Backend lock ownership changed unexpectedly: ${path}`)
+  }
+  rmSync(path)
+}
+
+let shutdownRequested = false
+let activeOperationPromise = null
+
+const withOperationLock = async (
+  operation,
+  { allowDuringShutdown = false } = {},
+) => {
+  ensureRuntimeDirectories()
+  const deadline = Date.now() + 60_000
+  let lockContent
+  while (!(lockContent = tryAcquireProcessLock(operationLockFile))) {
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for backend operation lock')
+    }
+    await sleep(200)
+  }
+  const execution = Promise.resolve().then(() => {
+    if (shutdownRequested && !allowDuringShutdown) {
+      throw new Error('Backend shutdown was requested')
+    }
+    return operation()
+  })
+  activeOperationPromise = execution
+  try {
+    return await execution
+  } finally {
+    if (activeOperationPromise === execution) activeOperationPromise = null
+    releaseProcessLock(operationLockFile, lockContent)
+  }
 }
 
 const tcpReady = (port) =>
@@ -407,7 +507,7 @@ const createRuntimeBridgeConfig = (source) => {
   return output
 }
 
-const start = async ({ buildArtifacts = true } = {}) => {
+const startServices = async ({ buildArtifacts = true } = {}) => {
   if (serviceOrder.some(isRunning))
     throw new Error('Backend services are already running; use backend:restart')
   assertExternalRuntimeRoot()
@@ -611,9 +711,13 @@ const start = async ({ buildArtifacts = true } = {}) => {
     )
     spawnService(
       'web-api',
-      process.execPath,
-      [join(runtimeRoot, 'app', 'web-api', 'server.js')],
-      webAPIEnvironment,
+      'npm',
+      ['run', 'start:web-api:host-production'],
+      {
+        ...webAPIEnvironment,
+        GIWA_WEB_API_ENTRYPOINT: join(runtimeRoot, 'app', 'web-api', 'server.js'),
+      },
+      { cwd: repositoryRoot },
     )
     await waitFor(
       'Web API',
@@ -621,6 +725,7 @@ const start = async ({ buildArtifacts = true } = {}) => {
       30_000,
     )
 
+    if (shutdownRequested) throw new Error('Backend shutdown was requested')
     rmSync(pauseFile, { force: true })
     console.log(
       'Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, worker, Web API',
@@ -638,13 +743,23 @@ const stopServices = async () => {
       rmSync(pidFile(name), { force: true })
       continue
     }
-    process.kill(state.pid, 'SIGTERM')
+    try {
+      process.kill(-state.pid, 'SIGTERM')
+    } catch {
+      process.kill(state.pid, 'SIGTERM')
+    }
     await waitFor(
       `${name} shutdown`,
       () => Promise.resolve(!isRunning(name)),
       15_000,
     ).catch(() => {
-      if (isRunning(name)) process.kill(state.pid, 'SIGKILL')
+      if (isRunning(name)) {
+        try {
+          process.kill(-state.pid, 'SIGKILL')
+        } catch {
+          process.kill(state.pid, 'SIGKILL')
+        }
+      }
     })
     rmSync(pidFile(name), { force: true })
   }
@@ -652,10 +767,30 @@ const stopServices = async () => {
 }
 
 const stop = async () => {
-  ensureRuntimeDirectories()
-  writeFileSync(pauseFile, 'paused\n', { mode: 0o600 })
-  await stopServices()
+  await withOperationLock(async () => {
+    ensureRuntimeDirectories()
+    writeFileSync(pauseFile, 'paused\n', { mode: 0o600 })
+    await stopServices()
+  })
 }
+
+const start = (options) => withOperationLock(() => startServices(options))
+
+export const runRestartOperation = async ({ prepare, pause, stop, start }) => {
+  prepare()
+  pause()
+  await stop()
+  await start()
+}
+
+const restart = () => withOperationLock(async () => {
+  await runRestartOperation({
+    prepare: ensureRuntimeDirectories,
+    pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
+    stop: stopServices,
+    start: startServices,
+  })
+})
 
 const status = () => {
   for (const name of serviceOrder)
@@ -672,54 +807,25 @@ const logs = () => {
 
 const supervise = async () => {
   ensureRuntimeDirectories()
-  try {
-    const descriptor = openSync(supervisorLockFile, 'wx', 0o600)
-    const commandLine = spawnSync(
-      'ps',
-      ['-ww', '-p', String(process.pid), '-o', 'command='],
-      { encoding: 'utf8' },
-    ).stdout.trim()
-    writeFileSync(
-      descriptor,
-      `${JSON.stringify({ pid: process.pid, commandLine })}\n`,
-    )
-    closeSync(descriptor)
-  } catch (error) {
-    if (error?.code !== 'EEXIST') throw error
-    const existing = JSON.parse(
-      readFileSync(supervisorLockFile, 'utf8'),
-    )
-    const observed = spawnSync(
-      'ps',
-      ['-ww', '-p', String(existing.pid), '-o', 'command='],
-      { encoding: 'utf8' },
-    )
-    if (
-      observed.status === 0 &&
-      observed.stdout.trim() === existing.commandLine
-    ) {
-      throw new Error(`Backend supervisor is already running as PID ${existing.pid}`)
-    }
-    rmSync(supervisorLockFile, { force: true })
-    return supervise()
+  const supervisorLock = tryAcquireProcessLock(supervisorLockFile)
+  if (!supervisorLock) {
+    const existing = JSON.parse(readFileSync(supervisorLockFile, 'utf8'))
+    throw new Error(`Backend supervisor is already running as PID ${existing.pid}`)
   }
   try {
     while (true) {
       if (!existsSync(pauseFile)) {
-        const running = serviceOrder.filter(isRunning)
-        if (!(await runtimeHealthy())) {
+        await withOperationLock(async () => {
+          if (existsSync(pauseFile) || await runtimeHealthy()) return
+          const running = serviceOrder.filter(isRunning)
           if (running.length > 0) await stopServices()
-          try {
-            await start({ buildArtifacts: false })
-          } catch (error) {
-            console.error(error)
-          }
-        }
+          await startServices({ buildArtifacts: false })
+        }).catch((error) => console.error(error))
       }
       await sleep(5_000)
     }
   } finally {
-    rmSync(supervisorLockFile, { force: true })
+    releaseProcessLock(supervisorLockFile, supervisorLock)
   }
 }
 
@@ -803,6 +909,12 @@ const installAutostart = () => {
 }
 
 let handlingSignal = false
+export const runSignalShutdown = async ({ pause, activeOperation, stop }) => {
+  pause()
+  if (activeOperation) await activeOperation.catch(() => {})
+  await stop()
+}
+
 for (const [signal, exitCode] of [
   ['SIGINT', 130],
   ['SIGTERM', 143],
@@ -810,8 +922,22 @@ for (const [signal, exitCode] of [
   process.on(signal, async () => {
     if (handlingSignal) return
     handlingSignal = true
-    await stop()
-    process.exit(exitCode)
+    shutdownRequested = true
+    ensureRuntimeDirectories()
+    try {
+      await runSignalShutdown({
+        pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
+        activeOperation: activeOperationPromise,
+        stop: () => withOperationLock(async () => {
+          writeFileSync(pauseFile, 'paused\n', { mode: 0o600 })
+          await stopServices()
+        }, { allowDuringShutdown: true }),
+      })
+    } catch (error) {
+      console.error(error)
+    } finally {
+      process.exit(exitCode)
+    }
   })
 }
 
@@ -820,8 +946,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (command === 'start') await start()
   else if (command === 'stop') await stop()
   else if (command === 'restart') {
-    await stopServices()
-    await start()
+    await restart()
   } else if (command === 'status') status()
   else if (command === 'logs') logs()
   else if (command === 'supervise') await supervise()
