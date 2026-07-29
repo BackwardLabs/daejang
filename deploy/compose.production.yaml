@@ -65,6 +65,7 @@ services:
       IDENTITY_VERIFICATION_MODE: ${IDENTITY_VERIFICATION_MODE:-disabled}
       UPBIT_PDF_IMPORT_ENABLED: ${UPBIT_PDF_IMPORT_ENABLED:-false}
       PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+      PRIVATE_OBJECT_ENCRYPTION_KEY: ${PRIVATE_OBJECT_ENCRYPTION_KEY}
       ENGINE_GRPC_TARGET: engine:50051
       ENGINE_GRPC_SERVER_NAME: engine.internal
       ENGINE_GRPC_CA_PATH: /run/secrets/engine-ca.pem
@@ -180,6 +181,7 @@ services:
     environment:
       DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
       DAEJANG_PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+      PRIVATE_OBJECT_ENCRYPTION_KEY: ${PRIVATE_OBJECT_ENCRYPTION_KEY}
       # jitd is deployed outside this Compose project on the private backend.
       # The mounted bridge config uses tcp:// plus the container TLS paths below.
       DAEJANG_JIT_BRIDGE_CONFIG: /run/config/jit-bridge.json

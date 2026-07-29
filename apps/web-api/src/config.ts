@@ -22,6 +22,7 @@ export type AppConfig = {
   engineInsecureTarget?: string
   privateObjectRoot?: string
   reportPayments?: ReportPaymentConfig
+  privateObjectEncryptionKey?: Buffer
 }
 
 export type ReportPaymentConfig = {
@@ -229,6 +230,20 @@ const parseEncryptionKey = (
   return key
 }
 
+const parsePrivateObjectEncryptionKey = (value: string | undefined) => {
+  if (!value) return undefined
+  const key = Buffer.from(value, 'base64')
+  if (
+    key.length !== 32 ||
+    key.toString('base64').replace(/=+$/, '') !== value.replace(/=+$/, '')
+  ) {
+    throw new Error(
+      'PRIVATE_OBJECT_ENCRYPTION_KEY must be a base64-encoded 32-byte key',
+    )
+  }
+  return key
+}
+
 const loadOAuthConfig = (
   environment: NodeJS.ProcessEnv,
   production: boolean,
@@ -403,9 +418,12 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     false,
     'UPBIT_PDF_IMPORT_ENABLED',
   )
-  if (production && upbitPdfImportEnabled) {
+  const privateObjectEncryptionKey = parsePrivateObjectEncryptionKey(
+    environment.PRIVATE_OBJECT_ENCRYPTION_KEY,
+  )
+  if (production && upbitPdfImportEnabled && !privateObjectEncryptionKey) {
     throw new Error(
-      'UPBIT_PDF_IMPORT_ENABLED cannot be enabled in production until an encrypted, audited, versioned object storage adapter is configured',
+      'PRIVATE_OBJECT_ENCRYPTION_KEY is required when PDF import is enabled in production',
     )
   }
   const oauth = loadOAuthConfig(environment, production)
@@ -521,6 +539,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     ),
     ...(reportPayments ? { reportPayments } : {}),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
+    ...(privateObjectEncryptionKey ? { privateObjectEncryptionKey } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
   }
 }

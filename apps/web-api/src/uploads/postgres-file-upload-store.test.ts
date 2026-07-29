@@ -292,6 +292,7 @@ const fixture = async (
   options: {
     pauseFirstLock?: boolean
     unlink?: typeof unlinkFile
+    encryptionKey?: Buffer
   } = {},
 ) => {
   const root = await mkdtemp(path.join(tmpdir(), 'daejang-upload-test-'))
@@ -300,7 +301,12 @@ const fixture = async (
   const store = new PostgresFileUploadStore(
     pool as unknown as Pool,
     root,
-    options.unlink ? { unlink: options.unlink } : {},
+    {
+      ...(options.unlink ? { unlink: options.unlink } : {}),
+      ...(options.encryptionKey
+        ? { encryptionKey: options.encryptionKey }
+        : {}),
+    },
   )
   const objectPath = path.join(root, row.object_key)
   return { root, pool, store, objectPath, temporaryPath: `${objectPath}.pending` }
@@ -313,6 +319,22 @@ afterEach(async () => {
 })
 
 describe('PostgresFileUploadStore state and file boundary', () => {
+  it('stores encrypted bytes while returning verified plaintext', async () => {
+    const row = uploadRow(validPdf, 'PENDING')
+    const encryptionKey = Buffer.alloc(32, 9)
+    const { store, objectPath } = await fixture(row, { encryptionKey })
+
+    await store.write(userId, uploadId, validPdf, new Date('2027-01-01T00:00:00Z'))
+    await store.confirm(userId, uploadId, new Date('2027-01-01T00:00:01Z'))
+
+    const stored = await readFile(objectPath)
+    expect(stored.subarray(0, 8).toString('ascii')).toBe('GIWAOBJ1')
+    expect(stored.includes(validPdf)).toBe(false)
+    await expect(store.readConfirmed(userId, uploadId)).resolves.toMatchObject({
+      contents: validPdf,
+    })
+  })
+
   it('recovers partial destination and temporary files through an atomic publish', async () => {
     const row = uploadRow(validPdf, 'PENDING')
     const { store, objectPath, temporaryPath } = await fixture(row)

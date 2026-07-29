@@ -33,7 +33,13 @@ const engineClient = config.engineMtls
       )
     : undefined
 const uploadStore = pool && config.privateObjectRoot
-  ? new PostgresFileUploadStore(pool, config.privateObjectRoot)
+  ? new PostgresFileUploadStore(
+      pool,
+      config.privateObjectRoot,
+      config.privateObjectEncryptionKey
+        ? { encryptionKey: config.privateObjectEncryptionKey }
+        : {},
+    )
   : undefined
 const taxReportReader = pool ? new PostgresTaxReportReader(pool) : undefined
 

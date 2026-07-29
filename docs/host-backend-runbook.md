@@ -46,9 +46,12 @@ npm run backend:stop
 둘은 같은 호스트의 loopback에서만 plaintext gRPC를 허용하며 외부 주소에는
 mTLS 설정이 계속 필수다.
 
-PDF parser 프로세스는 항상 시작하지만, Web API의 PDF 업로드 경로는
-`UPBIT_PDF_IMPORT_ENABLED` 설정을 따른다. 승인된 암호화·감사·버전 object
-storage가 없는 production에서는 기본값 `false`를 유지한다.
+PDF parser 프로세스는 항상 시작한다. production PDF 업로드를 켤 때는
+`UPBIT_PDF_IMPORT_ENABLED=true`와 base64 32-byte
+`PRIVATE_OBJECT_ENCRYPTION_KEY`를 함께 설정한다. Web API는 현재 서버의 private
+object root에 AES-256-GCM envelope만 저장하고 worker는 같은 키로 메모리에서만
+복호화한다. object key를 인증 데이터로 묶으므로 파일 경로가 바뀌면 복호화가
+실패한다.
 
 경로를 바꿔야 할 때는 다음 환경 변수를 사용한다.
 
@@ -62,6 +65,7 @@ storage가 없는 production에서는 기본값 `false`를 유지한다.
 - `GIWA_EVM_INDEXER_BINARY`
 - `GIWA_EVM_INDEXER_CONFIG`
 - `GIWA_EVM_INDEXER_ENV_FILE`
+- `PRIVATE_OBJECT_ENCRYPTION_KEY`
 
 Optimism 전용 RPC가 없으면 `https://mainnet.optimism.io`를 사용한다. 지속적인
 운영 부하에는 rate limit이 보장되는 전용 endpoint를 설정한다.

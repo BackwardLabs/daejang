@@ -28,6 +28,7 @@ buf generate
 | `DAEJANG_REVIEW_ARTIFACT_ROOT` | subject-private Review resolution artifact root |
 | `DAEJANG_REVIEW_ARTIFACT_TEMP` | 같은 filesystem에 있는 Review artifact 임시 디렉터리 |
 | `DAEJANG_PRIVATE_OBJECT_ROOT` | `sync-worker`가 검증하는 subject-private upload root |
+| `PRIVATE_OBJECT_ENCRYPTION_KEY` | Web API와 공유하는 base64 32-byte AES-256-GCM object key |
 | `DAEJANG_JIT_BRIDGE_CONFIG` | EVM source job을 `jitd`에 연결하는 JSON 설정 파일의 절대 경로 |
 | `ENGINE_LISTEN` | gRPC listen 주소, 기본 `127.0.0.1:50051` |
 | `ENGINE_TLS_CERT_PATH` | Engine server certificate |

@@ -1,14 +1,11 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -94,14 +91,15 @@ type EVMJITOrchestrator interface {
 }
 
 type Runner struct {
-	Store             Store
-	ObjectRoot        string
-	LeaseDuration     time.Duration
-	HeartbeatInterval time.Duration
-	PollInterval      time.Duration
-	RetryDelay        time.Duration
-	Wallets           WalletStore
-	EVMJIT            EVMJITOrchestrator
+	Store               Store
+	ObjectRoot          string
+	ObjectEncryptionKey []byte
+	LeaseDuration       time.Duration
+	HeartbeatInterval   time.Duration
+	PollInterval        time.Duration
+	RetryDelay          time.Duration
+	Wallets             WalletStore
+	EVMJIT              EVMJITOrchestrator
 }
 
 func (r Runner) Run(ctx context.Context) error {
@@ -327,23 +325,21 @@ func (r Runner) processUpbit(ctx context.Context, job sourcejobstore.SyncJob) er
 	if err != nil {
 		return r.Store.Fail(ctx, job, "INVALID_OBJECT_KEY", "저장된 파일 경로가 올바르지 않습니다.")
 	}
-	file, err := os.Open(path)
+	contents, err := readPrivateObject(path, r.ObjectEncryptionKey, source.ObjectKey)
 	if err != nil {
-		return r.Store.Fail(ctx, job, "OBJECT_NOT_FOUND", "업로드된 PDF 파일을 찾을 수 없습니다.")
+		if errors.Is(err, errPrivateObjectNotFound) {
+			return r.Store.Fail(ctx, job, "OBJECT_NOT_FOUND", "업로드된 PDF 파일을 찾을 수 없습니다.")
+		}
+		return r.Store.Fail(ctx, job, "OBJECT_DECRYPT_FAILED", "암호화된 업로드 파일을 읽을 수 없습니다.")
 	}
-	defer file.Close()
-	hash := sha256.New()
-	header := make([]byte, 5)
-	if _, err := io.ReadFull(file, header); err != nil {
+	if len(contents) < 5 {
 		return r.Store.Fail(ctx, job, "INVALID_PDF", "PDF 파일이 비어 있거나 손상되었습니다.")
 	}
-	if !bytes.Equal(header, []byte("%PDF-")) {
+	if string(contents[:5]) != "%PDF-" {
 		return r.Store.Fail(ctx, job, "INVALID_PDF", "PDF 형식을 확인할 수 없습니다.")
 	}
-	if _, err := io.Copy(hash, io.MultiReader(bytes.NewReader(header), file)); err != nil {
-		return err
-	}
-	if hex.EncodeToString(hash.Sum(nil)) != source.ArtifactDigest {
+	hash := sha256.Sum256(contents)
+	if hex.EncodeToString(hash[:]) != source.ArtifactDigest {
 		return r.Store.Fail(ctx, job, "DIGEST_MISMATCH", "업로드 파일의 무결성 검증에 실패했습니다.")
 	}
 	// Provider-specific row extraction requires an approved Upbit document
