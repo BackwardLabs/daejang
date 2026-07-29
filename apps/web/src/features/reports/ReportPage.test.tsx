@@ -93,6 +93,11 @@ describe('ReportPage', () => {
       }),
     ).toBeInTheDocument()
     expect(
+      await screen.findByRole('heading', {
+        name: '장부 생성부터 EAS 검증까지',
+      }),
+    ).toBeInTheDocument()
+    expect(
       screen.getByRole('heading', { name: '발행 산출물 이력' }),
     ).toBeInTheDocument()
     expect(screen.getAllByText('PROVISIONAL').length).toBeGreaterThan(0)
@@ -124,6 +129,11 @@ describe('ReportPage', () => {
         ),
       ),
     ).toBe(true)
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes('/attestation'),
+      ),
+    ).toBe(false)
   })
 
   it('keeps payment hidden when the server capability is disabled', async () => {

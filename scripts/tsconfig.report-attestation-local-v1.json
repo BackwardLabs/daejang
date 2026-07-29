@@ -1,0 +1,4 @@
+{
+  "extends": "../apps/web-api/tsconfig.json",
+  "include": ["run-report-attestation-dev-server.mts"]
+}

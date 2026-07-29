@@ -78,7 +78,28 @@ export function bootstrapSession({ retry = false } = {}) {
   const startRevision = revision
   publishSession({ status: 'checking', user: null })
 
-  const request = getCurrentUser()
+  const loadSession = async () => {
+    try {
+      return await getCurrentUser()
+    } catch (caught) {
+      const localFixtureEnabled =
+        import.meta.env.DEV &&
+        import.meta.env.VITE_GIWA28_LOCAL_DEMO === 'true'
+      if (
+        !localFixtureEnabled ||
+        !(caught instanceof WebApiError) ||
+        caught.status !== 401
+      ) {
+        throw caught
+      }
+      const { bootstrapLocalReportAttestationSession } =
+        await import('./local-report-attestation-session.ts')
+      await bootstrapLocalReportAttestationSession()
+      return getCurrentUser()
+    }
+  }
+
+  const request = loadSession()
     .then(({ user }) => {
       if (revision !== startRevision) return sessionSnapshot
 
