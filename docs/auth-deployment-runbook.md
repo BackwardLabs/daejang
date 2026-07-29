@@ -30,8 +30,14 @@ UPBIT_PDF_IMPORT_ENABLED=false
 `IDENTITY_VERIFICATION_MODE=disabled`는 사용자를 본인확인 완료 상태로 만드는 설정이
 아니다. 가입과 필수 약관 동의만 완료할 수 있게 한다. NICE 결과가 없으므로
 verified subject name claim을 임의로 만들거나
-`account:provision-subject-claim`으로 우회해서는 안 된다. 이름 일치가 필요한
-Upbit PDF 가져오기도 `UPBIT_PDF_IMPORT_ENABLED=false`로 유지한다.
+`account:provision-subject-claim`으로 우회해서는 안 된다.
+
+R1 MVP의 Upbit PDF 경로는 사용자 이름과 문서 이름을 비교하지 않는다. 업로드는
+로그인한 사용자와 소유권으로 격리하고, parser 결과의
+`subjectMatch.status=INCONCLUSIVE` 및
+`policyRef=mvp-subject-comparison-skipped:v1`을 보존한다. 이는 본인 일치 확인을
+의미하지 않는다. 현재 운영에서는 이름 비교와 별개로 승인된 암호화·감사·버전
+object storage가 없으므로 `UPBIT_PDF_IMPORT_ENABLED=false`를 유지한다.
 
 ## 배포를 멈춰야 하는 경우
 

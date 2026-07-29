@@ -50,6 +50,56 @@ func TestClientUsesBoundedOneRequestUnixProtocol(t *testing.T) {
 	}
 }
 
+func TestClientAcceptsExplicitMVPSubjectComparisonSkip(t *testing.T) {
+	request := validRequest()
+	request.ExpectedSubjectName = ""
+	socketPath := serveOnce(t, func(connection net.Conn) {
+		received := readRequestValue(t, connection)
+		if received.ExpectedSubjectName != "" {
+			t.Fatalf("subject name crossed the skipped-comparison boundary: %#v", received)
+		}
+		writeResponse(t, connection, responseStatusOK, "", uncheckedInternalEvidenceEnvelope(request))
+	})
+
+	result, err := (Client{SocketPath: socketPath}).Parse(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(result.InternalEvidence, []byte(`"status":"INCONCLUSIVE"`)) ||
+		bytes.Contains(result.InternalEvidence, []byte("김대장")) {
+		t.Fatalf("unchecked subject decision was not preserved safely: %s", result.InternalEvidence)
+	}
+}
+
+func TestClientRejectsUncheckedSubjectDecisionWithoutExactMVPPolicy(t *testing.T) {
+	for name, body := range map[string]string{
+		"missing policy": `{"status":"INCONCLUSIVE","rawValuesRetained":false}`,
+		"wrong policy":   `{"status":"INCONCLUSIVE","policyRef":"other-policy:v1","rawValuesRetained":false}`,
+		"raw retained":   `{"status":"INCONCLUSIVE","policyRef":"mvp-subject-comparison-skipped:v1","rawValuesRetained":true}`,
+		"mismatch":       `{"status":"MISMATCH","policyRef":"mvp-subject-comparison-skipped:v1","rawValuesRetained":false}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := validRequest()
+			request.ExpectedSubjectName = ""
+			socketPath := serveOnce(t, func(connection net.Conn) {
+				readRequest(t, connection)
+				envelope := strings.Replace(
+					uncheckedInternalEvidenceEnvelope(request),
+					`{"status":"INCONCLUSIVE","policyRef":"mvp-subject-comparison-skipped:v1","rawValuesRetained":false}`,
+					body,
+					1,
+				)
+				writeResponse(t, connection, responseStatusOK, "", envelope)
+			})
+			_, err := (Client{SocketPath: socketPath}).Parse(context.Background(), request)
+			var parserErr *Error
+			if !errors.As(err, &parserErr) || parserErr.Code != "PARSER_RESPONSE_INVALID" {
+				t.Fatalf("unsafe subject decision was accepted: %#v", err)
+			}
+		})
+	}
+}
+
 func TestClientReadinessRequiresAnExactActiveResponse(t *testing.T) {
 	socketPath := serveOnce(t, func(connection net.Conn) {
 		request := make([]byte, len(pingMagic))
@@ -179,6 +229,10 @@ func validRequest() Request {
 
 func validInternalEvidenceEnvelope(request Request) string {
 	return `{"contractVersion":"internal-document-evidence-input/v2","providerId":"UPBIT","artifact":{"artifactId":"artifact-1","importId":"import-1","subjectRef":"subject-1","sourceSystem":"UPBIT","contentHash":{"algorithm":"sha256","value":"` + hashBytes(request.PDF) + `"}},"subjectMatch":{"status":"MATCH"},"producer":{"name":"giwa-pdf-parser","version":"0.2.0"},"document":{"documentType":"TRADE_STATEMENT"},"records":[],"run":{"status":"COMPLETE","summary":{"sourceRecordCount":0}}}`
+}
+
+func uncheckedInternalEvidenceEnvelope(request Request) string {
+	return `{"contractVersion":"internal-document-evidence-input/v2","providerId":"UPBIT","artifact":{"artifactId":"artifact-1","importId":"import-1","subjectRef":"subject-1","sourceSystem":"UPBIT","contentHash":{"algorithm":"sha256","value":"` + hashBytes(request.PDF) + `"}},"subjectMatch":{"status":"INCONCLUSIVE","policyRef":"mvp-subject-comparison-skipped:v1","rawValuesRetained":false},"producer":{"name":"giwa-pdf-parser","version":"0.2.0"},"document":{"documentType":"TRADE_STATEMENT"},"records":[],"run":{"status":"COMPLETE","summary":{"sourceRecordCount":0}}}`
 }
 
 func serveOnce(t *testing.T, handler func(net.Conn)) string {

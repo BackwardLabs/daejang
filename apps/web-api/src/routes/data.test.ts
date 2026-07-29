@@ -424,14 +424,18 @@ describe('synchronous PDF import boundary', () => {
     expect(parsedBody && [...parsedBody].every((byte) => byte === 0)).toBe(true)
   })
 
-  it('fails closed before reading retained content when the session has no verified subject claim', async () => {
+  it('imports for an authenticated user without requiring a verified subject claim', async () => {
     const confirm = vi.fn(async () => confirmedUpload())
     const readConfirmed = vi.fn(async () => ({
       session: confirmedUpload(),
       contents: Buffer.alloc(128, 0x45),
     }))
+    const importUpbitDocument = vi.fn(async () => ({
+      source: { id: 'source-1', status: 'ACTIVE' },
+      job: { id: 'job-1', state: 'SUCCEEDED' },
+    }))
     const app = await buildRouteApp(
-      engineClient({ importUpbitDocument: vi.fn(async () => ({})) }),
+      engineClient({ importUpbitDocument }),
       async (request) => {
         const { verifiedSubjectName: _verifiedSubjectName, ...unverifiedSession } = session
         request.authSession = {
@@ -449,12 +453,12 @@ describe('synchronous PDF import boundary', () => {
       payload: Buffer.from([1]),
     })
 
-    expect(response.statusCode).toBe(403)
-    expect(response.json()).toMatchObject({
-      error: { code: 'VERIFIED_IDENTITY_REQUIRED' },
-    })
-    expect(confirm).not.toHaveBeenCalled()
-    expect(readConfirmed).not.toHaveBeenCalled()
+    expect(response.statusCode).toBe(201)
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(readConfirmed).toHaveBeenCalledOnce()
+    expect(importUpbitDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedSubjectName: '' }),
+    )
   })
 
   it('passes the encrypted PDF and password only in memory and zeroizes both buffers after Engine returns', async () => {
@@ -469,7 +473,7 @@ describe('synchronous PDF import boundary', () => {
     const importUpbitDocument = vi.fn(async (input: Parameters<NonNullable<EngineDataClient['importUpbitDocument']>>[0]) => {
       capturedOriginal = input.encryptedOriginalPdf
       capturedPassword = input.pdfPasswordUtf8
-      expect(input.expectedSubjectName).toBe('김대장')
+      expect(input.expectedSubjectName).toBe('')
       expect(input.context).toMatchObject({
         userId,
         sessionId: session.id,

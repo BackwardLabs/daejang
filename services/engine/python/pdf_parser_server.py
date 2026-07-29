@@ -29,7 +29,10 @@ _silence_process_output()
 from giwa_pdf_parser import ParseContext, ParsePolicy, SubjectMatchDecision, parse_document_bytes
 from giwa_pdf_parser.contracts.enums import SubjectClaimState, SubjectMatchStatus
 from giwa_pdf_parser.errors import ParseError, WrongPasswordError
-from giwa_pdf_parser.projections import project_internal_document_evidence
+from giwa_pdf_parser.projections import (
+    project_internal_document_evidence,
+    project_internal_document_evidence_without_subject_match,
+)
 
 
 _REQUEST_MAGIC = b"DJPARS01"
@@ -152,23 +155,34 @@ def _parse(metadata: dict[str, Any], password_bytes: bytearray, pdf_bytes: bytea
     finally:
         password = None
 
-    claim = outcome.transient_subject_claim
-    if claim.state != SubjectClaimState.PRESENT or claim.value is None:
-        raise LookupError("SUBJECT_CLAIM_UNAVAILABLE")
     expected_name = _normalized_exact_name(metadata["expectedSubjectName"])
-    if not expected_name or _normalized_exact_name(claim.value) != expected_name:
-        raise LookupError("SUBJECT_MISMATCH")
-
-    decision = SubjectMatchDecision.from_claim(
-        claim,
-        status=SubjectMatchStatus.MATCH,
-        subject_ref=metadata["subjectRef"],
-        policy_ref="verified-subject-name-nfkc-exact:v1",
-    )
-    internal_evidence = project_internal_document_evidence(
-        outcome.canonical_result,
-        subject_match=decision,
-    )
+    claim = outcome.transient_subject_claim
+    if expected_name:
+        if claim.state != SubjectClaimState.PRESENT or claim.value is None:
+            raise LookupError("SUBJECT_CLAIM_UNAVAILABLE")
+        if _normalized_exact_name(claim.value) != expected_name:
+            raise LookupError("SUBJECT_MISMATCH")
+        decision = SubjectMatchDecision.from_claim(
+            claim,
+            status=SubjectMatchStatus.MATCH,
+            subject_ref=metadata["subjectRef"],
+            policy_ref="verified-subject-name-nfkc-exact:v1",
+        )
+        internal_evidence = project_internal_document_evidence(
+            outcome.canonical_result,
+            subject_match=decision,
+        )
+    else:
+        decision = SubjectMatchDecision.from_claim(
+            claim,
+            status=SubjectMatchStatus.INCONCLUSIVE,
+            subject_ref=metadata["subjectRef"],
+            policy_ref="mvp-subject-comparison-skipped:v1",
+        )
+        internal_evidence = project_internal_document_evidence_without_subject_match(
+            outcome.canonical_result,
+            subject_match=decision,
+        )
     encoded = bytearray(
         json.dumps(
             internal_evidence.contract_dict(),

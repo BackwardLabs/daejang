@@ -162,14 +162,13 @@ export const registerSourceRoutes = async (
         },
       },
     },
-    async (request) => {
+    async () => {
       const importSupported =
         options.config.upbitPdfImportEnabled &&
         options.engineDataClient?.upbitPdfImportSupported === true
       return {
         upbitPdf: {
-          registrationEnabled:
-            importSupported && Boolean(request.authSession?.verifiedSubjectName),
+          registrationEnabled: importSupported,
           encryptedPdfSupported: importSupported,
         },
       }

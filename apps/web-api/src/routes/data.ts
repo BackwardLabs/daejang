@@ -312,16 +312,9 @@ export const registerDataRoutes = async (
     }
     return options.uploadStore
   }
-  const requireUpbitPdfUpload: onRequestHookHandler = async (request) => {
+  const requireUpbitPdfUpload: onRequestHookHandler = async (_request) => {
     assertUpbitPdfImport()
     availableUploadStore()
-    if (!request.authSession?.verifiedSubjectName) {
-      throw new ApiError(
-        403,
-        'VERIFIED_IDENTITY_REQUIRED',
-        '검증된 본인 명의가 있어야 거래내역서를 등록할 수 있습니다.',
-      )
-    }
   }
   const admitUploadCreate: onRequestHookHandler = async (request) => {
     const context = contextFor(request)
@@ -445,14 +438,6 @@ export const registerDataRoutes = async (
         if (!validDateRange(request.query.coverageStart, request.query.coverageEnd)) {
           throw new ApiError(400, 'INVALID_COVERAGE_PERIOD', '문서 포함 종료일은 시작일보다 빠를 수 없습니다.')
         }
-        const verifiedSubjectName = request.authSession?.verifiedSubjectName
-        if (!verifiedSubjectName) {
-          throw new ApiError(
-            403,
-            'VERIFIED_IDENTITY_REQUIRED',
-            '검증된 본인 명의가 있어야 거래내역서를 등록할 수 있습니다.',
-          )
-        }
         const uploadStore = availableUploadStore()
         const sessionContext = contextFor(request, `import:${request.params.uploadId}`)
         const pdfPasswordUtf8 = passwordEnvelope.subarray(1)
@@ -485,7 +470,10 @@ export const registerDataRoutes = async (
           byteLength: session.verifiedBytes,
           coverageStart: request.query.coverageStart,
           coverageEnd: request.query.coverageEnd,
-          expectedSubjectName: verifiedSubjectName.normalizedValue,
+          // R1 MVP does not operate an external identity-verification provider.
+          // An empty value explicitly asks the parser to preserve the result as
+          // subject-match INCONCLUSIVE instead of manufacturing a MATCH.
+          expectedSubjectName: '',
           encryptedOriginalPdf: retained.contents,
           pdfPasswordUtf8,
         }).catch(mapUpbitImportEngineError)

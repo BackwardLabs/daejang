@@ -3,6 +3,7 @@ package pdfparser
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -93,5 +94,39 @@ func TestPinnedPythonParserWithEncryptedSyntheticUpbitFixture(t *testing.T) {
 	if strings.Contains(string(result.InternalEvidence), syntheticFixturePassword) ||
 		strings.Contains(string(result.InternalEvidence), syntheticFixtureSubject) {
 		t.Fatal("transient fixture password or subject escaped into internal evidence")
+	}
+
+	uncheckedPassword := []byte(syntheticFixturePassword)
+	uncheckedResult, err := client.Parse(context.Background(), Request{
+		PDF: append([]byte(nil), pdf...), Password: uncheckedPassword,
+		ArtifactID:  "artifact:synthetic-sidecar-unchecked",
+		ImportID:    "import:synthetic-sidecar-unchecked",
+		SubjectRef:  "subject:synthetic-sidecar-unchecked",
+		CollectedAt: time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := string(uncheckedResult.InternalEvidence)
+	if !strings.Contains(evidence, `"status":"INCONCLUSIVE"`) ||
+		!strings.Contains(evidence, `"policyRef":"mvp-subject-comparison-skipped:v1"`) ||
+		strings.Contains(evidence, syntheticFixtureSubject) ||
+		!allZero(uncheckedPassword) {
+		t.Fatalf("unchecked subject decision was not preserved safely: %s", evidence)
+	}
+
+	mismatchPassword := []byte(syntheticFixturePassword)
+	_, err = client.Parse(context.Background(), Request{
+		PDF: append([]byte(nil), pdf...), Password: mismatchPassword,
+		ArtifactID:          "artifact:synthetic-sidecar-mismatch",
+		ImportID:            "import:synthetic-sidecar-mismatch",
+		SubjectRef:          "subject:synthetic-sidecar-mismatch",
+		CollectedAt:         time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC),
+		ExpectedSubjectName: "NOT_THE_DOCUMENT_SUBJECT",
+	})
+	var parserError *Error
+	if !errors.As(err, &parserError) || parserError.Code != "SUBJECT_MISMATCH" ||
+		!allZero(mismatchPassword) {
+		t.Fatalf("required subject comparison stopped failing closed: %#v", err)
 	}
 }

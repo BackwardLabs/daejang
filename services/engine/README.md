@@ -166,6 +166,13 @@ root filesystem, tmpfs, capability 제거, no-new-privileges 및 자원 제한�
 복사본이 다음 요청까지 남지 않는다. Compose는 현재 shell의 `GH_PAT`을 build secret으로
 전달하며 runtime 환경, image layer 또는 build argument에는 토큰을 남기지 않는다.
 
+R1 MVP에서는 외부 본인확인 provider가 없으므로 Web API가 비교 대상 이름을 전달하지
+않는다. Parser sidecar는 이름을 스스로 일치 처리하지 않고
+`subjectMatch.status=INCONCLUSIVE`,
+`policyRef=mvp-subject-comparison-skipped:v1`인 내부 evidence를 만든다. Engine은 이
+정확한 조합만 MVP 미확인 경로로 허용하며 `MISMATCH`나 다른 policy는 계속 거부한다.
+업로드 소유권, 파일 크기·digest, 비밀번호 일회성 전달과 parser 격리는 그대로 유지한다.
+
 ```bash
 GH_PAT="$(gh auth token)" docker compose \
   --env-file deploy/production.env \

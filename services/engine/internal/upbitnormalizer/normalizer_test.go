@@ -88,6 +88,55 @@ func TestPrepareRejectsSubjectMismatch(t *testing.T) {
 	}
 }
 
+func TestPrepareAcceptsExplicitMVPSubjectComparisonSkip(t *testing.T) {
+	input := validInput(t, []map[string]any{mappedRecord("row-1", 1, 0)})
+	var value map[string]any
+	if err := json.Unmarshal(input.InternalEvidence, &value); err != nil {
+		t.Fatal(err)
+	}
+	value["subjectMatch"] = map[string]any{
+		"status":            "INCONCLUSIVE",
+		"policyRef":         "mvp-subject-comparison-skipped:v1",
+		"rawValuesRetained": false,
+	}
+	input.InternalEvidence, _ = json.Marshal(value)
+
+	result, err := Prepare(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RecordCount != 1 || result.NormalizedCount != 0 {
+		t.Fatalf("unexpected review-only result: %#v", result)
+	}
+}
+
+func TestPrepareRejectsUncheckedSubjectDecisionWithoutExactMVPPolicy(t *testing.T) {
+	for name, subjectMatch := range map[string]map[string]any{
+		"missing policy": {
+			"status": "INCONCLUSIVE", "rawValuesRetained": false,
+		},
+		"wrong policy": {
+			"status": "INCONCLUSIVE", "policyRef": "other-policy:v1", "rawValuesRetained": false,
+		},
+		"raw retained": {
+			"status": "INCONCLUSIVE", "policyRef": "mvp-subject-comparison-skipped:v1", "rawValuesRetained": true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := validInput(t, []map[string]any{mappedRecord("row-1", 1, 0)})
+			var value map[string]any
+			if err := json.Unmarshal(input.InternalEvidence, &value); err != nil {
+				t.Fatal(err)
+			}
+			value["subjectMatch"] = subjectMatch
+			input.InternalEvidence, _ = json.Marshal(value)
+			if _, err := Prepare(input); err == nil {
+				t.Fatal("unsafe unchecked subject decision was accepted")
+			}
+		})
+	}
+}
+
 func TestPrepareRejectsMalformedTrailingContent(t *testing.T) {
 	input := validInput(t, []map[string]any{mappedRecord("row-1", 1, 0)})
 	input.InternalEvidence = append(input.InternalEvidence, []byte(`{"truncated"`)...)
