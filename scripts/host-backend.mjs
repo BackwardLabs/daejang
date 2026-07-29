@@ -61,6 +61,13 @@ const socketRoot = resolve(
 const configRoot = join(stateRoot, 'config')
 const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
+const managedJITBinary = join(binaryRoot, 'jitd')
+const jitBinary = resolve(
+  process.env.GIWA_JIT_BINARY ??
+    (existsSync(managedJITBinary)
+      ? managedJITBinary
+      : join(jitRuntime, 'bin', 'jitd')),
+)
 const pauseFile = join(stateRoot, 'paused')
 const supervisorLockFile = join(stateRoot, 'supervisor.lock')
 const operationLockFile = join(stateRoot, 'operation.lock')
@@ -604,6 +611,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
   ensureRuntimeDirectories()
   if (buildArtifacts) build()
   for (const requiredArtifact of [
+    jitBinary,
     join(binaryRoot, 'engine-api'),
     join(binaryRoot, 'engine-healthcheck'),
     join(binaryRoot, 'sync-worker'),
@@ -705,7 +713,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     )
     spawnService(
       'jit',
-      join(jitRuntime, 'bin', 'jitd'),
+      jitBinary,
       [
         '--config',
         jitConfig,
