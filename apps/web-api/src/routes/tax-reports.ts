@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { ApiError, resourceNotFound, unauthorized } from '../errors.js'
 import {
   AmbiguousCurrentTaxReportError,
+  CorrectionPendingError,
   InconsistentTaxReportError,
 } from '../tax-report/postgres-tax-report-reader.js'
 import type {
@@ -127,6 +128,9 @@ export const registerTaxReportRoutes = async (
         }
         if (error instanceof AmbiguousCurrentTaxReportError) {
           throw new ApiError(409, 'AMBIGUOUS_TAX_RESIDENCY', '같은 과세연도에 여러 거주자 신고 자료가 있어 자동 선택할 수 없습니다.')
+        }
+        if (error instanceof CorrectionPendingError) {
+          throw new ApiError(503, 'CORRECTION_PENDING', '정정 신고 검증이 완료될 때까지 신고 자료를 제공할 수 없습니다.')
         }
         if (error instanceof InconsistentTaxReportError) {
           throw new ApiError(503, 'TAX_REPORT_INCONSISTENT', '신고 자료의 일관성 검증에 실패했습니다.')

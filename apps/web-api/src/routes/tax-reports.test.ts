@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../app.js'
 import type { AppConfig } from '../config.js'
 import type { CurrentTaxReport, TaxReportFinality, TaxReportReader } from '../tax-report/types.js'
+import { CorrectionPendingError } from '../tax-report/postgres-tax-report-reader.js'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 const OTHER_USER_ID = '00000000-0000-4000-8000-000000000002'
@@ -61,9 +62,11 @@ class FakeTaxReportReader implements TaxReportReader {
   readonly durable = true
   calls: Array<{ subjectId: string; taxYear: number; finality: TaxReportFinality; residentId?: string }> = []
   value: CurrentTaxReport | undefined = fixture
+  failure: Error | undefined
 
   async getCurrent(subjectId: string, taxYear: number, finality: TaxReportFinality, residentId?: string) {
     this.calls.push({ subjectId, taxYear, finality, ...(residentId ? { residentId } : {}) })
+    if (this.failure) throw this.failure
     return this.value
   }
 }
@@ -125,5 +128,18 @@ describe('current tax report route', () => {
     const response = await context.app.inject({ method: 'GET', url: '/api/v1/tax-reports/2027/current', headers: { cookie: `${config.sessionCookieName}=${token}` } })
     expect(response.statusCode).toBe(404)
     expect(response.json()).toMatchObject({ error: { code: 'RESOURCE_NOT_FOUND' } })
+  })
+  it('fails closed with a stable correction-pending response without disclosing another subject', async () => {
+    reader.failure = new CorrectionPendingError('invalid correction artifact')
+    const { token } = await createSession()
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/current?residentId=resident-1',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: { code: 'CORRECTION_PENDING' } })
+    expect(response.body).not.toContain(OTHER_USER_ID)
   })
 })
