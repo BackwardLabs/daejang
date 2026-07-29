@@ -1,0 +1,318 @@
+import { randomUUID } from 'node:crypto'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+
+import { Wallet } from 'ethers'
+import { Pool } from 'pg'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+import { buildApp } from '../app.js'
+import type { AppConfig } from '../config.js'
+import { EngineMtlsClient } from '../engine/mtls-client.js'
+import { PostgresFileUploadStore } from '../uploads/postgres-file-upload-store.js'
+import { PostgresWalletSourceStore } from './postgres-wallet-source-store.js'
+
+const enabled = process.env.RUN_SOURCE_PIPELINE_E2E_TESTS === '1'
+
+const disposableDatabaseUrl = (name: string) => {
+  const value = process.env[name]
+  if (!enabled) return undefined
+  if (!value) throw new Error(`${name} is required for source pipeline E2E tests`)
+  const url = new URL(value)
+  const databaseName = decodeURIComponent(url.pathname.slice(1)).toLowerCase()
+  if (
+    !['postgres:', 'postgresql:'].includes(url.protocol) ||
+    !new Set(['127.0.0.1', 'localhost', '[::1]']).has(url.hostname) ||
+    !databaseName.includes('test')
+  ) {
+    throw new Error(`${name} must target a loopback-only disposable test database`)
+  }
+  return value
+}
+
+const ownerDatabaseUrl = disposableDatabaseUrl('TEST_DATABASE_URL')
+const webDatabaseUrl = disposableDatabaseUrl('TEST_WEB_DATABASE_URL')
+const engineTarget = enabled ? process.env.TEST_ENGINE_GRPC_TARGET : undefined
+if (enabled && !engineTarget) {
+  throw new Error('TEST_ENGINE_GRPC_TARGET is required for source pipeline E2E tests')
+}
+
+const describeWithPipeline = enabled ? describe : describe.skip
+const fixturePassword = 'synthetic-pdf-password-do-not-persist'
+
+const config = (databaseUrl: string): AppConfig => ({
+  runtimeMode: 'test',
+  host: '127.0.0.1',
+  port: 3000,
+  publicOrigin: 'http://localhost:5173',
+  sessionCookieName: 'daejang_session',
+  signupSessionCookieName: 'daejang_signup',
+  sessionAbsoluteTtlSeconds: 3_600,
+  sessionIdleTtlSeconds: 600,
+  signupSessionTtlSeconds: 3_600,
+  bodyLimitBytes: 21 * 1024 * 1024,
+  secureCookies: false,
+  trustProxyHops: 0,
+  databaseUrl,
+  rateLimitHmacSecret: 'source-pipeline-e2e-rate-limit-secret',
+  oauth: {
+    enabledProviders: new Set(),
+    transactionTtlSeconds: 600,
+    stateHmacSecret: 'source-pipeline-e2e-oauth-state-secret',
+    transactionEncryptionKey: Buffer.alloc(32, 1),
+    providers: {},
+  },
+  emailAuth: {
+    enabled: false,
+    resendApiKey: undefined,
+    from: undefined,
+    verificationHmacSecret: 'source-pipeline-e2e-email-secret',
+    verificationTtlSeconds: 300,
+    verificationTokenTtlSeconds: 600,
+    resendAfterSeconds: 60,
+  },
+  signup: {
+    enabled: false,
+    identityVerificationRequired: false,
+    methods: { email: false, oauthProviders: [] },
+  },
+  identityVerificationMode: 'disabled',
+  upbitPdfImportEnabled: true,
+  engineMtls: undefined,
+})
+
+describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
+  const userId = randomUUID()
+  const ownerPool = new Pool({ connectionString: ownerDatabaseUrl })
+  const webPool = new Pool({ connectionString: webDatabaseUrl })
+  const objectEncryptionKey = Buffer.alloc(32, 7)
+  let objectRoot: string
+  let engine: EngineMtlsClient
+  let context: Awaited<ReturnType<typeof buildApp>>
+  let token: string
+
+  beforeAll(async () => {
+    objectRoot = await mkdtemp(join(tmpdir(), 'daejang-source-pipeline-e2e-'))
+    await ownerPool.query(
+      `INSERT INTO web_private.users(id,display_name,status)
+       VALUES($1::uuid,'Source pipeline E2E','active')`,
+      [userId],
+    )
+    engine = EngineMtlsClient.connectInsecureLoopback(engineTarget!, true)
+    await engine.waitForReady(10_000)
+    context = await buildApp({
+      config: config(webDatabaseUrl!),
+      logger: false,
+      walletSourceStore: new PostgresWalletSourceStore(webPool, engine),
+      uploadStore: new PostgresFileUploadStore(webPool, objectRoot, {
+        encryptionKey: objectEncryptionKey,
+        encryptionKeyId: 'source-pipeline-e2e',
+      }),
+      engineDataClient: engine,
+    })
+    ;({ token } = await context.sessionService.create({
+      user: { id: userId, displayName: 'Source pipeline E2E' },
+    }))
+  }, 30_000)
+
+  afterAll(async () => {
+    await context?.app.close()
+    engine?.close()
+    await webPool.end()
+    await ownerPool.end()
+    if (objectRoot) await rm(objectRoot, { recursive: true, force: true })
+    objectEncryptionKey.fill(0)
+  })
+
+  const inject = (input: {
+    method: 'GET' | 'POST' | 'PUT'
+    url: string
+    payload?: Buffer | Record<string, unknown>
+    contentType?: string
+  }) => context.app.inject({
+    method: input.method,
+    url: input.url,
+    headers: {
+      cookie: `daejang_session=${token}`,
+      ...(input.method === 'GET' ? {} : { origin: config(webDatabaseUrl!).publicOrigin }),
+      ...(input.contentType ? { 'content-type': input.contentType } : {}),
+      ...(Buffer.isBuffer(input.payload)
+        ? { 'content-length': String(input.payload.byteLength) }
+        : {}),
+    },
+    ...(input.payload === undefined ? {} : { payload: input.payload }),
+  })
+
+  it('persists a signed wallet through HTTP, Web PostgreSQL, Engine, and source PostgreSQL', async () => {
+    const wallet = Wallet.createRandom()
+    const challengeResponse = await inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets/challenges',
+      payload: { address: wallet.address, chainId: 'eip155:1' },
+    })
+    expect(challengeResponse.statusCode).toBe(201)
+    const challenge = challengeResponse.json<{ challengeId: string; message: string }>()
+
+    const registration = await inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets',
+      payload: {
+        challengeId: challenge.challengeId,
+        signature: await wallet.signMessage(challenge.message),
+        chainIds: ['eip155:1', 'eip155:10'],
+        label: 'E2E wallet',
+      },
+    })
+    expect(registration.statusCode).toBe(201)
+    const source = registration.json<{ id: string; address: string }>()
+    expect(source.address).toBe(wallet.address.toLowerCase())
+
+    const durable = await ownerPool.query<{
+      address: string
+      status: string
+      consumed_at: Date | null
+      chain_ids: string[]
+    }>(
+      `SELECT wallet.address,wallet.status,challenge.consumed_at,
+        ARRAY_AGG(scope.chain_id ORDER BY scope.chain_id)::text[] AS chain_ids
+       FROM source_private.wallet_sources AS wallet
+       JOIN source_private.wallet_chain_scopes AS scope ON scope.wallet_source_id=wallet.id
+       JOIN web_private.wallet_ownership_challenges AS challenge
+         ON challenge.id=$2::uuid AND challenge.user_id=wallet.user_id
+       WHERE wallet.id=$1::uuid AND wallet.user_id=$3::uuid
+       GROUP BY wallet.address,wallet.status,challenge.consumed_at`,
+      [source.id, challenge.challengeId, userId],
+    )
+    expect(durable.rows[0]).toMatchObject({
+      address: wallet.address.toLowerCase(),
+      status: 'ACTIVE',
+      chain_ids: ['eip155:1', 'eip155:10'],
+    })
+    expect(durable.rows[0]?.consumed_at).toBeInstanceOf(Date)
+
+    const list = await inject({ method: 'GET', url: '/api/v1/sources' })
+    expect(list.statusCode).toBe(200)
+    expect(list.json()).toMatchObject({
+      items: [expect.objectContaining({ id: source.id, status: 'ACTIVE' })],
+    })
+
+    const replay = await inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets',
+      payload: {
+        challengeId: challenge.challengeId,
+        signature: await wallet.signMessage(challenge.message),
+        chainIds: ['eip155:1'],
+      },
+    })
+    expect(replay.statusCode).toBe(409)
+  })
+
+  it('persists an encrypted upload through the real PDF parser, artifacts, evidence, and source job DB', async () => {
+    const fixturePath = resolve(
+      process.cwd(),
+      '../../services/engine/internal/pdfparser/testdata/synthetic_upbit_trade.encrypted.pdf.b64',
+    )
+    const pdf = Buffer.from((await readFile(fixturePath, 'utf8')).trim(), 'base64')
+    const create = await inject({
+      method: 'POST',
+      url: '/api/v1/uploads',
+      payload: {
+        filename: 'synthetic-upbit-trade.pdf',
+        mediaType: 'application/pdf',
+        sizeBytes: pdf.byteLength,
+        intentKey: randomUUID(),
+      },
+    })
+    expect(create.statusCode).toBe(201)
+    const { uploadId } = create.json<{ uploadId: string }>()
+
+    const upload = await inject({
+      method: 'PUT',
+      url: `/api/v1/uploads/${uploadId}/content`,
+      contentType: 'application/pdf',
+      payload: Buffer.from(pdf),
+    })
+    expect(upload.statusCode).toBe(204)
+
+    const uploadRow = await ownerPool.query<{ object_key: string }>(
+      'SELECT object_key FROM web_private.upload_sessions WHERE id=$1::uuid',
+      [uploadId],
+    )
+    const stored = await readFile(join(objectRoot, uploadRow.rows[0]!.object_key))
+    expect(stored.subarray(0, 8).toString()).toBe('GIWAOBJ2')
+    expect(stored.includes(Buffer.from('%PDF-'))).toBe(false)
+
+    const passwordEnvelope = Buffer.concat([
+      Buffer.from([1]),
+      Buffer.from(fixturePassword),
+    ])
+    const imported = await inject({
+      method: 'POST',
+      url: `/api/v1/uploads/${uploadId}/import?coverageStart=2026-01-01&coverageEnd=2026-12-31`,
+      contentType: 'application/octet-stream',
+      payload: passwordEnvelope,
+    })
+    expect(imported.statusCode, imported.body).toBe(201)
+    const result = imported.json<{
+      source: { id: string; status: string }
+      job: { id: string; state: string; phase: string; outputFragmentId: string }
+      evidenceTerminalStatus: string
+      sourceRecordCount: number
+      normalizedRecordCount: number
+    }>()
+    expect(result).toMatchObject({
+      source: { status: 'ACTIVE' },
+      job: { state: 'SUCCEEDED', phase: 'COMPLETE' },
+      evidenceTerminalStatus: 'PARTIAL',
+      sourceRecordCount: 1,
+    })
+    expect(result.job.outputFragmentId).not.toBe('')
+
+    const durable = await ownerPool.query<{
+      upload_state: string
+      source_status: string
+      job_state: string
+      phase: string
+      output_fragment_id: string
+      fragment_count: string
+      artifact_count: string
+    }>(
+      `SELECT upload.state AS upload_state,document.status AS source_status,
+        job.state AS job_state,job.phase,job.output_fragment_id,
+        (SELECT COUNT(*)::text FROM subject_evidence.evidence_fragment fragment
+          WHERE fragment.subject_id=$1::text AND fragment.fragment_id=job.output_fragment_id) AS fragment_count,
+        (SELECT COUNT(*)::text FROM artifact.artifact_object artifact
+          WHERE artifact.privacy_class='SUBJECT_PRIVATE') AS artifact_count
+       FROM web_private.upload_sessions AS upload
+       JOIN source_private.document_sources AS document ON document.upload_id=upload.id
+       JOIN source_private.sync_jobs AS job ON job.source_id=document.id
+       WHERE upload.id=$2::uuid AND upload.user_id=$1::uuid`,
+      [userId, uploadId],
+    )
+    expect(durable.rows[0]).toMatchObject({
+      upload_state: 'CONFIRMED',
+      source_status: 'ACTIVE',
+      job_state: 'SUCCEEDED',
+      phase: 'COMPLETE',
+      output_fragment_id: result.job.outputFragmentId,
+      fragment_count: '1',
+    })
+    expect(Number(durable.rows[0]?.artifact_count)).toBeGreaterThanOrEqual(3)
+
+    const requestContext = {
+      requestId: randomUUID(),
+      userId,
+      sessionId: 'source-pipeline-e2e',
+    }
+    const listed = await engine.listAllSources(requestContext)
+    expect(listed.documents).toContainEqual(
+      expect.objectContaining({ id: result.source.id, status: 'ACTIVE' }),
+    )
+    await expect(engine.getSyncJob(requestContext, result.job.id)).resolves.toMatchObject({
+      state: 'SUCCEEDED',
+      outputFragmentId: result.job.outputFragmentId,
+    })
+  }, 120_000)
+})
