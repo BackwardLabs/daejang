@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# DB34 Tax/Web release control. It never publishes ports or changes DNS/TLS.
+set -euo pipefail
+
+root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+compose="$root/deploy/compose.production.yaml"
+env_file="${DAEJANG_PRODUCTION_ENV_FILE:-$root/deploy/production.env}"
+project=daejang
+usage() { echo "usage: $0 {render|preflight|disabled-start|drain|stage|rollback}" >&2; exit 64; }
+[[ $# -eq 1 ]] || usage
+[[ -f "$env_file" ]] || { echo "refusing: production env file not found: $env_file" >&2; exit 64; }
+command -v docker >/dev/null || { echo "refusing: docker is required" >&2; exit 69; }
+
+env_get() {
+  local key=$1 value
+  value=$(awk -F= -v key="$key" '$0 !~ /^[[:space:]]*#/ && $1 == key { sub(/^[^=]*=/, ""); print; exit }' "$env_file")
+  [[ -n "$value" ]] || { echo "refusing: $key is empty or absent in $env_file" >&2; exit 65; }
+  printf '%s' "$value"
+}
+render() { docker compose --project-name "$project" --env-file "$env_file" -f "$compose" config; }
+require_digest() {
+  local name=$1 value
+  value=$(env_get "$name")
+  [[ "$value" == sha256:* && ${#value} -eq 71 ]] || { echo "refusing: $name must be a sha256 digest" >&2; exit 65; }
+}
+preflight() {
+  local rendered image architecture volume
+  [[ $(env_get DAEJANG_DB_NETWORK) == daejang-db_default ]] || { echo "refusing: DB34 target must be daejang-db_default" >&2; exit 65; }
+  require_digest DB34_RELEASE_DIGEST
+  require_digest DB34_BOM_DIGEST
+  require_digest WEB_PRODUCTION_CONFIG_DIGEST
+  require_digest TAX_RUNTIME_CONFIG_DIGEST
+  rendered=$(render)
+  [[ $rendered != *$'build:'* ]] || { echo "refusing: production render contains build:" >&2; exit 65; }
+  while IFS= read -r image; do
+    [[ "$image" == *@sha256:* ]] || { echo "refusing: mutable or tag-only image: $image" >&2; exit 65; }
+    architecture=$(docker image inspect --format '{{.Architecture}}' "$image" 2>/dev/null || true)
+    [[ "$architecture" == arm64 ]] || { echo "refusing: image is not locally verified linux/arm64: $image" >&2; exit 65; }
+  done < <(docker compose --project-name "$project" --env-file "$env_file" -f "$compose" config --images)
+  for volume in private_objects source_artifacts review_artifacts pdf_parser_socket tax_control tax_state tax_receipts; do
+    [[ $rendered == *"$volume:"* ]] || { echo "refusing: required named volume absent: $volume" >&2; exit 65; }
+  done
+  [[ $rendered == *$'name: daejang'* ]] || { echo "refusing: rendered project is not daejang" >&2; exit 65; }
+  [[ $rendered != *$'ports:'* ]] || { echo "refusing: production compose exposes a public port" >&2; exit 65; }
+  echo "preflight passed for DB34 Tax/Web disabled release"
+}
+tax_disabled() {
+  local tax_env enabled
+  tax_env=$(env_get TAX_RUNTIME_ENV_FILE)
+  [[ -f "$tax_env" ]] || { echo "refusing: TAX_RUNTIME_ENV_FILE not found" >&2; exit 65; }
+  enabled=$(awk -F= '$0 !~ /^[[:space:]]*#/ && $1 == "TAX_RUNTIME_ENABLED" { sub(/^[^=]*=/, ""); print; exit }' "$tax_env")
+  [[ -z "$enabled" || "$enabled" == false ]] || { echo "refusing: TAX_RUNTIME_ENABLED must be false or absent" >&2; exit 65; }
+}
+
+case "$1" in
+  render) render ;;
+  preflight) preflight ;;
+  disabled-start)
+    preflight; tax_disabled
+    docker compose --project-name "$project" --env-file "$env_file" -f "$compose" up -d --no-deps tax
+    echo "Tax started in disabled mode only"
+    ;;
+  drain)
+    preflight
+    docker compose --project-name "$project" --env-file "$env_file" -f "$compose" stop --timeout 60 tax
+    echo "Tax drained and stopped; no volume was removed"
+    ;;
+  stage)
+    preflight; tax_disabled
+    docker compose --project-name "$project" --env-file "$env_file" -f "$compose" up -d --no-deps --force-recreate tax
+    echo "staged disabled Tax container; no edge/public cutover was performed"
+    ;;
+  rollback)
+    preflight
+    docker compose --project-name "$project" --env-file "$env_file" -f "$compose" stop --timeout 60 tax
+    echo "rollback stopped Tax only; named volumes and proxy services were left intact"
+    ;;
+  *) usage ;;
+esac

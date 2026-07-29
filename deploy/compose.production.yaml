@@ -1,29 +1,52 @@
 name: daejang
+
+x-runtime-hardening: &runtime-hardening
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-resource-limits: &resource-limits
+  deploy:
+    resources:
+      limits:
+        cpus: "1.00"
+        memory: 768M
+
 services:
   nginx:
-    image: nginx:1.29-alpine
+    image: ${NGINX_IMAGE_REF:?NGINX_IMAGE_REF must be a linux/arm64 digest reference}
     restart: unless-stopped
-    ports: ["${PUBLIC_TLS_PORT:-8443}:8443"]
+    <<: [*runtime-hardening, *resource-limits]
+    user: "101:101"
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
     volumes:
       - ./nginx/web-api.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/proxy_params:/etc/nginx/proxy_params:ro
-      - ${PUBLIC_TLS_CERT_PATH}:/run/secrets/public-tls-cert.pem:ro
-      - ${PUBLIC_TLS_KEY_PATH}:/run/secrets/public-tls-key.pem:ro
+      - ${NGINX_RUNTIME_CONFIG_PATH:?}:/run/config/nginx-runtime.conf:ro
+      - ${NGINX_PERMISSION_SENTINEL_PATH:?}:/run/daejang/permission-sentinel:ro
     depends_on:
-      web-api: { condition: service_healthy }
-    networks: [edge]
+      web-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks: [proxy]
 
   web-api:
-    build: { context: .., dockerfile: apps/web-api/Dockerfile }
+    image: ${WEB_API_IMAGE_REF:?WEB_API_IMAGE_REF must be a linux/arm64 digest reference}
     restart: unless-stopped
-    read_only: true
+    <<: [*runtime-hardening, *resource-limits]
+    user: "65532:65532"
     tmpfs:
-      - /tmp:size=16m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    pids_limit: 128
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    env_file:
+      - ${WEB_API_RUNTIME_ENV_FILE:?}
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -74,113 +97,82 @@ services:
       ENGINE_GRPC_CA_PATH: /run/secrets/engine-ca.pem
       ENGINE_GRPC_CERT_PATH: /run/secrets/web-engine-client-cert.pem
       ENGINE_GRPC_KEY_PATH: /run/secrets/web-engine-client-key.pem
+      PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
     volumes:
       - private_objects:/var/lib/daejang/private
-      - ${ENGINE_CA_PATH}:/run/secrets/engine-ca.pem:ro
-      - ${WEB_ENGINE_CLIENT_CERT_PATH}:/run/secrets/web-engine-client-cert.pem:ro
-      - ${WEB_ENGINE_CLIENT_KEY_PATH}:/run/secrets/web-engine-client-key.pem:ro
+      - ${WEB_API_SECRET_DIR:?}:/run/secrets:ro
+      - ${WEB_API_CONFIG_DIR:?}:/run/config:ro
+      - ${WEB_API_PERMISSION_SENTINEL_PATH:?}:/run/daejang/permission-sentinel:ro
     depends_on:
-      engine: { condition: service_started }
+      engine:
+        condition: service_healthy
     healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:3000/readyz').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 6
       start_period: 10s
-    networks: [edge, backend, database]
+    networks: [proxy, internal, database]
 
   engine:
-    build:
-      context: ..
-      dockerfile: services/engine/Dockerfile
-      target: engine-runtime
-      secrets: [github_token]
+    image: ${ENGINE_IMAGE_REF:?ENGINE_IMAGE_REF must be a linux/arm64 digest reference}
     restart: unless-stopped
+    <<: [*runtime-hardening, *resource-limits]
+    user: "65532:65532"
+    tmpfs:
+      - /tmp:size=32m,mode=1777,noexec,nosuid,nodev
+    env_file:
+      - ${ENGINE_RUNTIME_ENV_FILE:?}
     environment:
       ENGINE_LISTEN: 0.0.0.0:50051
-      DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
-      DAEJANG_SOURCE_ARTIFACT_DATABASE_URL: ${SOURCE_ARTIFACT_DATABASE_URL}
-      DAEJANG_SOURCE_ARTIFACT_ROOT: /var/lib/daejang/source-artifacts/objects
-      DAEJANG_SOURCE_ARTIFACT_TEMP: /var/lib/daejang/source-artifacts/tmp
-      DAEJANG_QUERY_DATABASE_URL: ${QUERY_DATABASE_URL}
-      DAEJANG_REPORT_DATABASE_URL: ${REPORT_DATABASE_URL}
-      DAEJANG_REVIEW_DATABASE_URL: ${REVIEW_DATABASE_URL}
-      DAEJANG_REVIEW_ARTIFACT_DATABASE_URL: ${REVIEW_ARTIFACT_DATABASE_URL}
-      DAEJANG_REVIEW_ARTIFACT_ROOT: ${REVIEW_ARTIFACT_ROOT:-}
-      DAEJANG_REVIEW_ARTIFACT_TEMP: ${REVIEW_ARTIFACT_TEMP:-}
       ENGINE_TLS_CERT_PATH: /run/secrets/engine-server-cert.pem
       ENGINE_TLS_KEY_PATH: /run/secrets/engine-server-key.pem
       ENGINE_TLS_CLIENT_CA_PATH: /run/secrets/engine-client-ca.pem
-      ENGINE_WEB_API_CLIENT_DNS_NAME: ${ENGINE_WEB_API_CLIENT_DNS_NAME}
-      ENGINE_PDF_PARSER_SOCKET_PATH: /run/daejang/pdf-parser/parser.sock
       ENGINE_HEALTH_CA_PATH: /run/secrets/engine-ca.pem
       ENGINE_HEALTH_CERT_PATH: /run/secrets/probe-client-cert.pem
       ENGINE_HEALTH_KEY_PATH: /run/secrets/probe-client-key.pem
       ENGINE_HEALTH_SERVER_NAME: engine.internal
       PRIVATE_OBJECT_ENCRYPTION_KEY: ${PRIVATE_OBJECT_ENCRYPTION_KEY}
       PRIVATE_OBJECT_ENCRYPTION_KEY_ID: ${PRIVATE_OBJECT_ENCRYPTION_KEY_ID}
+      ENGINE_PDF_PARSER_SOCKET_PATH: /run/daejang/pdf-parser/parser.sock
     volumes:
-      - ${ENGINE_SERVER_CERT_PATH}:/run/secrets/engine-server-cert.pem:ro
-      - ${ENGINE_SERVER_KEY_PATH}:/run/secrets/engine-server-key.pem:ro
-      - ${ENGINE_CLIENT_CA_PATH}:/run/secrets/engine-client-ca.pem:ro
-      - ${ENGINE_CA_PATH}:/run/secrets/engine-ca.pem:ro
-      - ${ENGINE_PROBE_CERT_PATH}:/run/secrets/probe-client-cert.pem:ro
-      - ${ENGINE_PROBE_KEY_PATH}:/run/secrets/probe-client-key.pem:ro
+      - ${ENGINE_SECRET_DIR:?}:/run/secrets:ro
+      - ${ENGINE_CONFIG_DIR:?}:/run/config:ro
       - review_artifacts:/var/lib/daejang/review-artifacts
       - source_artifacts:/var/lib/daejang/source-artifacts
       - pdf_parser_socket:/run/daejang/pdf-parser:ro
+      - ${ENGINE_PERMISSION_SENTINEL_PATH:?}:/run/daejang/permission-sentinel:ro
     depends_on:
-      pdf-parser: { condition: service_healthy }
+      pdf-parser:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "/usr/local/bin/engine-healthcheck"]
       interval: 15s
       timeout: 4s
       retries: 3
       start_period: 10s
-    networks: [backend, database]
+    networks: [internal, database]
 
   pdf-parser:
-    build:
-      context: ..
-      dockerfile: services/engine/Dockerfile
-      target: parser-runtime
-      secrets: [github_token]
+    image: ${PDF_PARSER_IMAGE_REF:?PDF_PARSER_IMAGE_REF must be a linux/arm64 digest reference}
     restart: unless-stopped
+    <<: [*runtime-hardening, *resource-limits]
+    user: "65532:65532"
     network_mode: none
-    read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    pids_limit: 8
-    mem_limit: 768m
-    cpus: 1.0
     volumes:
       - pdf_parser_socket:/run/daejang/pdf-parser
+      - ${PDF_PARSER_PERMISSION_SENTINEL_PATH:?}:/run/daejang/permission-sentinel:ro
     healthcheck:
-      test:
-        - CMD
-        - /opt/daejang-pdf-parser/bin/python
-        - -I
-        - -c
-        - "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect('/run/daejang/pdf-parser/parser.sock'); s.sendall(b'DJPING01'); s.shutdown(socket.SHUT_WR); r=s.makefile('rb'); assert r.read(8)==b'DJPONG01' and r.read(1)==b''"
+      test: ["CMD", "/opt/daejang-pdf-parser/bin/python", "-I", "-c", "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect('/run/daejang/pdf-parser/parser.sock'); s.sendall(b'DJPING01'); s.shutdown(socket.SHUT_WR); r=s.makefile('rb'); assert r.read(8)==b'DJPONG01' and r.read(1)==b''"]
       interval: 15s
       timeout: 2s
       retries: 3
       start_period: 5s
 
   sync-worker:
-    build:
-      context: ..
-      dockerfile: services/engine/Dockerfile
-      target: engine-runtime
-      secrets: [github_token]
+    image: ${SYNC_WORKER_IMAGE_REF:?SYNC_WORKER_IMAGE_REF must be a linux/arm64 digest reference}
     entrypoint: ["/usr/local/bin/sync-worker"]
     restart: unless-stopped
     environment:
@@ -193,25 +185,62 @@ services:
       # jitd is deployed outside this Compose project on the private backend.
       # The mounted bridge config uses tcp:// plus the container TLS paths below.
       DAEJANG_JIT_BRIDGE_CONFIG: /run/config/jit-bridge.json
+    <<: [*runtime-hardening, *resource-limits]
+    user: "65532:65532"
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    env_file:
+      - ${SYNC_WORKER_RUNTIME_ENV_FILE:?}
     volumes:
       - private_objects:/var/lib/daejang/private:ro
-      - ${JIT_BRIDGE_CONFIG_PATH}:/run/config/jit-bridge.json:ro
-      - ${JIT_BRIDGE_CA_PATH}:/run/secrets/jit-ca.pem:ro
-      - ${JIT_BRIDGE_CLIENT_CERT_PATH}:/run/secrets/jit-client-cert.pem:ro
-      - ${JIT_BRIDGE_CLIENT_KEY_PATH}:/run/secrets/jit-client-key.pem:ro
-    networks: [backend, database]
+      - ${SYNC_WORKER_SECRET_DIR:?}:/run/secrets:ro
+      - ${SYNC_WORKER_CONFIG_DIR:?}:/run/config:ro
+      - ${SYNC_WORKER_PERMISSION_SENTINEL_PATH:?}:/run/daejang/permission-sentinel:ro
+    networks: [internal, database]
+
+  tax:
+    image: ${TAX_IMAGE_REF:?TAX_IMAGE_REF must be a linux/arm64 digest reference}
+    restart: unless-stopped
+    <<: [*runtime-hardening, *resource-limits]
+    user: "65532:65532"
+    tmpfs:
+      - /tmp:size=32m,mode=1777,noexec,nosuid,nodev
+    env_file:
+      - ${TAX_RUNTIME_ENV_FILE:?}
+    environment:
+      DAEJANG_TAXD_CLAIM_CONTROL_DIR: /run/config/claim-control
+      DAEJANG_TAXD_CLAIM_CONTROL_STATE_DIR: /var/lib/daejang/tax-state
+      DAEJANG_TAXD_CLAIM_RECEIPT_DIR: /var/lib/daejang/tax-receipts
+      DAEJANG_TAXD_HEALTH_ADDRESS: 0.0.0.0:8080
+    volumes:
+      - ${TAX_SECRET_DIR:?}:/run/secrets:ro
+      - ${TAX_CONFIG_DIR:?}:/run/config:ro
+      - tax_state:/var/lib/daejang/tax-state
+      - tax_receipts:/var/lib/daejang/tax-receipts
+      - source_artifacts:/var/lib/daejang/source-artifacts:ro
+      - review_artifacts:/var/lib/daejang/review-artifacts:ro
+      - ${TAX_PERMISSION_SENTINEL_PATH:?}:/run/daejang/permission-sentinel:ro
+    healthcheck:
+      test: ["CMD", "/taxd", "healthcheck"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+      start_period: 10s
+    networks: [internal, database]
 
 networks:
-  edge: {}
-  backend: {}
+  proxy:
+    internal: true
+  internal:
+    internal: true
   database:
     external: true
-    name: ${DAEJANG_DB_NETWORK:-daejang-db_default}
+    name: ${DAEJANG_DB_NETWORK:?}
+
 volumes:
   private_objects: {}
   source_artifacts: {}
   review_artifacts: {}
   pdf_parser_socket: {}
-secrets:
-  github_token:
-    environment: GH_PAT
+  tax_state: {}
+  tax_receipts: {}

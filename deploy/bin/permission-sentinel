@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Verify Docker Desktop bind-mount isolation with non-secret per-service sentinels.
+set -euo pipefail
+
+root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+compose="$root/deploy/compose.production.yaml"
+env_file="${1:-$root/deploy/production.env}"
+[[ -f "$env_file" ]] || { echo "refusing: env file not found: $env_file" >&2; exit 64; }
+command -v docker >/dev/null || { echo "refusing: docker is required" >&2; exit 69; }
+
+operating_system=$(docker info --format '{{.OperatingSystem}}')
+case "$operating_system" in
+  *Docker\ Desktop*) ;;
+  *) echo "refusing: permission sentinel is restricted to Docker Desktop (got: $operating_system)" >&2; exit 65 ;;
+esac
+
+env_get() {
+  local key=$1 value
+  value=$(awk -F= -v key="$key" '$0 !~ /^[[:space:]]*#/ && $1 == key { sub(/^[^=]*=/, ""); print; exit }' "$env_file")
+  [[ -n "$value" ]] || { echo "refusing: $key is empty or absent in $env_file" >&2; exit 65; }
+  printf '%s' "$value"
+}
+
+services=(nginx web-api engine pdf-parser sync-worker tax)
+declare -A paths
+for service in "${services[@]}"; do
+  key=$(tr '[:lower:]-' '[:upper:]_' <<<"${service}_PERMISSION_SENTINEL_PATH")
+  paths["$service"]=$(env_get "$key")
+  [[ ${paths[$service]} = /* ]] || { echo "refusing: $key must be an absolute host path" >&2; exit 65; }
+done
+
+# Distinct files are required: a shared sentinel cannot demonstrate isolation.
+for left in "${services[@]}"; do
+  for right in "${services[@]}"; do
+    [[ "$left" = "$right" ]] && continue
+    [[ ${paths[$left]} != "${paths[$right]}" ]] || { echo "refusing: $left and $right share a sentinel path" >&2; exit 65; }
+  done
+done
+
+created=()
+cleanup() {
+  local path
+  for path in "${created[@]:-}"; do rm -f -- "$path"; done
+}
+trap cleanup EXIT HUP INT TERM
+umask 077
+for service in "${services[@]}"; do
+  path=${paths[$service]}
+  [[ ! -e "$path" ]] || { echo "refusing: sentinel already exists: $path" >&2; exit 65; }
+  mkdir -p -- "$(dirname -- "$path")"
+  token="daejang-non-secret-sentinel:${service}:$(date +%s):$RANDOM"
+  printf '%s\n' "$token" >"$path"
+  created+=("$path")
+done
+
+# Render before starting any one-off container; this rejects missing bind sources and
+# makes the mounted paths auditable without exposing runtime environment values.
+docker compose --env-file "$env_file" -f "$compose" config --quiet
+for service in "${services[@]}"; do
+  expected=$(<"${paths[$service]}")
+  command=(docker compose --env-file "$env_file" -f "$compose" run --rm --no-deps --entrypoint /bin/sh "$service" -ec)
+  script='test "$(cat /run/daejang/permission-sentinel)" = "$1"; shift; for path in "$@"; do test ! -e "$path"; done'
+  forbidden=()
+  for other in "${services[@]}"; do
+    [[ "$other" = "$service" ]] || forbidden+=("${paths[$other]}")
+  done
+  "${command[@]}" "$script" sentinel "$expected" "${forbidden[@]}"
+done
+
+echo "permission sentinel passed: each service can read only its own non-secret sentinel"

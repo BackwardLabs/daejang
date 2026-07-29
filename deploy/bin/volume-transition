@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Copy Compose named volumes without deleting or modifying their source volumes.
+set -euo pipefail
+
+project=daejang
+helper_image=${VOLUME_HELPER_IMAGE_REF:-}
+state_dir=${VOLUME_TRANSITION_STATE_DIR:-./deploy/volume-transition-state}
+usage() { echo "usage: $0 inventory | copy --quiesced SOURCE TARGET | verify SOURCE TARGET | switch SOURCE TARGET | rollback SOURCE TARGET" >&2; exit 64; }
+[[ $# -ge 1 ]] || usage
+command -v docker >/dev/null || { echo "refusing: docker is required" >&2; exit 69; }
+
+require_helper() {
+  [[ "$helper_image" == *@sha256:* ]] || { echo "refusing: VOLUME_HELPER_IMAGE_REF must be a digest-pinned helper image" >&2; exit 65; }
+}
+require_volume() { docker volume inspect "$1" >/dev/null || { echo "refusing: volume does not exist: $1" >&2; exit 65; }; }
+require_quiesced() {
+  [[ ${1:-} == --quiesced ]] || { echo "refusing: copy requires explicit --quiesced" >&2; exit 65; }
+  [[ -z $(docker ps --filter "label=com.docker.compose.project=$project" --quiet) ]] || {
+    echo "refusing: project $project has running containers; drain and stop it before copying" >&2; exit 65;
+  }
+}
+manifest_path() { printf '%s/%s--%s.sha256' "$state_dir" "$1" "$2"; }
+volume_hash() {
+  local volume=$1
+  docker run --rm --mount "type=volume,src=$volume,dst=/data,readonly" "$helper_image" sh -ec \
+    'cd /data; find . -type f -print0 | sort -z | xargs -0 -r sha256sum'
+}
+write_switch() {
+  local volume=$1 target=$2
+  mkdir -p -- "$state_dir"
+  cat >"$state_dir/volume-switch.yaml" <<EOF
+services:
+  volume-transition-marker:
+    image: ${helper_image}
+    profiles: ["volume-transition-marker"]
+    command: ["true"]
+volumes:
+  ${volume#${project}_}:
+    external: true
+    name: ${target}
+EOF
+}
+
+case "$1" in
+  inventory)
+    docker volume ls --filter "label=com.docker.compose.project=$project" --format '{{.Name}}'
+    ;;
+  copy)
+    [[ $# -eq 4 ]] || usage
+    require_quiesced "$2"; source=$3; target=$4
+    require_helper; require_volume "$source"
+    [[ "$source" != "$target" ]] || { echo "refusing: source and target must differ" >&2; exit 65; }
+    docker volume inspect "$target" >/dev/null && { echo "refusing: target already exists: $target" >&2; exit 65; }
+    mkdir -p -- "$state_dir"
+    volume_hash "$source" >"$(manifest_path "$source" "$target")"
+    docker volume create --label com.daejang.volume-transition.source="$source" --label com.daejang.volume-transition.manifest="$(manifest_path "$source" "$target")" "$target" >/dev/null
+    docker run --rm --mount "type=volume,src=$source,dst=/source,readonly" --mount "type=volume,src=$target,dst=/target" "$helper_image" sh -ec \
+      'cd /source; tar -cf - . | (cd /target; tar -xpf -)'
+    "$0" verify "$source" "$target"
+    echo "copied $source to $target; source was mounted read-only and remains untouched"
+    ;;
+  verify)
+    [[ $# -eq 3 ]] || usage
+    source=$2; target=$3; require_helper; require_volume "$source"; require_volume "$target"
+    manifest=$(manifest_path "$source" "$target")
+    [[ -f "$manifest" ]] || { echo "refusing: hash manifest missing: $manifest" >&2; exit 65; }
+    cmp -s "$manifest" <(volume_hash "$target") || { echo "refusing: target hash differs from source manifest" >&2; exit 65; }
+    echo "verified $target against $manifest"
+    ;;
+  switch)
+    [[ $# -eq 3 ]] || usage
+    source=$2; target=$3; require_helper; require_volume "$source"; require_volume "$target"
+    "$0" verify "$source" "$target"
+    write_switch "$source" "$target"
+    echo "staged switch in $state_dir/volume-switch.yaml; deploy with this override after review"
+    ;;
+  rollback)
+    [[ $# -eq 3 ]] || usage
+    source=$2; target=$3; require_volume "$source"; require_volume "$target"
+    write_switch "$source" "$source"
+    echo "staged rollback to untouched source in $state_dir/volume-switch.yaml"
+    ;;
+  *) usage ;;
+esac
