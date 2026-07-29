@@ -58,8 +58,7 @@ const routePreloaders: Record<string, () => Promise<unknown>> = {
   '/sources/new': loadSourceTypeSelectionPage,
   '/sources/new/upbit': loadSourceMethodIntroPage,
   '/sources/new/upbit/upload': loadUpbitPdfRegistrationPage,
-  '/sources/new/wallet': loadSourceMethodIntroPage,
-  '/sources/new/wallet/connect': loadReownEvmWalletConnectionRoute,
+  '/sources/new/wallet': loadReownEvmWalletConnectionRoute,
 }
 
 function preloadRoute(pathname: string) {
@@ -69,6 +68,10 @@ function preloadRoute(pathname: string) {
 
 function normalizePath(pathname: string) {
   const normalized = pathname.replace(/\/+$/, '')
+
+  if (normalized === '/sources/new/wallet/connect') {
+    return '/sources/new/wallet'
+  }
 
   return normalized || '/'
 }
@@ -113,6 +116,14 @@ export function AppRouter() {
   const isProtectedRoute =
     protectedRoutes.has(path) || path.startsWith('/sources/')
   const isPublicEntry = path === '/' || path === '/login'
+
+  useEffect(() => {
+    const rawPath = window.location.pathname.replace(/\/+$/, '') || '/'
+    const canonicalPath = normalizePath(rawPath)
+    if (canonicalPath !== rawPath) {
+      navigateTo(canonicalPath, true)
+    }
+  }, [])
 
   useEffect(() => {
     function handlePathChange() {
@@ -197,11 +208,7 @@ export function AppRouter() {
     } else if (path === '/sources/new/upbit/upload') {
       protectedPage = <UpbitPdfRegistrationPage />
     } else if (path === '/sources/new/wallet') {
-      protectedPage = <SourceMethodIntroPage methodId="evm-wallet" />
-    } else if (path === '/sources/new/wallet/connect') {
-      protectedPage = (
-        <ReownEvmWalletConnectionRoute />
-      )
+      protectedPage = <ReownEvmWalletConnectionRoute />
     } else if (productPage) {
       protectedPage = <ProductPage kind={productPage} />
     }
