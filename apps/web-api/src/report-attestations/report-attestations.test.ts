@@ -1,0 +1,1045 @@
+import { describe, expect, it, vi } from 'vitest'
+
+import { buildApp } from '../app.js'
+import { loadConfig } from '../config.js'
+import {
+  loadLocalReportAttestationRuntime,
+  LocalContractsRuntimeError,
+} from './local-runtime-adapter.js'
+import {
+  getMockPublicationCanonicalJson,
+  getMockReportPublication,
+  MOCK_REPORT_ID,
+} from './mock-publication-source.js'
+import {
+  LOCAL_REPORT_ATTESTATION_RUNTIME_KIND,
+  type Hex32,
+  type LocalReportAttestationRuntime,
+  type PreparedSyntheticEvidence,
+  type RedactedExecutionResult,
+  type ReportReviewOutcome,
+} from './types.js'
+
+const OWNER_A = '00000000-0000-4000-8000-000000000028'
+const OWNER_B = '00000000-0000-4000-8000-000000000029'
+const COMMITMENT = `0x${'1'.repeat(64)}` as Hex32
+const SUBMISSION_UID = `0x${'2'.repeat(64)}` as Hex32
+const REVIEW_UID = `0x${'3'.repeat(64)}` as Hex32
+const TRANSACTION_HASH = `0x${'4'.repeat(64)}`
+
+const config = loadConfig({
+  NODE_ENV: 'test',
+  PUBLIC_ORIGIN: 'http://localhost:5173',
+  RATE_LIMIT_HMAC_SECRET: 'report-attestation-test-secret',
+})
+const IDENTITY_KEY = new Uint8Array(32).fill(28)
+
+const confirmed = (attestationUID: Hex32): RedactedExecutionResult => ({
+  status: 'CONFIRMED',
+  transactionHash: TRANSACTION_HASH,
+  attestationUID,
+  reasonCode: null,
+})
+
+const createFakeRuntime = (options?: {
+  issuerResults?: RedactedExecutionResult[]
+  reviewerResult?: RedactedExecutionResult
+  runtimeApproved?: boolean
+  prepareOverride?: (
+    input: Parameters<
+      LocalReportAttestationRuntime['prepareSyntheticEvidence']
+    >[0],
+  ) => unknown
+  verifyThrows?: boolean
+}) => {
+  let originalArtifact = new Uint8Array()
+  const issuerResults = options?.issuerResults ?? [confirmed(SUBMISSION_UID)]
+  const prepareSyntheticEvidence = vi.fn(
+    async (
+      input: Parameters<
+        LocalReportAttestationRuntime['prepareSyntheticEvidence']
+      >[0],
+    ) => {
+      originalArtifact = input.safeArtifactBytes.slice()
+      const override = options?.prepareOverride?.(input)
+      if (override) {
+        return override as Awaited<
+          ReturnType<
+            LocalReportAttestationRuntime['prepareSyntheticEvidence']
+          >
+        >
+      }
+      return {
+        preparedRecordId: input.preparedRecordId,
+        reportId: input.reportId,
+        revision: input.revision,
+        commitment: COMMITMENT,
+      }
+    },
+  )
+  const executeIssuer = vi.fn(async () => {
+    const next = issuerResults.shift()
+    return next ?? confirmed(SUBMISSION_UID)
+  })
+  const executeReviewer = vi.fn(
+    async () => options?.reviewerResult ?? confirmed(REVIEW_UID),
+  )
+  const isUsable = vi.fn(async () => options?.runtimeApproved ?? true)
+  const verifyPreparedReport = vi.fn(
+    async (
+      input: Parameters<
+        LocalReportAttestationRuntime['verifyPreparedReport']
+      >[0],
+    ) => {
+      if (options?.verifyThrows) {
+        throw new Error('private runtime verification detail')
+      }
+      const matches = Buffer.from(input.safeArtifactBytes).equals(
+        Buffer.from(originalArtifact),
+      )
+      return matches
+        ? ({ result: 'USABLE', reason: null } as const)
+        : ({ result: 'UNUSABLE', reason: 'COMMITMENT_MISMATCH' } as const)
+    },
+  )
+  const close = vi.fn(async () => undefined)
+  const runtime: LocalReportAttestationRuntime = {
+    kind: LOCAL_REPORT_ATTESTATION_RUNTIME_KIND,
+    issuerExecutor: { executeIssuer },
+    reviewerExecutor: { executeReviewer },
+    prepareSyntheticEvidence,
+    isUsable,
+    verifyPreparedReport,
+    close,
+  }
+  return {
+    runtime,
+    prepareSyntheticEvidence,
+    executeIssuer,
+    executeReviewer,
+    isUsable,
+    verifyPreparedReport,
+    close,
+  }
+}
+
+const createHarness = async (
+  reviewOutcome: ReportReviewOutcome = 'APPROVE',
+  fake = createFakeRuntime(),
+) => {
+  const context = await buildApp({
+    config,
+    logger: false,
+    reportAttestations: {
+      runtime: fake.runtime,
+      reviewOutcome,
+      identityKey: IDENTITY_KEY,
+    },
+  })
+  const sessionA = await context.sessionService.create({
+    user: { id: OWNER_A, displayName: 'owner-a' },
+  })
+  const sessionB = await context.sessionService.create({
+    user: { id: OWNER_B, displayName: 'owner-b' },
+  })
+  const request = (
+    owner: 'A' | 'B',
+    input: {
+      method: 'GET' | 'POST'
+      url: string
+      payload?: Record<string, unknown>
+    },
+  ) =>
+    context.app.inject({
+      ...input,
+      headers: {
+        cookie: `${config.sessionCookieName}=${
+          owner === 'A' ? sessionA.token : sessionB.token
+        }`,
+        origin: config.publicOrigin,
+      },
+    })
+  return { context, fake, request }
+}
+
+describe('local report attestation fixture', () => {
+  it('uses deterministic canonical JSON containing only the safe allowlist', () => {
+    const first = getMockReportPublication()
+    const second = getMockReportPublication()
+    const parsed = JSON.parse(
+      new TextDecoder().decode(first.safeArtifactBytes),
+    ) as Record<string, unknown>
+
+    expect(new TextDecoder().decode(first.safeArtifactBytes)).toBe(
+      getMockPublicationCanonicalJson(),
+    )
+    expect(first.safeArtifactBytes).toEqual(second.safeArtifactBytes)
+    expect(Object.keys(parsed)).toEqual([
+      'schemaVersion',
+      'taxYear',
+      'transactionCount',
+      'completeCount',
+      'exceptionCount',
+      'denomination',
+      'resultClass',
+      'derivationRuleVersion',
+      'evidenceSchemaVersion',
+    ])
+    expect(JSON.stringify(parsed)).not.toMatch(
+      /user|owner|document|address|amount|hash|nonce|gas|fee|transactionHash/i,
+    )
+
+    first.safeArtifactBytes[0] = 0
+    expect(second.safeArtifactBytes[0]).not.toBe(0)
+  })
+
+  it('runs the approve lifecycle, redacts private inputs, and is idempotent', async () => {
+    const harness = await createHarness()
+    try {
+      const prepared = await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      expect(prepared.statusCode).toBe(201)
+      expect(prepared.json()).toMatchObject({
+        reportId: MOCK_REPORT_ID,
+        lifecycle: 'PREPARED',
+        submission: null,
+        review: null,
+      })
+      expect(JSON.stringify(prepared.json())).not.toMatch(
+        /preparedRecordId|contractReportId|commitment|safeArtifact|revision/i,
+      )
+
+      const rejectedInput = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+        payload: {
+          outcome: 'APPROVE',
+          artifact: 'unsafe',
+          preparedRecordId: 'caller-owned',
+          attestationUID: SUBMISSION_UID,
+          revision: 99,
+          nonce: 1,
+          gas: 1,
+          fee: 1,
+          rawTransaction: '0x01',
+        },
+      })
+      expect(rejectedInput.statusCode).toBe(400)
+      expect(harness.fake.executeIssuer).not.toHaveBeenCalled()
+
+      const queued = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      expect(queued.statusCode).toBe(202)
+      expect(queued.json()).toMatchObject({
+        lifecycle: 'SUBMISSION_QUEUED',
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const submitted = await harness.request('A', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestation`,
+      })
+      expect(submitted.json()).toMatchObject({
+        lifecycle: 'SUBMITTED',
+        submission: {
+          status: 'CONFIRMED',
+          transactionHash: TRANSACTION_HASH,
+          attestationUID: SUBMISSION_UID,
+          reasonCode: null,
+        },
+      })
+      const repeatedSubmit = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      expect(repeatedSubmit.statusCode).toBe(202)
+      expect(repeatedSubmit.json()).toMatchObject({ lifecycle: 'SUBMITTED' })
+      expect(harness.fake.executeIssuer).toHaveBeenCalledTimes(1)
+
+      const rejectedReviewInput = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+        payload: { outcome: 'REJECT' },
+      })
+      expect(rejectedReviewInput.statusCode).toBe(400)
+      expect(harness.fake.executeReviewer).not.toHaveBeenCalled()
+
+      const review = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+      })
+      expect(review.statusCode).toBe(202)
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const approved = await harness.request('A', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestation`,
+      })
+      expect(approved.json()).toMatchObject({
+        lifecycle: 'APPROVED',
+        review: {
+          status: 'CONFIRMED',
+          attestationUID: REVIEW_UID,
+        },
+      })
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+      })
+      expect(harness.fake.executeReviewer).toHaveBeenCalledTimes(1)
+
+      const verified = await harness.request('A', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/verification`,
+      })
+      expect(verified.json()).toEqual({
+        reportId: MOCK_REPORT_ID,
+        lifecycle: 'APPROVED',
+        result: 'USABLE',
+        reasonCode: null,
+      })
+
+      await harness.context.reportAttestationService?.mutateSafeArtifactForTest(
+        OWNER_A,
+        MOCK_REPORT_ID,
+        (bytes) => Uint8Array.from([...bytes, 0]),
+      )
+      const mutated = await harness.request('A', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/verification`,
+      })
+      expect(mutated.json()).toMatchObject({
+        result: 'UNUSABLE',
+        reasonCode: 'COMMITMENT_MISMATCH',
+      })
+    } finally {
+      await harness.context.app.close()
+    }
+    expect(harness.fake.close).toHaveBeenCalledTimes(1)
+    await harness.context.app.close()
+    expect(harness.fake.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('derives isolated identities per user while keeping the mock artifact identical', async () => {
+    const harness = await createHarness()
+    try {
+      const beforeOwnerB = await harness.request('B', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestation`,
+      })
+      expect(beforeOwnerB.statusCode).toBe(404)
+
+      const ownerA = await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      expect(ownerA.statusCode).toBe(201)
+
+      const ownerB = await harness.request('B', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      expect(ownerB.statusCode).toBe(201)
+      expect(ownerA.json()).toMatchObject({
+        reportId: MOCK_REPORT_ID,
+        lifecycle: 'PREPARED',
+      })
+      expect(ownerB.json()).toMatchObject({
+        reportId: MOCK_REPORT_ID,
+        lifecycle: 'PREPARED',
+      })
+
+      expect(harness.fake.prepareSyntheticEvidence).toHaveBeenCalledTimes(2)
+      const ownerAInput =
+        harness.fake.prepareSyntheticEvidence.mock.calls[0]?.[0]
+      const ownerBInput =
+        harness.fake.prepareSyntheticEvidence.mock.calls[1]?.[0]
+      expect(ownerAInput).toBeDefined()
+      expect(ownerBInput).toBeDefined()
+      expect(ownerAInput?.preparedRecordId).toMatch(/^ep_[0-9a-f]{64}$/)
+      expect(ownerBInput?.preparedRecordId).toMatch(/^ep_[0-9a-f]{64}$/)
+      expect(ownerAInput?.reportId).toMatch(/^0x[0-9a-f]{64}$/)
+      expect(ownerBInput?.reportId).toMatch(/^0x[0-9a-f]{64}$/)
+      expect(ownerAInput?.preparedRecordId).not.toBe(
+        ownerBInput?.preparedRecordId,
+      )
+      expect(ownerAInput?.reportId).not.toBe(ownerBInput?.reportId)
+      expect(ownerAInput?.safeArtifactBytes).toEqual(
+        ownerBInput?.safeArtifactBytes,
+      )
+      expect(JSON.stringify([ownerAInput, ownerBInput])).not.toContain(OWNER_A)
+      expect(JSON.stringify([ownerAInput, ownerBInput])).not.toContain(OWNER_B)
+      expect(JSON.stringify([ownerA.json(), ownerB.json()])).not.toMatch(
+        /preparedRecordId|contractReportId|commitment|safeArtifact|revision/i,
+      )
+
+      const secondSessionForA = await harness.context.sessionService.create({
+        user: { id: OWNER_A, displayName: 'owner-a-new-session' },
+      })
+      const sameUserAgain = await harness.context.app.inject({
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+        headers: {
+          cookie: `${config.sessionCookieName}=${secondSessionForA.token}`,
+          origin: config.publicOrigin,
+        },
+      })
+      expect(sameUserAgain.statusCode).toBe(201)
+      expect(sameUserAgain.json()).toEqual(ownerA.json())
+      expect(harness.fake.prepareSyntheticEvidence).toHaveBeenCalledTimes(2)
+
+      for (const owner of ['A', 'B'] as const) {
+        await harness.request(owner, {
+          method: 'POST',
+          url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        await harness.request(owner, {
+          method: 'POST',
+          url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        const verification = await harness.request(owner, {
+          method: 'GET',
+          url: `/api/v1/reports/${MOCK_REPORT_ID}/verification`,
+        })
+        expect(verification.json()).toMatchObject({
+          lifecycle: 'APPROVED',
+          result: 'USABLE',
+        })
+      }
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('exposes PREPARING while preparation is pending and never submits early', async () => {
+    const fake = createFakeRuntime()
+    let resolvePreparation:
+      | ((value: PreparedSyntheticEvidence) => void)
+      | undefined
+    const pendingPreparation = new Promise<PreparedSyntheticEvidence>(
+      (resolve) => {
+        resolvePreparation = resolve
+      },
+    )
+    fake.prepareSyntheticEvidence.mockImplementation(
+      async () => pendingPreparation,
+    )
+    const harness = await createHarness('APPROVE', fake)
+    try {
+      const firstPrepare = harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      await vi.waitFor(() =>
+        expect(fake.prepareSyntheticEvidence).toHaveBeenCalledTimes(1),
+      )
+
+      const sameOwner = await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      expect(sameOwner.statusCode).toBe(201)
+      expect(sameOwner.json()).toMatchObject({ lifecycle: 'PREPARING' })
+
+      const preparingStatus = await harness.request('A', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestation`,
+      })
+      expect(preparingStatus.json()).toMatchObject({
+        lifecycle: 'PREPARING',
+      })
+      const earlySubmit = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      expect(earlySubmit.statusCode).toBe(202)
+      expect(earlySubmit.json()).toMatchObject({ lifecycle: 'PREPARING' })
+      expect(fake.executeIssuer).not.toHaveBeenCalled()
+
+      const otherOwnerStatus = await harness.request('B', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestation`,
+      })
+      expect(otherOwnerStatus.statusCode).toBe(404)
+      const otherOwnerSubmit = await harness.request('B', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      expect(otherOwnerSubmit.statusCode).toBe(404)
+
+      const preparedInput =
+        fake.prepareSyntheticEvidence.mock.calls[0]?.[0]
+      if (!preparedInput) {
+        throw new Error('expected prepared runtime input')
+      }
+      resolvePreparation?.({
+        preparedRecordId: preparedInput.preparedRecordId,
+        reportId: preparedInput.reportId,
+        revision: 1,
+        commitment: COMMITMENT,
+      })
+      const completedPrepare = await firstPrepare
+      expect(completedPrepare.statusCode).toBe(201)
+      expect(completedPrepare.json()).toMatchObject({ lifecycle: 'PREPARED' })
+
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+      expect(fake.executeIssuer).toHaveBeenCalledTimes(1)
+    } finally {
+      const preparedInput =
+        fake.prepareSyntheticEvidence.mock.calls[0]?.[0]
+      if (preparedInput) {
+        resolvePreparation?.({
+          preparedRecordId: preparedInput.preparedRecordId,
+          reportId: preparedInput.reportId,
+          revision: 1,
+          commitment: COMMITMENT,
+        })
+      }
+      await harness.context.app.close()
+    }
+  })
+
+  it('keeps a failed preparation tombstone and rejects malformed runtime output', async () => {
+    const fake = createFakeRuntime({
+      prepareOverride: (input) => ({
+        preparedRecordId: input.preparedRecordId,
+        reportId: input.reportId,
+        revision: input.revision,
+        commitment: 'not-bytes32',
+      }),
+    })
+    const harness = await createHarness('APPROVE', fake)
+    try {
+      const failed = await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      expect(failed.statusCode).toBe(503)
+      expect(failed.json()).toMatchObject({
+        error: { code: 'REPORT_ATTESTATION_PREPARATION_FAILED' },
+      })
+
+      const tombstone = await harness.request('A', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestation`,
+      })
+      expect(tombstone.json()).toMatchObject({
+        lifecycle: 'PREPARATION_FAILED',
+        failureCode: 'PREPARATION_RESULT_REJECTED',
+      })
+
+      const otherOwner = await harness.request('B', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      expect(otherOwner.statusCode).toBe(503)
+      expect(fake.prepareSyntheticEvidence).toHaveBeenCalledTimes(2)
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it.each([
+    ['PENDING', 'PENDING'],
+    ['RETRY_REQUIRED', 'RETRY_REQUIRED'],
+    ['RECONCILIATION_REQUIRED', 'RECONCILIATION_REQUIRED'],
+  ] as const)(
+    'keeps issuer %s non-terminal and resumes the same prepared operation',
+    async (runtimeStatus, lifecycle) => {
+      const fake = createFakeRuntime({
+        issuerResults: [
+          {
+            status: runtimeStatus,
+            transactionHash: null,
+            attestationUID: null,
+            reasonCode: null,
+          },
+          confirmed(SUBMISSION_UID),
+        ],
+      })
+      const harness = await createHarness('APPROVE', fake)
+      try {
+        await harness.request('A', {
+          method: 'POST',
+          url: '/api/v1/dev/reports/attestation-fixture',
+        })
+        await harness.request('A', {
+          method: 'POST',
+          url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        expect(
+          await harness.context.reportAttestationService?.getStatus(
+            OWNER_A,
+            MOCK_REPORT_ID,
+          ),
+        ).toMatchObject({ lifecycle, failureCode: null })
+
+        await harness.request('A', {
+          method: 'POST',
+          url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        expect(fake.executeIssuer).toHaveBeenCalledTimes(2)
+        const preparedRecordId =
+          fake.prepareSyntheticEvidence.mock.calls[0]?.[0].preparedRecordId
+        expect(fake.executeIssuer).toHaveBeenNthCalledWith(1, {
+          preparedRecordId,
+        })
+        expect(fake.executeIssuer).toHaveBeenNthCalledWith(2, {
+          preparedRecordId,
+        })
+        expect(
+          await harness.context.reportAttestationService?.getStatus(
+            OWNER_A,
+            MOCK_REPORT_ID,
+          ),
+        ).toMatchObject({ lifecycle: 'SUBMITTED' })
+      } finally {
+        await harness.context.app.close()
+      }
+    },
+  )
+
+  it.each([
+    [
+      'missing transaction hash',
+      {
+        status: 'CONFIRMED',
+        transactionHash: null,
+        attestationUID: SUBMISSION_UID,
+        reasonCode: null,
+      },
+    ],
+    [
+      'invalid transaction hash',
+      {
+        status: 'CONFIRMED',
+        transactionHash: '0x01',
+        attestationUID: SUBMISSION_UID,
+        reasonCode: null,
+      },
+    ],
+    [
+      'non-null reason code',
+      {
+        status: 'CONFIRMED',
+        transactionHash: TRANSACTION_HASH,
+        attestationUID: SUBMISSION_UID,
+        reasonCode: 'UNEXPECTED_REASON',
+      },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, RedactedExecutionResult]>)(
+    'rejects an issuer CONFIRMED result with %s',
+    async (_label, invalidResult) => {
+      const fake = createFakeRuntime({ issuerResults: [invalidResult] })
+      const harness = await createHarness('APPROVE', fake)
+      try {
+        await harness.request('A', {
+          method: 'POST',
+          url: '/api/v1/dev/reports/attestation-fixture',
+        })
+        await harness.request('A', {
+          method: 'POST',
+          url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        expect(
+          await harness.context.reportAttestationService?.getStatus(
+            OWNER_A,
+            MOCK_REPORT_ID,
+          ),
+        ).toMatchObject({
+          lifecycle: 'SUBMISSION_FAILED',
+          failureCode: 'ISSUER_RESULT_REJECTED',
+        })
+      } finally {
+        await harness.context.app.close()
+      }
+    },
+  )
+
+  it.each([
+    [
+      'missing transaction hash',
+      {
+        status: 'CONFIRMED',
+        transactionHash: null,
+        attestationUID: REVIEW_UID,
+        reasonCode: null,
+      },
+    ],
+    [
+      'non-null reason code',
+      {
+        status: 'CONFIRMED',
+        transactionHash: TRANSACTION_HASH,
+        attestationUID: REVIEW_UID,
+        reasonCode: 'UNEXPECTED_REASON',
+      },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, RedactedExecutionResult]>)(
+    'rejects a reviewer CONFIRMED result with %s',
+    async (_label, invalidResult) => {
+      const fake = createFakeRuntime({ reviewerResult: invalidResult })
+      const harness = await createHarness('APPROVE', fake)
+      try {
+        await harness.request('A', {
+          method: 'POST',
+          url: '/api/v1/dev/reports/attestation-fixture',
+        })
+        await harness.request('A', {
+          method: 'POST',
+          url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        await harness.request('A', {
+          method: 'POST',
+          url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        expect(
+          await harness.context.reportAttestationService?.getStatus(
+            OWNER_A,
+            MOCK_REPORT_ID,
+          ),
+        ).toMatchObject({
+          lifecycle: 'REVIEW_FAILED',
+          failureCode: 'REVIEWER_RESULT_REJECTED',
+        })
+        expect(fake.isUsable).not.toHaveBeenCalled()
+      } finally {
+        await harness.context.app.close()
+      }
+    },
+  )
+
+  it('preserves a confirmed review receipt and reconciles without resending it', async () => {
+    const fake = createFakeRuntime()
+    fake.isUsable
+      .mockRejectedValueOnce(new Error('private reconciliation failure'))
+      .mockResolvedValue(true)
+    const harness = await createHarness('APPROVE', fake)
+    try {
+      await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const reconciliationRequired =
+        await harness.context.reportAttestationService?.getStatus(
+          OWNER_A,
+          MOCK_REPORT_ID,
+        )
+      expect(reconciliationRequired).toMatchObject({
+        lifecycle: 'RECONCILIATION_REQUIRED',
+        review: {
+          status: 'CONFIRMED',
+          transactionHash: TRANSACTION_HASH,
+          attestationUID: REVIEW_UID,
+          reasonCode: null,
+        },
+        failureCode: 'REVIEW_RECONCILIATION_FAILED',
+      })
+      expect(fake.executeReviewer).toHaveBeenCalledTimes(1)
+      expect(fake.isUsable).toHaveBeenCalledTimes(1)
+
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      expect(
+        await harness.context.reportAttestationService?.getStatus(
+          OWNER_A,
+          MOCK_REPORT_ID,
+        ),
+      ).toMatchObject({
+        lifecycle: 'APPROVED',
+        review: {
+          status: 'CONFIRMED',
+          transactionHash: TRANSACTION_HASH,
+          attestationUID: REVIEW_UID,
+          reasonCode: null,
+        },
+        failureCode: null,
+      })
+      expect(fake.executeReviewer).toHaveBeenCalledTimes(1)
+      expect(fake.isUsable).toHaveBeenCalledTimes(2)
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('supports only the trusted MANUAL_REVIEW configuration', async () => {
+    const manualResult: RedactedExecutionResult = {
+      status: 'MANUAL_REVIEW',
+      transactionHash: null,
+      attestationUID: null,
+      reasonCode: 'HUMAN_DECISION_REQUIRED',
+    }
+    const manual = await createHarness(
+      'MANUAL_REVIEW',
+      createFakeRuntime({ reviewerResult: manualResult }),
+    )
+    try {
+      await manual.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      await manual.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await manual.context.reportAttestationService?.waitForIdle()
+      await manual.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+      })
+      await manual.context.reportAttestationService?.waitForIdle()
+      expect(
+        await manual.context.reportAttestationService?.getStatus(
+          OWNER_A,
+          MOCK_REPORT_ID,
+        ),
+      ).toMatchObject({
+        lifecycle: 'MANUAL_REVIEW',
+        failureCode: null,
+      })
+    } finally {
+      await manual.context.app.close()
+    }
+
+    const mismatch = await createHarness(
+      'APPROVE',
+      createFakeRuntime({ reviewerResult: manualResult }),
+    )
+    try {
+      await mismatch.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      await mismatch.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await mismatch.context.reportAttestationService?.waitForIdle()
+      await mismatch.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+      })
+      await mismatch.context.reportAttestationService?.waitForIdle()
+      expect(
+        await mismatch.context.reportAttestationService?.getStatus(
+          OWNER_A,
+          MOCK_REPORT_ID,
+        ),
+      ).toMatchObject({
+        lifecycle: 'REVIEW_FAILED',
+        failureCode: 'REVIEW_OUTCOME_MISMATCH',
+      })
+    } finally {
+      await mismatch.context.app.close()
+    }
+  })
+
+  it.each([
+    ['APPROVE', false],
+    ['REJECT', true],
+    ['MANUAL_REVIEW', true],
+  ] as const)(
+    'fails closed when configured %s disagrees with the runtime result',
+    async (reviewOutcome, runtimeApproved) => {
+      const harness = await createHarness(
+        reviewOutcome,
+        createFakeRuntime({ runtimeApproved }),
+      )
+      try {
+        await harness.request('A', {
+          method: 'POST',
+          url: '/api/v1/dev/reports/attestation-fixture',
+        })
+        await harness.request('A', {
+          method: 'POST',
+          url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        await harness.request('A', {
+          method: 'POST',
+          url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+        })
+        await harness.context.reportAttestationService?.waitForIdle()
+        expect(
+          await harness.context.reportAttestationService?.getStatus(
+            OWNER_A,
+            MOCK_REPORT_ID,
+          ),
+        ).toMatchObject({
+          lifecycle: 'REVIEW_FAILED',
+          failureCode: 'REVIEW_OUTCOME_MISMATCH',
+        })
+      } finally {
+        await harness.context.app.close()
+      }
+    },
+  )
+
+  it('returns a stable rejected verification without running artifact verification', async () => {
+    const fake = createFakeRuntime({ runtimeApproved: false })
+    const harness = await createHarness('REJECT', fake)
+    try {
+      await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const response = await harness.request('A', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/verification`,
+      })
+      expect(response.json()).toEqual({
+        reportId: MOCK_REPORT_ID,
+        lifecycle: 'REJECTED',
+        result: 'UNUSABLE',
+        reasonCode: 'REVIEW_REJECTED',
+      })
+      expect(fake.verifyPreparedReport).not.toHaveBeenCalled()
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('maps verification exceptions without exposing private runtime details', async () => {
+    const harness = await createHarness(
+      'APPROVE',
+      createFakeRuntime({ verifyThrows: true }),
+    )
+    try {
+      await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/dev/reports/${MOCK_REPORT_ID}/attestation-review`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const response = await harness.request('A', {
+        method: 'GET',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/verification`,
+      })
+      expect(response.json()).toMatchObject({
+        result: 'VERIFY_FAILED',
+        reasonCode: 'VERIFICATION_EXECUTION_FAILED',
+      })
+      expect(response.body).not.toContain('private runtime verification detail')
+      expect(response.body).not.toContain('stack')
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('waits for a queued job and closes the runtime exactly once', async () => {
+    const fake = createFakeRuntime()
+    let resolveIssuer:
+      | ((value: RedactedExecutionResult) => void)
+      | undefined
+    const pendingIssuer = new Promise<RedactedExecutionResult>((resolve) => {
+      resolveIssuer = resolve
+    })
+    fake.executeIssuer.mockImplementation(async () => pendingIssuer)
+    const harness = await createHarness('APPROVE', fake)
+    try {
+      await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await vi.waitFor(() =>
+        expect(fake.executeIssuer).toHaveBeenCalledTimes(1),
+      )
+
+      const closing = harness.context.app.close()
+      await Promise.resolve()
+      expect(fake.close).not.toHaveBeenCalled()
+      resolveIssuer?.(confirmed(SUBMISSION_UID))
+      await closing
+      expect(fake.close).toHaveBeenCalledTimes(1)
+
+      await harness.context.app.close()
+      expect(fake.close).toHaveBeenCalledTimes(1)
+    } finally {
+      resolveIssuer?.(confirmed(SUBMISSION_UID))
+      await harness.context.app.close()
+    }
+  })
+
+  it('rejects the local runtime in production before server startup', async () => {
+    const fake = createFakeRuntime()
+    await expect(
+      buildApp({
+        config: { ...config, runtimeMode: 'production' },
+        logger: false,
+        reportAttestations: {
+          runtime: fake.runtime,
+          reviewOutcome: 'APPROVE',
+        },
+      }),
+    ).rejects.toThrow('Local report attestations are not allowed in production')
+    expect(fake.prepareSyntheticEvidence).not.toHaveBeenCalled()
+    expect(fake.close).not.toHaveBeenCalled()
+  })
+
+  it('rejects production before the optional contracts module import', () => {
+    expect(() =>
+      loadLocalReportAttestationRuntime({
+        runtimeMode: 'production',
+        reviewOutcome: 'APPROVE',
+      }),
+    ).toThrow(
+      expect.objectContaining<Partial<LocalContractsRuntimeError>>({
+        code: 'LOCAL_CONTRACTS_NOT_ALLOWED',
+      }),
+    )
+  })
+})

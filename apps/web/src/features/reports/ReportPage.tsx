@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { ApiClientError } from '../../api/client.ts'
 import { loadReports, type ReportModel } from '../../api/productApi.ts'
 import { AppSidebar, type AppYear } from '../../components/AppSidebar.tsx'
@@ -16,6 +15,13 @@ import {
   type TaxReportModel,
 } from './taxReportApi.ts'
 import './report.css'
+
+const LocalReportAttestationDemo = import.meta.env.DEV
+  ? lazy(async () => {
+      const module = await import('./LocalReportAttestationDemo.tsx')
+      return { default: module.LocalReportAttestationDemo }
+    })
+  : null
 
 const number = (value: string | number) =>
   Number(value).toLocaleString('ko-KR')
@@ -265,6 +271,18 @@ export function ReportPage() {
           title="보고서"
           tone="workspace"
         />
+
+        {LocalReportAttestationDemo ? (
+          <Suspense
+            fallback={
+              <p className="report-api-state" role="status">
+                GIWA-28 로컬 검증 화면을 준비하는 중입니다.
+              </p>
+            }
+          >
+            <LocalReportAttestationDemo />
+          </Suspense>
+        ) : null}
 
         <section
           className="tax-report-section"

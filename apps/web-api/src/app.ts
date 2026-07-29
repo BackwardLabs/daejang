@@ -42,6 +42,12 @@ import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
 import { registerTaxReportRoutes } from './routes/tax-reports.js'
 import { registerReportPaymentRoutes } from './routes/report-payments.js'
 import { registerSecurityPolicy } from './security.js'
+import { registerReportAttestationRoutes } from './report-attestations/routes.js'
+import { ReportAttestationService } from './report-attestations/service.js'
+import type {
+  LocalReportAttestationRuntime,
+  ReportReviewOutcome,
+} from './report-attestations/types.js'
 import {
   MemoryWalletSourceStore,
   type WalletSourceStore,
@@ -69,6 +75,11 @@ type BuildAppOptions = {
   reportPaymentTaxReportReader?: ReportPaymentTaxReportReader
   reportPaymentStore?: ReportPaymentStore
   reportPaymentFacilitator?: ReportPaymentFacilitator
+  reportAttestations?: {
+    runtime: LocalReportAttestationRuntime
+    reviewOutcome: ReportReviewOutcome
+    identityKey?: Uint8Array
+  }
   now?: () => Date
   readinessCheck?: () => Promise<void>
 }
@@ -84,6 +95,9 @@ const hasStatusCode = (error: unknown): error is { statusCode: number } =>
 
 export const buildApp = async (options: BuildAppOptions = {}) => {
   const config = options.config ?? loadConfig()
+  if (config.runtimeMode === 'production' && options.reportAttestations) {
+    throw new Error('Local report attestations are not allowed in production')
+  }
   if (config.runtimeMode === 'production' && options.sessionStore?.durable !== true) {
     throw new Error('A durable SessionStore is required in production')
   }
@@ -223,6 +237,22 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       ? new UnavailableWalletSourceStore()
       : new MemoryWalletSourceStore()
   )
+  const reportAttestationService = options.reportAttestations
+    ? new ReportAttestationService({
+        runtime: options.reportAttestations.runtime,
+        reviewOutcome: options.reportAttestations.reviewOutcome,
+        ...(options.reportAttestations.identityKey
+          ? { identityKey: options.reportAttestations.identityKey }
+          : {}),
+        ...(options.now ? { now: options.now } : {}),
+      })
+    : undefined
+
+  if (reportAttestationService) {
+    app.addHook('onClose', async () => {
+      await reportAttestationService.close()
+    })
+  }
 
   await app.register(cookie)
   app.decorateRequest('authSession', undefined)
@@ -376,7 +406,6 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         reader: options.taxReportReader,
       })
     }
-
     await registerReportPaymentRoutes(protectedApp, {
       config,
       ...(config.reportPayments
@@ -391,6 +420,11 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         : {}),
       ...(options.now ? { now: options.now } : {}),
     })
+    if (reportAttestationService) {
+      await registerReportAttestationRoutes(protectedApp, {
+        service: reportAttestationService,
+      })
+    }
   })
   return {
     app,
@@ -402,5 +436,6 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     oauthService,
     emailAuthService,
     walletSourceStore,
+    reportAttestationService,
   }
 }
