@@ -807,6 +807,7 @@ const logs = () => {
 
 const supervise = async () => {
   ensureRuntimeDirectories()
+  loadRuntimeEnvironment()
   const supervisorLock = tryAcquireProcessLock(supervisorLockFile)
   if (!supervisorLock) {
     const existing = JSON.parse(readFileSync(supervisorLockFile, 'utf8'))
