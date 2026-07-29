@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+# Copy Compose named volumes without deleting or modifying their source volumes.
+set -euo pipefail
+
+project=daejang
+root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+helper_image=${VOLUME_HELPER_IMAGE_REF:-}
+state_dir=${VOLUME_TRANSITION_STATE_DIR:-"$root/deploy/volume-transition-state"}
+
+usage() {
+  echo "usage: $0 inventory | copy --quiesced SOURCE TARGET | verify SOURCE TARGET | switch SOURCE TARGET | rollback SOURCE TARGET" >&2
+  exit 64
+}
+
+[[ $# -ge 1 ]] || usage
+command -v docker >/dev/null || { echo "refusing: docker is required" >&2; exit 69; }
+
+require_helper() {
+  [[ "$helper_image" == *@sha256:* ]] || {
+    echo "refusing: VOLUME_HELPER_IMAGE_REF must be a digest-pinned helper image" >&2
+    exit 65
+  }
+}
+
+require_volume_name() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$ ]] || {
+    echo "refusing: invalid Docker volume name: $1" >&2
+    exit 65
+  }
+}
+
+require_volume() {
+  require_volume_name "$1"
+  docker volume inspect "$1" >/dev/null || {
+    echo "refusing: volume does not exist: $1" >&2
+    exit 65
+  }
+}
+
+require_state_dir() {
+  [[ "$state_dir" = /* ]] && [[ "$state_dir" != *$'\n'* ]] && [[ "$state_dir" != *"/../"* ]] && [[ "$state_dir" != */.. ]] || {
+    echo "refusing: VOLUME_TRANSITION_STATE_DIR must be an absolute path without '..'" >&2
+    exit 65
+  }
+  mkdir -p -- "$state_dir"
+  [[ -d "$state_dir" && ! -L "$state_dir" ]] || {
+    echo "refusing: state path is not a real directory: $state_dir" >&2
+    exit 65
+  }
+  state_dir=$(CDPATH= cd -P -- "$state_dir" && pwd -P)
+}
+
+volume_key() {
+  local volume=$1 key
+  [[ "$volume" == "$project"_* ]] || {
+    echo "refusing: source volume must use the ${project}_ prefix: $volume" >&2
+    exit 65
+  }
+  key=${volume#"$project"_}
+  [[ "$key" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || {
+    echo "refusing: source volume has no valid Compose volume key: $volume" >&2
+    exit 65
+  }
+  printf '%s' "$key"
+}
+
+manifest_path() {
+  printf '%s/%s--%s.manifest' "$state_dir" "$1" "$2"
+}
+
+require_manifest() {
+  local manifest
+  manifest=$(manifest_path "$1" "$2")
+  [[ -f "$manifest" && ! -L "$manifest" ]] || {
+    echo "refusing: manifest missing or unsafe: $manifest" >&2
+    exit 65
+  }
+  printf '%s' "$manifest"
+}
+
+volume_manifest() {
+  local volume=$1
+  docker run --rm --user 0:0 --mount "type=volume,src=$volume,dst=/data,readonly" "$helper_image" sh -ec '
+    export LC_ALL=C
+    cd /data
+    find -P . -xdev \( -type f -o -type d -o -type l \) -print0 |
+      sort -z |
+      while IFS= read -r -d "" path; do
+        case "$(stat -c "%F" -- "$path")" in
+          "regular file")
+            kind=f
+            digest=$(sha256sum -- "$path" | cut -d " " -f 1)
+            size=$(stat -c "%s" -- "$path")
+            ;;
+          "directory")
+            kind=d
+            digest=-
+            size=-
+            ;;
+          "symbolic link")
+            kind=l
+            digest=$(readlink -- "$path" | sha256sum | cut -d " " -f 1)
+            size=$(stat -c "%s" -- "$path")
+            ;;
+          *)
+            echo "refusing: unsupported filesystem entry: $path" >&2
+            exit 65
+            ;;
+        esac
+        stat_fields=$(stat -c "%a %u %g" -- "$path")
+        set -- $stat_fields
+        printf "%s\0%s\0%s\0%s\0%s\0%s\0%s\0" "$kind" "$path" "$1" "$2" "$3" "$size" "$digest"
+      done
+
+    unsupported=$(find -P . -xdev ! \( -type f -o -type d -o -type l \) -print -quit)
+    [ -z "$unsupported" ] || {
+      echo "refusing: unsupported filesystem entry: $unsupported" >&2
+      exit 65
+    }
+  '
+}
+
+write_manifest() {
+  local source=$1 target=$2 manifest temporary
+  manifest=$(manifest_path "$source" "$target")
+  [[ ! -e "$manifest" && ! -L "$manifest" ]] || {
+    echo "refusing: manifest already exists: $manifest" >&2
+    exit 65
+  }
+  temporary=$(mktemp "$state_dir/.volume-manifest.XXXXXX")
+  trap 'rm -f -- "$temporary"' RETURN
+  volume_manifest "$source" >"$temporary"
+  mv -- "$temporary" "$manifest"
+  trap - RETURN
+}
+
+require_quiesced() {
+  local source=$1 id mounted
+  [[ ${2:-} == --quiesced ]] || {
+    echo "refusing: copy requires explicit --quiesced" >&2
+    exit 65
+  }
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    while IFS= read -r mounted; do
+      [[ "$mounted" != "$source" ]] || {
+        echo "refusing: running container $id mounts source volume $source" >&2
+        exit 65
+      }
+    done < <(docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' "$id")
+  done < <(docker ps --quiet)
+}
+
+verify_against_manifest() {
+  local volume=$1 manifest=$2 label=$3
+  cmp -s "$manifest" <(volume_manifest "$volume") || {
+    echo "refusing: $label differs from the recorded source manifest" >&2
+    exit 65
+  }
+}
+
+write_switch() {
+  local source=$1 selected=$2 key temporary
+  key=$(volume_key "$source")
+  temporary=$(mktemp "$state_dir/.volume-switch.XXXXXX")
+  trap 'rm -f -- "$temporary"' RETURN
+  cat >"$temporary" <<EOF
+volumes:
+  ${key}:
+    external: true
+    name: ${selected}
+EOF
+  mv -- "$temporary" "$state_dir/volume-switch.yaml"
+  trap - RETURN
+}
+
+case "$1" in
+  inventory)
+    docker volume ls --filter "label=com.docker.compose.project=$project" --format '{{.Name}}'
+    ;;
+  copy)
+    [[ $# -eq 4 ]] || usage
+    source=$3
+    target=$4
+    require_state_dir
+    require_helper
+    require_volume "$source"
+    require_volume_name "$target"
+    require_quiesced "$source" "$2"
+    [[ "$source" != "$target" ]] || {
+      echo "refusing: source and target must differ" >&2
+      exit 65
+    }
+    docker volume inspect "$target" >/dev/null && {
+      echo "refusing: target already exists: $target" >&2
+      exit 65
+    }
+    write_manifest "$source" "$target"
+    docker volume create --label com.daejang.volume-transition.source="$source" "$target" >/dev/null
+    docker run --rm --user 0:0 --mount "type=volume,src=$source,dst=/source,readonly" --mount "type=volume,src=$target,dst=/target" "$helper_image" sh -ec \
+      'cd /source; tar -cf - . | (cd /target; tar -xpf -)'
+    manifest=$(require_manifest "$source" "$target")
+    verify_against_manifest "$source" "$manifest" "source after copy"
+    verify_against_manifest "$target" "$manifest" "target after copy"
+    echo "copied $source to $target; source was mounted read-only and matches its pre-copy manifest"
+    ;;
+  verify)
+    [[ $# -eq 3 ]] || usage
+    source=$2
+    target=$3
+    require_state_dir
+    require_helper
+    require_volume "$source"
+    require_volume "$target"
+    manifest=$(require_manifest "$source" "$target")
+    verify_against_manifest "$source" "$manifest" "source"
+    verify_against_manifest "$target" "$manifest" "target"
+    echo "verified $source and $target against $manifest"
+    ;;
+  switch)
+    [[ $# -eq 3 ]] || usage
+    source=$2
+    target=$3
+    require_state_dir
+    require_helper
+    require_volume "$source"
+    require_volume "$target"
+    manifest=$(require_manifest "$source" "$target")
+    verify_against_manifest "$source" "$manifest" "source"
+    verify_against_manifest "$target" "$manifest" "target"
+    write_switch "$source" "$target"
+    echo "staged switch in $state_dir/volume-switch.yaml; deploy with this volume-only override after review"
+    ;;
+  rollback)
+    [[ $# -eq 3 ]] || usage
+    source=$2
+    target=$3
+    require_state_dir
+    require_volume "$source"
+    require_volume_name "$target"
+    manifest=$(require_manifest "$source" "$target")
+    require_helper
+    verify_against_manifest "$source" "$manifest" "source"
+    write_switch "$source" "$source"
+    echo "staged rollback to untouched source in $state_dir/volume-switch.yaml"
+    ;;
+  *) usage ;;
+esac
