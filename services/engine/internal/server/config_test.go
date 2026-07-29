@@ -38,6 +38,21 @@ func TestLoadConfigAllowsExplicitInsecureLoopback(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAllowsProtectedUnixSocketWithoutTLS(t *testing.T) {
+	config, err := LoadConfig(func(key string) string {
+		values := validImportConfig()
+		delete(values, "ENGINE_ALLOW_INSECURE_LOOPBACK")
+		values["ENGINE_LISTEN"] = "unix:///run/giwa/engine.sock"
+		return values[key]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Listen != "unix:///run/giwa/engine.sock" {
+		t.Fatalf("unexpected Unix listener: %#v", config)
+	}
+}
+
 func TestLoadConfigRequiresCompleteReviewPersistenceConfiguration(t *testing.T) {
 	_, err := LoadConfig(func(key string) string {
 		values := validImportConfig()

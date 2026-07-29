@@ -328,7 +328,8 @@ describe('PostgresFileUploadStore state and file boundary', () => {
     await store.confirm(userId, uploadId, new Date('2027-01-01T00:00:01Z'))
 
     const stored = await readFile(objectPath)
-    expect(stored.subarray(0, 8).toString('ascii')).toBe('GIWAOBJ1')
+    expect(stored.subarray(0, 8).toString('ascii')).toBe('GIWAOBJ2')
+    expect(stored.subarray(9, 16).toString('utf8')).toBe('primary')
     expect(stored.includes(validPdf)).toBe(false)
     await expect(store.readConfirmed(userId, uploadId)).resolves.toMatchObject({
       contents: validPdf,

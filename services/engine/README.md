@@ -29,8 +29,10 @@ buf generate
 | `DAEJANG_REVIEW_ARTIFACT_TEMP` | 같은 filesystem에 있는 Review artifact 임시 디렉터리 |
 | `DAEJANG_PRIVATE_OBJECT_ROOT` | `sync-worker`가 검증하는 subject-private upload root |
 | `PRIVATE_OBJECT_ENCRYPTION_KEY` | Web API와 공유하는 base64 32-byte AES-256-GCM object key |
+| `PRIVATE_OBJECT_ENCRYPTION_KEY_ID` | 새 private object envelope에 기록할 현재 key ID |
+| `PRIVATE_OBJECT_DECRYPTION_KEYS` | key rotation 중 이전 key ID와 base64 key를 담는 JSON object |
 | `DAEJANG_JIT_BRIDGE_CONFIG` | EVM source job을 `jitd`에 연결하는 JSON 설정 파일의 절대 경로 |
-| `ENGINE_LISTEN` | gRPC listen 주소, 기본 `127.0.0.1:50051` |
+| `ENGINE_LISTEN` | gRPC listen 주소. 같은 host 통합 실행은 `unix:///absolute/path/engine.sock` 사용 |
 | `ENGINE_TLS_CERT_PATH` | Engine server certificate |
 | `ENGINE_TLS_KEY_PATH` | Engine server private key |
 | `ENGINE_TLS_CLIENT_CA_PATH` | Web API client certificate를 검증할 CA |
@@ -42,11 +44,9 @@ buf generate
 TLS 네 값은 함께 설정해야 합니다. CA가 발급한 다른 인증서가 사용자
 `RequestContext`를 위조하지 못하도록 health RPC를 제외한 모든 RPC는 이 DNS
 SAN이 정확히 포함된 Web API 인증서만 허용하며 wildcard SAN은 거부합니다. 별도 probe 인증서는 health
-service만 호출할 수 있습니다. 같은 host에서 두 process를 운영할 때는 loopback
-listen과 `ENGINE_ALLOW_INSECURE_LOOPBACK=true`를 명시적으로 사용할 수 있습니다.
-이 경우 Web API도 `ENGINE_ALLOW_INSECURE_LOOPBACK=true`와
-`ENGINE_GRPC_INSECURE_TARGET=127.0.0.1:50051`을 함께 설정해야 합니다. loopback이
-아닌 plaintext target은 runtime mode와 무관하게 거부됩니다.
+service만 호출할 수 있습니다. 같은 host 통합 실행은 외부 TCP port 대신 소유자만
+접근 가능한 directory 안의 Unix socket을 사용합니다. Engine은 socket mode를
+`0600`으로 강제하며 Web API production 설정은 plaintext TCP target을 거부합니다.
 
 Review mutation은 네 Review 설정값을 모두 지정했을 때만 등록됩니다. Review
 DSN은 `daejang_event_app` 수준의 review/reference 권한을, artifact DSN은

@@ -37,7 +37,15 @@ const uploadStore = pool && config.privateObjectRoot
       pool,
       config.privateObjectRoot,
       config.privateObjectEncryptionKey
-        ? { encryptionKey: config.privateObjectEncryptionKey }
+        ? {
+            encryptionKey: config.privateObjectEncryptionKey,
+            ...(config.privateObjectEncryptionKeyId
+              ? { encryptionKeyId: config.privateObjectEncryptionKeyId }
+              : {}),
+            ...(config.privateObjectDecryptionKeys
+              ? { decryptionKeys: config.privateObjectDecryptionKeys }
+              : {}),
+          }
         : {},
     )
   : undefined

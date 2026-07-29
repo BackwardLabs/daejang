@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"errors"
 	"net"
 	"os"
@@ -30,6 +31,8 @@ type Config struct {
 	TLSClientCAPath           string
 	WebAPIClientDNSName       string
 	AllowInsecureLoopback     bool
+	PrivateObjectKey          []byte
+	PrivateObjectKeyID        string
 }
 
 func LoadConfig(getenv func(string) string) (Config, error) {
@@ -50,6 +53,19 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		TLSPrivateKeyPath:         getenv("ENGINE_TLS_KEY_PATH"),
 		TLSClientCAPath:           getenv("ENGINE_TLS_CLIENT_CA_PATH"),
 		WebAPIClientDNSName:       getenv("ENGINE_WEB_API_CLIENT_DNS_NAME"),
+		PrivateObjectKeyID:        getenv("PRIVATE_OBJECT_ENCRYPTION_KEY_ID"),
+	}
+	if encodedKey := getenv("PRIVATE_OBJECT_ENCRYPTION_KEY"); encodedKey != "" {
+		key, err := base64.StdEncoding.DecodeString(encodedKey)
+		if err != nil || len(key) != 32 {
+			return Config{}, errors.New("PRIVATE_OBJECT_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
+		}
+		result.PrivateObjectKey = key
+		if result.PrivateObjectKeyID == "" {
+			return Config{}, errors.New("PRIVATE_OBJECT_ENCRYPTION_KEY_ID is required with PRIVATE_OBJECT_ENCRYPTION_KEY")
+		}
+	} else if result.PrivateObjectKeyID != "" {
+		return Config{}, errors.New("PRIVATE_OBJECT_ENCRYPTION_KEY is required with PRIVATE_OBJECT_ENCRYPTION_KEY_ID")
 	}
 	if result.Listen == "" {
 		result.Listen = "127.0.0.1:50051"
@@ -134,6 +150,13 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return Config{}, errors.New("ENGINE_WEB_API_CLIENT_DNS_NAME must be an exact DNS SAN without wildcards")
 	}
 	if tlsCount == 0 {
+		if strings.HasPrefix(result.Listen, "unix://") {
+			socketPath := strings.TrimPrefix(result.Listen, "unix://")
+			if !filepath.IsAbs(socketPath) {
+				return Config{}, errors.New("ENGINE_LISTEN Unix socket path must be absolute")
+			}
+			return result, nil
+		}
 		host, _, err := net.SplitHostPort(result.Listen)
 		if err != nil {
 			return Config{}, errors.New("ENGINE_LISTEN must be a host:port address")

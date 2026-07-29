@@ -26,6 +26,7 @@ SIGNUP_ENABLED=true
 IDENTITY_VERIFICATION_MODE=disabled
 UPBIT_PDF_IMPORT_ENABLED=true
 PRIVATE_OBJECT_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+PRIVATE_OBJECT_ENCRYPTION_KEY_ID=primary
 ```
 
 `IDENTITY_VERIFICATION_MODE=disabled`는 사용자를 본인확인 완료 상태로 만드는 설정이
@@ -281,6 +282,7 @@ SIGNUP_ENABLED=true
 IDENTITY_VERIFICATION_MODE=disabled
 UPBIT_PDF_IMPORT_ENABLED=true
 PRIVATE_OBJECT_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+PRIVATE_OBJECT_ENCRYPTION_KEY_ID=primary
 ```
 
 필수 약관 전문은 migration이 자동으로 만들지 않는다. 법무 검토가 끝난 현재

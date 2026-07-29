@@ -91,15 +91,15 @@ type EVMJITOrchestrator interface {
 }
 
 type Runner struct {
-	Store               Store
-	ObjectRoot          string
-	ObjectEncryptionKey []byte
-	LeaseDuration       time.Duration
-	HeartbeatInterval   time.Duration
-	PollInterval        time.Duration
-	RetryDelay          time.Duration
-	Wallets             WalletStore
-	EVMJIT              EVMJITOrchestrator
+	Store             Store
+	ObjectRoot        string
+	ObjectKeyring     PrivateObjectKeyring
+	LeaseDuration     time.Duration
+	HeartbeatInterval time.Duration
+	PollInterval      time.Duration
+	RetryDelay        time.Duration
+	Wallets           WalletStore
+	EVMJIT            EVMJITOrchestrator
 }
 
 func (r Runner) Run(ctx context.Context) error {
@@ -325,7 +325,7 @@ func (r Runner) processUpbit(ctx context.Context, job sourcejobstore.SyncJob) er
 	if err != nil {
 		return r.Store.Fail(ctx, job, "INVALID_OBJECT_KEY", "저장된 파일 경로가 올바르지 않습니다.")
 	}
-	contents, err := readPrivateObject(path, r.ObjectEncryptionKey, source.ObjectKey)
+	contents, err := readPrivateObject(path, r.ObjectKeyring, source.ObjectKey)
 	if err != nil {
 		if errors.Is(err, errPrivateObjectNotFound) {
 			return r.Store.Fail(ctx, job, "OBJECT_NOT_FOUND", "업로드된 PDF 파일을 찾을 수 없습니다.")

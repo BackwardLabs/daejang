@@ -16,6 +16,7 @@ import { validatePdfContents } from './pdf-validation.js'
 import {
   decryptPrivateObject,
   encryptPrivateObject,
+  type PrivateObjectKeyring,
 } from './private-object-crypto.js'
 
 type UploadRow = {
@@ -91,7 +92,7 @@ export class PostgresFileUploadStore implements UploadStore {
   readonly #objectRoot: string
   readonly #renameFile: typeof rename
   readonly #unlinkFile: typeof unlink
-  readonly #encryptionKey: Buffer | undefined
+  readonly #keyring: PrivateObjectKeyring | undefined
 
   constructor(
     pool: Pool,
@@ -100,13 +101,24 @@ export class PostgresFileUploadStore implements UploadStore {
       rename?: typeof rename
       unlink?: typeof unlink
       encryptionKey?: Buffer
+      encryptionKeyId?: string
+      decryptionKeys?: ReadonlyMap<string, Buffer>
     } = {},
   ) {
     this.#pool = pool
     this.#objectRoot = path.resolve(objectRoot)
     this.#renameFile = options.rename ?? rename
     this.#unlinkFile = options.unlink ?? unlink
-    this.#encryptionKey = options.encryptionKey
+    if (options.encryptionKey) {
+      const currentKeyId = options.encryptionKeyId ?? 'primary'
+      this.#keyring = {
+        currentKeyId,
+        keys: new Map([
+          ...(options.decryptionKeys?.entries() ?? []),
+          [currentKeyId, options.encryptionKey],
+        ]),
+      }
+    }
   }
 
   async create(input: CreateUpload) {
@@ -167,8 +179,8 @@ export class PostgresFileUploadStore implements UploadStore {
         if (staleTemporaryRemoval === 'retry') {
           throw new Error('temporary cleanup failed')
         }
-        const storedContents = this.#encryptionKey
-          ? encryptPrivateObject(contents, this.#encryptionKey, session.objectKey)
+        const storedContents = this.#keyring
+          ? encryptPrivateObject(contents, this.#keyring, session.objectKey)
           : contents
         await writeFile(temporary, storedContents, { mode: 0o600, flag: 'wx' })
         await this.#renameFile(temporary, destination)
@@ -542,8 +554,8 @@ export class PostgresFileUploadStore implements UploadStore {
 
   async #readObject(objectKey: string) {
     const storedContents = await readFile(this.#path(objectKey))
-    return this.#encryptionKey
-      ? decryptPrivateObject(storedContents, this.#encryptionKey, objectKey)
+    return this.#keyring
+      ? decryptPrivateObject(storedContents, this.#keyring, objectKey)
       : storedContents
   }
 

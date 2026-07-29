@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import net from 'node:net'
+import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { loadEnvFile } from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -30,7 +31,7 @@ const jitRuntime = resolve(
 )
 const runtimeRoot = resolve(
   process.env.GIWA_HOST_RUNTIME_ROOT ??
-    join(repositoryRoot, '.runtime', 'production'),
+    join(homedir(), 'Library', 'Application Support', 'GIWA', 'production'),
 )
 const stateRoot = join(runtimeRoot, 'supervisor')
 const logRoot = join(stateRoot, 'logs')
@@ -46,6 +47,19 @@ const socketRoot = resolve(
 const configRoot = join(stateRoot, 'config')
 const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
+
+const pathIsWithin = (parent, candidate) =>
+  candidate === parent || candidate.startsWith(`${parent}/`)
+
+const assertExternalRuntimeRoot = () => {
+  for (const checkout of [repositoryRoot, databaseRepository, jitRepository, jitRuntime]) {
+    if (pathIsWithin(checkout, runtimeRoot)) {
+      throw new Error(
+        `GIWA_HOST_RUNTIME_ROOT must be outside Git checkouts: ${runtimeRoot}`,
+      )
+    }
+  }
+}
 
 const ensureRuntimeDirectories = () => {
   for (const directory of [
@@ -68,9 +82,17 @@ const ensureRuntimeDirectories = () => {
 const databaseEnvFile = resolve(
   process.env.GIWA_DATABASE_ENV_FILE ?? join(databaseRepository, '.env'),
 )
+const canonicalProductionEnvFile = join(
+  projectRoot,
+  'daejang',
+  'deploy',
+  'production.env',
+)
 const productionEnvFile = resolve(
   process.env.GIWA_PRODUCTION_ENV_FILE ??
-    join(repositoryRoot, 'deploy', 'production.env'),
+    (existsSync(canonicalProductionEnvFile)
+      ? canonicalProductionEnvFile
+      : join(repositoryRoot, 'deploy', 'production.env')),
 )
 const jitEnvrc = resolve(
   process.env.GIWA_JIT_ENVRC ?? join(jitRepository, '.envrc'),
@@ -107,20 +129,34 @@ const serviceOrder = ['pdf-parser', 'jit', 'engine', 'worker', 'web-api']
 const pidFile = (name) => join(pidRoot, `${name}.pid`)
 const logFile = (name) => join(logRoot, `${name}.log`)
 
-const readPid = (name) => {
+const readProcessState = (name) => {
   try {
-    return Number.parseInt(readFileSync(pidFile(name), 'utf8').trim(), 10)
+    const state = JSON.parse(readFileSync(pidFile(name), 'utf8'))
+    if (
+      Number.isSafeInteger(state.pid) &&
+      state.pid > 1 &&
+      typeof state.commandLine === 'string' &&
+      state.commandLine.length > 0
+    ) return state
+    return undefined
   } catch {
     return undefined
   }
 }
 
 const isRunning = (name) => {
-  const pid = readPid(name)
-  if (!Number.isSafeInteger(pid) || pid <= 1) return false
+  const state = readProcessState(name)
+  if (!state) return false
   try {
-    process.kill(pid, 0)
-    return true
+    process.kill(state.pid, 0)
+    const result = spawnSync('ps', ['-ww', '-p', String(state.pid), '-o', 'command='], {
+      encoding: 'utf8',
+    })
+    if (result.status !== 0) return false
+    const observed = result.stdout.trim()
+    if (observed === state.commandLine) return true
+    const firstArgument = state.commandLine.indexOf(' ')
+    return firstArgument > 0 && observed.endsWith(state.commandLine.slice(firstArgument))
   } catch {
     return false
   }
@@ -134,6 +170,9 @@ const run = (command, args, options = {}) => {
 
 const spawnService = (name, command, args, environment) => {
   if (isRunning(name)) throw new Error(`${name} is already running`)
+  if (command.includes('/') && !existsSync(command)) {
+    throw new Error(`${name} executable is missing: ${command}`)
+  }
   rmSync(pidFile(name), { force: true })
   const descriptor = openSync(logFile(name), 'a', 0o600)
   const child = spawn(command, args, {
@@ -143,8 +182,29 @@ const spawnService = (name, command, args, environment) => {
   })
   child.unref()
   closeSync(descriptor)
-  writeFileSync(pidFile(name), `${child.pid}\n`, { mode: 0o600 })
+  writeFileSync(
+    pidFile(name),
+    `${JSON.stringify({ pid: child.pid, commandLine: [command, ...args].join(' ') })}\n`,
+    { mode: 0o600 },
+  )
 }
+
+const baseEnvironment = () => Object.fromEntries(
+  ['PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'HOME'].flatMap((name) =>
+    process.env[name] === undefined ? [] : [[name, process.env[name]]],
+  ),
+)
+
+const serviceEnvironment = (exactNames, prefixes, overrides = {}) => ({
+  ...baseEnvironment(),
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([name, value]) =>
+      value !== undefined &&
+      (exactNames.includes(name) || prefixes.some((prefix) => name.startsWith(prefix))),
+    ),
+  ),
+  ...overrides,
+})
 
 const sleep = (milliseconds) =>
   new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds))
@@ -173,6 +233,21 @@ const tcpReady = (port) =>
     socket.once('error', fail)
     socket.once('timeout', fail)
   })
+
+const unixReady = (socketPath) => new Promise((resolveReady) => {
+  const socket = net.createConnection(socketPath)
+  socket.setTimeout(500)
+  socket.once('connect', () => {
+    socket.destroy()
+    resolveReady(true)
+  })
+  const fail = () => {
+    socket.destroy()
+    resolveReady(false)
+  }
+  socket.once('error', fail)
+  socket.once('timeout', fail)
+})
 
 const parserReady = () => {
   const socketPath = join(socketRoot, 'pdf-parser.sock')
@@ -257,6 +332,7 @@ const start = async () => {
   if (serviceOrder.some(isRunning))
     throw new Error('Backend services are already running; use backend:restart')
   loadRuntimeEnvironment()
+  assertExternalRuntimeRoot()
   ensureRuntimeDirectories()
 
   try {
@@ -265,23 +341,19 @@ const start = async () => {
     })
     await waitFor('PostgreSQL', () => tcpReady(55432), 30_000)
     build()
-
     const parserSocket = join(socketRoot, 'pdf-parser.sock')
     const jitSocket = join(socketRoot, 'jit.sock')
+    const engineSocket = join(socketRoot, 'engine.sock')
     rmSync(parserSocket, { force: true })
     rmSync(jitSocket, { force: true })
+    rmSync(engineSocket, { force: true })
 
     spawnService(
       'pdf-parser',
       process.env.GIWA_PDF_PARSER_PYTHON ??
-        join(
-          repositoryRoot,
-          'services',
-          'engine',
-          '.venv-pdf-parser',
-          'bin',
-          'python',
-        ),
+        (existsSync(join(repositoryRoot, 'services', 'engine', '.venv-pdf-parser', 'bin', 'python'))
+          ? join(repositoryRoot, 'services', 'engine', '.venv-pdf-parser', 'bin', 'python')
+          : join(projectRoot, 'daejang', 'services', 'engine', '.venv-pdf-parser', 'bin', 'python')),
       [
         '-I',
         '-B',
@@ -352,8 +424,7 @@ const start = async () => {
         '--subject-acl',
         join(jitRuntime, 'configs', 'subject-acl.json'),
       ],
-      {
-        ...process.env,
+      serviceEnvironment([], ['ENV_RPC_URL_', 'ETHEREUM_', 'OPTIMISM_'], {
         ENV_POSTGRES_DSN: jitURL,
         ENV_RPC_URL_ETHEREUM_MAINNET: ethereumRPC,
         ENV_RPC_URL_OPTIMISM_MAINNET: optimismRPC,
@@ -361,18 +432,16 @@ const start = async () => {
         ETHEREUM_TRACE_RPC_URL: ethereumRPC,
         OPTIMISM_RPC_URL: optimismRPC,
         OPTIMISM_TRACE_RPC_URL: optimismRPC,
-      },
+      }),
     )
     await waitFor(
       'multichain JIT',
-      () => Promise.resolve(existsSync(jitSocket)),
+      () => existsSync(jitSocket) ? unixReady(jitSocket) : Promise.resolve(false),
       60_000,
     )
 
-    spawnService('engine', join(binaryRoot, 'engine-api'), [], {
-      ...process.env,
-      ENGINE_LISTEN: '127.0.0.1:50051',
-      ENGINE_ALLOW_INSECURE_LOOPBACK: 'true',
+    spawnService('engine', join(binaryRoot, 'engine-api'), [], serviceEnvironment([], [], {
+      ENGINE_LISTEN: `unix://${engineSocket}`,
       DAEJANG_SOURCE_DATABASE_URL: sourceURL,
       DAEJANG_SOURCE_ARTIFACT_DATABASE_URL: sourceURL,
       DAEJANG_QUERY_DATABASE_URL: queryURL,
@@ -384,12 +453,14 @@ const start = async () => {
       DAEJANG_REVIEW_ARTIFACT_ROOT: join(artifactRoot, 'review', 'root'),
       DAEJANG_REVIEW_ARTIFACT_TEMP: join(artifactRoot, 'review', 'tmp'),
       ENGINE_PDF_PARSER_SOCKET_PATH: parserSocket,
-      ENGINE_TLS_CERT_PATH: '',
-      ENGINE_TLS_KEY_PATH: '',
-      ENGINE_TLS_CLIENT_CA_PATH: '',
-      ENGINE_WEB_API_CLIENT_DNS_NAME: '',
-    })
-    await waitFor('Engine', () => tcpReady(50051), 30_000)
+      PRIVATE_OBJECT_ENCRYPTION_KEY: process.env.PRIVATE_OBJECT_ENCRYPTION_KEY,
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: process.env.PRIVATE_OBJECT_ENCRYPTION_KEY_ID ?? 'primary',
+    }))
+    await waitFor(
+      'Engine',
+      () => existsSync(engineSocket) ? unixReady(engineSocket) : Promise.resolve(false),
+      30_000,
+    )
 
     const bridgeConfigSource = resolve(
       process.env.GIWA_JIT_BRIDGE_CONFIG ?? join(configRoot, 'jit-bridge.json'),
@@ -398,34 +469,53 @@ const start = async () => {
       throw new Error(`JIT bridge config is missing: ${bridgeConfigSource}`)
     }
     const bridgeConfig = createRuntimeBridgeConfig(bridgeConfigSource)
-    spawnService('worker', join(binaryRoot, 'sync-worker'), [], {
-      ...process.env,
+    const workerReadyFile = join(stateRoot, 'worker.ready')
+    rmSync(workerReadyFile, { force: true })
+    spawnService('worker', join(binaryRoot, 'sync-worker'), [], serviceEnvironment([], [], {
       DAEJANG_SOURCE_DATABASE_URL: sourceURL,
       DAEJANG_PRIVATE_OBJECT_ROOT: join(runtimeRoot, 'private-objects'),
       DAEJANG_JIT_BRIDGE_CONFIG: bridgeConfig,
-    })
-    await waitFor('worker', () => Promise.resolve(isRunning('worker')), 5_000)
+      DAEJANG_WORKER_READY_FILE: workerReadyFile,
+      PRIVATE_OBJECT_ENCRYPTION_KEY: process.env.PRIVATE_OBJECT_ENCRYPTION_KEY,
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: process.env.PRIVATE_OBJECT_ENCRYPTION_KEY_ID ?? 'primary',
+      PRIVATE_OBJECT_DECRYPTION_KEYS: process.env.PRIVATE_OBJECT_DECRYPTION_KEYS,
+    }))
+    await waitFor(
+      'worker',
+      () => Promise.resolve(isRunning('worker') && existsSync(workerReadyFile)),
+      10_000,
+    )
 
-    const webAPIEnvironment = {
-      ...process.env,
+    const webAPIEnvironment = serviceEnvironment(
+      [
+        'BODY_LIMIT_BYTES',
+        'IDENTITY_VERIFICATION_MODE',
+        'PRIVATE_OBJECT_DECRYPTION_KEYS',
+        'PRIVATE_OBJECT_ENCRYPTION_KEY',
+        'PRIVATE_OBJECT_ENCRYPTION_KEY_ID',
+        'PUBLIC_ORIGIN',
+        'RATE_LIMIT_HMAC_SECRET',
+        'SESSION_ABSOLUTE_TTL_SECONDS',
+        'SESSION_IDLE_TTL_SECONDS',
+        'SIGNUP_ENABLED',
+        'SIGNUP_SESSION_TTL_SECONDS',
+        'TRUST_PROXY_HOPS',
+        'UPBIT_PDF_IMPORT_ENABLED',
+      ],
+      ['OAUTH_', 'GOOGLE_', 'KAKAO_', 'NAVER_', 'EMAIL_', 'RESEND_', 'X402_'],
+      {
       NODE_ENV: 'production',
       HOST: '127.0.0.1',
       PORT: process.env.GIWA_HOST_API_PORT ?? '3001',
       DATABASE_URL: webURL,
       PRIVATE_OBJECT_ROOT: join(runtimeRoot, 'private-objects'),
-      ENGINE_ALLOW_INSECURE_LOOPBACK: 'true',
-      ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID:
+        process.env.PRIVATE_OBJECT_ENCRYPTION_KEY_ID ?? 'primary',
+      ENGINE_GRPC_INSECURE_TARGET: `unix:${engineSocket}`,
       UPBIT_PDF_IMPORT_ENABLED:
         process.env.UPBIT_PDF_IMPORT_ENABLED ?? 'false',
-    }
-    for (const name of [
-      'ENGINE_GRPC_TARGET',
-      'ENGINE_GRPC_CA_PATH',
-      'ENGINE_GRPC_CERT_PATH',
-      'ENGINE_GRPC_KEY_PATH',
-    ]) {
-      delete webAPIEnvironment[name]
-    }
+      },
+    )
     spawnService(
       'web-api',
       process.execPath,
@@ -459,18 +549,18 @@ const start = async () => {
 
 const stop = async () => {
   for (const name of [...serviceOrder].reverse()) {
-    const pid = readPid(name)
+    const state = readProcessState(name)
     if (!isRunning(name)) {
       rmSync(pidFile(name), { force: true })
       continue
     }
-    process.kill(pid, 'SIGTERM')
+    process.kill(state.pid, 'SIGTERM')
     await waitFor(
       `${name} shutdown`,
       () => Promise.resolve(!isRunning(name)),
       15_000,
     ).catch(() => {
-      process.kill(pid, 'SIGKILL')
+      if (isRunning(name)) process.kill(state.pid, 'SIGKILL')
     })
     rmSync(pidFile(name), { force: true })
   }
@@ -488,6 +578,98 @@ const logs = () => {
     .map(logFile)
   if (files.length === 0) throw new Error('No backend logs are available')
   run('tail', ['-n', process.env.GIWA_LOG_LINES ?? '80', ...files])
+}
+
+const supervise = async () => {
+  while (true) {
+    const running = serviceOrder.filter(isRunning)
+    if (running.length !== serviceOrder.length) {
+      if (running.length > 0) await stop()
+      try {
+        await start()
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    await sleep(5_000)
+  }
+}
+
+const xmlEscape = (value) => value
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+
+const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`
+
+const installCronAutostart = (script) => {
+  const existing = spawnSync('crontab', ['-l'], { encoding: 'utf8' })
+  if (existing.status !== 0 && existing.status !== 1) {
+    throw new Error(`Unable to read crontab: status ${existing.status}`)
+  }
+  const marker = '# GIWA_HOST_BACKEND'
+  const retained = (existing.stdout ?? '')
+    .split(/\r?\n/)
+    .filter((line) => line && !line.includes(marker))
+  retained.push(
+    `@reboot cd ${shellQuote(repositoryRoot)} && ${shellQuote(process.execPath)} ${shellQuote(script)} supervise >> ${shellQuote(join(logRoot, 'supervisor.log'))} 2>&1 ${marker}`,
+  )
+  const installed = spawnSync('crontab', ['-'], {
+    input: `${retained.join('\n')}\n`,
+    encoding: 'utf8',
+    stdio: ['pipe', 'inherit', 'inherit'],
+  })
+  if (installed.status !== 0) {
+    throw new Error(`Unable to install crontab: status ${installed.status}`)
+  }
+  console.log('Installed @reboot supervisor through crontab')
+  return 'cron'
+}
+
+const installAutostart = () => {
+  assertExternalRuntimeRoot()
+  ensureRuntimeDirectories()
+  const launchAgents = join(homedir(), 'Library', 'LaunchAgents')
+  mkdirSync(launchAgents, { recursive: true, mode: 0o700 })
+  const plist = join(launchAgents, 'io.backwardlabs.giwa-host-backend.plist')
+  const script = fileURLToPath(import.meta.url)
+  writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>io.backwardlabs.giwa-host-backend</string>
+  <key>ProgramArguments</key><array>
+    <string>${xmlEscape(process.execPath)}</string>
+    <string>${xmlEscape(script)}</string>
+    <string>supervise</string>
+  </array>
+  <key>WorkingDirectory</key><string>${xmlEscape(repositoryRoot)}</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>${xmlEscape(join(logRoot, 'supervisor.log'))}</string>
+  <key>StandardErrorPath</key><string>${xmlEscape(join(logRoot, 'supervisor.log'))}</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>${xmlEscape(process.env.PATH ?? '')}</string>
+    <key>GIWA_HOST_RUNTIME_ROOT</key><string>${xmlEscape(runtimeRoot)}</string>
+  </dict>
+</dict></plist>
+`, { mode: 0o600 })
+  const bootstrap = spawnSync(
+    'launchctl',
+    ['bootstrap', `gui/${process.getuid()}`, plist],
+    { stdio: 'inherit' },
+  )
+  let installedWith = 'launchd'
+  if (bootstrap.status !== 0) {
+    const load = spawnSync('launchctl', ['load', '-w', plist], {
+      stdio: 'inherit',
+    })
+    if (load.status !== 0) installedWith = installCronAutostart(script)
+  }
+  if (installedWith === 'launchd') {
+    console.log(`Installed login supervisor: ${plist}`)
+  }
 }
 
 let handlingSignal = false
@@ -511,4 +693,6 @@ else if (command === 'restart') {
   await start()
 } else if (command === 'status') status()
 else if (command === 'logs') logs()
-else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs')
+else if (command === 'supervise') await supervise()
+else if (command === 'install-autostart') installAutostart()
+else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|supervise|install-autostart')
