@@ -59,8 +59,9 @@ describe('evmWalletFlowReducer', () => {
       error: null,
       intentKey: null,
       period: {
-        mode: 'TAX_YEAR',
-        taxYear: '2027',
+        endDate: '2026-07-28',
+        mode: 'CUSTOM',
+        startDate: '2026-07-28',
       },
       status: 'EDITING',
       verificationId: 'verification-1',

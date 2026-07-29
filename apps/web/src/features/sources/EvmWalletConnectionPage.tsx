@@ -640,7 +640,7 @@ function ScopeStep({
           <header className="wallet-period-panel__heading">
             <div>
               <h3 id="wallet-period-title">수집 기간</h3>
-              <p>과세연도 전체 또는 최대 1년의 직접 기간을 선택합니다.</p>
+              <p>현재 검증된 JIT 수집 기간을 사용합니다.</p>
             </div>
             <span className="wallet-period-panel__sync">
               동기화 · 사용자 요청 시 선택 범위 수집
@@ -654,12 +654,12 @@ function ScopeStep({
                 type="radio"
                 name="wallet-period-mode"
                 checked={period.mode === 'TAX_YEAR'}
-                disabled={isSubmitting}
+                disabled
                 onChange={() =>
-                  onPeriodChange({ mode: 'TAX_YEAR', taxYear: '2027' })
+                  onPeriodChange({ mode: 'TAX_YEAR', taxYear: '2026' })
                 }
               />
-              과세연도 전체
+              과세연도 전체 (준비 중)
             </label>
             <label>
               <input
@@ -669,9 +669,9 @@ function ScopeStep({
                 disabled={isSubmitting}
                 onChange={() =>
                   onPeriodChange({
-                    endDate: '2027-12-31',
+                    endDate: '2026-07-28',
                     mode: 'CUSTOM',
-                    startDate: '2027-01-01',
+                    startDate: '2026-07-28',
                   })
                 }
               />
@@ -717,7 +717,7 @@ function ScopeStep({
                     ref={startDateRef}
                     type="date"
                     value={period.startDate}
-                    disabled={isSubmitting}
+                    disabled
                     aria-invalid={Boolean(fieldErrors.startDate)}
                     aria-describedby={
                       fieldErrors.startDate
@@ -742,7 +742,7 @@ function ScopeStep({
                     ref={endDateRef}
                     type="date"
                     value={period.endDate}
-                    disabled={isSubmitting}
+                    disabled
                     aria-invalid={Boolean(fieldErrors.endDate)}
                     aria-describedby={
                       fieldErrors.endDate
@@ -762,7 +762,7 @@ function ScopeStep({
                   />
                 </label>
                 <p className="wallet-period-help" id="wallet-period-help">
-                  최대 1년 · 시작일은 종료일보다 빠르거나 같게 설정
+                  현재 검증된 범위: 2026-07-28 하루
                 </p>
               </>
             )}
