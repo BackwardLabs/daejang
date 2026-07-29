@@ -310,8 +310,8 @@ export async function loginWithEmail(input: {
   )
 }
 
-export async function getCurrentUser() {
-  return parseCurrentUserResponse(await requestJson<unknown>('me'))
+export async function getCurrentUser(signal?: AbortSignal) {
+  return parseCurrentUserResponse(await requestJson<unknown>('me', { signal }))
 }
 
 export async function logout() {

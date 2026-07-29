@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   getSessionSnapshot,
+  resetSessionStateForTests,
   setCurrentUser,
 } from '../auth/session-store.ts'
 import { requestApi, requestRaw, requestRawResponse } from './client.ts'
 
 afterEach(() => {
+  resetSessionStateForTests()
   vi.unstubAllGlobals()
 })
 
@@ -52,6 +54,29 @@ describe('product API client', () => {
     )
 
     await expect(request()).rejects.toMatchObject({ status: 401 })
+    expect(getSessionSnapshot()).toEqual({
+      status: 'anonymous',
+      user: null,
+    })
+  })
+
+  it('invalidates a session that is still being resolved after a protected request returns 401', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'AUTHENTICATION_REQUIRED',
+              message: '로그인이 필요합니다',
+            },
+          }),
+          { status: 401, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    )
+
+    await expect(requestApi('/dashboard')).rejects.toMatchObject({ status: 401 })
     expect(getSessionSnapshot()).toEqual({
       status: 'anonymous',
       user: null,

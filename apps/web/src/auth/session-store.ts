@@ -25,6 +25,7 @@ let sessionSnapshot = unknownSession
 let bootstrapPromise: Promise<SessionSnapshot> | undefined
 let revision = 0
 const listeners = new Set<() => void>()
+const sessionCheckTimeoutMs = 10_000
 
 function publishSession(snapshot: SessionSnapshot) {
   sessionSnapshot = snapshot
@@ -54,7 +55,7 @@ export function getSessionRevision() {
 export function invalidateSessionAtRevision(expectedRevision: number) {
   if (
     revision !== expectedRevision ||
-    sessionSnapshot.status !== 'authenticated'
+    sessionSnapshot.status === 'anonymous'
   ) {
     return false
   }
@@ -76,11 +77,16 @@ export function bootstrapSession({ retry = false } = {}) {
   }
 
   const startRevision = revision
+  const controller = new AbortController()
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    sessionCheckTimeoutMs,
+  )
   publishSession({ status: 'checking', user: null })
 
   const loadSession = async () => {
     try {
-      return await getCurrentUser()
+      return await getCurrentUser(controller.signal)
     } catch (caught) {
       const localFixtureEnabled =
         import.meta.env.DEV &&
@@ -95,7 +101,7 @@ export function bootstrapSession({ retry = false } = {}) {
       const { bootstrapLocalReportAttestationSession } =
         await import('./local-report-attestation-session.ts')
       await bootstrapLocalReportAttestationSession()
-      return getCurrentUser()
+      return getCurrentUser(controller.signal)
     }
   }
 
@@ -120,6 +126,7 @@ export function bootstrapSession({ retry = false } = {}) {
       return sessionSnapshot
     })
     .finally(() => {
+      window.clearTimeout(timeout)
       if (bootstrapPromise === request) bootstrapPromise = undefined
     })
 

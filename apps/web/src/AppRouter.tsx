@@ -93,6 +93,19 @@ const protectedRoutes = new Set([
   '/sources',
 ])
 
+function SessionLoadingState() {
+  return (
+    <main
+      className="session-loading"
+      role="status"
+      aria-label="페이지를 불러오는 중"
+    >
+      <img src="/daejang-logo.svg" alt="" />
+      <span className="session-loading__bar" aria-hidden="true" />
+    </main>
+  )
+}
+
 export function AppRouter() {
   const [path, setPath] = useState(() => normalizePath(window.location.pathname))
   const [, startRouteTransition] = useTransition()
@@ -168,8 +181,8 @@ export function AppRouter() {
       )
     }
 
-    if (session.status !== 'authenticated' || !session.user) {
-      return <p className="session-state" role="status">로그인 상태를 확인하는 중</p>
+    if (session.status === 'anonymous') {
+      return <SessionLoadingState />
     }
 
     let protectedPage: React.ReactNode
@@ -193,16 +206,15 @@ export function AppRouter() {
       protectedPage = <ProductPage kind={productPage} />
     }
 
-    return <Suspense fallback={null}>{protectedPage}</Suspense>
+    return (
+      <Suspense fallback={<SessionLoadingState />}>
+        {protectedPage}
+      </Suspense>
+    )
   }
 
-  if (
-    isPublicEntry &&
-    (session.status === 'unknown' ||
-      session.status === 'checking' ||
-      session.status === 'authenticated')
-  ) {
-    return <p className="session-state" role="status">로그인 상태를 확인하는 중</p>
+  if (isPublicEntry && session.status === 'authenticated') {
+    return <SessionLoadingState />
   }
 
   return <App />

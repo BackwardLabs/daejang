@@ -46,6 +46,31 @@ beforeEach(() => {
 })
 
 describe('AppRouter', () => {
+  it('renders the protected page while the session check is still pending', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)))
+    window.history.pushState({}, '', '/dashboard')
+
+    render(<AppRouter />)
+
+    expect(
+      screen.getByRole('heading', { name: '세무 장부 요약' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('로그인 상태를 확인하는 중'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('renders the public entry without waiting for the session check', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)))
+    window.history.pushState({}, '', '/')
+
+    render(<AppRouter />)
+
+    expect(
+      screen.getByRole('heading', { name: /흩어진 디지털 자산 기록/ }),
+    ).toBeInTheDocument()
+  })
+
   it('keeps the existing landing page at the root path without a session', async () => {
     vi.stubGlobal(
       'fetch',
