@@ -181,7 +181,7 @@ export function AppRouter() {
       )
     }
 
-    if (session.status !== 'authenticated' || !session.user) {
+    if (session.status === 'anonymous') {
       return <SessionLoadingState />
     }
 
@@ -206,15 +206,14 @@ export function AppRouter() {
       protectedPage = <ProductPage kind={productPage} />
     }
 
-    return <Suspense fallback={null}>{protectedPage}</Suspense>
+    return (
+      <Suspense fallback={<SessionLoadingState />}>
+        {protectedPage}
+      </Suspense>
+    )
   }
 
-  if (
-    isPublicEntry &&
-    (session.status === 'unknown' ||
-      session.status === 'checking' ||
-      session.status === 'authenticated')
-  ) {
+  if (isPublicEntry && session.status === 'authenticated') {
     return <SessionLoadingState />
   }
 

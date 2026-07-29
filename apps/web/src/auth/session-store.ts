@@ -55,7 +55,7 @@ export function getSessionRevision() {
 export function invalidateSessionAtRevision(expectedRevision: number) {
   if (
     revision !== expectedRevision ||
-    sessionSnapshot.status !== 'authenticated'
+    sessionSnapshot.status === 'anonymous'
   ) {
     return false
   }
