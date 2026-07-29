@@ -1,0 +1,42 @@
+services:
+  tax:
+    profiles: [tax-disabled]
+    image: ${TAX_IMAGE_REF:?TAX_IMAGE_REF must be an immutable digest reference}
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 0.50
+    env_file:
+      - ${TAX_RUNTIME_ENV_FILE:?TAX_RUNTIME_ENV_FILE is required}
+    environment:
+      DAEJANG_TAXD_EMERGENCY_DENY_PROFILE_IDS: weth9.unwrap,weth9.wrap
+      DAEJANG_TAXD_CLAIM_CONTROL_DIR: /run/config/claim-control
+      DAEJANG_TAXD_CLAIM_CONTROL_STATE_DIR: /var/lib/daejang/tax-state
+      DAEJANG_TAXD_CLAIM_RECEIPT_DIR: /var/lib/daejang/tax-receipts
+      DAEJANG_TAXD_HEALTH_ADDRESS: 0.0.0.0:8080
+    volumes:
+      - ${TAX_CONFIG_DIR:?TAX_CONFIG_DIR is required}:/run/config:ro
+      - ${TAX_SECRET_DIR:?TAX_SECRET_DIR is required}:/run/secrets:ro
+      - source_artifacts:/var/lib/daejang/source-artifacts:ro
+      - review_artifacts:/var/lib/daejang/review-artifacts:ro
+      - tax_state:/var/lib/daejang/tax-state
+      - tax_receipts:/var/lib/daejang/tax-receipts
+    healthcheck:
+      test: ["CMD", "/taxd", "healthcheck"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+      start_period: 10s
+    networks: [backend, database]
+
+volumes:
+  tax_state: {}
+  tax_receipts: {}

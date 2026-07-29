@@ -1,78 +1,151 @@
 #!/usr/bin/env bash
-# DB34 Tax/Web release control. It never publishes ports or changes DNS/TLS.
+# DB34 Tax/Web disabled release control. It never publishes ports or changes DNS/TLS.
 set -euo pipefail
 
 root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
-compose="$root/deploy/compose.production.yaml"
-env_file="${DAEJANG_PRODUCTION_ENV_FILE:-$root/deploy/production.env}"
+base_compose="$root/deploy/compose.production.yaml"
+tax_compose="$root/deploy/compose.tax-disabled.yaml"
+production_env_file="${DAEJANG_PRODUCTION_ENV_FILE:-$root/deploy/production.env}"
+tax_env_file="${DAEJANG_TAX_DISABLED_ENV_FILE:-$root/deploy/tax-disabled.env}"
 project=daejang
-usage() { echo "usage: $0 {render|preflight|disabled-start|drain|stage|rollback}" >&2; exit 64; }
+usage() { echo "usage: $0 {render|plan|preflight|disabled-start|drain|rollback}" >&2; exit 64; }
 [[ $# -eq 1 ]] || usage
-[[ -f "$env_file" ]] || { echo "refusing: production env file not found: $env_file" >&2; exit 64; }
 command -v docker >/dev/null || { echo "refusing: docker is required" >&2; exit 69; }
 
+require_file() {
+  local path=$1 description=$2
+  [[ -f "$path" ]] || { echo "refusing: $description not found: $path" >&2; exit 64; }
+}
+
 env_get() {
-  local key=$1 value
-  value=$(awk -F= -v key="$key" '$0 !~ /^[[:space:]]*#/ && $1 == key { sub(/^[^=]*=/, ""); print; exit }' "$env_file")
-  [[ -n "$value" ]] || { echo "refusing: $key is empty or absent in $env_file" >&2; exit 65; }
+  local file=$1 key=$2 value
+  value=$(awk -F= -v key="$key" '$0 !~ /^[[:space:]]*#/ && $1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file")
+  [[ -n "$value" ]] || { echo "refusing: $key is empty or absent in $file" >&2; exit 65; }
   printf '%s' "$value"
 }
-render() { docker compose --project-name "$project" --env-file "$env_file" -f "$compose" config; }
-require_digest() {
-  local name=$1 value
-  value=$(env_get "$name")
-  [[ "$value" == sha256:* && ${#value} -eq 71 ]] || { echo "refusing: $name must be a sha256 digest" >&2; exit 65; }
+
+compose_cmd() {
+  docker compose --project-name "$project" --profile tax-disabled \
+    --env-file "$production_env_file" --env-file "$tax_env_file" \
+    -f "$base_compose" -f "$tax_compose" "$@"
 }
+
+render() {
+  require_file "$production_env_file" "production env file"
+  require_file "$tax_env_file" "Tax disabled env file"
+  compose_cmd config -q
+  compose_cmd config --services
+  compose_cmd config --images
+}
+
+require_lowercase_digest() {
+  local name=$1 value=$2
+  [[ "$value" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo "refusing: $name must be a lowercase sha256 digest" >&2
+    exit 65
+  }
+}
+
+tax_service_config() {
+  compose_cmd config | awk '
+    $0 == "  tax:" { in_tax=1; next }
+    in_tax && $0 ~ /^  [^[:space:]][^:]*:$/ { exit }
+    in_tax { print }
+  '
+}
+
+validate_runtime_env() {
+  local runtime_env
+  runtime_env=$(env_get "$tax_env_file" TAX_RUNTIME_ENV_FILE)
+  [[ "$runtime_env" = /* && "$runtime_env" != *"/../"* && "$runtime_env" != */.. && ! -L "$runtime_env" ]] || {
+    echo "refusing: TAX_RUNTIME_ENV_FILE must be an absolute, non-symlink path without '..'" >&2
+    exit 65
+  }
+  require_file "$runtime_env" "Tax runtime env file"
+  local mode
+  mode=$(stat -f '%Lp' "$runtime_env" 2>/dev/null || stat -c '%a' "$runtime_env")
+  [[ "$mode" == 400 || "$mode" == 600 ]] || {
+    echo "refusing: Tax runtime env file mode must be 0400 or 0600" >&2
+    exit 65
+  }
+}
+
 preflight() {
-  local rendered image architecture volume
-  [[ $(env_get DAEJANG_DB_NETWORK) == daejang-db_default ]] || { echo "refusing: DB34 target must be daejang-db_default" >&2; exit 65; }
-  require_digest DB34_RELEASE_DIGEST
-  require_digest DB34_BOM_DIGEST
-  require_digest WEB_PRODUCTION_CONFIG_DIGEST
-  require_digest TAX_RUNTIME_CONFIG_DIGEST
-  rendered=$(render)
-  [[ $rendered != *$'build:'* ]] || { echo "refusing: production render contains build:" >&2; exit 65; }
-  while IFS= read -r image; do
-    [[ "$image" == *@sha256:* ]] || { echo "refusing: mutable or tag-only image: $image" >&2; exit 65; }
-    architecture=$(docker image inspect --format '{{.Architecture}}' "$image" 2>/dev/null || true)
-    [[ "$architecture" == arm64 ]] || { echo "refusing: image is not locally verified linux/arm64: $image" >&2; exit 65; }
-  done < <(docker compose --project-name "$project" --env-file "$env_file" -f "$compose" config --images)
-  for volume in private_objects source_artifacts review_artifacts pdf_parser_socket tax_control tax_state tax_receipts; do
-    [[ $rendered == *"$volume:"* ]] || { echo "refusing: required named volume absent: $volume" >&2; exit 65; }
+  local tax_image tax_digest platform rendered tax_rendered
+  require_file "$production_env_file" "production env file"
+  require_file "$tax_env_file" "Tax disabled env file"
+  [[ $(env_get "$tax_env_file" DAEJANG_DB_NETWORK) == daejang-db_default ]] || {
+    echo "refusing: DB34 target must be daejang-db_default" >&2
+    exit 65
+  }
+  docker network inspect daejang-db_default >/dev/null
+  tax_image=$(env_get "$tax_env_file" TAX_IMAGE_REF)
+  [[ "$tax_image" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || {
+    echo "refusing: TAX_IMAGE_REF must be an immutable image@sha256:<64 lowercase hex characters> reference" >&2
+    exit 65
+  }
+  tax_digest=${tax_image##*@}
+  require_lowercase_digest TAX_IMAGE_REF "$tax_digest"
+  platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$tax_image")
+  [[ "$platform" == linux/arm64 ]] || {
+    echo "refusing: Tax image is not locally verified linux/arm64: $tax_image" >&2
+    exit 65
+  }
+  validate_runtime_env
+  rendered=$(compose_cmd config)
+  [[ "$rendered" == *$'name: daejang'* ]] || {
+    echo "refusing: rendered project is not daejang" >&2
+    exit 65
+  }
+  [[ "$rendered" == *$'name: daejang-db_default'* ]] || {
+    echo "refusing: rendered database network is not daejang-db_default" >&2
+    exit 65
+  }
+  tax_rendered=$(tax_service_config)
+  [[ -n "$tax_rendered" ]] || { echo "refusing: Tax service is absent" >&2; exit 65; }
+  [[ "$tax_rendered" != *$'ports:'* ]] || {
+    echo "refusing: Tax service must not publish ports" >&2
+    exit 65
+  }
+  [[ "$tax_rendered" == *'DAEJANG_TAXD_EMERGENCY_DENY_PROFILE_IDS: weth9.unwrap,weth9.wrap'* ]] || {
+    echo "refusing: Compose must force both WETH profiles into the emergency deny set" >&2
+    exit 65
+  }
+  for volume in source_artifacts review_artifacts tax_state tax_receipts; do
+    [[ "$rendered" == *"$volume:"* ]] || {
+      echo "refusing: required Tax volume absent: $volume" >&2
+      exit 65
+    }
   done
-  [[ $rendered == *$'name: daejang'* ]] || { echo "refusing: rendered project is not daejang" >&2; exit 65; }
-  [[ $rendered != *$'ports:'* ]] || { echo "refusing: production compose exposes a public port" >&2; exit 65; }
-  echo "preflight passed for DB34 Tax/Web disabled release"
+  echo "preflight passed for DB34 Tax disabled release"
 }
-tax_disabled() {
-  local tax_env enabled
-  tax_env=$(env_get TAX_RUNTIME_ENV_FILE)
-  [[ -f "$tax_env" ]] || { echo "refusing: TAX_RUNTIME_ENV_FILE not found" >&2; exit 65; }
-  enabled=$(awk -F= '$0 !~ /^[[:space:]]*#/ && $1 == "TAX_RUNTIME_ENABLED" { sub(/^[^=]*=/, ""); print; exit }' "$tax_env")
-  [[ -z "$enabled" || "$enabled" == false ]] || { echo "refusing: TAX_RUNTIME_ENABLED must be false or absent" >&2; exit 65; }
+
+stop_tax() {
+  local ids
+  ids=$(docker ps --all --quiet \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=tax")
+  if [[ -z "$ids" ]]; then
+    echo "Tax has no project container to stop"
+    return
+  fi
+  docker stop --time 60 $ids >/dev/null
 }
 
 case "$1" in
-  render) render ;;
+  render|plan) render ;;
   preflight) preflight ;;
   disabled-start)
-    preflight; tax_disabled
-    docker compose --project-name "$project" --env-file "$env_file" -f "$compose" up -d --no-deps tax
+    preflight
+    compose_cmd up -d --no-deps tax
     echo "Tax started in disabled mode only"
     ;;
   drain)
-    preflight
-    docker compose --project-name "$project" --env-file "$env_file" -f "$compose" stop --timeout 60 tax
+    stop_tax
     echo "Tax drained and stopped; no volume was removed"
     ;;
-  stage)
-    preflight; tax_disabled
-    docker compose --project-name "$project" --env-file "$env_file" -f "$compose" up -d --no-deps --force-recreate tax
-    echo "staged disabled Tax container; no edge/public cutover was performed"
-    ;;
   rollback)
-    preflight
-    docker compose --project-name "$project" --env-file "$env_file" -f "$compose" stop --timeout 60 tax
+    stop_tax
     echo "rollback stopped Tax only; named volumes and proxy services were left intact"
     ;;
   *) usage ;;
