@@ -253,6 +253,14 @@ export const privateObjectWriteEnvironment = (environment) =>
       }
     : {}
 
+export const hostWebAPIEngineEnvironment = (engineSocket) => {
+  const target = `unix:${engineSocket}`
+  return {
+    ENGINE_GRPC_INSECURE_TARGET: target,
+    GIWA_HOST_ENGINE_TARGET: target,
+  }
+}
+
 const sleep = (milliseconds) =>
   new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds))
 
@@ -814,7 +822,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       DATABASE_URL: webURL,
       PRIVATE_OBJECT_ROOT: join(runtimeRoot, 'private-objects'),
       ...privateObjectWriteEnvironment(process.env),
-      ENGINE_GRPC_INSECURE_TARGET: `unix:${engineSocket}`,
+      ...hostWebAPIEngineEnvironment(engineSocket),
       ENGINE_PROTO_PATH: join(
         runtimeRoot,
         'proto',
