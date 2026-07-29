@@ -144,9 +144,6 @@ func (i *DocumentImporter) ImportUpbitDocument(ctx context.Context, params Upbit
 	if err != nil {
 		return UpbitDocumentImportResult{}, &DocumentImportError{Code: "ORIGINAL_ARTIFACT_STORE_FAILED"}
 	}
-	if originalRef.Digest != params.ArtifactDigest {
-		return fail("ORIGINAL_ARTIFACT_DIGEST_MISMATCH", "Encrypted source artifact digest did not match", errors.New("encrypted source artifact digest mismatch"))
-	}
 	internalRef, err := i.Artifacts.Put(ctx, parsed.InternalEvidence, privateArtifact("application/json"))
 	if err != nil {
 		return UpbitDocumentImportResult{}, &DocumentImportError{Code: "INTERNAL_EVIDENCE_STORE_FAILED"}

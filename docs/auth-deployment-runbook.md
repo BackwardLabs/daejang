@@ -24,7 +24,9 @@ Git pull은 코드, migration, Compose 설정만 갱신한다. `.env`, 인증서
 ```dotenv
 SIGNUP_ENABLED=true
 IDENTITY_VERIFICATION_MODE=disabled
-UPBIT_PDF_IMPORT_ENABLED=false
+UPBIT_PDF_IMPORT_ENABLED=true
+PRIVATE_OBJECT_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+PRIVATE_OBJECT_ENCRYPTION_KEY_ID=primary
 ```
 
 `IDENTITY_VERIFICATION_MODE=disabled`는 사용자를 본인확인 완료 상태로 만드는 설정이
@@ -36,8 +38,8 @@ R1 MVP의 Upbit PDF 경로는 사용자 이름과 문서 이름을 비교하지 
 로그인한 사용자와 소유권으로 격리하고, parser 결과의
 `subjectMatch.status=INCONCLUSIVE` 및
 `policyRef=mvp-subject-comparison-skipped:v1`을 보존한다. 이는 본인 일치 확인을
-의미하지 않는다. 현재 운영에서는 이름 비교와 별개로 승인된 암호화·감사·버전
-object storage가 없으므로 `UPBIT_PDF_IMPORT_ENABLED=false`를 유지한다.
+의미하지 않는다. 현재 운영에서는 서버의 private object root에 AES-256-GCM
+envelope만 저장하고 Web API와 sync worker에 동일한 외부 key를 주입한다.
 
 ## 배포를 멈춰야 하는 경우
 
@@ -268,6 +270,7 @@ chmod 660 deploy/production.env
 - session, rate-limit, OAuth transaction용 서로 다른 secret
 - Naver, Google, Kakao client ID·secret
 - Resend API key와 `EMAIL_FROM`
+- private PDF object AES-256-GCM key
 - Engine·Web API·health probe의 mTLS 인증서
 - JIT bridge 설정과 mTLS 인증서
 - private Go module build용 GitHub token은 파일이 아니라 build shell에만 주입
@@ -277,7 +280,9 @@ chmod 660 deploy/production.env
 ```dotenv
 SIGNUP_ENABLED=true
 IDENTITY_VERIFICATION_MODE=disabled
-UPBIT_PDF_IMPORT_ENABLED=false
+UPBIT_PDF_IMPORT_ENABLED=true
+PRIVATE_OBJECT_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+PRIVATE_OBJECT_ENCRYPTION_KEY_ID=primary
 ```
 
 필수 약관 전문은 migration이 자동으로 만들지 않는다. 법무 검토가 끝난 현재
@@ -366,7 +371,7 @@ done
 - OAuth callback 후 새 GIWA 계정 생성, 필수 약관 동의, dashboard 진입 가능
 - 기존 이메일로 다시 가입할 때 새 인증번호를 보내지 않고 기존 계정 안내
 - 로그아웃한 session cookie로 보호 API에 다시 접근할 수 없음
-- `UPBIT_PDF_IMPORT_ENABLED=false` 상태에서 PDF 가져오기 경로가 열리지 않음
+- 업로드된 PDF 원문이 private object root에 key ID가 포함된 `GIWAOBJ2` 암호화 envelope로만 저장됨
 
 실제 provider 로그인, Resend 수신, callback과 cookie 회전은 단순 `curl`만으로
 완료 검증할 수 없다. 브라우저에서 provider별로 가입과 재로그인을 한 번씩 확인한다.

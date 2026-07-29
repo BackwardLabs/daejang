@@ -20,6 +20,7 @@ coverage/
 # 도구 캐시와 로그
 .vite/
 .cache/
+.runtime/
 .wrangler/
 .wrangler-dist/
 **/.dev.vars

@@ -38,6 +38,11 @@ describe('web api configuration', () => {
         'X402_MAX_TIMEOUT_SECONDS',
         'X402_TOKEN_NAME',
         'X402_TOKEN_VERSION',
+        'PRIVATE_OBJECT_ENCRYPTION_KEY',
+        'PRIVATE_OBJECT_ENCRYPTION_KEY_ID',
+        'PRIVATE_OBJECT_LEGACY_KEY_ID',
+        'PRIVATE_OBJECT_DECRYPTION_KEYS',
+        'ENGINE_ALLOW_INSECURE_LOOPBACK',
       ]),
     )
   })
@@ -124,7 +129,7 @@ describe('web api configuration', () => {
     ).toThrow('base64-encoded 32-byte key')
   })
 
-  it('requires durable PostgreSQL, rate-limit, and Engine mTLS settings in production', () => {
+  it('requires durable PostgreSQL, rate-limit, and an Engine transport in production', () => {
     expect(() =>
       loadConfig({
         NODE_ENV: 'production',
@@ -164,7 +169,7 @@ describe('web api configuration', () => {
     ).toThrow('gRPC authority')
   })
 
-  it('allows plaintext Engine transport only on development loopback', () => {
+  it('allows plaintext Engine transport only on loopback', () => {
     expect(
       loadConfig({
         NODE_ENV: 'development',
@@ -180,7 +185,7 @@ describe('web api configuration', () => {
     ).toThrow('loopback')
   })
 
-  it('keeps Upbit PDF import default-off and rejects filesystem-backed production activation', () => {
+  it('keeps Upbit PDF import default-off and requires encrypted production storage', () => {
     expect(loadConfig().upbitPdfImportEnabled).toBe(false)
     expect(
       loadConfig({
@@ -193,16 +198,44 @@ describe('web api configuration', () => {
         NODE_ENV: 'production',
         UPBIT_PDF_IMPORT_ENABLED: 'true',
       }),
-    ).toThrow('cannot be enabled in production')
+    ).toThrow('PRIVATE_OBJECT_ENCRYPTION_KEY')
+
+    const key = Buffer.alloc(32, 7).toString('base64')
+    const config = loadConfig({
+      NODE_ENV: 'production',
+      PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
+      DATABASE_URL: 'postgresql://example.invalid/daejang',
+      PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
+      PRIVATE_OBJECT_ENCRYPTION_KEY: key,
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: 'primary',
+      RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
+      UPBIT_PDF_IMPORT_ENABLED: 'true',
+      ENGINE_GRPC_TARGET: 'engine.internal:50051',
+      ENGINE_GRPC_CA_PATH: '/run/secrets/engine-ca.pem',
+      ENGINE_GRPC_CERT_PATH: '/run/secrets/client.pem',
+      ENGINE_GRPC_KEY_PATH: '/run/secrets/client-key.pem',
+    })
+    expect(config.upbitPdfImportEnabled).toBe(true)
+    expect(config.privateObjectEncryptionKey).toEqual(Buffer.alloc(32, 7))
+    expect(config.privateObjectEncryptionKeyId).toBe('primary')
   })
 
-  it('rejects plaintext Engine transport in production', () => {
+  it('allows a protected Unix socket but rejects plaintext TCP in production', () => {
     expect(() =>
       loadConfig({
         NODE_ENV: 'production',
         ENGINE_GRPC_INSECURE_TARGET: '127.0.0.1:50051',
       }),
-    ).toThrow('not allowed in production')
+    ).toThrow('plaintext TCP Engine transport is not allowed in production')
+
+    expect(loadConfig({
+      NODE_ENV: 'production',
+      PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
+      DATABASE_URL: 'postgresql://example.invalid/daejang',
+      PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
+      RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
+      ENGINE_GRPC_INSECURE_TARGET: 'unix:/run/giwa/engine.sock',
+    }).engineInsecureTarget).toBe('unix:/run/giwa/engine.sock')
   })
 
   it('rejects idle timeouts longer than the absolute timeout', () => {

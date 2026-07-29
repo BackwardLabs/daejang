@@ -65,6 +65,10 @@ services:
       IDENTITY_VERIFICATION_MODE: ${IDENTITY_VERIFICATION_MODE:-disabled}
       UPBIT_PDF_IMPORT_ENABLED: ${UPBIT_PDF_IMPORT_ENABLED:-false}
       PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+      PRIVATE_OBJECT_ENCRYPTION_KEY: ${PRIVATE_OBJECT_ENCRYPTION_KEY}
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: ${PRIVATE_OBJECT_ENCRYPTION_KEY_ID}
+      PRIVATE_OBJECT_LEGACY_KEY_ID: ${PRIVATE_OBJECT_LEGACY_KEY_ID:-}
+      PRIVATE_OBJECT_DECRYPTION_KEYS: ${PRIVATE_OBJECT_DECRYPTION_KEYS:-}
       ENGINE_GRPC_TARGET: engine:50051
       ENGINE_GRPC_SERVER_NAME: engine.internal
       ENGINE_GRPC_CA_PATH: /run/secrets/engine-ca.pem
@@ -117,6 +121,8 @@ services:
       ENGINE_HEALTH_CERT_PATH: /run/secrets/probe-client-cert.pem
       ENGINE_HEALTH_KEY_PATH: /run/secrets/probe-client-key.pem
       ENGINE_HEALTH_SERVER_NAME: engine.internal
+      PRIVATE_OBJECT_ENCRYPTION_KEY: ${PRIVATE_OBJECT_ENCRYPTION_KEY}
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: ${PRIVATE_OBJECT_ENCRYPTION_KEY_ID}
     volumes:
       - ${ENGINE_SERVER_CERT_PATH}:/run/secrets/engine-server-cert.pem:ro
       - ${ENGINE_SERVER_KEY_PATH}:/run/secrets/engine-server-key.pem:ro
@@ -180,6 +186,10 @@ services:
     environment:
       DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
       DAEJANG_PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+      PRIVATE_OBJECT_ENCRYPTION_KEY: ${PRIVATE_OBJECT_ENCRYPTION_KEY}
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: ${PRIVATE_OBJECT_ENCRYPTION_KEY_ID}
+      PRIVATE_OBJECT_LEGACY_KEY_ID: ${PRIVATE_OBJECT_LEGACY_KEY_ID:-}
+      PRIVATE_OBJECT_DECRYPTION_KEYS: ${PRIVATE_OBJECT_DECRYPTION_KEYS:-}
       # jitd is deployed outside this Compose project on the private backend.
       # The mounted bridge config uses tcp:// plus the container TLS paths below.
       DAEJANG_JIT_BRIDGE_CONFIG: /run/config/jit-bridge.json

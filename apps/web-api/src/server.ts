@@ -27,13 +27,30 @@ const pool = config.databaseUrl
 const engineClient = config.engineMtls
   ? await EngineMtlsClient.connect(config.engineMtls, config.upbitPdfImportEnabled)
   : config.engineInsecureTarget
-    ? EngineMtlsClient.connectInsecureForDevelopment(
+    ? EngineMtlsClient.connectInsecureLoopback(
         config.engineInsecureTarget,
         config.upbitPdfImportEnabled,
       )
     : undefined
 const uploadStore = pool && config.privateObjectRoot
-  ? new PostgresFileUploadStore(pool, config.privateObjectRoot)
+  ? new PostgresFileUploadStore(
+      pool,
+      config.privateObjectRoot,
+      config.privateObjectEncryptionKey
+        ? {
+            encryptionKey: config.privateObjectEncryptionKey,
+            ...(config.privateObjectEncryptionKeyId
+              ? { encryptionKeyId: config.privateObjectEncryptionKeyId }
+              : {}),
+            ...(config.privateObjectDecryptionKeys
+              ? { decryptionKeys: config.privateObjectDecryptionKeys }
+              : {}),
+            ...(config.privateObjectLegacyKeyId
+              ? { legacyKeyId: config.privateObjectLegacyKeyId }
+              : {}),
+          }
+        : {},
+    )
   : undefined
 const taxReportReader = pool ? new PostgresTaxReportReader(pool) : undefined
 
