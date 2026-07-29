@@ -516,7 +516,6 @@ describe('AppRouter', () => {
     ['/sources/new/upbit', 'Upbit PDF 등록'],
     ['/sources/new/upbit/upload', 'Upbit PDF 등록'],
     ['/sources/new/wallet', 'EVM Wallet 연결'],
-    ['/sources/new/wallet/connect', 'EVM Wallet 연결'],
   ])('renders the source flow page at %s', async (path, heading) => {
     window.history.pushState({}, '', path)
 
@@ -528,7 +527,7 @@ describe('AppRouter', () => {
   })
 
   it('fails closed when the Reown project ID is not configured', async () => {
-    window.history.pushState({}, '', '/sources/new/wallet/connect')
+    window.history.pushState({}, '', '/sources/new/wallet')
 
     render(<AppRouter />)
 
@@ -540,6 +539,19 @@ describe('AppRouter', () => {
     expect(
       await screen.findByText('선택한 지갑을 사용할 수 없어요'),
     ).toBeInTheDocument()
+  })
+
+  it('replaces the removed wallet connect path with the canonical wallet route', async () => {
+    window.history.pushState({}, '', '/sources/new/wallet/connect')
+
+    render(<AppRouter />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'EVM Wallet 연결' }),
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/sources/new/wallet')
+    })
   })
 
   it('renders the settings product page', async () => {

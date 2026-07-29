@@ -154,6 +154,6 @@ describe('source flow pages', () => {
 
     expect(
       screen.getByRole('link', { name: '지갑 연결 시작' }),
-    ).toHaveAttribute('href', '/sources/new/wallet/connect')
+    ).toHaveAttribute('href', '/sources/new/wallet')
   })
 })

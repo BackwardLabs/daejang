@@ -62,7 +62,7 @@ export function SourceMethodIntroPage({
                 href={
                   isUpbitPdf
                     ? '/sources/new/upbit/upload'
-                    : '/sources/new/wallet/connect'
+                    : '/sources/new/wallet'
                 }
               >
                 {actionLabel} <span aria-hidden="true">→</span>

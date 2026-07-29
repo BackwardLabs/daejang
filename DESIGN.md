@@ -3,7 +3,7 @@
 ## Source of truth
 
 - 상태: **Active**
-- 마지막 갱신: `2026-07-26`
+- 마지막 갱신: `2026-07-30`
 - 적용 범위: 공개 랜딩, 인증·회원가입, 온보딩, 제품 대시보드, 데이터 소스 등록, 수집 진행, 장부 검토, 보고서
 - 구현 기준: 이 문서의 공통 제품 규칙을 우선하고, 화면별 Figma와 flow 문서는 해당 화면의 구조·콘텐츠 근거로 사용한다.
 - 확인한 근거:
@@ -257,6 +257,7 @@ Product scale:
 ### Data display
 
 - Summary card: 주요 숫자 하나, 기준 기간과 source를 함께 표시한다.
+- 화면 전환에 수량을 함께 표시할 때는 세그먼트 control을 사용한다. 조회 전 수량은 `0`으로 추정하지 않고 `—`, 조회 완료 후에는 `0건`처럼 단위를 포함해 표시한다.
 - Table: column header, 정렬 상태, 빈 상태, loading 상태와 row action을 제공한다.
 - Status badge: label과 semantic color를 함께 사용한다.
 - Stepper / Job progress: 완료, 현재, 예정, 검토 필요, 실패를 구분한다.
