@@ -215,6 +215,16 @@ func TestDocumentImporterReturnsSucceededIdempotentResultWithoutArtifactReproces
 	}
 }
 
+func TestCompletedImportResultPreservesCompleteTerminalStatus(t *testing.T) {
+	total := int64(7)
+	result := completedImportResult(sourcejobstore.DocumentSource{}, sourcejobstore.SyncJob{
+		State: "SUCCEEDED", TotalRecords: &total, ProcessedRecords: total,
+	})
+	if result.EvidenceTerminalStatus != "COMPLETE" || result.SourceRecordCount != total || result.NormalizedRecordCount != total {
+		t.Fatalf("completed replay changed terminal result: %#v", result)
+	}
+}
+
 func TestDocumentImporterRejectsMismatchedSucceededIdentityBeforeParsing(t *testing.T) {
 	now := time.Date(2026, 7, 29, 1, 2, 3, 0, time.UTC)
 	claim := runningImportClaim(now)

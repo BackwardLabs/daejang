@@ -19,7 +19,9 @@
 | Activity·Ledger·Review 조회 | 구현 | Web JSON → QueryService → read-only DB role |
 | Review 상세·응답 revision | 구현 | account scope, option validation, CAS, private artifact, V2 event·consumer delivery row |
 | Report snapshot | 구현 | immutable digest snapshot, 실제 계산 전 `PARTIAL` 표시 |
-| Upbit 행 추출·정규화 | 후속 | 공식 PDF fixture와 문서 버전 계약 필요 |
+| Upbit 행 추출·Observation 정규화 | 구현 | 매수·매도·입금·출금, 명시적 미지원 outcome, immutable successor backfill |
+| 미물질화 Observation 장부 조회 | 구현 | `OBSERVATION_ONLY`·`PARTIAL`, 실제 posting 생성 시 자동 제외 |
+| Source coverage 보고서 | 구현 | 연도별 거래·완료·예외 집계, 손익 `UNKNOWN`, private manifest |
 | Ledger 재계산·세금 Lot | 후속 | resolved Review revision을 producer 입력으로 연결 필요 |
 | Review delivery·anchor·Report gate·PDF | 후속 | delivery worker, anchor/application receipt, latest proof 일치, immutable manifest 필요 |
 | 운영 환경 배포 | 배포 대기 | DB 변경 commit 배포, 인증서·DSN·Cloudflare `/api/*` route 필요 |
@@ -32,20 +34,25 @@ flowchart TD
   source --> sync[Durable Sync Job 생성]
   sync --> worker[Worker lease·PDF 무결성 확인]
   worker --> parse{지원 문서 parser인가?}
-  parse -->|예| activity[Activity·Ledger producer]
+  parse -->|예| observation[CEX Observation 정규화]
   parse -->|아니오| fail[명시적 실패 상태]
+  observation --> activity[PARTIAL 장부 read projection]
+  observation --> coverage[PARTIAL source coverage 보고서]
   activity --> review[Review read model]
   review --> resolution[Account-scoped Review resolution]
   resolution --> delivery[ReviewResolved V2 + durable delivery rows]
   delivery -. 미구현 workers·proof gate .-> report[Immutable Report snapshot]
 ```
 
-다음 구현은 지원할 Upbit PDF 실물 fixture를 고정한 뒤 행 추출·정규화 producer를
-worker에 연결하는 작업입니다. 그 결과를 기존 ledger/review/lot 저장 계약으로
-발행한 뒤 resolved Review를 재계산에 반영하고 anchor·Report gate를 거쳐 최종
+Upbit PDF의 매수·매도·입금·출금 행은 Source Evidence Observation으로 정규화되고,
+아직 tax posting이 없는 Observation도 `PARTIAL` 장부와 source coverage 보고서에서
+조회됩니다. 다음 구현은 이 Observation을 기존 ledger/review/lot 저장 계약으로
+물질화한 뒤 resolved Review를 재계산에 반영하고 anchor·Report gate를 거쳐 최종
 세금 Report 산출을 활성화합니다. delivery row는 downstream handoff가 저장됐다는
 뜻일 뿐 recalculation, anchor 또는 report delivery 완료 신호가 아닙니다. parser가
 없는 문서는 성공한 거래 0건으로 위장하지 않고 지원 불가 실패로 종료해야 합니다.
+
+세부 매핑과 재처리 불변조건은 [Upbit PDF Observation 정규화](upbit-observation-pipeline.md)를 따릅니다.
 
 ## 단계별 완료 조건
 

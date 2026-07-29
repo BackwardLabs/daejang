@@ -181,7 +181,7 @@ func (i *DocumentImporter) ImportUpbitDocument(ctx context.Context, params Upbit
 		SubjectID: params.SubjectID, FragmentID: fragmentID, ProducerRunID: claim.Job.ID,
 		GenerationID: generationID, ArtifactDigest: rootRef.Digest, ResultDigest: normalized.ResultDigest,
 		SchemaDigest: upbitnormalizer.SchemaDigest, ProducerName: upbitnormalizer.ProducerName,
-		ProducerVersion: upbitnormalizer.ProducerVersion, TerminalStatus: "PARTIAL", Evidence: normalized.Evidence,
+		ProducerVersion: upbitnormalizer.ProducerVersion, TerminalStatus: normalized.TerminalStatus, Evidence: normalized.Evidence,
 	})
 	if err != nil {
 		// Publication may have committed before a transport response was lost. Keep
@@ -201,7 +201,7 @@ func (i *DocumentImporter) ImportUpbitDocument(ctx context.Context, params Upbit
 		return UpbitDocumentImportResult{}, errors.New("load completed document import")
 	}
 	return UpbitDocumentImportResult{
-		Document: claim.Document, Job: completedJob, EvidenceTerminalStatus: "PARTIAL",
+		Document: claim.Document, Job: completedJob, EvidenceTerminalStatus: normalized.TerminalStatus,
 		SourceRecordCount: normalized.RecordCount, NormalizedRecordCount: normalized.NormalizedCount,
 	}, nil
 }
@@ -275,8 +275,12 @@ func completedImportResult(document sourcejobstore.DocumentSource, job sourcejob
 	if job.TotalRecords != nil {
 		sourceCount = *job.TotalRecords
 	}
+	terminalStatus := "PARTIAL"
+	if job.TotalRecords != nil && job.ProcessedRecords == *job.TotalRecords {
+		terminalStatus = "COMPLETE"
+	}
 	return UpbitDocumentImportResult{
-		Document: document, Job: job, EvidenceTerminalStatus: "PARTIAL",
+		Document: document, Job: job, EvidenceTerminalStatus: terminalStatus,
 		SourceRecordCount: sourceCount, NormalizedRecordCount: job.ProcessedRecords,
 	}
 }

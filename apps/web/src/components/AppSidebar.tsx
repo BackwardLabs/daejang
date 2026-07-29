@@ -11,7 +11,7 @@ import { AppLink } from './AppLink.tsx'
 import './app-sidebar.css'
 
 export type AppPage = 'dashboard' | 'ledger' | 'reports' | 'settings' | 'sources'
-export type AppYear = '2026' | '2027'
+export type AppYear = '2025' | '2026' | '2027'
 
 export type AppSidebarSecondaryItem = {
   badge?: string
@@ -107,6 +107,7 @@ export function AppSidebar({
         >
           <option value="2027">2027년 · 전체 기간</option>
           <option value="2026">2026년 · 전체 기간</option>
+          <option value="2025">2025년 · 전체 기간</option>
         </select>
       </label>
 

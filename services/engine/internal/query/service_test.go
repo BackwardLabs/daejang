@@ -17,9 +17,26 @@ const queryTestSubjectID = "11111111-1111-4111-8111-111111111111"
 
 type fakeReadStore struct {
 	page        readmodelstore.OpenReviewPage
+	dashboard   readmodelstore.Dashboard
+	ledger      []readmodelstore.LedgerEvent
 	lastSubject string
 	lastCursor  *readmodelstore.OpenReviewCursor
 	lastLimit   int32
+}
+
+type fakeObservationReadStore struct {
+	count     int64
+	events    []readmodelstore.LedgerEvent
+	err       error
+	lastLimit int32
+}
+
+func (f *fakeObservationReadStore) CountUnmaterialized(context.Context, string, int32) (int64, error) {
+	return f.count, f.err
+}
+func (f *fakeObservationReadStore) ListUnmaterialized(_ context.Context, _ string, _ int32, limit int32) ([]readmodelstore.LedgerEvent, error) {
+	f.lastLimit = limit
+	return f.events, f.err
 }
 
 type fakeTaxReportStore struct {
@@ -28,6 +45,21 @@ type fakeTaxReportStore struct {
 	err         error
 	lastSubject string
 	lastTaxYear int
+}
+
+func TestObservationReadProjectionMergesBeforeApplyingLedgerLimit(t *testing.T) {
+	at := time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+	reads := &fakeReadStore{ledger: []readmodelstore.LedgerEvent{{EventID: "materialized", EffectiveAt: at.Add(-time.Hour)}}}
+	observations := &fakeObservationReadStore{events: []readmodelstore.LedgerEvent{{EventID: "observation", EffectiveAt: at}}}
+	service := &Service{Reads: reads, Observations: observations}
+
+	ledger, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{Context: queryTestContext(), TaxYear: 2026, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observations.lastLimit != 1 || len(ledger.GetItems()) != 1 || ledger.GetItems()[0].GetEventId() != "observation" {
+		t.Fatalf("ledger limit was applied before merge: limit=%d response=%#v", observations.lastLimit, ledger)
+	}
 }
 
 func (f *fakeTaxReportStore) GetCurrentReportForYear(_ context.Context, subject string, taxYear int) (taxreportstore.CurrentReportDetail, bool, error) {
@@ -40,11 +72,26 @@ func (f *fakeTaxReportStore) ListReportHistory(context.Context, string, int, int
 }
 
 func (f *fakeReadStore) Dashboard(context.Context, string, int32) (readmodelstore.Dashboard, error) {
-	return readmodelstore.Dashboard{}, nil
+	return f.dashboard, nil
 }
 
 func (f *fakeReadStore) ListLedgerEvents(context.Context, string, int32, int32) ([]readmodelstore.LedgerEvent, error) {
-	return nil, nil
+	return f.ledger, nil
+}
+
+func TestObservationReadProjectionAugmentsDashboardAndLedgerWithoutReplacingMaterializedEvents(t *testing.T) {
+	at := time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+	reads := &fakeReadStore{dashboard: readmodelstore.Dashboard{TransactionCount: 2}, ledger: []readmodelstore.LedgerEvent{{EventID: "materialized", EffectiveAt: at.Add(-time.Hour)}}}
+	observations := &fakeObservationReadStore{count: 3, events: []readmodelstore.LedgerEvent{{EventID: "observation", Resolution: "PARTIAL", InterpretationSupport: "OBSERVATION_ONLY", EffectiveAt: at}}}
+	service := &Service{Reads: reads, Observations: observations}
+	dashboard, err := service.GetDashboard(context.Background(), &enginev1.GetDashboardRequest{Context: queryTestContext(), TaxYear: 2026})
+	if err != nil || dashboard.GetDashboard().GetTransactionCount() != 5 {
+		t.Fatalf("observation dashboard projection: response=%#v err=%v", dashboard, err)
+	}
+	ledger, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{Context: queryTestContext(), TaxYear: 2026, Limit: 10})
+	if err != nil || len(ledger.GetItems()) != 2 || ledger.GetItems()[0].GetEventId() != "observation" || ledger.GetItems()[1].GetEventId() != "materialized" {
+		t.Fatalf("combined ledger projection: response=%#v err=%v", ledger, err)
+	}
 }
 
 func (f *fakeReadStore) ListOpenReviewsPage(
