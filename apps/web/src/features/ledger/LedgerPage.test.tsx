@@ -89,7 +89,18 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
     render(<LedgerPage />)
     expect(await screen.findByRole('heading', { name: '아직 처리된 거래가 없습니다' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '전체 거래 0건' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '검토 필요 0건' })).toBeInTheDocument()
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/ledger?taxYear=2027'), expect.anything())
+  })
+
+  it('does not present unknown counts as zero while data is loading', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
+
+    render(<LedgerPage />)
+
+    expect(screen.getByRole('button', { name: '전체 거래 —' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '검토 필요 —' })).toBeInTheDocument()
   })
 
   it('keeps a healthy ledger visible when the Review list fails', async () => {
@@ -109,12 +120,12 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
     expect(await screen.findByText('event-2027')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '검토 0' }))
+    fireEvent.click(screen.getByRole('button', { name: '검토 필요 —' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('검토 목록을 불러오지 못했습니다')
     fireEvent.click(screen.getByRole('button', { name: '검토 다시 불러오기' }))
     expect(await screen.findByRole('button', { name: /UNKNOWN_TRANSACTION/ })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '거래 1' }))
+    fireEvent.click(screen.getByRole('button', { name: '전체 거래 1건' }))
     expect(screen.getByText('event-2027')).toBeInTheDocument()
   })
 
@@ -132,7 +143,7 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
     expect(await screen.findByRole('alert')).toHaveTextContent('장부를 불러오지 못했습니다')
 
-    fireEvent.click(await screen.findByRole('button', { name: '검토 1' }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     expect(await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })).toBeInTheDocument()
     expect(screen.queryByText('장부를 불러오지 못했습니다')).not.toBeInTheDocument()
   })
@@ -171,7 +182,7 @@ describe('LedgerPage', () => {
     fireEvent.change(screen.getByLabelText('조회 기간'), { target: { value: '2026' } })
 
     expect(await screen.findByText('event-2026')).toBeInTheDocument()
-    fireEvent.click(await screen.findByRole('button', { name: '검토 1' }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     expect(await screen.findByRole('button', { name: /NEEDS_CONTEXT/ })).toBeInTheDocument()
 
     resolveOldLedger?.(jsonResponse({ items: [ledgerEvent] }))
@@ -179,7 +190,7 @@ describe('LedgerPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /UNKNOWN_TRANSACTION/ })).not.toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole('button', { name: '거래 1' }))
+    fireEvent.click(screen.getByRole('button', { name: '전체 거래 1건' }))
     expect(screen.getByText('event-2026')).toBeInTheDocument()
     expect(screen.queryByText('event-2027')).not.toBeInTheDocument()
   })
@@ -210,7 +221,7 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    fireEvent.click(await screen.findByRole('button', { name: /검토 1/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     expect(await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })).toBeInTheDocument()
     expect(screen.getByText('0xabc123')).toBeInTheDocument()
     expect(screen.getByText('1.25 ETH')).toBeInTheDocument()
@@ -250,7 +261,7 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    fireEvent.click(await screen.findByRole('button', { name: /검토 1/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     fireEvent.click(await screen.findByRole('button', { name: '검토 더 보기' }))
 
     expect(await screen.findByRole('button', { name: /NEEDS_CONTEXT/ })).toBeInTheDocument()
@@ -282,7 +293,7 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    fireEvent.click(await screen.findByRole('button', { name: /검토 1/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
 
@@ -320,7 +331,7 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    fireEvent.click(await screen.findByRole('button', { name: /검토 2/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 2건' }))
     await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
     fireEvent.click(screen.getByRole('button', { name: /NEEDS_CONTEXT/ }))
@@ -374,7 +385,7 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    fireEvent.click(await screen.findByRole('button', { name: /검토 2/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 2건' }))
     await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
     fireEvent.click(screen.getByRole('button', { name: /NEEDS_CONTEXT/ }))
@@ -431,7 +442,7 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    fireEvent.click(await screen.findByRole('button', { name: /검토 1/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('같은 요청으로 다시 시도')

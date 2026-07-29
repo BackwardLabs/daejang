@@ -142,6 +142,8 @@ export function LedgerPage() {
   const selectedOption = reviewDetail?.options.find((option) => option.code === resolutionCode)
   const resolutionBusy = resolutionStatus === 'submitting' || resolutionStatus === 'refreshing'
   const resolutionBlocked = resolutionStatus === 'reanalyze'
+  const ledgerCount = ledgerStatus === 'ready' ? `${events.length}건` : '—'
+  const reviewCount = reviewStatus === 'ready' ? `${reviews.length}건` : '—'
 
   const selectReview = (reviewId: string) => {
     selectedReviewIdRef.current = reviewId
@@ -253,11 +255,33 @@ export function LedgerPage() {
     <div className="ledger-page product-shell">
       <AppSidebar activePage="ledger" year={year} onYearChange={setYear} />
       <main className="ledger-main">
-        <section className="ledger-header">
-          <div><p>ACTIVITY · LEDGER · REVIEW</p><h1>거래 장부</h1><span>Engine이 확정한 현재 revision과 열린 검토 항목을 조회합니다.</span></div>
+        <section className="ledger-header" aria-labelledby="ledger-page-title">
+          <div className="ledger-header__copy">
+            <p>장부 작업</p>
+            <h1 id="ledger-page-title">거래 장부</h1>
+            <span>수집된 거래와 검토가 필요한 항목을 한곳에서 확인합니다.</span>
+          </div>
           <div className="ledger-header__actions">
-            <button type="button" className={view === 'ledger' ? 'is-active' : undefined} onClick={() => setView('ledger')}>거래 {events.length}</button>
-            <button type="button" className={view === 'review' ? 'is-active' : undefined} onClick={() => setView('review')}>검토 {reviews.length}</button>
+            <button
+              type="button"
+              aria-label={`전체 거래 ${ledgerCount}`}
+              aria-pressed={view === 'ledger'}
+              className={view === 'ledger' ? 'is-active' : undefined}
+              onClick={() => setView('ledger')}
+            >
+              <span>전체 거래</span>
+              <strong>{ledgerCount}</strong>
+            </button>
+            <button
+              type="button"
+              aria-label={`검토 필요 ${reviewCount}`}
+              aria-pressed={view === 'review'}
+              className={view === 'review' ? 'is-active' : undefined}
+              onClick={() => setView('review')}
+            >
+              <span>검토 필요</span>
+              <strong>{reviewCount}</strong>
+            </button>
           </div>
         </section>
 
