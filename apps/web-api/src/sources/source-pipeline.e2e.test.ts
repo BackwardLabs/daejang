@@ -197,6 +197,67 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
       items: [expect.objectContaining({ id: source.id, status: 'ACTIVE' })],
     })
 
+    const syncIntentKey = randomUUID()
+    const queued = await inject({
+      method: 'POST',
+      url: '/api/v1/syncs',
+      payload: {
+        sourceKind: 'EVM_WALLET',
+        sourceId: source.id,
+        coverageStart: '2026-07-28',
+        coverageEnd: '2026-07-28',
+        trigger: 'USER_REQUEST',
+        intentKey: syncIntentKey,
+      },
+    })
+    expect(queued.statusCode, queued.body).toBe(201)
+    const { job } = queued.json<{
+      job: {
+        id: string
+        phase: string
+        requestedCoverageEnd: string
+        requestedCoverageStart: string
+        sourceId: string
+        sourceKind: string
+        state: string
+        trigger: string
+      }
+    }>()
+    expect(job).toMatchObject({
+      phase: 'VALIDATE_SOURCE',
+      requestedCoverageEnd: '2026-07-28',
+      requestedCoverageStart: '2026-07-28',
+      sourceId: source.id,
+      sourceKind: 'EVM_WALLET',
+      state: 'QUEUED',
+      trigger: 'USER_REQUEST',
+    })
+
+    const durableJob = await ownerPool.query<{
+      phase: string
+      requested_coverage_end: string
+      requested_coverage_start: string
+      source_id: string
+      source_kind: string
+      state: string
+      trigger_kind: string
+    }>(
+      `SELECT source_id::text,source_kind,state,phase,
+        requested_coverage_start::text,requested_coverage_end::text,trigger_kind
+       FROM source_private.sync_jobs
+       WHERE id=$1::uuid AND user_id=$2::uuid AND idempotency_key=$3`,
+      [job.id, userId, syncIntentKey],
+    )
+    expect(durableJob.rows[0]).toEqual({
+      phase: 'VALIDATE_SOURCE',
+      requested_coverage_end: '2026-07-28',
+      requested_coverage_start: '2026-07-28',
+      source_id: source.id,
+      source_kind: 'EVM_WALLET',
+      state: 'QUEUED',
+      trigger_kind: 'USER_REQUEST',
+    })
+
     const replay = await inject({
       method: 'POST',
       url: '/api/v1/sources/wallets',
