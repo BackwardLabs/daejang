@@ -2,6 +2,7 @@ import type { Pool } from 'pg'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  assertReportPaymentSchema,
   assertSubjectNameProvisionerSchema,
   assertTaxReportSchema,
   assertWebAuthSchema,
@@ -89,6 +90,15 @@ const validSubjectNameProvisionerContract = {
   dangerous_table_write: false,
 }
 
+const validReportPaymentContract = {
+  orders_table: 'web_private.report_payment_orders',
+  authorizations_table: 'web_private.report_payment_authorizations',
+  entitlements_table: 'web_private.report_payment_entitlements',
+  contract_version: 1,
+  contract_digest: '28f6894a953e6acc5c238b04e025662ee6bc7d3b5dbd31e783c40789b9e6dcf4',
+  migration_version: '35',
+}
+
 function poolReturning<T>(row: T): Pool {
   return {
     query: vi.fn().mockResolvedValue({ rows: [row] }),
@@ -170,5 +180,22 @@ describe('subject-name provisioner schema preflight', () => {
         }),
       ),
     ).rejects.toThrow('subject-name claim provisioner migration contract is invalid')
+  })
+})
+
+describe('report payment schema preflight', () => {
+  it('accepts the durable order, replay and entitlement contract', async () => {
+    await expect(
+      assertReportPaymentSchema(poolReturning(validReportPaymentContract)),
+    ).resolves.toBeUndefined()
+  })
+
+  it('rejects a deployment without the nonce replay table', async () => {
+    await expect(
+      assertReportPaymentSchema(poolReturning({
+        ...validReportPaymentContract,
+        authorizations_table: null,
+      })),
+    ).rejects.toThrow('report x402 payment migration contract is invalid')
   })
 })

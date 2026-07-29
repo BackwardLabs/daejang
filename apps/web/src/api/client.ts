@@ -60,11 +60,15 @@ async function sendWithSessionBoundary(path: string, init: RequestInit) {
 }
 
 export async function requestRaw(path: string, init: RequestInit = {}) {
-  const response = await sendWithSessionBoundary(path, init)
+  const response = await requestRawResponse(path, init)
   if (!response.ok) {
     throw await toApiError(response)
   }
   return response
+}
+
+export async function requestRawResponse(path: string, init: RequestInit = {}) {
+  return sendWithSessionBoundary(path, init)
 }
 
 export async function requestApi<T>(

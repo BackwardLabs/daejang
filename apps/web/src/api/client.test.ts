@@ -3,7 +3,7 @@ import {
   getSessionSnapshot,
   setCurrentUser,
 } from '../auth/session-store.ts'
-import { requestApi, requestRaw } from './client.ts'
+import { requestApi, requestRaw, requestRawResponse } from './client.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -93,6 +93,25 @@ describe('product API client', () => {
         id: '00000000-0000-4000-8000-000000000002',
         displayName: '새 사용자',
       },
+    })
+  })
+
+  it('applies the same session boundary when a caller needs to inspect a 402 response', async () => {
+    setCurrentUser({
+      id: '00000000-0000-4000-8000-000000000001',
+      displayName: '기존 사용자',
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+    )
+
+    const response = await requestRawResponse('/tax-reports/2027/current/download')
+
+    expect(response.status).toBe(401)
+    expect(getSessionSnapshot()).toEqual({
+      status: 'anonymous',
+      user: null,
     })
   })
 })

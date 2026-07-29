@@ -31,6 +31,12 @@ export type CurrentTaxReport = {
 
 export type TaxReportFinality = CurrentTaxReport['finality']
 
+export type ReportPaymentTaxReport = {
+  report: CurrentTaxReport
+  residentId: string
+  reportArtifactDigest: string
+}
+
 export interface TaxReportReader {
   readonly durable: boolean
   getCurrent(
@@ -39,4 +45,14 @@ export interface TaxReportReader {
     finality: TaxReportFinality,
     residentId?: string,
   ): Promise<CurrentTaxReport | undefined>
+}
+
+export interface ReportPaymentTaxReportReader {
+  readonly durable: boolean
+  getCurrentForPayment(
+    subjectId: string,
+    taxYear: number,
+    finality: 'FINAL',
+    residentId?: string,
+  ): Promise<ReportPaymentTaxReport | undefined>
 }

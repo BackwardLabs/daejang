@@ -432,5 +432,6 @@ End-to-end 핵심 경로:
 
 - [사용자 온보딩 및 데이터 소스 연결](01-user-onboarding.md)
 - [데이터 소스 등록 및 수집 기간 설정](02-data-source-collection.md)
+- [실제 FINAL 보고서 x402 결제](report-x402-payment.md)
 - [대장 Flow](https://www.figma.com/board/9rt2FVwNe1Dfv9DXLThXok/%EB%8C%80%EC%9E%A5-flow?node-id=58-145)
 - [Technical Spec — GIWA MVP v0.1](https://linear.app/giwa-daejang/document/technical-spec-giwa-mvp-v01-18d511232c66)
