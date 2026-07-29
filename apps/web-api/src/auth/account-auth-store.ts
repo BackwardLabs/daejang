@@ -10,6 +10,7 @@ export type EmailChallengePurpose = 'signup' | 'verify_email' | 'password_reset'
 export type LegalDocumentType =
   | 'terms'
   | 'privacy'
+  | 'privacy_collection'
   | 'identity_verification'
   | 'marketing'
 

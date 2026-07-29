@@ -753,6 +753,10 @@ describe('account authentication routes', () => {
         ['terms', '00000000-0000-4000-8000-000000000031'],
         ['privacy', '00000000-0000-4000-8000-000000000032'],
         [
+          'privacy_collection',
+          '00000000-0000-4000-8000-000000000035',
+        ],
+        [
           'identity_verification',
           '00000000-0000-4000-8000-000000000033',
         ],
@@ -775,18 +779,24 @@ describe('account authentication routes', () => {
         url: '/api/v1/legal-documents/current?locale=ko-KR',
       })
       const applicableDocuments = documentsResponse.json<{
-        documents: Array<CurrentLegalDocument & { required: boolean }>
+        documents: Array<
+          CurrentLegalDocument & {
+            required: boolean
+            consentMode: 'required' | 'optional' | 'notice'
+          }
+        >
       }>().documents
       expect(applicableDocuments.map(({ documentType }) => documentType)).toEqual([
         'terms',
         'privacy',
+        'privacy_collection',
         'marketing',
       ])
       expect(
         applicableDocuments
           .filter(({ required }) => required)
           .map(({ documentType }) => documentType),
-      ).toEqual(['terms', 'privacy'])
+      ).toEqual(['terms', 'privacy_collection'])
 
       const removedMockCompletion = await noIdentityContext.app.inject({
         method: 'POST',
@@ -807,10 +817,12 @@ describe('account authentication routes', () => {
         },
         payload: {
           locale: 'ko-KR',
-          decisions: applicableDocuments.map(({ id, documentType }) => ({
-            legalDocumentId: id,
-            action: documentType === 'marketing' ? 'withdrawn' : 'accepted',
-          })),
+          decisions: applicableDocuments
+            .filter(({ consentMode }) => consentMode !== 'notice')
+            .map(({ id, documentType }) => ({
+              legalDocumentId: id,
+              action: documentType === 'marketing' ? 'withdrawn' : 'accepted',
+            })),
         },
       })
       expect(consent.statusCode).toBe(200)
