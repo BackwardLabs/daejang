@@ -183,7 +183,7 @@ func validInternalEvidenceEnvelope(request Request) string {
 
 func serveOnce(t *testing.T, handler func(net.Conn)) string {
 	t.Helper()
-	placeholder, err := os.CreateTemp("/private/tmp", "djpdf-*.sock")
+	placeholder, err := os.CreateTemp("/tmp", "djpdf-*.sock")
 	if err != nil {
 		t.Fatal(err)
 	}

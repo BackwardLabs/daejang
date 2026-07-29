@@ -30,7 +30,7 @@ func TestPinnedPythonParserWithEncryptedSyntheticUpbitFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	socketPath := filepath.Join(
-		"/private/tmp",
+		"/tmp",
 		fmt.Sprintf("djpdf-integration-%d-%d.sock", os.Getpid(), time.Now().UnixNano()),
 	)
 	t.Cleanup(func() { _ = os.Remove(socketPath) })
