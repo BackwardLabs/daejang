@@ -32,6 +32,57 @@ export const formatReviewQuantity = (quantity: string, assetDecimals?: number) =
   return `${negative ? '-' : ''}${integer}${fraction ? `.${fraction}` : ''}`
 }
 
+type LedgerSurface = 'ledger' | 'review'
+type LedgerSurfaceStatus = 'loading' | 'error'
+
+function LedgerDataState({
+  surface,
+  status,
+  onRetry,
+}: {
+  surface: LedgerSurface
+  status: LedgerSurfaceStatus
+  onRetry: () => void
+}) {
+  const isLedger = surface === 'ledger'
+  const isLoading = status === 'loading'
+  const subject = isLedger ? '장부' : '검토 목록'
+  const subjectObject = isLedger ? '장부를' : '검토 목록을'
+  const retryLabel = isLedger ? '장부 다시 불러오기' : '검토 다시 불러오기'
+  const listTitle = isLedger ? '거래 목록' : '검토 목록'
+  const detailTitle = isLedger ? '거래 상세' : '검토 상세'
+  const message = isLoading
+    ? `${subjectObject} 불러오는 중입니다.`
+    : `${subjectObject} 불러오지 못했습니다.`
+  const description = isLoading
+    ? '데이터가 도착하면 이 화면에 바로 표시됩니다. 다른 메뉴는 계속 사용할 수 있습니다.'
+    : '연결 상태를 확인한 뒤 다시 시도해 주세요. 다른 메뉴는 계속 사용할 수 있습니다.'
+
+  return <div className="ledger-data-state" aria-busy={isLoading}>
+    <section
+      className={`ledger-data-state__notice is-${status}`}
+      role={isLoading ? 'status' : 'alert'}
+      aria-live={isLoading ? 'polite' : 'assertive'}
+    >
+      <span className="ledger-data-state__icon" aria-hidden="true">{isLoading ? '···' : '!'}</span>
+      <div><strong>{message}</strong><p>{description}</p></div>
+      {!isLoading ? <button type="button" onClick={onRetry}>{retryLabel}</button> : null}
+    </section>
+    <section className="ledger-browser ledger-browser--state" aria-label={`${subject} ${isLoading ? '로딩' : '오류'} 상태`}>
+      <div className="ledger-data-state__panel ledger-data-state__list">
+        <header><div><span>LIST</span><h2>{listTitle}</h2></div><small>{isLoading ? '불러오는 중' : '연결 오류'}</small></header>
+        {isLoading ? <div className="ledger-data-state__rows" aria-hidden="true">
+          <i /><i /><i />
+        </div> : <p>목록을 표시할 수 없습니다.</p>}
+      </div>
+      <div className="ledger-browser__detail ledger-data-state__panel">
+        <header><div><span>DETAIL</span><h2>{detailTitle}</h2></div></header>
+        {isLoading ? <div className="ledger-data-state__detail" aria-hidden="true"><i /><i /><i /><i /></div> : <p>목록을 다시 불러오면 상세 정보도 함께 복구됩니다.</p>}
+      </div>
+    </section>
+  </div>
+}
+
 export function LedgerPage() {
   const [year, setYear] = useState<AppYear>('2027')
   const [events, setEvents] = useState<LedgerEventModel[]>([])
@@ -54,6 +105,7 @@ export function LedgerPage() {
   const [resolutionIntentKey, setResolutionIntentKey] = useState<string>()
   const [view, setView] = useState<'ledger' | 'review'>('ledger')
   const [ledgerStatus, setLedgerStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [ledgerReloadKey, setLedgerReloadKey] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -75,7 +127,7 @@ export function LedgerPage() {
         ) setLedgerStatus('error')
       })
     return () => controller.abort()
-  }, [year])
+  }, [ledgerReloadKey, year])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -142,6 +194,8 @@ export function LedgerPage() {
   const selectedOption = reviewDetail?.options.find((option) => option.code === resolutionCode)
   const resolutionBusy = resolutionStatus === 'submitting' || resolutionStatus === 'refreshing'
   const resolutionBlocked = resolutionStatus === 'reanalyze'
+  const ledgerCount = ledgerStatus === 'ready' ? events.length : '—'
+  const reviewCount = reviewStatus === 'ready' ? reviews.length : '—'
 
   const selectReview = (reviewId: string) => {
     selectedReviewIdRef.current = reviewId
@@ -256,13 +310,12 @@ export function LedgerPage() {
         <section className="ledger-header">
           <div><p>ACTIVITY · LEDGER · REVIEW</p><h1>거래 장부</h1><span>Engine이 확정한 현재 revision과 열린 검토 항목을 조회합니다.</span></div>
           <div className="ledger-header__actions">
-            <button type="button" className={view === 'ledger' ? 'is-active' : undefined} onClick={() => setView('ledger')}>거래 {events.length}</button>
-            <button type="button" className={view === 'review' ? 'is-active' : undefined} onClick={() => setView('review')}>검토 {reviews.length}</button>
+            <button type="button" className={view === 'ledger' ? 'is-active' : undefined} onClick={() => setView('ledger')}>거래 {ledgerCount}</button>
+            <button type="button" className={view === 'review' ? 'is-active' : undefined} onClick={() => setView('review')}>검토 {reviewCount}</button>
           </div>
         </section>
 
-        {view === 'ledger' && ledgerStatus === 'error' ? <p className="ledger-api-state" role="alert">장부를 불러오지 못했습니다. Engine과 데이터베이스 연결을 확인해 주세요.</p> : null}
-        {view === 'ledger' && ledgerStatus === 'loading' ? <p className="ledger-api-state" role="status">장부를 불러오는 중입니다.</p> : null}
+        {view === 'ledger' && ledgerStatus !== 'ready' ? <LedgerDataState surface="ledger" status={ledgerStatus} onRetry={() => setLedgerReloadKey((current) => current + 1)} /> : null}
 
         {ledgerStatus === 'ready' && view === 'ledger' ? (
           events.length === 0 ? (
@@ -285,13 +338,7 @@ export function LedgerPage() {
           )
         ) : null}
 
-        {view === 'review' && reviewStatus === 'loading' ? <p className="ledger-api-state" role="status">검토 목록을 불러오는 중입니다.</p> : null}
-        {view === 'review' && reviewStatus === 'error' ? (
-          <section className="ledger-api-state" role="alert">
-            <p>검토 목록을 불러오지 못했습니다. 장부는 계속 확인할 수 있습니다.</p>
-            <button type="button" onClick={() => setReviewReloadKey((current) => current + 1)}>검토 다시 불러오기</button>
-          </section>
-        ) : null}
+        {view === 'review' && reviewStatus !== 'ready' ? <LedgerDataState surface="review" status={reviewStatus} onRetry={() => setReviewReloadKey((current) => current + 1)} /> : null}
 
         {reviewStatus === 'ready' && view === 'review' ? (
           reviews.length === 0 ? <section className="ledger-empty-state"><h2>열린 검토가 없습니다</h2><p>Engine이 판단 보류 항목을 만들면 사유와 근거가 여기에 표시됩니다.</p></section> :

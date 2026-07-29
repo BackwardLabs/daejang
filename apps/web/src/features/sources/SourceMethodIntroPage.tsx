@@ -1,3 +1,5 @@
+import { lazy, Suspense, useCallback, useState } from 'react'
+import { navigateTo } from '../../auth/navigation.ts'
 import {
   sourceMethodBullets,
   sourceMethodDefinitions,
@@ -6,6 +8,24 @@ import {
 import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import { useSourceCapabilities } from './useSourceCapabilities.ts'
+import { queueWalletRegistrationNotice } from './sourceRegistrationNotice.ts'
+
+type WalletFeedback = {
+  message: string
+}
+
+const loadReownWalletConnection = () =>
+  import('./ReownEvmWalletConnectionRoute.tsx')
+
+const ReownWalletLauncher = lazy(async () => {
+  const module = await loadReownWalletConnection()
+
+  return { default: module.ReownWalletLauncher }
+})
+
+function preloadReownWalletConnection() {
+  void loadReownWalletConnection().catch(() => undefined)
+}
 
 export function SourceMethodIntroPage({
   methodId,
@@ -13,16 +33,40 @@ export function SourceMethodIntroPage({
   methodId: SourceMethodId
 }) {
   const capabilities = useSourceCapabilities()
+  const [walletFlowStarted, setWalletFlowStarted] = useState(false)
+  const [walletLauncherAttempt, setWalletLauncherAttempt] = useState(0)
+  const [walletFeedback, setWalletFeedback] = useState<WalletFeedback>()
   const method = sourceMethodDefinitions[methodId]
   const isUpbitPdf = methodId === 'upbit-pdf'
   const registrationEnabled =
     !isUpbitPdf || capabilities.upbitPdf.registrationEnabled
   const actionLabel =
     isUpbitPdf ? 'PDF 등록 시작' : '지갑 연결 시작'
+  const handleWalletConnected = useCallback(() => {
+    setWalletFlowStarted(false)
+    queueWalletRegistrationNotice()
+    navigateTo('/sources')
+  }, [])
+  const handleWalletCancelled = useCallback(() => {
+    setWalletFlowStarted(false)
+    setWalletFeedback({
+      message: '지갑 연결 또는 서명이 취소되었습니다. 다시 시도해 주세요.',
+    })
+  }, [])
+  const handleWalletError = useCallback(() => {
+    setWalletFlowStarted(false)
+    setWalletFeedback({
+      message: '지갑 연결을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    })
+  }, [])
 
   return (
     <SourceFlowLayout
-      badge={{ label: method.intro.badge, tone: method.tone }}
+      badge={
+        isUpbitPdf
+          ? { label: method.intro.badge, tone: method.tone }
+          : undefined
+      }
       description={method.intro.subtitle}
       eyebrow={method.intro.eyebrow}
       title={methodId === 'upbit-pdf' ? 'Upbit PDF 등록' : 'EVM Wallet 연결'}
@@ -57,16 +101,28 @@ export function SourceMethodIntroPage({
 
           <div className="source-intro-actions">
             {registrationEnabled ? (
-              <AppLink
-                className="source-primary-action"
-                href={
-                  isUpbitPdf
-                    ? '/sources/new/upbit/upload'
-                    : '/sources/new/wallet/connect'
-                }
-              >
-                {actionLabel} <span aria-hidden="true">→</span>
-              </AppLink>
+              isUpbitPdf ? (
+                <AppLink
+                  className="source-primary-action"
+                  href="/sources/new/upbit/upload"
+                >
+                  {actionLabel} <span aria-hidden="true">→</span>
+                </AppLink>
+              ) : (
+                <button
+                  type="button"
+                  className="source-primary-action"
+                  onClick={() => {
+                    setWalletFeedback(undefined)
+                    setWalletLauncherAttempt((attempt) => attempt + 1)
+                    setWalletFlowStarted(true)
+                  }}
+                  onFocus={preloadReownWalletConnection}
+                  onPointerEnter={preloadReownWalletConnection}
+                >
+                  {actionLabel} <span aria-hidden="true">→</span>
+                </button>
+              )
             ) : (
               <span className="source-primary-action" aria-disabled="true">
                 Upbit PDF 등록 불가
@@ -108,7 +164,27 @@ export function SourceMethodIntroPage({
         </p>
       ) : null}
 
+      {!isUpbitPdf && walletFeedback ? (
+        <p
+          className="source-api-notice source-api-notice--error"
+          role="alert"
+        >
+          {walletFeedback.message}
+        </p>
+      ) : null}
+
       <p className="source-footer-note">{method.intro.footer}</p>
+
+      {!isUpbitPdf && walletFlowStarted ? (
+        <Suspense fallback={null}>
+          <ReownWalletLauncher
+            key={walletLauncherAttempt}
+            onCancelled={handleWalletCancelled}
+            onConnected={handleWalletConnected}
+            onError={handleWalletError}
+          />
+        </Suspense>
+      ) : null}
     </SourceFlowLayout>
   )
 }

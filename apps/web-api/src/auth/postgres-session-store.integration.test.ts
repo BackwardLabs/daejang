@@ -318,13 +318,15 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       intent: 'signup' | 'login',
     ) => {
       const response = await context.app.inject({
-        method: 'GET',
-        url: `/api/v1/auth/oauth/naver/start?intent=${intent}&return_to=%2Fdashboard`,
+        method: 'POST',
+        url: '/api/v1/auth/oauth/naver/start',
+        headers: { origin: postgresAuthConfig.publicOrigin },
+        payload: { intent, returnTo: '/dashboard' },
       })
-      expect(response.statusCode).toBe(302)
-      const state = new URL(response.headers.location as string).searchParams.get(
-        'state',
-      )
+      expect(response.statusCode).toBe(200)
+      const state = new URL(
+        response.json().authorizationUrl as string,
+      ).searchParams.get('state')
       const cookie = responseCookie(
         response.headers['set-cookie'],
         'daejang_oauth',
@@ -342,7 +344,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       headers: { cookie: signupStart.cookie },
     })
     expect(signup.statusCode).toBe(302)
-    expect(signup.headers.location).toBe('/?onboarding=terms')
+    expect(signup.headers.location).toBe('/signup/terms')
 
     const persistedAccount = await pool.query<{
       user_id: string
@@ -956,12 +958,14 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
 
     try {
       const start = await context.app.inject({
-        method: 'GET',
-        url: '/api/v1/auth/oauth/naver/start?intent=signup',
+        method: 'POST',
+        url: '/api/v1/auth/oauth/naver/start',
+        headers: { origin: identityDisabledConfig.publicOrigin },
+        payload: { intent: 'signup' },
       })
-      const state = new URL(start.headers.location as string).searchParams.get(
-        'state',
-      )
+      const state = new URL(
+        start.json().authorizationUrl as string,
+      ).searchParams.get('state')
       const oauthCookie = responseCookie(
         start.headers['set-cookie'],
         'daejang_oauth',
@@ -975,7 +979,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
         headers: { cookie: oauthCookie as string },
       })
       expect(callback.statusCode).toBe(302)
-      expect(callback.headers.location).toBe('/?onboarding=terms')
+      expect(callback.headers.location).toBe('/signup/terms')
       const signupCookie = responseCookie(
         callback.headers['set-cookie'],
         identityDisabledConfig.signupSessionCookieName,
@@ -984,7 +988,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
 
       const currentDocuments = await context.app.inject({
         method: 'GET',
-        url: '/api/v1/legal-documents/current?locale=ko-KR',
+        url: '/api/v1/legal-documents/current',
       })
       expect(currentDocuments.statusCode).toBe(200)
       const applicableDocuments = currentDocuments.json<{

@@ -7,9 +7,12 @@ import type {
 } from 'fastify'
 
 import {
+  authNoticeCookieName,
+  clearAuthNoticeCookie,
   clearOAuthTransactionCookie,
   clearSignupSessionCookie,
   oauthTransactionCookieName,
+  setAuthNoticeCookie,
   setOAuthTransactionCookie,
   setSessionCookie,
   setSignupSessionCookie,
@@ -109,10 +112,36 @@ const parseProvider = (value: string) => {
   return value as OAuthProviderName
 }
 
-const safeCallbackErrorCode = (error: unknown) =>
-  error instanceof ApiError
+const authNoticeCodes = new Set([
+  'oauth_access_denied',
+  'invalid_oauth_transaction',
+  'oauth_provider_unavailable',
+  'oauth_account_not_found',
+  'signup_unavailable',
+  'account_already_exists',
+  'account_unavailable',
+  'oauth_callback_failed',
+])
+
+const safeCallbackErrorCode = (error: unknown) => {
+  const code = error instanceof ApiError
     ? error.code.toLocaleLowerCase('en-US')
     : 'oauth_callback_failed'
+  return authNoticeCodes.has(code) ? code : 'oauth_callback_failed'
+}
+
+const setCallbackNotice = (
+  reply: FastifyReply,
+  code: string,
+  options: AccountAuthRoutesOptions,
+) => {
+  setAuthNoticeCookie(
+    reply,
+    code,
+    new Date(currentTime(options).getTime() + 120_000),
+    options.config,
+  )
+}
 
 const setSignupCookieForUser = async (
   reply: FastifyReply,
@@ -213,18 +242,46 @@ export const registerAccountAuthRoutes = async (
     },
   }))
 
-  app.get<{
+  app.post(
+    '/api/v1/auth/oauth/result/consume',
+    {
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code'],
+            properties: {
+              code: {
+                anyOf: [
+                  { type: 'string', enum: [...authNoticeCodes] },
+                  { type: 'null' },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const value = request.cookies[authNoticeCookieName(options.config)]
+      clearAuthNoticeCookie(reply, options.config)
+      return { code: value && authNoticeCodes.has(value) ? value : null }
+    },
+  )
+
+  app.post<{
     Params: { provider: string }
-    Querystring: {
+    Body: {
       intent: string
-      return_to?: string
+      returnTo?: string
     }
   }>(
     '/api/v1/auth/oauth/:provider/start',
     {
       preHandler: [
         async (request) => {
-          if (request.query.intent === 'signup') {
+          if (request.body.intent === 'signup') {
             assertSignupEnabled(options)
           }
         },
@@ -241,29 +298,39 @@ export const registerAccountAuthRoutes = async (
           required: ['provider'],
           properties: { provider: { type: 'string' } },
         },
-        querystring: {
+        body: {
           type: 'object',
           additionalProperties: false,
           required: ['intent'],
           properties: {
             intent: { type: 'string', enum: ['signup', 'login'] },
-            return_to: { type: 'string', maxLength: 512 },
+            returnTo: { type: 'string', maxLength: 512 },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['authorizationUrl'],
+            properties: {
+              authorizationUrl: { type: 'string', format: 'uri' },
+            },
           },
         },
       },
     },
     async (request, reply) => {
       const provider = parseProvider(request.params.provider)
-      if (!oauthIntents.has(request.query.intent as OAuthIntent)) {
+      if (!oauthIntents.has(request.body.intent as OAuthIntent)) {
         throw oauthProviderUnavailable()
       }
-      if (request.query.intent === 'signup') {
+      if (request.body.intent === 'signup') {
         assertSignupEnabled(options)
       }
       const authorizationUrl = await options.oauthService.start({
         provider,
-        intent: request.query.intent as OAuthIntent,
-        returnPath: request.query.return_to,
+        intent: request.body.intent as OAuthIntent,
+        returnPath: request.body.returnTo,
       })
       const state = authorizationUrl.searchParams.get('state')
       if (!state) {
@@ -278,7 +345,7 @@ export const registerAccountAuthRoutes = async (
         ),
         options.config,
       )
-      return reply.redirect(authorizationUrl.toString(), 302)
+      return { authorizationUrl: authorizationUrl.toString() }
     },
   )
 
@@ -331,18 +398,8 @@ export const registerAccountAuthRoutes = async (
             provider,
             state: request.query.state,
           })
-          const deniedDestination = new URL(
-            '/login',
-            options.config.publicOrigin,
-          )
-          deniedDestination.searchParams.set(
-            'auth_error',
-            'oauth_access_denied',
-          )
-          return reply.redirect(
-            `${deniedDestination.pathname}${deniedDestination.search}`,
-            302,
-          )
+          setCallbackNotice(reply, 'oauth_access_denied', options)
+          return reply.redirect('/login', 302)
         }
         if (!request.query.code) {
           throw oauthProviderUnavailable()
@@ -367,7 +424,7 @@ export const registerAccountAuthRoutes = async (
           if (user.status === 'pending') {
             assertSignupEnabled(options)
             await setSignupCookieForUser(reply, user, options)
-            return reply.redirect('/?onboarding=terms', 302)
+            return reply.redirect('/signup/terms', 302)
           }
           if (user.status !== 'active') {
             throw accountUnavailable()
@@ -406,7 +463,7 @@ export const registerAccountAuthRoutes = async (
           emailVerified: completed.identity.emailVerified,
         })
         await setSignupCookieForUser(reply, user, options)
-        return reply.redirect('/?onboarding=terms', 302)
+        return reply.redirect('/signup/terms', 302)
       } catch (error) {
         request.log.warn(
           {
@@ -415,9 +472,8 @@ export const registerAccountAuthRoutes = async (
           },
           'oauth callback rejected',
         )
-        const destination = new URL('/login', options.config.publicOrigin)
-        destination.searchParams.set('auth_error', safeCallbackErrorCode(error))
-        return reply.redirect(`${destination.pathname}${destination.search}`, 302)
+        setCallbackNotice(reply, safeCallbackErrorCode(error), options)
+        return reply.redirect('/login', 302)
       }
     },
   )
@@ -604,7 +660,7 @@ export const registerAccountAuthRoutes = async (
         await setSignupCookieForUser(reply, user, options)
         return {
           status: 'signup_pending',
-          nextPath: '/?onboarding=terms',
+          nextPath: '/signup/terms',
         }
       }
       if (user.status !== 'active') {
@@ -630,29 +686,14 @@ export const registerAccountAuthRoutes = async (
     },
   )
 
-  app.get<{ Querystring: { locale?: string } }>(
+  app.get(
     '/api/v1/legal-documents/current',
-    {
-      schema: {
-        querystring: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            locale: {
-              type: 'string',
-              const: 'ko-KR',
-              default: 'ko-KR',
-            },
-          },
-        },
-      },
-    },
-    async (request) => {
+    async () => {
       const applicableTypes = new Set(applicableLegalDocumentTypes(options))
       const requiredTypes = new Set(requiredLegalDocumentTypes(options))
       const documents = (
         await options.accountStore.listCurrentLegalDocuments(
-          request.query.locale ?? 'ko-KR',
+          'ko-KR',
           currentTime(options),
         )
       ).filter((document) => applicableTypes.has(document.documentType))

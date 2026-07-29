@@ -3,6 +3,7 @@ import upbitLogo from '../../assets/sources/upbit-logo.png'
 import { AppLink } from '../../components/AppLink.tsx'
 import { useEffect, useState } from 'react'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
+import { consumeWalletRegistrationNotice } from './sourceRegistrationNotice.ts'
 import {
   disconnectWalletSource,
   listSyncJobs,
@@ -29,19 +30,103 @@ function maskAddress(address: string) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`
 }
 
+function SourceDataState({
+  onRetry,
+  status,
+}: {
+  onRetry: () => void
+  status: 'loading' | 'error'
+}) {
+  const isLoading = status === 'loading'
+
+  return (
+    <section
+      className={`source-data-state source-data-state--${status}`}
+      aria-busy={isLoading}
+      aria-labelledby="source-data-state-title"
+    >
+      <div className="source-data-state__header">
+        <div>
+          <h2 id="source-data-state-title">연결된 데이터 소스 목록</h2>
+          <p>
+            {isLoading
+              ? '등록된 거래소와 지갑을 확인하고 있습니다.'
+              : '데이터를 다시 불러오면 연결 상태와 처리 현황을 확인할 수 있습니다.'}
+          </p>
+        </div>
+        <span className="source-data-state__badge">
+          {isLoading ? '확인 중' : '불러오기 실패'}
+        </span>
+      </div>
+
+      <div
+        className="source-data-state__notice"
+        role={isLoading ? 'status' : 'alert'}
+      >
+        <span
+          className={`source-data-state__icon${isLoading ? ' is-loading' : ''}`}
+          aria-hidden="true"
+        >
+          {isLoading ? '' : '!'}
+        </span>
+        <div>
+          <strong>
+            {isLoading
+              ? '데이터 소스를 불러오는 중입니다.'
+              : '데이터 소스를 불러오지 못했습니다.'}
+          </strong>
+          <span>
+            {isLoading
+              ? '잠시만 기다려 주세요. 이 화면에서 데이터 소스를 추가할 수 있습니다.'
+              : '연결 상태를 확인한 뒤 다시 시도해 주세요. 데이터 소스 추가는 계속할 수 있습니다.'}
+          </span>
+        </div>
+        {!isLoading ? (
+          <button type="button" onClick={onRetry}>
+            데이터 소스 다시 불러오기
+          </button>
+        ) : null}
+      </div>
+
+      {isLoading ? (
+        <div className="source-data-state__skeleton" aria-hidden="true">
+          {[0, 1, 2].map((item) => (
+            <div className="source-data-state__skeleton-row" key={item}>
+              <i />
+              <span>
+                <b />
+                <small />
+              </span>
+              <em />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 export function SourceManagementPage() {
   const [sources, setSources] = useState<SourceApiModel[]>([])
   const [jobs, setJobs] = useState<SyncJobApiModel[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [disconnectingId, setDisconnectingId] = useState<string>()
+  const [reloadKey, setReloadKey] = useState(0)
+  const [showRegistrationNotice, setShowRegistrationNotice] = useState(false)
   const activeSources = sources.filter((source) => source.status === 'ACTIVE')
 
   useEffect(() => {
+    if (consumeWalletRegistrationNotice()) {
+      setShowRegistrationNotice(true)
+    }
+  }, [])
+
+  useEffect(() => {
     const controller = new AbortController()
-    void Promise.all([listSources(controller.signal), listSyncJobs(controller.signal)])
-      .then(([sourceResult, jobResult]) => {
+    setStatus('loading')
+    void listSources(controller.signal)
+      .then((sourceResult) => {
         setSources(sourceResult.items)
-        setJobs(jobResult.items)
         setStatus('ready')
       })
       .catch((error: unknown) => {
@@ -49,8 +134,24 @@ export function SourceManagementPage() {
           setStatus('error')
         }
       })
+    void listSyncJobs(controller.signal)
+      .then((jobResult) => setJobs(jobResult.items))
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setJobs([])
+        }
+      })
     return () => controller.abort()
-  }, [])
+  }, [reloadKey])
+
+  useEffect(() => {
+    if (!showRegistrationNotice) return
+    const timeoutId = window.setTimeout(
+      () => setShowRegistrationNotice(false),
+      5_000,
+    )
+    return () => window.clearTimeout(timeoutId)
+  }, [showRegistrationNotice])
 
   async function handleDisconnect(sourceId: string) {
     setDisconnectingId(sourceId)
@@ -73,29 +174,43 @@ export function SourceManagementPage() {
       description="거래내역서와 지갑 연결을 한곳에서 관리합니다."
       title="데이터 소스 관리"
     >
+      {showRegistrationNotice ? (
+        <div className="source-toast" role="status" aria-live="polite">
+          <span aria-hidden="true">✓</span>
+          <div>
+            <strong>연결 완료</strong>
+            <p>지갑 데이터 소스가 등록되었습니다.</p>
+          </div>
+          <button
+            type="button"
+            aria-label="알림 닫기"
+            onClick={() => setShowRegistrationNotice(false)}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       <section
         className="source-summary-card"
         aria-labelledby="connected-source-title"
       >
         <div>
           <h2 id="connected-source-title">연결된 데이터 소스</h2>
-          <p>현재 연결된 소스 {activeSources.length}개</p>
+          <p>
+            현재 연결된 소스{' '}
+            {status === 'ready' ? `${activeSources.length}개` : '—'}
+          </p>
         </div>
         <AppLink className="source-primary-action" href="/sources/new">
           데이터 소스 추가 <span aria-hidden="true">→</span>
         </AppLink>
       </section>
 
-      {status === 'loading' ? (
-        <p className="source-api-notice" role="status">
-          데이터 소스를 불러오는 중입니다.
-        </p>
-      ) : null}
-
-      {status === 'error' ? (
-        <p className="source-api-notice" role="alert">
-          데이터 소스를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.
-        </p>
+      {status !== 'ready' ? (
+        <SourceDataState
+          status={status}
+          onRetry={() => setReloadKey((current) => current + 1)}
+        />
       ) : null}
 
       {status === 'ready' && sources.length > 0 ? (

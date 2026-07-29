@@ -4,12 +4,9 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENGINE_DIR="${ROOT_DIR}/services/engine"
-API_ENV_FILE="${ROOT_DIR}/apps/web-api/.env"
-WEB_ENV_FILE="${ROOT_DIR}/apps/web/.env"
-
-DB_HOST="${GIWA_LOCAL_DB_HOST:-127.0.0.1}"
-DB_PORT="${GIWA_LOCAL_DB_PORT:-55433}"
-DB_NAME="${GIWA_LOCAL_DB_NAME:-daejang_test}"
+DB_HOST="${GIWA_LOCAL_DB_HOST:-}"
+DB_PORT="${GIWA_LOCAL_DB_PORT:-}"
+DB_NAME="${GIWA_LOCAL_DB_NAME:-}"
 WEB_PORT="${GIWA_WEB_PORT:-5173}"
 API_PORT="${GIWA_API_PORT:-3000}"
 ENGINE_PORT="${GIWA_ENGINE_PORT:-50051}"
@@ -22,10 +19,11 @@ PDF_PARSER_SOCKET="${PDF_PARSER_RUNTIME_BASE}/parser.sock"
 START_ENGINE=0
 CHECK_ONLY=0
 
-WEB_DATABASE_URL="${GIWA_WEB_DATABASE_URL:-}"
+WEB_DATABASE_URL="${GIWA_WEB_DATABASE_URL:-${DATABASE_URL:-}}"
 SOURCE_DATABASE_URL="${GIWA_SOURCE_DATABASE_URL:-}"
 QUERY_DATABASE_URL="${GIWA_QUERY_DATABASE_URL:-}"
 EVENT_DATABASE_URL="${GIWA_EVENT_DATABASE_URL:-}"
+REVIEW_DATABASE_URL="${GIWA_REVIEW_DATABASE_URL:-}"
 
 PIDS=()
 LABELS=()
@@ -43,11 +41,13 @@ Usage:
 Starts the local Web API and frontend together. PostgreSQL must already be
 running. Press Ctrl+C once to stop both processes.
 
---with-engine also starts the local Engine. This currently requires every
-Engine database permission preflight to pass.
+--with-engine also starts the local Engine. ReviewService stays disabled unless
+GIWA_REVIEW_DATABASE_URL is provided.
 
-Required secret-backed input:
+Web API database URL lookup order:
   GIWA_WEB_DATABASE_URL
+  DATABASE_URL
+  DATABASE_URL from apps/web-api/.env
 
 Required with --with-engine:
   GIWA_SOURCE_DATABASE_URL
@@ -61,15 +61,22 @@ Optional overrides:
   GIWA_WEB_PORT
   GIWA_API_PORT
   GIWA_ENGINE_PORT
+  GIWA_LOCAL_EMAIL_AUTH_ENABLED
+  GIWA_LOCAL_RESEND_API_KEY
+  GIWA_LOCAL_EMAIL_FROM
+  GIWA_LOCAL_OAUTH_ENABLED_PROVIDERS
+  GIWA_LOCAL_OAUTH_TRANSACTION_ENCRYPTION_KEY
   GIWA_DEV_START_TIMEOUT_SECONDS
   GIWA_REVIEW_ARTIFACT_BASE
   GIWA_SOURCE_ARTIFACT_BASE
   GIWA_PDF_PARSER_PYTHON_PATH
   GIWA_PDF_PARSER_RUNTIME_BASE
   GIWA_WEB_DATABASE_URL
+  DATABASE_URL
   GIWA_SOURCE_DATABASE_URL
   GIWA_QUERY_DATABASE_URL
   GIWA_EVENT_DATABASE_URL
+  GIWA_REVIEW_DATABASE_URL
 EOF
 }
 
@@ -84,6 +91,42 @@ require_command() {
 
 require_file() {
   [[ -s "$1" ]] || fail "Required file is missing or empty: $1"
+}
+
+load_web_database_url() {
+  local env_file="${ROOT_DIR}/apps/web-api/.env"
+
+  if [[ -n "$WEB_DATABASE_URL" || ! -f "$env_file" ]]; then
+    return 0
+  fi
+  WEB_DATABASE_URL="$(
+    node --env-file-if-exists="$env_file" \
+      -e 'if (process.env.DATABASE_URL) process.stdout.write(process.env.DATABASE_URL)'
+  )"
+}
+
+resolve_database_target() {
+  local parsed_target
+
+  parsed_target="$(
+    DATABASE_URL="$WEB_DATABASE_URL" node -e '
+      try {
+        const url = new URL(process.env.DATABASE_URL)
+        const database = url.pathname.slice(1) || decodeURIComponent(url.username)
+        process.stdout.write([url.hostname, url.port || "5432", database].join("\t"))
+      } catch {
+        process.exitCode = 1
+      }
+    '
+  )" || fail "Web API DATABASE_URL is not a valid PostgreSQL URL"
+
+  local parsed_host
+  local parsed_port
+  local parsed_name
+  IFS=$'\t' read -r parsed_host parsed_port parsed_name <<<"$parsed_target"
+  DB_HOST="${DB_HOST:-$parsed_host}"
+  DB_PORT="${DB_PORT:-$parsed_port}"
+  DB_NAME="${DB_NAME:-$parsed_name}"
 }
 
 validate_port() {
@@ -113,6 +156,7 @@ preflight() {
   require_command curl
   require_command lsof
   require_command nc
+  require_command node
   require_command npm
   require_command pgrep
   if ((START_ENGINE == 1)); then
@@ -121,10 +165,10 @@ preflight() {
     require_file "${ENGINE_DIR}/python/pdf_parser_server.py"
   fi
 
-  require_file "$API_ENV_FILE"
-  require_file "$WEB_ENV_FILE"
   [[ -d "${ROOT_DIR}/node_modules" ]] || fail "node_modules is missing. Run: cd ${ROOT_DIR} && npm ci"
-  [[ -n "$WEB_DATABASE_URL" ]] || fail "GIWA_WEB_DATABASE_URL is required"
+  load_web_database_url
+  [[ -n "$WEB_DATABASE_URL" ]] || fail "Web API DATABASE_URL was not found in GIWA_WEB_DATABASE_URL, DATABASE_URL, or apps/web-api/.env. Use the daejang_web_app connection URL from ../daejang-db/docs/operations.md"
+  resolve_database_target
   if ((START_ENGINE == 1)); then
     [[ -n "$SOURCE_DATABASE_URL" ]] || fail "GIWA_SOURCE_DATABASE_URL is required with --with-engine"
     [[ -n "$QUERY_DATABASE_URL" ]] || fail "GIWA_QUERY_DATABASE_URL is required with --with-engine"
@@ -193,17 +237,19 @@ cleanup() {
   CLEANED_UP=1
   trap - EXIT INT TERM HUP
 
-  if ((${#PIDS[@]} > 0)); then
+  if [[ -n "$LAST_STARTED_PID" ]]; then
     printf '\nStopping local services...\n'
   fi
 
-  for pid in "${PIDS[@]}"; do
+  for pid in "${PIDS[@]:-}"; do
+    [[ -n "$pid" ]] || continue
     if kill -0 "$pid" 2>/dev/null; then
       terminate_tree "$pid"
     fi
   done
 
-  for pid in "${PIDS[@]}"; do
+  for pid in "${PIDS[@]:-}"; do
+    [[ -n "$pid" ]] || continue
     wait "$pid" 2>/dev/null || true
   done
 }
@@ -214,6 +260,15 @@ on_signal() {
 }
 
 start_engine() {
+  local review_artifact_database_url=""
+  local review_artifact_root=""
+  local review_artifact_temp=""
+  if [[ -n "$REVIEW_DATABASE_URL" ]]; then
+    review_artifact_database_url="$SOURCE_DATABASE_URL"
+    review_artifact_root="${ARTIFACT_BASE}/objects"
+    review_artifact_temp="${ARTIFACT_BASE}/tmp"
+  fi
+
   printf 'Starting Engine...\n'
   (
     cd "$ENGINE_DIR"
@@ -226,10 +281,10 @@ start_engine() {
       DAEJANG_SOURCE_ARTIFACT_TEMP="${SOURCE_ARTIFACT_BASE}/tmp" \
       DAEJANG_QUERY_DATABASE_URL="$QUERY_DATABASE_URL" \
       DAEJANG_REPORT_DATABASE_URL="$EVENT_DATABASE_URL" \
-      DAEJANG_REVIEW_DATABASE_URL="$EVENT_DATABASE_URL" \
-      DAEJANG_REVIEW_ARTIFACT_DATABASE_URL="$SOURCE_DATABASE_URL" \
-      DAEJANG_REVIEW_ARTIFACT_ROOT="${ARTIFACT_BASE}/objects" \
-      DAEJANG_REVIEW_ARTIFACT_TEMP="${ARTIFACT_BASE}/tmp" \
+      DAEJANG_REVIEW_DATABASE_URL="$REVIEW_DATABASE_URL" \
+      DAEJANG_REVIEW_ARTIFACT_DATABASE_URL="$review_artifact_database_url" \
+      DAEJANG_REVIEW_ARTIFACT_ROOT="$review_artifact_root" \
+      DAEJANG_REVIEW_ARTIFACT_TEMP="$review_artifact_temp" \
       ENGINE_PDF_PARSER_SOCKET_PATH="$PDF_PARSER_SOCKET" \
       go run ./cmd/engine-api
   ) &
@@ -239,24 +294,49 @@ start_engine() {
 }
 
 start_api() {
+  local engine_grpc_target=""
+  if ((START_ENGINE == 1)); then
+    engine_grpc_target="127.0.0.1:${ENGINE_PORT}"
+  fi
+
+  local api_environment=(
+    "NODE_ENV=development"
+    "HOST=127.0.0.1"
+    "PORT=${API_PORT}"
+    "PUBLIC_ORIGIN=http://localhost:${WEB_PORT}"
+    "DATABASE_URL=${WEB_DATABASE_URL}"
+    "SIGNUP_ENABLED=true"
+    "IDENTITY_VERIFICATION_MODE=disabled"
+    "EMAIL_AUTH_ENABLED=${GIWA_LOCAL_EMAIL_AUTH_ENABLED:-true}"
+    "UPBIT_PDF_IMPORT_ENABLED=true"
+    "ENGINE_ALLOW_INSECURE_LOOPBACK=true"
+    "ENGINE_GRPC_INSECURE_TARGET=${engine_grpc_target}"
+  )
+  if [[ -n "${GIWA_LOCAL_RESEND_API_KEY:-}" ]]; then
+    api_environment+=(
+      "RESEND_API_KEY=${GIWA_LOCAL_RESEND_API_KEY}"
+    )
+  fi
+  if [[ -n "${GIWA_LOCAL_EMAIL_FROM:-}" ]]; then
+    api_environment+=(
+      "EMAIL_FROM=${GIWA_LOCAL_EMAIL_FROM}"
+    )
+  fi
+  if [[ -n "${GIWA_LOCAL_OAUTH_ENABLED_PROVIDERS:-}" ]]; then
+    api_environment+=(
+      "OAUTH_ENABLED_PROVIDERS=${GIWA_LOCAL_OAUTH_ENABLED_PROVIDERS}"
+    )
+  fi
+  if [[ -n "${GIWA_LOCAL_OAUTH_TRANSACTION_ENCRYPTION_KEY:-}" ]]; then
+    api_environment+=(
+      "OAUTH_TRANSACTION_ENCRYPTION_KEY=${GIWA_LOCAL_OAUTH_TRANSACTION_ENCRYPTION_KEY}"
+    )
+  fi
+
   printf 'Starting Web API...\n'
   (
     cd "$ROOT_DIR"
-    exec env \
-      NODE_ENV=development \
-      HOST=127.0.0.1 \
-      PORT="$API_PORT" \
-      PUBLIC_ORIGIN="http://localhost:${WEB_PORT}" \
-      DATABASE_URL="$WEB_DATABASE_URL" \
-      SIGNUP_ENABLED=true \
-      IDENTITY_VERIFICATION_MODE=disabled \
-      UPBIT_PDF_IMPORT_ENABLED=true \
-      ENGINE_GRPC_INSECURE_TARGET="$(
-        if ((START_ENGINE == 1)); then
-          printf '127.0.0.1:%s' "$ENGINE_PORT"
-        fi
-      )" \
-      npm run dev:api
+    exec env "${api_environment[@]}" npm run dev:api
   ) &
   LAST_STARTED_PID="$!"
   PIDS+=("$LAST_STARTED_PID")

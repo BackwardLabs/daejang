@@ -27,6 +27,33 @@ IDENTITY_VERIFICATION_MODE=disabled
 UPBIT_PDF_IMPORT_ENABLED=false
 ```
 
+### 동일 host에서 process로 실행하는 경우
+
+Web API, Engine, PDF parser와 JIT를 같은 서버에서 host process로 실행하면 App
+Compose의 내부 mTLS와 NGINX TLS는 사용하지 않아도 된다. 공개 HTTPS는 Cloudflare
+Tunnel이 담당하고, Tunnel의 local service는 `http://127.0.0.1:3000`으로 제한한다.
+
+- Web API: `HOST=127.0.0.1`, `PORT=3000`
+- Engine: `ENGINE_LISTEN=127.0.0.1:50051`,
+  `ENGINE_ALLOW_INSECURE_LOOPBACK=true`
+- Web API의 Engine client: `ENGINE_GRPC_INSECURE_TARGET=127.0.0.1:50051`,
+  `ENGINE_ALLOW_INSECURE_LOOPBACK=true`
+- PDF parser와 JIT: 절대 경로 Unix socket
+- PostgreSQL DSN: Docker service 이름 `postgres:5432`가 아니라 host publish 주소
+  `127.0.0.1:55432`
+
+production loopback opt-in은 외부 interface의 plaintext Engine listener를 허용하지
+않는다. Cloudflare Worker의 `WEB_API_ORIGIN`은 public Worker 주소가 아니라 Tunnel이
+제공하는 별도 HTTPS hostname을 사용한다.
+
+Web API build와 host-native production 실행은 다음 명령으로 수행한다. runner는
+`deploy/production.env`를 읽고 Docker 내부 DSN hostname `postgres:5432`만
+`127.0.0.1:55432`로 변환하며 비밀번호를 출력하거나 복사하지 않는다.
+
+```bash
+npm run start:web-api:host-production
+```
+
 `IDENTITY_VERIFICATION_MODE=disabled`는 사용자를 본인확인 완료 상태로 만드는 설정이
 아니다. 가입과 필수 약관 동의만 완료할 수 있게 한다. NICE 결과가 없으므로
 verified subject name claim을 임의로 만들거나
@@ -44,10 +71,10 @@ Upbit PDF 가져오기도 `UPBIT_PDF_IMPORT_ENABLED=false`로 유지한다.
 - `wi11y` 계정이 저장소 파일을 읽고 쓸 수 없거나 Docker를 사용할 수 없다.
 - 최종 DB PR과 최종 App PR이 아직 `main`에 병합되지 않았다.
 
-특히 현재 서버 확인 결과에서는 `daejang-db/.env`가 존재하지만,
-`daejang/deploy/production.env`는 관찰되지 않았다. 현재 stack이 다른 env source를
-사용할 수 있으므로, 실행 경로를 확인하기 전에 예시 파일을 복사해 새
-`production.env`를 만들지 않는다.
+현재 서버에는 `daejang-db/.env`와 `daejang/deploy/production.env`가 모두 있다.
+host-native 실행에서는 DB DSN의 password가 현재 DB role과 일치하고 hostname이
+runner가 변환할 수 있는 `postgres` 또는 host loopback인지 값 노출 없이 preflight한
+뒤 시작한다.
 
 ## 1. 서버 관리자가 공유 권한을 한 번 정리한다
 
@@ -347,8 +374,11 @@ curl -i https://daejang.backwardlabs.io/api/v1/me
 curl -i https://daejang.backwardlabs.io/api/v1/auth/capabilities
 
 for provider in naver google kakao; do
-  curl -sS -D - -o /dev/null \
-    "https://daejang.backwardlabs.io/api/v1/auth/oauth/${provider}/start?intent=signup"
+  curl -sS -D - \
+    -H 'Origin: https://daejang.backwardlabs.io' \
+    -H 'Content-Type: application/json' \
+    --data '{"intent":"signup","returnTo":"/signup/terms"}' \
+    "https://daejang.backwardlabs.io/api/v1/auth/oauth/${provider}/start"
 done
 ```
 
@@ -356,7 +386,7 @@ done
 
 - 비로그인 `/api/v1/me`는 HTML이 아닌 JSON `401` 반환
 - capabilities에서 signup이 활성화되고 email과 설정된 OAuth provider가 표시됨
-- Naver, Google, Kakao 시작 요청은 각 provider의 공식 인증 주소로 `302`
+- Naver, Google, Kakao 시작 요청은 `200`과 각 provider의 공식 `authorizationUrl` 반환
 - OAuth callback 후 새 GIWA 계정 생성, 필수 약관 동의, dashboard 진입 가능
 - 기존 이메일로 다시 가입할 때 새 인증번호를 보내지 않고 기존 계정 안내
 - 로그아웃한 session cookie로 보호 API에 다시 접근할 수 없음

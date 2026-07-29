@@ -229,19 +229,26 @@ describe('authentication flows', () => {
     ).toBeInTheDocument()
   })
 
-  it('explains when signup becomes unavailable during an OAuth callback', () => {
-    window.history.replaceState(
-      null,
-      '',
-      '/login?auth_error=signup_unavailable',
-    )
+  it('consumes a callback notice without exposing it in the login URL', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/auth/capabilities')) {
+        return jsonResponse(signupCapabilities)
+      }
+      if (url.includes('/auth/oauth/result/consume')) {
+        return jsonResponse({ code: 'signup_unavailable' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    window.history.replaceState(null, '', '/login')
     render(<App />)
 
     expect(
-      screen.getByText(
+      await screen.findByText(
         '현재 신규 가입을 받을 수 없습니다. 기존 계정으로 로그인해 주세요',
       ),
     ).toBeInTheDocument()
+    expect(window.location.search).toBe('')
   })
 
   it('uses real email API operations before showing server-backed terms', async () => {
@@ -479,7 +486,7 @@ describe('authentication flows', () => {
         if (url.includes('/auth/email/login')) {
           return jsonResponse({
             status: 'signup_pending',
-            nextPath: '/?onboarding=terms',
+            nextPath: '/signup/terms',
           })
         }
         if (url.includes('/legal-documents/current')) {
@@ -503,7 +510,7 @@ describe('authentication flows', () => {
     expect(
       await screen.findByRole('heading', { name: '약관과 개인정보 안내' }),
     ).toBeInTheDocument()
-    expect(window.location.pathname).toBe('/')
+    expect(window.location.pathname).toBe('/signup/terms')
   })
 
   it('clears email credentials after leaving the email signup screen', async () => {
@@ -532,7 +539,7 @@ describe('authentication flows', () => {
         throw new Error(`Unexpected request: ${url}`)
       }),
     )
-    window.history.replaceState(null, '', '/?onboarding=terms')
+    window.history.replaceState(null, '', '/signup/terms')
     render(<App />)
 
     expect(await screen.findByText('[필수] 서비스 이용약관')).toBeInTheDocument()

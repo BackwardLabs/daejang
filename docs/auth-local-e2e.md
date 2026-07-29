@@ -274,11 +274,14 @@ curl -i http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/readyz
 curl -i http://localhost:5173/api/v1/me
 curl -i \
-  'http://localhost:5173/api/v1/legal-documents/current?locale=ko-KR'
+  'http://localhost:5173/api/v1/legal-documents/current'
 
 for provider in naver google kakao; do
-  curl -sS -D - -o /dev/null \
-    "http://localhost:5173/api/v1/auth/oauth/${provider}/start?intent=signup"
+  curl -sS -D - \
+    -H 'Origin: http://localhost:5173' \
+    -H 'Content-Type: application/json' \
+    --data '{"intent":"signup","returnTo":"/signup/terms"}' \
+    "http://localhost:5173/api/v1/auth/oauth/${provider}/start"
 done
 ```
 
@@ -288,9 +291,9 @@ done
 - `/readyz`: `200`과 `{"status":"ready"}`
 - 비로그인 `/api/v1/me`: HTML이 아닌 JSON `401`
 - 약관 endpoint: 현재 로컬 fixture를 포함한 JSON
-- Naver: `nid.naver.com`으로 향하는 `302`
-- Google: `accounts.google.com`으로 향하는 `302`
-- Kakao: `kauth.kakao.com`으로 향하는 `302`
+- Naver: `nid.naver.com`으로 향하는 `authorizationUrl` 반환
+- Google: `accounts.google.com`으로 향하는 `authorizationUrl` 반환
+- Kakao: `kauth.kakao.com`으로 향하는 `authorizationUrl` 반환
 - OAuth 시작 응답: `HttpOnly; SameSite=Lax` transaction cookie 포함
 
 ## 9. 브라우저에서 사용자 흐름을 확인한다

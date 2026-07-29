@@ -1,12 +1,60 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SourceManagementPage } from './SourceManagementPage.tsx'
 import { SourceMethodIntroPage } from './SourceMethodIntroPage.tsx'
 import { SourceTypeSelectionPage } from './SourceTypeSelectionPage.tsx'
+import { queueWalletRegistrationNotice } from './sourceRegistrationNotice.ts'
+
+vi.mock('./ReownEvmWalletConnectionRoute.tsx', () => ({
+  ReownWalletLauncher: ({
+    onConnected,
+    onCancelled,
+  }: {
+    onConnected: (wallet: {
+      address: string
+      chainId: string
+      network: string
+      provider: 'walletconnect'
+    }) => void
+    onCancelled?: () => void
+  }) => (
+    <div role="dialog" aria-label="Reown 지갑 연결">
+      <button
+        type="button"
+        onClick={() => onConnected({
+          address: '0x1234567890abcdef1234567890abcdef12345678',
+          chainId: 'eip155:1',
+          network: 'Ethereum',
+          provider: 'walletconnect',
+        })}
+      >
+        연결 완료 시뮬레이션
+      </button>
+      <button type="button" onClick={onCancelled}>
+        서명 취소 시뮬레이션
+      </button>
+    </div>
+  ),
+}))
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('source flow pages', () => {
+  it('keeps the source list structure visible while data is loading', () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise(() => {})))
+
+    render(<SourceManagementPage />)
+
+    expect(screen.getByText('현재 연결된 소스 —')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '연결된 데이터 소스 목록' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '데이터 소스를 불러오는 중입니다.',
+    )
+  })
+
   it('starts from an empty source list and keeps the selected tax year in sync', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ items: [] }), {
@@ -19,7 +67,9 @@ describe('source flow pages', () => {
     expect(
       screen.getByRole('heading', { name: '데이터 소스 관리' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('현재 연결된 소스 0개')).toBeInTheDocument()
+    expect(
+      await screen.findByText('현재 연결된 소스 0개'),
+    ).toBeInTheDocument()
     expect(
       await screen.findByRole('heading', {
         name: '아직 연결된 데이터 소스가 없어요',
@@ -50,23 +100,107 @@ describe('source flow pages', () => {
     expect(screen.queryByText('2026 과세연도')).not.toBeInTheDocument()
   })
 
-  it('uses production-safe copy when source services are unavailable', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(
+  it('shows registered sources even when job status is temporarily unavailable', async () => {
+    const walletSource = {
+      id: 'source-wallet-1',
+      type: 'EVM_WALLET',
+      address: '0x1234567890abcdef1234567890abcdef12345678',
+      accountType: 'EOA',
+      verificationChainId: 'eip155:1',
+      verifiedAt: '2027-07-29T00:00:00.000Z',
+      status: 'ACTIVE',
+      createdAt: '2027-07-29T00:00:00.000Z',
+      updatedAt: '2027-07-29T00:00:00.000Z',
+      chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ items: [walletSource] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          error: { code: 'ENGINE_UNAVAILABLE' },
+        }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        })),
+    )
+
+    render(<SourceManagementPage />)
+
+    expect(await screen.findByText('현재 연결된 소스 1개')).toBeInTheDocument()
+    expect(screen.getByText('0x1234…5678')).toBeInTheDocument()
+    expect(screen.getByText('연결됨')).toBeInTheDocument()
+  })
+
+  it('shows a completion toast after returning from wallet registration in StrictMode', async () => {
+    queueWalletRegistrationNotice()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ))
+
+    render(
+      <StrictMode>
+        <SourceManagementPage />
+      </StrictMode>,
+    )
+
+    expect(await screen.findByText('연결 완료')).toBeInTheDocument()
+    expect(screen.getByText('지갑 데이터 소스가 등록되었습니다.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '알림 닫기' })).toBeEnabled()
+  })
+
+  it('uses production-safe copy and can retry when source services are unavailable', async () => {
+    const unavailable = () => Promise.resolve(
       new Response(JSON.stringify({ error: { code: 'WALLET_SOURCE_UNAVAILABLE' } }), {
         status: 503,
         headers: { 'content-type': 'application/json' },
       }),
-    )))
+    )
+    const available = () => Promise.resolve(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockImplementationOnce(unavailable)
+        .mockImplementationOnce(unavailable)
+        .mockImplementationOnce(available)
+        .mockImplementationOnce(available),
+    )
 
     render(<SourceManagementPage />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      '데이터 소스를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.',
+      '데이터 소스를 불러오지 못했습니다.',
     )
+    expect(screen.getByText('현재 연결된 소스 —')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '연결된 데이터 소스 목록' }),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/로컬 데이터베이스/)).not.toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: '아직 연결된 데이터 소스가 없어요' }),
     ).not.toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '데이터 소스 다시 불러오기' }),
+    )
+
+    expect(
+      await screen.findByRole('heading', {
+        name: '아직 연결된 데이터 소스가 없어요',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('현재 연결된 소스 0개')).toBeInTheDocument()
   })
 
   it('keeps Upbit PDF disabled when the safe import path is unavailable', () => {
@@ -135,7 +269,8 @@ describe('source flow pages', () => {
     ).toHaveAttribute('href', '/sources/new')
   })
 
-  it('explains the read-only EVM Wallet connection and links to the connection flow', () => {
+  it('keeps the introduction behind Reown and returns to sources after registration', async () => {
+    window.history.pushState({}, '', '/sources/new/wallet')
     render(<SourceMethodIntroPage methodId="evm-wallet" />)
 
     expect(
@@ -152,8 +287,57 @@ describe('source flow pages', () => {
     ).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
 
+    fireEvent.click(
+      screen.getByRole('button', { name: '지갑 연결 시작' }),
+    )
+
     expect(
-      screen.getByRole('link', { name: '지갑 연결 시작' }),
-    ).toHaveAttribute('href', '/sources/new/wallet/connect')
+      await screen.findByRole('dialog', { name: 'Reown 지갑 연결' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', {
+        name: '지갑 주소만 연결해 온체인 거래를 수집하세요',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('읽기 전용')).toHaveLength(1)
+    expect(window.location.pathname).toBe('/sources/new/wallet')
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '연결 완료 시뮬레이션' }),
+    )
+
+    expect(
+      screen.queryByRole('dialog', { name: 'Reown 지갑 연결' }),
+    ).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe('/sources')
+    expect(window.sessionStorage.getItem('source-registration-notice.v1')).toBe(
+      'wallet',
+    )
+  })
+
+  it('returns to the unchanged introduction and allows retry after cancellation', async () => {
+    window.history.pushState({}, '', '/sources/new/wallet')
+    render(<SourceMethodIntroPage methodId="evm-wallet" />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '지갑 연결 시작' }),
+    )
+    fireEvent.click(
+      await screen.findByRole('button', { name: '서명 취소 시뮬레이션' }),
+    )
+
+    expect(
+      screen.getByRole('heading', { name: 'EVM Wallet 연결' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '지갑 연결 또는 서명이 취소되었습니다. 다시 시도해 주세요.',
+    )
+    expect(
+      screen.getByRole('button', { name: '지갑 연결 시작' }),
+    ).toBeEnabled()
+    expect(
+      screen.queryByRole('dialog', { name: 'Reown 지갑 연결' }),
+    ).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe('/sources/new/wallet')
   })
 })

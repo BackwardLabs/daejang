@@ -92,6 +92,42 @@ describe('LedgerPage', () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/ledger?taxYear=2027'), expect.anything())
   })
 
+  it('keeps the ledger workspace visible while data is loading', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
+
+    render(<LedgerPage />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('장부를 불러오는 중')
+    expect(screen.getByRole('heading', { name: '거래 목록' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '거래 상세' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '거래 —' })).toBeInTheDocument()
+  })
+
+  it('keeps the ledger workspace visible after an error and recovers on retry', async () => {
+    let ledgerReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) {
+        ledgerReads++
+        return ledgerReads === 1
+          ? jsonResponse({ error: { code: 'ENGINE_UNAVAILABLE', message: 'ledger unavailable' } }, 503)
+          : jsonResponse({ items: [ledgerEvent] })
+      }
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('장부를 불러오지 못했습니다')
+    expect(screen.getByRole('heading', { name: '거래 목록' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '거래 상세' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '장부 다시 불러오기' }))
+
+    expect(await screen.findByText('event-2027')).toBeInTheDocument()
+    expect(ledgerReads).toBe(2)
+  })
+
   it('keeps a healthy ledger visible when the Review list fails', async () => {
     let reviewListReads = 0
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -109,7 +145,7 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
     expect(await screen.findByText('event-2027')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '검토 0' }))
+    fireEvent.click(screen.getByRole('button', { name: '검토 —' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('검토 목록을 불러오지 못했습니다')
     fireEvent.click(screen.getByRole('button', { name: '검토 다시 불러오기' }))
     expect(await screen.findByRole('button', { name: /UNKNOWN_TRANSACTION/ })).toBeInTheDocument()

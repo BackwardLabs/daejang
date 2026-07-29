@@ -27,7 +27,17 @@ export type AuthenticatedSessionResponse = {
 
 export type EmailLoginResponse =
   | AuthenticatedSessionResponse
-  | { status: 'signup_pending'; nextPath: '/?onboarding=terms' }
+  | { status: 'signup_pending'; nextPath: '/signup/terms' }
+
+export type AuthNoticeCode =
+  | 'oauth_access_denied'
+  | 'invalid_oauth_transaction'
+  | 'oauth_provider_unavailable'
+  | 'oauth_account_not_found'
+  | 'signup_unavailable'
+  | 'account_already_exists'
+  | 'account_unavailable'
+  | 'oauth_callback_failed'
 
 type ApiErrorPayload = {
   error?: {
@@ -111,11 +121,11 @@ function parseEmailLoginResponse(value: unknown): EmailLoginResponse {
   if (
     isRecord(value) &&
     value.status === 'signup_pending' &&
-    value.nextPath === '/?onboarding=terms'
+    value.nextPath === '/signup/terms'
   ) {
     return {
       status: 'signup_pending',
-      nextPath: '/?onboarding=terms',
+      nextPath: '/signup/terms',
     }
   }
 
@@ -190,20 +200,65 @@ async function requestJson<T>(
 
 export function buildSocialAuthStartUrl(
   provider: SocialProvider,
-  intent: AuthIntent,
   origin = window.location.origin,
 ) {
-  const url = new URL(`auth/oauth/${provider}/start`, apiBaseUrl(origin))
-  url.searchParams.set('intent', intent)
-  url.searchParams.set(
-    'return_to',
-    intent === 'signup' ? '/?onboarding=terms' : '/dashboard',
-  )
-  return url.toString()
+  return new URL(`auth/oauth/${provider}/start`, apiBaseUrl(origin)).toString()
 }
 
-export function startSocialAuth(provider: SocialProvider, intent: AuthIntent) {
-  window.location.assign(buildSocialAuthStartUrl(provider, intent))
+function parseSocialAuthStartResponse(value: unknown) {
+  if (!isRecord(value) || typeof value.authorizationUrl !== 'string') {
+    throw invalidAuthResponse('소셜 로그인 주소를 확인하지 못했습니다')
+  }
+
+  const authorizationUrl = new URL(value.authorizationUrl)
+  if (authorizationUrl.protocol !== 'https:') {
+    throw invalidAuthResponse('소셜 로그인 주소를 확인하지 못했습니다')
+  }
+  return authorizationUrl.toString()
+}
+
+export async function requestSocialAuthStart(
+  provider: SocialProvider,
+  intent: AuthIntent,
+) {
+  const response = await requestJson<unknown>(`auth/oauth/${provider}/start`, {
+    method: 'POST',
+    body: {
+      intent,
+      returnTo: intent === 'signup' ? '/signup/terms' : '/dashboard',
+    },
+  })
+  return parseSocialAuthStartResponse(response)
+}
+
+export async function startSocialAuth(
+  provider: SocialProvider,
+  intent: AuthIntent,
+) {
+  const authorizationUrl = await requestSocialAuthStart(provider, intent)
+  window.location.assign(authorizationUrl)
+}
+
+const authNoticeCodes = new Set<AuthNoticeCode>([
+  'oauth_access_denied',
+  'invalid_oauth_transaction',
+  'oauth_provider_unavailable',
+  'oauth_account_not_found',
+  'signup_unavailable',
+  'account_already_exists',
+  'account_unavailable',
+  'oauth_callback_failed',
+])
+
+export async function consumeAuthNotice() {
+  const value = await requestJson<unknown>('auth/oauth/result/consume', {
+    method: 'POST',
+  })
+  if (!isRecord(value) || value.code === null) return undefined
+  return typeof value.code === 'string' &&
+    authNoticeCodes.has(value.code as AuthNoticeCode)
+    ? value.code as AuthNoticeCode
+    : undefined
 }
 
 const socialProviders = new Set<SocialProvider>(['kakao', 'naver', 'google'])
@@ -347,7 +402,7 @@ export type LegalDocument = {
 
 export function getCurrentLegalDocuments() {
   return requestJson<{ documents: LegalDocument[] }>(
-    'legal-documents/current?locale=ko-KR',
+    'legal-documents/current',
   )
 }
 

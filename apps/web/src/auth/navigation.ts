@@ -1,8 +1,15 @@
-export type PublicPath = '/' | '/login' | '/terms' | '/privacy' | '/support'
+export type PublicPath =
+  | '/'
+  | '/login'
+  | '/signup/terms'
+  | '/terms'
+  | '/privacy'
+  | '/support'
 
 const publicPaths = new Set<PublicPath>([
   '/',
   '/login',
+  '/signup/terms',
   '/terms',
   '/privacy',
   '/support',
@@ -20,6 +27,14 @@ export function readPublicPath(): PublicPath | null {
   const rawPath = window.location.pathname
   const path = normalizePath(rawPath)
 
+  if (
+    path === '/' &&
+    new URL(window.location.href).searchParams.get('onboarding') === 'terms'
+  ) {
+    window.history.replaceState(null, '', '/signup/terms')
+    return '/signup/terms'
+  }
+
   if (path === '/signup') {
     window.history.replaceState(null, '', '/')
     return '/'
@@ -27,8 +42,8 @@ export function readPublicPath(): PublicPath | null {
 
   if (!publicPaths.has(path as PublicPath)) return null
 
-  if (path !== rawPath) {
-    window.history.replaceState(null, '', `${path}${window.location.search}`)
+  if (path !== rawPath || window.location.search) {
+    window.history.replaceState(null, '', path)
   }
 
   return path as PublicPath
@@ -41,15 +56,4 @@ export function navigateTo(path: string, replace = false) {
   const method = replace ? 'replaceState' : 'pushState'
   window.history[method](null, '', path)
   window.dispatchEvent(new PopStateEvent('popstate'))
-}
-
-export function consumeOnboardingReturn() {
-  const url = new URL(window.location.href)
-  if (url.pathname !== '/' || url.searchParams.get('onboarding') !== 'terms') {
-    return false
-  }
-
-  url.searchParams.delete('onboarding')
-  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
-  return true
 }

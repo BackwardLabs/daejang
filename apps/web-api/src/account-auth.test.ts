@@ -138,17 +138,38 @@ describe('account authentication routes', () => {
 
   const startOAuth = async (intent: 'signup' | 'login') => {
     const response = await context.app.inject({
-      method: 'GET',
-      url: `/api/v1/auth/oauth/naver/start?intent=${intent}&return_to=%2Fdashboard`,
+      method: 'POST',
+      url: '/api/v1/auth/oauth/naver/start',
+      headers: { origin: config.publicOrigin },
+      payload: { intent, returnTo: '/dashboard' },
     })
-    expect(response.statusCode).toBe(302)
-    const location = new URL(response.headers.location as string)
+    expect(response.statusCode).toBe(200)
+    const location = new URL(response.json().authorizationUrl as string)
     const state = location.searchParams.get('state')
     const cookie = cookiePair(response.headers['set-cookie'])
     expect(state).toBeTruthy()
     expect(cookie).toMatch(/^daejang_oauth=/u)
     return { state: state as string, cookie: cookie as string }
   }
+
+  it('accepts OAuth start details only in a same-origin POST body', async () => {
+    const legacyQueryRequest = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/oauth/naver/start?intent=login&return_to=%2Fdashboard',
+    })
+    expect(legacyQueryRequest.statusCode).toBe(404)
+
+    const response = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth/naver/start',
+      headers: { origin: config.publicOrigin },
+      payload: { intent: 'login', returnTo: '/dashboard' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().authorizationUrl).toMatch(
+      /^https:\/\/provider\.example\/authorize\?state=/u,
+    )
+  })
 
   it('creates distinct pending users for distinct provider subjects even when email matches', async () => {
     const firstStart = await startOAuth('signup')
@@ -158,7 +179,7 @@ describe('account authentication routes', () => {
       headers: { cookie: firstStart.cookie },
     })
     expect(first.statusCode).toBe(302)
-    expect(first.headers.location).toBe('/?onboarding=terms')
+    expect(first.headers.location).toBe('/signup/terms')
     expect(cookieHeaderText(first.headers['set-cookie'])).toContain(
       'daejang_signup=',
     )
@@ -187,7 +208,7 @@ describe('account authentication routes', () => {
     })
 
     expect(signup.statusCode).toBe(302)
-    expect(signup.headers.location).toBe('/?onboarding=terms')
+    expect(signup.headers.location).toBe('/signup/terms')
     const created = await store.findUserByIdentity(
       'naver',
       'returning-subject',
@@ -221,8 +242,26 @@ describe('account authentication routes', () => {
     })
 
     expect(response.statusCode).toBe(302)
-    expect(response.headers.location).toBe(
-      '/login?auth_error=oauth_account_not_found',
+    expect(response.headers.location).toBe('/login')
+    const noticeCookie = /daejang_auth_notice=[^;\n]+/u.exec(
+      cookieHeaderText(response.headers['set-cookie']),
+    )?.[0]
+    expect(noticeCookie).toBe(
+      'daejang_auth_notice=oauth_account_not_found',
+    )
+
+    const notice = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth/result/consume',
+      headers: {
+        origin: config.publicOrigin,
+        cookie: noticeCookie as string,
+      },
+    })
+    expect(notice.statusCode).toBe(200)
+    expect(notice.json()).toEqual({ code: 'oauth_account_not_found' })
+    expect(cookieHeaderText(notice.headers['set-cookie'])).toContain(
+      'daejang_auth_notice=;',
     )
     expect(
       await store.findUserByIdentity('naver', 'unknown-subject'),
@@ -238,12 +277,14 @@ describe('account authentication routes', () => {
     })
     store.linkIdentity('naver', 'active-subject', userId)
     const response = await context.app.inject({
-      method: 'GET',
-      url: '/api/v1/auth/oauth/naver/start?intent=login&return_to=%2F%2Fevil.example',
+      method: 'POST',
+      url: '/api/v1/auth/oauth/naver/start',
+      headers: { origin: config.publicOrigin },
+      payload: { intent: 'login', returnTo: '//evil.example' },
     })
-    const state = new URL(response.headers.location as string).searchParams.get(
-      'state',
-    )
+    const state = new URL(
+      response.json().authorizationUrl as string,
+    ).searchParams.get('state')
     const oauthCookie = cookiePair(response.headers['set-cookie'])
     expect(oauthCookie).toBeTruthy()
 
@@ -252,10 +293,10 @@ describe('account authentication routes', () => {
       url: `/api/v1/auth/oauth/naver/callback?code=active-subject&state=${state}`,
     })
     expect(crossBrowserCallback.statusCode).toBe(302)
-    expect(crossBrowserCallback.headers.location).toBe(
-      '/login?auth_error=invalid_oauth_transaction',
+    expect(crossBrowserCallback.headers.location).toBe('/login')
+    expect(cookieHeaderText(crossBrowserCallback.headers['set-cookie'])).toContain(
+      'daejang_auth_notice=invalid_oauth_transaction',
     )
-    expect(crossBrowserCallback.headers['set-cookie']).toBeUndefined()
 
     const callback = await context.app.inject({
       method: 'GET',
@@ -280,18 +321,20 @@ describe('account authentication routes', () => {
       headers: { cookie: start.cookie },
     })
     expect(denied.statusCode).toBe(302)
-    expect(denied.headers.location).toBe(
-      '/login?auth_error=oauth_access_denied',
-    )
+    expect(denied.headers.location).toBe('/login')
     expect(denied.headers.location).not.toContain('provider-secret')
+    expect(cookieHeaderText(denied.headers['set-cookie'])).toContain(
+      'daejang_auth_notice=oauth_access_denied',
+    )
 
     const replay = await context.app.inject({
       method: 'GET',
       url: `/api/v1/auth/oauth/naver/callback?error=access_denied&state=${start.state}`,
       headers: { cookie: start.cookie },
     })
-    expect(replay.headers.location).toBe(
-      '/login?auth_error=invalid_oauth_transaction',
+    expect(replay.headers.location).toBe('/login')
+    expect(cookieHeaderText(replay.headers['set-cookie'])).toContain(
+      'daejang_auth_notice=invalid_oauth_transaction',
     )
   })
 
@@ -366,7 +409,7 @@ describe('account authentication routes', () => {
     expect(pendingLogin.statusCode).toBe(200)
     expect(pendingLogin.json()).toEqual({
       status: 'signup_pending',
-      nextPath: '/?onboarding=terms',
+      nextPath: '/signup/terms',
     })
     expect(cookieHeaderText(pendingLogin.headers['set-cookie'])).not.toContain(
       'daejang_session=',
@@ -588,8 +631,9 @@ describe('account authentication routes', () => {
         headers: { cookie: inFlightOAuthSignup.cookie },
       })
       expect(callback.statusCode).toBe(302)
-      expect(callback.headers.location).toBe(
-        '/login?auth_error=signup_unavailable',
+      expect(callback.headers.location).toBe('/login')
+      expect(cookieHeaderText(callback.headers['set-cookie'])).toContain(
+        'daejang_auth_notice=signup_unavailable',
       )
       expect(
         await store.findUserByIdentity('naver', 'blocked-subject'),
@@ -597,8 +641,10 @@ describe('account authentication routes', () => {
 
       for (const request of [
         {
-          method: 'GET' as const,
-          url: '/api/v1/auth/oauth/naver/start?intent=signup',
+          method: 'POST' as const,
+          url: '/api/v1/auth/oauth/naver/start',
+          headers: originHeaders,
+          payload: { intent: 'signup' },
         },
         {
           method: 'POST' as const,
@@ -703,7 +749,7 @@ describe('account authentication routes', () => {
 
     const response = await context.app.inject({
       method: 'GET',
-      url: '/api/v1/legal-documents/current?locale=ko-KR',
+      url: '/api/v1/legal-documents/current',
     })
 
     expect(response.statusCode).toBe(503)
@@ -733,10 +779,14 @@ describe('account authentication routes', () => {
 
     try {
       const start = await noIdentityContext.app.inject({
-        method: 'GET',
-        url: '/api/v1/auth/oauth/naver/start?intent=signup',
+        method: 'POST',
+        url: '/api/v1/auth/oauth/naver/start',
+        headers: { origin: noIdentityConfig.publicOrigin },
+        payload: { intent: 'signup' },
       })
-      const authorizationUrl = new URL(start.headers.location as string)
+      const authorizationUrl = new URL(
+        start.json().authorizationUrl as string,
+      )
       const state = authorizationUrl.searchParams.get('state') as string
       const oauthCookie = cookiePair(start.headers['set-cookie']) as string
       const callback = await noIdentityContext.app.inject({
@@ -772,7 +822,7 @@ describe('account authentication routes', () => {
 
       const documentsResponse = await noIdentityContext.app.inject({
         method: 'GET',
-        url: '/api/v1/legal-documents/current?locale=ko-KR',
+        url: '/api/v1/legal-documents/current',
       })
       const applicableDocuments = documentsResponse.json<{
         documents: Array<CurrentLegalDocument & { required: boolean }>

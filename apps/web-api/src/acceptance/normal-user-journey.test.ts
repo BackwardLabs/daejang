@@ -408,7 +408,7 @@ describe('documented normal user journey', () => {
 
     const legalDocuments = await context.app.inject({
       method: 'GET',
-      url: '/api/v1/legal-documents/current?locale=ko-KR',
+      url: '/api/v1/legal-documents/current',
     })
     expect(legalDocuments.statusCode).toBe(200)
     const requiredDocuments = legalDocuments

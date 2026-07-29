@@ -234,7 +234,7 @@ describe('AppRouter', () => {
       }
       throw new Error(`Unexpected request: ${url}`)
     }))
-    window.history.pushState({}, '', '/?onboarding=terms')
+    window.history.pushState({}, '', '/signup/terms')
     render(<AppRouter />)
 
     await screen.findByText('[필수] 서비스 이용약관')
@@ -491,7 +491,6 @@ describe('AppRouter', () => {
     ['/sources/new/upbit', 'Upbit PDF 등록'],
     ['/sources/new/upbit/upload', 'Upbit PDF 등록'],
     ['/sources/new/wallet', 'EVM Wallet 연결'],
-    ['/sources/new/wallet/connect', 'EVM Wallet 연결'],
   ])('renders the source flow page at %s', async (path, heading) => {
     window.history.pushState({}, '', path)
 
@@ -502,18 +501,16 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
-  it('fails closed when the Reown project ID is not configured', async () => {
+  it('redirects the removed wallet connect route to the wallet introduction', async () => {
     window.history.pushState({}, '', '/sources/new/wallet/connect')
 
     render(<AppRouter />)
 
-    fireEvent.click(
-      await screen.findByRole('radio', { name: 'WalletConnect (Reown)' }),
-    )
-    fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
-
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/sources/new/wallet')
+    })
     expect(
-      await screen.findByText('선택한 지갑을 사용할 수 없어요'),
+      await screen.findByRole('button', { name: '지갑 연결 시작' }),
     ).toBeInTheDocument()
   })
 

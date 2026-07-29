@@ -8,8 +8,6 @@ import { navigateTo } from './auth/navigation.ts'
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx'
 import type { ProductPageKind } from './features/product/ProductPage.tsx'
 
-const loadReownEvmWalletConnectionRoute = () =>
-  import('./features/sources/ReownEvmWalletConnectionRoute.tsx')
 const loadLedgerPage = () => import('./features/ledger/LedgerPage.tsx')
 const loadReportPage = () => import('./features/reports/ReportPage.tsx')
 const loadSourceManagementPage = () =>
@@ -22,11 +20,6 @@ const loadUpbitPdfRegistrationPage = () =>
   import('./features/sources/UpbitPdfRegistrationPage.tsx')
 const loadProductPage = () => import('./features/product/ProductPage.tsx')
 
-const ReownEvmWalletConnectionRoute = lazy(async () => {
-  const module = await loadReownEvmWalletConnectionRoute()
-
-  return { default: module.ReownEvmWalletConnectionRoute }
-})
 const LedgerPage = lazy(() =>
   loadLedgerPage().then((module) => ({ default: module.LedgerPage })))
 const ReportPage = lazy(() =>
@@ -59,7 +52,7 @@ const routePreloaders: Record<string, () => Promise<unknown>> = {
   '/sources/new/upbit': loadSourceMethodIntroPage,
   '/sources/new/upbit/upload': loadUpbitPdfRegistrationPage,
   '/sources/new/wallet': loadSourceMethodIntroPage,
-  '/sources/new/wallet/connect': loadReownEvmWalletConnectionRoute,
+  '/sources/new/wallet/connect': loadSourceMethodIntroPage,
 }
 
 function preloadRoute(pathname: string) {
@@ -99,7 +92,8 @@ export function AppRouter() {
   const session = useSession()
   const isProtectedRoute =
     protectedRoutes.has(path) || path.startsWith('/sources/')
-  const isPublicEntry = path === '/' || path === '/login'
+  const isPublicEntry =
+    path === '/' || path === '/login' || path === '/signup/terms'
 
   useEffect(() => {
     function handlePathChange() {
@@ -127,6 +121,12 @@ export function AppRouter() {
 
   useEffect(() => {
     preloadRoute(path)
+  }, [path])
+
+  useEffect(() => {
+    if (path === '/sources/new/wallet/connect') {
+      navigateTo('/sources/new/wallet', true)
+    }
   }, [path])
 
   useEffect(() => {
@@ -183,12 +183,11 @@ export function AppRouter() {
       protectedPage = <SourceMethodIntroPage methodId="upbit-pdf" />
     } else if (path === '/sources/new/upbit/upload') {
       protectedPage = <UpbitPdfRegistrationPage />
-    } else if (path === '/sources/new/wallet') {
+    } else if (
+      path === '/sources/new/wallet' ||
+      path === '/sources/new/wallet/connect'
+    ) {
       protectedPage = <SourceMethodIntroPage methodId="evm-wallet" />
-    } else if (path === '/sources/new/wallet/connect') {
-      protectedPage = (
-        <ReownEvmWalletConnectionRoute />
-      )
     } else if (productPage) {
       protectedPage = <ProductPage kind={productPage} />
     }

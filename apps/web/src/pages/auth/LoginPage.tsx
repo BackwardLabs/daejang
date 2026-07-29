@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
+  consumeAuthNotice,
   loginWithEmail,
   startSocialAuth,
   WebApiError,
+  type AuthNoticeCode,
   type EmailLoginResponse,
   type SocialProvider,
 } from '../../auth/api.ts'
@@ -38,7 +40,7 @@ const providers: Record<SocialProvider, ProviderInfo> = {
   },
 }
 
-const authErrorMessages: Record<string, string> = {
+const authErrorMessages: Record<AuthNoticeCode, string> = {
   oauth_access_denied: '소셜 로그인이 취소되었습니다',
   invalid_oauth_transaction:
     '로그인 요청이 만료되었거나 이미 사용되었습니다. 다시 시도해 주세요',
@@ -49,12 +51,6 @@ const authErrorMessages: Record<string, string> = {
   account_already_exists: '이미 가입된 계정입니다. 로그인해 주세요',
   account_unavailable: '현재 이 계정으로 로그인할 수 없습니다',
   oauth_callback_failed: '소셜 서비스에서 계정을 확인하지 못했습니다',
-}
-
-function readAuthError() {
-  const code = new URL(window.location.href).searchParams.get('auth_error')
-  if (!code) return ''
-  return authErrorMessages[code] || '로그인을 완료하지 못했습니다. 다시 시도해 주세요'
 }
 
 type LoginPageProps = {
@@ -78,8 +74,19 @@ export function LoginPage({
   const [submitting, setSubmitting] = useState(false)
   const [redirectingProvider, setRedirectingProvider] =
     useState<SocialProvider | null>(null)
-  const [error, setError] = useState(() => readAuthError())
+  const [error, setError] = useState('')
   const socialRedirectStartedRef = useRef(false)
+  const authNoticeRequestedRef = useRef(false)
+
+  useEffect(() => {
+    if (authNoticeRequestedRef.current) return
+    authNoticeRequestedRef.current = true
+    void consumeAuthNotice()
+      .then((code) => {
+        if (code) setError(authErrorMessages[code])
+      })
+      .catch(() => undefined)
+  }, [])
 
   const reset = () => {
     setEmail('')
@@ -90,12 +97,23 @@ export function LoginPage({
     setView('method')
   }
 
-  const redirectToSocialLogin = (provider: SocialProvider) => {
+  const redirectToSocialLogin = async (provider: SocialProvider) => {
     if (socialRedirectStartedRef.current) return
 
     socialRedirectStartedRef.current = true
     setRedirectingProvider(provider)
-    startSocialAuth(provider, 'login')
+    setError('')
+    try {
+      await startSocialAuth(provider, 'login')
+    } catch (caught) {
+      socialRedirectStartedRef.current = false
+      setRedirectingProvider(null)
+      setError(
+        caught instanceof WebApiError
+          ? caught.message.replace(/\.$/u, '')
+          : '소셜 로그인을 시작하지 못했습니다',
+      )
+    }
   }
 
   const submitEmailLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -159,7 +177,7 @@ export function LoginPage({
                     type="button"
                     key={key}
                     disabled={redirectingProvider !== null}
-                    onClick={() => redirectToSocialLogin(key)}
+                    onClick={() => void redirectToSocialLogin(key)}
                   >
                     <span aria-hidden="true">
                       <img src={item.icon} alt="" width="24" height="24" />

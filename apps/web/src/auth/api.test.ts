@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSocialAuthStartUrl,
+  consumeAuthNotice,
   getAuthCapabilities,
   getCurrentUser,
   loginWithEmail,
+  requestSocialAuthStart,
   sendEmailCode,
   submitSignupConsents,
 } from './api.ts'
@@ -61,17 +63,85 @@ describe('Web auth API client', () => {
     })
   })
 
-  it('builds same-origin OAuth start URLs with approved return paths', () => {
+  it('builds OAuth start URLs without exposing intent or return paths', () => {
     expect(
-      buildSocialAuthStartUrl('naver', 'signup', 'https://daejang.backwardlabs.io'),
+      buildSocialAuthStartUrl('naver', 'https://daejang.backwardlabs.io'),
     ).toBe(
-      'https://daejang.backwardlabs.io/api/v1/auth/oauth/naver/start?intent=signup&return_to=%2F%3Fonboarding%3Dterms',
+      'https://daejang.backwardlabs.io/api/v1/auth/oauth/naver/start',
     )
 
     expect(
-      buildSocialAuthStartUrl('google', 'login', 'https://daejang.backwardlabs.io'),
+      buildSocialAuthStartUrl('google', 'https://daejang.backwardlabs.io'),
     ).toBe(
-      'https://daejang.backwardlabs.io/api/v1/auth/oauth/google/start?intent=login&return_to=%2Fdashboard',
+      'https://daejang.backwardlabs.io/api/v1/auth/oauth/google/start',
+    )
+  })
+
+  it('sends OAuth intent and return path in a POST body', async () => {
+    const authorizationUrl =
+      'https://kauth.kakao.com/oauth/authorize?state=opaque-state'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ authorizationUrl }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(requestSocialAuthStart('kakao', 'login')).resolves.toBe(
+      authorizationUrl,
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/api/v1/auth/oauth/kakao/start',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ intent: 'login', returnTo: '/dashboard' }),
+      }),
+    )
+  })
+
+  it('uses the clean signup terms path for social signup', async () => {
+    const authorizationUrl =
+      'https://kauth.kakao.com/oauth/authorize?state=opaque-state'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ authorizationUrl }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await requestSocialAuthStart('kakao', 'signup')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/api/v1/auth/oauth/kakao/start',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          intent: 'signup',
+          returnTo: '/signup/terms',
+        }),
+      }),
+    )
+  })
+
+  it('consumes callback notices through a credentialed POST', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 'oauth_access_denied' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(consumeAuthNotice()).resolves.toBe('oauth_access_denied')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:3000/api/v1/auth/oauth/result/consume',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+      }),
     )
   })
 

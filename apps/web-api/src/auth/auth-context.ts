@@ -32,6 +32,30 @@ export const oauthTransactionCookieName = (config: AppConfig) =>
     ? '__Host-daejang_oauth'
     : 'daejang_oauth'
 
+export const authNoticeCookieName = (config: AppConfig) =>
+  config.runtimeMode === 'production'
+    ? '__Host-daejang_auth_notice'
+    : 'daejang_auth_notice'
+
+export const setAuthNoticeCookie = (
+  reply: FastifyReply,
+  code: string,
+  expiresAt: Date,
+  config: AppConfig,
+) => {
+  reply.setCookie(authNoticeCookieName(config), code, {
+    ...sessionCookieOptions(config),
+    expires: expiresAt,
+  })
+}
+
+export const clearAuthNoticeCookie = (
+  reply: FastifyReply,
+  config: AppConfig,
+) => {
+  reply.clearCookie(authNoticeCookieName(config), sessionCookieOptions(config))
+}
+
 export const setOAuthTransactionCookie = (
   reply: FastifyReply,
   state: string,

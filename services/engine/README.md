@@ -41,10 +41,11 @@ buf generate
 TLS 네 값은 함께 설정해야 합니다. CA가 발급한 다른 인증서가 사용자
 `RequestContext`를 위조하지 못하도록 health RPC를 제외한 모든 RPC는 이 DNS
 SAN이 정확히 포함된 Web API 인증서만 허용하며 wildcard SAN은 거부합니다. 별도 probe 인증서는 health
-service만 호출할 수 있습니다. 로컬 통합 테스트에서만 loopback listen과
-`ENGINE_ALLOW_INSECURE_LOOPBACK=true`를 사용할 수 있습니다. 이 경우 Web API도
-`ENGINE_GRPC_INSECURE_TARGET=127.0.0.1:50051`을 설정합니다. 두 plaintext opt-in은
-production에서 거부됩니다.
+service만 호출할 수 있습니다. 같은 host에서 두 process를 운영할 때는 loopback
+listen과 `ENGINE_ALLOW_INSECURE_LOOPBACK=true`를 명시적으로 사용할 수 있습니다.
+이 경우 Web API도 `ENGINE_ALLOW_INSECURE_LOOPBACK=true`와
+`ENGINE_GRPC_INSECURE_TARGET=127.0.0.1:50051`을 함께 설정해야 합니다. loopback이
+아닌 plaintext target은 runtime mode와 무관하게 거부됩니다.
 
 Review mutation은 네 Review 설정값을 모두 지정했을 때만 등록됩니다. Review
 DSN은 `daejang_event_app` 수준의 review/reference 권한을, artifact DSN은

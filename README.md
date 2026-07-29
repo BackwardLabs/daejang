@@ -27,15 +27,25 @@ npm install
 npm run dev
 ```
 
-개발 서버는 기본적으로 `http://localhost:5173`에서 실행됩니다.
-
-Web API는 별도 터미널에서 실행합니다.
+`npm run dev`는 프런트엔드만 `http://localhost:5173`에 실행합니다. 실제 로그인과
+DB 기반 화면을 함께 확인할 때는 `daejang-db` PostgreSQL을 먼저 실행하고
+`apps/web-api/.env`에 Web DB 접속 URL을 설정한 뒤 통합 실행 명령을 사용합니다.
 
 ```bash
-npm run dev:api
+npm run dev:local
 ```
 
-Web API의 기본 주소는 `http://127.0.0.1:3000`입니다. 설정 가능한 환경 변수는 [`apps/web-api/.env.example`](apps/web-api/.env.example)에서 확인할 수 있습니다.
+`dev:local`은 프런트엔드 `http://localhost:5173`과 Web API
+`http://127.0.0.1:3000`을 함께 실행하고, `PUBLIC_ORIGIN`과 Vite API proxy를 같은
+포트 설정에서 자동으로 구성합니다. Web DB URL은 `GIWA_WEB_DATABASE_URL`, 셸의
+`DATABASE_URL`, `apps/web-api/.env`의 `DATABASE_URL` 순서로 찾습니다. 일회성으로
+다른 DB를 사용할 때만 앞의 두 셸 변수를 사용하면 됩니다. PostgreSQL 사전 점검도
+선택된 URL의 host와 port를 사용합니다. Web API 설정 목록은
+[`apps/web-api/.env.example`](apps/web-api/.env.example)에서 확인할 수 있습니다.
+기본 통합 실행은 기존 이메일 계정 로그인을 켜고 OAuth는 끕니다. Resend 발신 설정은
+`apps/web-api/.env` 값을 그대로 사용하며, `GIWA_LOCAL_RESEND_API_KEY`와
+`GIWA_LOCAL_EMAIL_FROM`은 일회성 override가 필요할 때만 지정합니다. OAuth callback을
+확인할 때는 `GIWA_LOCAL_OAUTH_*` 값을 추가합니다.
 
 실제 지갑 source를 로컬 DB에 저장하려면 `daejang-db` migration과 Source Engine도
 실행해야 합니다. 로컬 plaintext gRPC는 loopback에만 명시적으로 허용되며 자세한

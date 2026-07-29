@@ -120,7 +120,24 @@ npm install
 npm run dev
 ```
 
-기본 접속 주소는 `http://localhost:5173`이다.
+기본 접속 주소는 `http://localhost:5173`이다. 이 명령은 프런트엔드만 실행한다.
+로그인과 실제 DB API를 함께 확인할 때는 `daejang-db`를 먼저 실행하고
+`apps/web-api/.env`에 `DATABASE_URL`을 설정한 다음 통합 명령을 사용한다.
+
+```bash
+npm run dev:local
+```
+
+통합 실행의 기본 포트는 프런트엔드 `5173`, Web API `3000`, PostgreSQL `55432`다.
+`PUBLIC_ORIGIN`과 Vite proxy target은 이 포트 값에서 자동으로 만들어지므로 별도로
+맞출 필요가 없다. Web DB URL은 `GIWA_WEB_DATABASE_URL`, 셸의 `DATABASE_URL`,
+`apps/web-api/.env`의 `DATABASE_URL` 순서로 적용된다. 앞의 두 셸 변수는 일회성
+override에 사용하며 PostgreSQL 사전 점검 대상도 선택된 URL에서 가져온다. 기본 통합
+실행은 기존 이메일 계정 로그인만 활성화하고 OAuth는 비활성화한다. Resend 설정은
+`apps/web-api/.env`에서 읽으며 `GIWA_LOCAL_RESEND_API_KEY`와
+`GIWA_LOCAL_EMAIL_FROM`은 일회성 override에만 사용한다. OAuth를 시험할 때는
+`GIWA_LOCAL_OAUTH_ENABLED_PROVIDERS`,
+`GIWA_LOCAL_OAUTH_TRANSACTION_ENCRYPTION_KEY`를 명시한다.
 
 GitHub 인증은 개인 로컬 설정 또는 승인된 credential helper를 사용한다. PAT를 remote URL, `.env`, Git config의 평문 값, shell history 또는 저장소 파일에 기록하지 않는다.
 

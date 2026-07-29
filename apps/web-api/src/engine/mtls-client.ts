@@ -213,7 +213,7 @@ export class EngineMtlsClient implements WalletSourceRegistry {
     )
   }
 
-  static connectInsecureForDevelopment(target: string, upbitPdfImportEnabled: boolean) {
+  static connectInsecureLoopback(target: string, upbitPdfImportEnabled: boolean) {
     return EngineMtlsClient.#create(
       target,
       grpcCredentials.createInsecure(),

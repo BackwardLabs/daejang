@@ -6,7 +6,6 @@ import {
 } from './auth/api.ts'
 import { setCurrentUser } from './auth/session-store.ts'
 import {
-  consumeOnboardingReturn,
   navigateTo,
   readPublicPath,
   type PublicPath,
@@ -33,14 +32,15 @@ function canSignup(capabilities: AuthCapabilities) {
 const pageTitles: Record<PublicPath, string> = {
   '/': 'Daejang | 디지털 자산 기록을 한곳에서',
   '/login': '로그인 | Daejang',
+  '/signup/terms': '약관 동의 | Daejang',
   '/terms': '서비스 이용약관 | Daejang',
   '/privacy': '개인정보 처리방침 | Daejang',
   '/support': '고객지원 | Daejang',
 }
 
 export function App() {
-  const [returnedFromSignup] = useState(() => consumeOnboardingReturn())
   const [path, setPath] = useState<PublicPath | null>(() => readPublicPath())
+  const returnedFromSignup = path === '/signup/terms'
   const [authCapabilities, setAuthCapabilities] = useState<AuthCapabilities>()
   const [onboardingVisible, setOnboardingVisible] = useState(false)
   const [onboardingScreen, setOnboardingScreen] = useState<OnboardingScreen>(
@@ -70,8 +70,8 @@ export function App() {
 
   useEffect(() => {
     const onPopState = () => {
-      const returned = consumeOnboardingReturn()
       const nextPath = readPublicPath()
+      const returned = nextPath === '/signup/terms'
       setPath(nextPath)
       if (returned && signupAvailable) {
         setOnboardingVisible(true)
@@ -143,7 +143,7 @@ export function App() {
 
   const continueAfterLogin = async (response: EmailLoginResponse) => {
     const { nextPath } = response
-    if (nextPath === '/?onboarding=terms') {
+    if (nextPath === '/signup/terms') {
       let capabilities = authCapabilities
       if (!capabilities) {
         try {
@@ -159,9 +159,8 @@ export function App() {
         setPath('/login')
         return
       }
-      window.history.replaceState(null, '', nextPath)
-      consumeOnboardingReturn()
-      setPath('/')
+      navigateTo(nextPath, true)
+      setPath(nextPath)
       setOnboardingScreen('consent')
       setOnboardingKey((current) => current + 1)
       setOnboardingVisible(true)

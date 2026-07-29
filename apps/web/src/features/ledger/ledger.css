@@ -1908,3 +1908,217 @@
     grid-template-columns: 1fr;
   }
 }
+
+.ledger-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--ledger-line-soft);
+}
+
+.ledger-header > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.ledger-header p {
+  color: var(--ledger-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.ledger-header h1 {
+  font-size: 28px;
+  line-height: 36px;
+  letter-spacing: -.02em;
+}
+
+.ledger-header span {
+  color: var(--ledger-muted);
+  line-height: 20px;
+}
+
+.ledger-header__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ledger-header__actions button {
+  min-width: 76px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--ledger-line);
+  border-radius: 10px;
+  color: var(--ledger-muted);
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ledger-header__actions button.is-active {
+  border-color: var(--ledger-ink);
+  color: #fff;
+  background: var(--ledger-ink);
+}
+
+.ledger-data-state {
+  display: grid;
+  gap: 16px;
+}
+
+.ledger-data-state__notice {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 80px;
+  padding: 16px 18px;
+  border: 1px solid var(--ledger-line-soft);
+  border-radius: 14px;
+  background: var(--ledger-paper);
+}
+
+.ledger-data-state__notice.is-error {
+  border-color: rgb(220 38 38 / 24%);
+  background: #fffafa;
+}
+
+.ledger-data-state__icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: var(--ledger-muted);
+  background: var(--product-background-subtle, #f3f4f6);
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.ledger-data-state__notice.is-error .ledger-data-state__icon {
+  color: var(--ledger-negative);
+  background: #fef2f2;
+}
+
+.ledger-data-state__notice div {
+  display: grid;
+  gap: 3px;
+}
+
+.ledger-data-state__notice strong {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ledger-data-state__notice p {
+  color: var(--ledger-muted);
+  line-height: 20px;
+}
+
+.ledger-data-state__notice button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--ledger-line);
+  border-radius: 10px;
+  color: var(--ledger-ink);
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ledger-browser--state {
+  padding: 0;
+}
+
+.ledger-data-state__panel {
+  min-height: 320px;
+}
+
+.ledger-data-state__list {
+  padding: 22px;
+  border: 1px solid var(--ledger-line-soft);
+  border-radius: 18px;
+  background: var(--ledger-paper);
+}
+
+.ledger-data-state__panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ledger-data-state__panel header span {
+  color: var(--ledger-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.ledger-data-state__panel header h2 {
+  margin-top: 5px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ledger-data-state__panel header small,
+.ledger-data-state__panel > p {
+  color: var(--ledger-muted);
+}
+
+.ledger-data-state__panel > p {
+  margin-top: 28px;
+  line-height: 20px;
+}
+
+.ledger-data-state__rows {
+  display: grid;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.ledger-data-state__rows i {
+  height: 60px;
+  border: 1px solid var(--ledger-line-soft);
+  border-radius: 12px;
+  background: linear-gradient(90deg, #f7f7f8 0 34%, #f1f2f4 34% 36%, #f7f7f8 36% 100%);
+}
+
+.ledger-data-state__detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.ledger-data-state__detail i {
+  height: 72px;
+  border-radius: 10px;
+  background: #f3f4f6;
+}
+
+@media (max-width: 900px) {
+  .ledger-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ledger-header__actions {
+    width: 100%;
+  }
+
+  .ledger-header__actions button {
+    flex: 1;
+  }
+
+  .ledger-data-state__notice {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .ledger-data-state__notice button {
+    grid-column: 1 / -1;
+  }
+}

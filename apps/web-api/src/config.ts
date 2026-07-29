@@ -290,7 +290,7 @@ const loadEngineMtlsConfig = (
   }
 }
 
-const loadDevelopmentEngineTarget = (
+const loadInsecureLoopbackEngineTarget = (
   environment: NodeJS.ProcessEnv,
   production: boolean,
 ) => {
@@ -298,16 +298,27 @@ const loadDevelopmentEngineTarget = (
   if (!target) {
     return undefined
   }
-  if (production) {
-    throw new Error('ENGINE_GRPC_INSECURE_TARGET is not allowed in production')
-  }
   if (
     environment.ENGINE_GRPC_TARGET ||
     environment.ENGINE_GRPC_CA_PATH ||
     environment.ENGINE_GRPC_CERT_PATH ||
     environment.ENGINE_GRPC_KEY_PATH
   ) {
-    throw new Error('Configure either Engine mTLS or insecure loopback, not both')
+    throw new Error('Configure either Engine mTLS or a local Engine transport, not both')
+  }
+  const unixSocket = /^unix:(\/.+)$/.exec(target)
+  if (unixSocket) {
+    if (
+      unixSocket[1]?.includes('/../') ||
+      unixSocket[1]?.endsWith('/..') ||
+      unixSocket[1]?.includes('/./')
+    ) {
+      throw new Error('ENGINE_GRPC_INSECURE_TARGET Unix socket path must be normalized')
+    }
+    return target
+  }
+  if (production) {
+    throw new Error('plaintext TCP Engine transport is not allowed in production')
   }
   const match = /^(?:127\.0\.0\.1|localhost|\[::1\]):([1-9][0-9]{0,4})$/.exec(target)
   if (!match || Number(match[1]) > 65_535) {
@@ -365,7 +376,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
         identityVerificationRequired: false,
         methods: { email: false, oauthProviders: [] },
       }
-  const engineInsecureTarget = loadDevelopmentEngineTarget(
+  const engineInsecureTarget = loadInsecureLoopbackEngineTarget(
     environment,
     production,
   )
@@ -439,7 +450,10 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     signup,
     identityVerificationMode,
     upbitPdfImportEnabled,
-    engineMtls: loadEngineMtlsConfig(environment, production),
+    engineMtls: loadEngineMtlsConfig(
+      environment,
+      production && engineInsecureTarget === undefined,
+    ),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(engineInsecureTarget ? { engineInsecureTarget } : {}),
   }

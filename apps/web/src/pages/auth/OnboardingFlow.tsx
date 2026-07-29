@@ -269,13 +269,23 @@ function MethodScreen({
   const socialRedirectStartedRef = useRef(false)
   const [redirectingProvider, setRedirectingProvider] =
     useState<SocialProvider | null>(null)
+  const [socialError, setSocialError] = useState('')
 
-  const redirectToSocialSignup = (provider: SocialProvider) => {
+  const redirectToSocialSignup = async (provider: SocialProvider) => {
     if (socialRedirectStartedRef.current) return
 
     socialRedirectStartedRef.current = true
     setRedirectingProvider(provider)
-    startSocialAuth(provider, 'signup')
+    setSocialError('')
+    try {
+      await startSocialAuth(provider, 'signup')
+    } catch (caught) {
+      socialRedirectStartedRef.current = false
+      setRedirectingProvider(null)
+      setSocialError(
+        inlineErrorMessage(caught, '소셜 가입을 시작하지 못했습니다'),
+      )
+    }
   }
 
   return (
@@ -294,7 +304,7 @@ function MethodScreen({
               className={`auth-provider auth-provider--${provider}`}
               type="button"
               disabled={redirectingProvider !== null}
-              onClick={() => redirectToSocialSignup(provider)}
+              onClick={() => void redirectToSocialSignup(provider)}
               key={provider}
             >
               <span aria-hidden="true">
@@ -307,6 +317,11 @@ function MethodScreen({
           )
         })}
       </div>
+      {socialError ? (
+        <p className="auth-alert auth-alert--error" role="alert">
+          {socialError}
+        </p>
+      ) : null}
       {hasSocialProvider && signupMethods.email ? <div className="auth-divider"><span>또는</span></div> : null}
       {signupMethods.email ? (
         <button className="auth-secondary-button" type="button" onClick={onEmail}>

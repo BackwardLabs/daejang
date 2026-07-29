@@ -4,8 +4,11 @@ import { describe, expect, it } from 'vitest'
 
 import type { AppConfig } from '../config.js'
 import {
+  authNoticeCookieName,
+  clearAuthNoticeCookie,
   clearOAuthTransactionCookie,
   clearSessionCookie,
+  setAuthNoticeCookie,
   setOAuthTransactionCookie,
   setSessionCookie,
 } from './auth-context.js'
@@ -111,6 +114,40 @@ describe('session cookie policy', () => {
     await app.close()
 
     expect(setHeader).toContain('__Host-daejang_oauth=oauth-state')
+    for (const header of [setHeader, clearHeader]) {
+      expect(header).toContain('Path=/')
+      expect(header).toContain('HttpOnly')
+      expect(header).toContain('Secure')
+      expect(header).toContain('SameSite=Lax')
+      expect(header).not.toContain('Domain=')
+    }
+  })
+
+  it('stores callback notices in a short-lived HttpOnly host cookie', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(cookie)
+    app.get('/set', async (_request, reply) => {
+      setAuthNoticeCookie(
+        reply,
+        'oauth_access_denied',
+        new Date('2027-07-20T00:02:00.000Z'),
+        config,
+      )
+      return { ok: true }
+    })
+    app.get('/clear', async (_request, reply) => {
+      clearAuthNoticeCookie(reply, config)
+      return { ok: true }
+    })
+
+    const setHeader = (await app.inject('/set')).headers['set-cookie']
+    const clearHeader = (await app.inject('/clear')).headers['set-cookie']
+    await app.close()
+
+    expect(authNoticeCookieName(config)).toBe('__Host-daejang_auth_notice')
+    expect(setHeader).toContain(
+      '__Host-daejang_auth_notice=oauth_access_denied',
+    )
     for (const header of [setHeader, clearHeader]) {
       expect(header).toContain('Path=/')
       expect(header).toContain('HttpOnly')

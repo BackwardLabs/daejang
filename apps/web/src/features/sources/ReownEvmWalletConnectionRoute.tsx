@@ -1,293 +1,260 @@
-import { useCallback, useRef } from 'react'
-import {
-  useAppKit,
-  type Provider,
-} from '@reown/appkit/react'
-import { useAppKitWallet } from '@reown/appkit-wallet-button/react'
+import { useEffect } from 'react'
+import { useAppKit, type Provider } from '@reown/appkit/react'
 import { BrowserProvider, verifyMessage } from 'ethers'
-import { EvmWalletConnectionPage } from './EvmWalletConnectionPage.tsx'
-import {
-  type CompleteWalletConnection,
-  type ConnectWallet,
-  type EvmWalletProviderId,
-  type RequestOwnershipSignature,
-  normalizeEvmWalletPeriod,
-} from './evmWalletFlow.ts'
+import type { ConnectedWallet } from './evmWalletFlow.ts'
 import {
   isReownAppKitConfigured,
   reownAppKit,
 } from './reownAppKit.ts'
 import {
-  createSyncJob,
   createWalletChallenge,
   registerWalletSource,
-  watchSyncJob,
 } from './sourceApi.ts'
 
-const directWalletNames = {
-  coinbase: 'coinbase',
-  metamask: 'metamask',
-  walletconnect: 'walletConnect',
-} as const
+function getEvmConnection() {
+  const caipAddress = reownAppKit?.getCaipAddress('eip155')
+  const chainId = reownAppKit?.getChainId()
 
-const unavailableConnectWallet: ConnectWallet = async () => ({
-  error: { code: 'PROVIDER_UNAVAILABLE' },
-  ok: false,
-})
+  if (!caipAddress || chainId === undefined) return null
 
-const unavailableOwnershipSignature: RequestOwnershipSignature = async () => ({
-  error: { code: 'SIGNATURE_FAILED' },
-  ok: false,
-})
+  const address = caipAddress.split(':').at(-1)
+  if (!address) return null
 
-const unavailableCompleteConnection: CompleteWalletConnection = async () => ({
-  error: { code: 'SOURCE_SAVE_FAILED' },
-  ok: false,
-})
-
-function isUserRejection(error: unknown) {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 4001
-  )
+  return { address, chainId: `eip155:${chainId}` }
 }
 
-function waitForEvmConnection(signal: AbortSignal) {
-  return new Promise<{ address: string; chainId: string }>((resolve, reject) => {
+function isUserCancellation(error: unknown) {
+  if (typeof error !== 'object' || error === null) return false
+
+  const code = 'code' in error ? error.code : undefined
+  return code === 4001 || code === 'ACTION_REJECTED'
+}
+
+function waitForEvmSessionClear(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
     const startedAt = Date.now()
 
-    function finish() {
+    const finish = (error?: Error) => {
       window.clearInterval(intervalId)
       signal.removeEventListener('abort', handleAbort)
+      if (error) reject(error)
+      else resolve()
     }
 
-    function handleAbort() {
-      finish()
-      reject(new DOMException('Wallet connection aborted.', 'AbortError'))
+    const handleAbort = () => {
+      finish(new DOMException('Wallet disconnect aborted.', 'AbortError'))
     }
 
-    const intervalId = window.setInterval(() => {
-      const caipAddress = reownAppKit?.getCaipAddress('eip155')
-      const chainId = reownAppKit?.getChainId()
-
-      if (caipAddress && chainId !== undefined) {
-        const address = caipAddress.split(':').at(-1)
-        if (address) {
-          finish()
-          resolve({ address, chainId: `eip155:${chainId}` })
-          return
-        }
-      }
-
-      if (Date.now() - startedAt >= 120_000) {
+    const check = () => {
+      if (!getEvmConnection()) {
         finish()
-        reject(new Error('Wallet connection timed out.'))
+        return
       }
-    }, 100)
 
+      if (Date.now() - startedAt >= 5_000) {
+        finish(new Error('Previous EVM wallet session did not disconnect.'))
+      }
+    }
+
+    const intervalId = window.setInterval(check, 50)
     signal.addEventListener('abort', handleAbort, { once: true })
+    check()
   })
 }
 
-function getDirectWalletName(provider: EvmWalletProviderId) {
-  if (provider in directWalletNames) {
-    return directWalletNames[
-      provider as keyof typeof directWalletNames
-    ]
+async function registerConnectedWallet(
+  wallet: ConnectedWallet,
+  signal: AbortSignal,
+) {
+  const walletProvider = reownAppKit?.getProvider<Provider>('eip155')
+  if (!walletProvider) {
+    throw new Error('Connected EVM provider is unavailable.')
   }
+
+  const challenge = await createWalletChallenge({
+    address: wallet.address,
+    chainId: wallet.chainId,
+    signal,
+  })
+  const signer = await new BrowserProvider(walletProvider).getSigner()
+  const signature = await signer.signMessage(challenge.message)
+
+  if (signal.aborted) {
+    throw new DOMException('Wallet registration aborted.', 'AbortError')
+  }
+
+  const recoveredAddress = verifyMessage(challenge.message, signature)
+  if (recoveredAddress.toLowerCase() !== wallet.address.toLowerCase()) {
+    throw new Error('Wallet signature address does not match.')
+  }
+
+  await registerWalletSource({
+    challengeId: challenge.challengeId,
+    signature,
+    chainIds: [wallet.chainId],
+    signal,
+  })
+}
+
+function ConfiguredReownLauncher({
+  onCancelled,
+  onConnected,
+  onError,
+}: {
+  onCancelled?: () => void
+  onConnected: (wallet: ConnectedWallet) => void
+  onError?: () => void
+}) {
+  const { open } = useAppKit()
+
+  useEffect(() => {
+    const appKit = reownAppKit
+    if (!appKit) {
+      onError?.()
+      return
+    }
+
+    const controller = new AbortController()
+    let disposed = false
+    let modalWasOpened = false
+    let registrationStarted = false
+    let settled = false
+    let connectionInterval: number | undefined
+    let modalCloseTimer: number | undefined
+    let launchTimer: number | undefined
+    let unsubscribeState: () => void = () => undefined
+
+    const cleanup = () => {
+      controller.abort()
+      if (launchTimer !== undefined) {
+        window.clearTimeout(launchTimer)
+      }
+      if (connectionInterval !== undefined) {
+        window.clearInterval(connectionInterval)
+      }
+      if (modalCloseTimer !== undefined) {
+        window.clearTimeout(modalCloseTimer)
+      }
+      unsubscribeState()
+    }
+
+    const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+
+    const handleFailure = (error: unknown) => {
+      if (disposed || (error instanceof DOMException && error.name === 'AbortError')) {
+        return
+      }
+
+      settle(() => {
+        if (isUserCancellation(error)) onCancelled?.()
+        else onError?.()
+      })
+    }
+
+    const completeConnection = () => {
+      const connection = getEvmConnection()
+      if (!connection) return false
+      if (registrationStarted) return true
+
+      if (connection.chainId !== 'eip155:1') {
+        settle(() => onError?.())
+        return true
+      }
+
+      registrationStarted = true
+      const wallet: ConnectedWallet = {
+        address: connection.address,
+        chainId: connection.chainId,
+        network: 'Ethereum',
+        provider: 'walletconnect',
+      }
+
+      void registerConnectedWallet(wallet, controller.signal)
+        .then(() => {
+          if (!disposed) settle(() => onConnected(wallet))
+        })
+        .catch(handleFailure)
+      return true
+    }
+
+    const launch = async () => {
+      try {
+        if (getEvmConnection()) {
+          await appKit.disconnect('eip155')
+          await waitForEvmSessionClear(controller.signal)
+        }
+        if (disposed) return
+
+        modalWasOpened = appKit.getState().open
+        unsubscribeState = appKit.subscribeState((state) => {
+          if (state.open) {
+            modalWasOpened = true
+            return
+          }
+
+          if (!modalWasOpened || settled) return
+
+          modalCloseTimer = window.setTimeout(() => {
+            if (!completeConnection()) {
+              settle(() => onCancelled?.())
+            }
+          }, 0)
+        })
+        connectionInterval = window.setInterval(() => {
+          completeConnection()
+        }, 100)
+
+        await open({ namespace: 'eip155', view: 'Connect' })
+      } catch (error) {
+        handleFailure(error)
+      }
+    }
+
+    launchTimer = window.setTimeout(() => {
+      launchTimer = undefined
+      void launch()
+    }, 0)
+
+    return () => {
+      if (settled) return
+      disposed = true
+      settled = true
+      cleanup()
+    }
+  }, [onCancelled, onConnected, onError, open])
 
   return null
 }
 
-function MissingReownConfigurationRoute() {
-  return (
-    <EvmWalletConnectionPage
-      completeConnection={unavailableCompleteConnection}
-      connectWallet={unavailableConnectWallet}
-      requestSignature={unavailableOwnershipSignature}
-    />
-  )
+function MissingReownLauncher({ onError }: { onError?: () => void }) {
+  useEffect(() => {
+    onError?.()
+  }, [onError])
+
+  return null
 }
 
-function ConfiguredReownRoute() {
-  const { open } = useAppKit()
-  const walletButton = useAppKitWallet({ namespace: 'eip155' })
-  const pendingSignatures = useRef(new Map<string, string>())
-  const pendingSourceIds = useRef(new Map<string, string>())
-
-  const connectWallet = useCallback<ConnectWallet>(
-    async ({ provider, signal }) => {
-      try {
-        const directWalletName = getDirectWalletName(provider)
-
-        if (directWalletName) {
-          await walletButton.connect(directWalletName)
-        } else {
-          await open({ namespace: 'eip155', view: 'Connect' })
-        }
-
-        const connection = await waitForEvmConnection(signal)
-
-        if (connection.chainId !== 'eip155:1') {
-          return {
-            error: { code: 'CONNECTION_FAILED' },
-            ok: false,
-          }
-        }
-
-        return {
-          ok: true,
-          wallet: {
-            address: connection.address,
-            chainId: connection.chainId,
-            network: 'Ethereum',
-            provider,
-          },
-        }
-      } catch (error) {
-        if (signal.aborted) {
-          throw error
-        }
-
-        return {
-          error: {
-            code: isUserRejection(error)
-              ? 'CONNECTION_REJECTED'
-              : 'CONNECTION_FAILED',
-          },
-          ok: false,
-        }
-      }
-    },
-    [open, walletButton],
-  )
-
-  const requestSignature = useCallback<RequestOwnershipSignature>(
-    async ({ signal, wallet }) => {
-      try {
-        const walletProvider = reownAppKit?.getProvider<Provider>('eip155')
-        if (!walletProvider) {
-          return {
-            error: { code: 'SIGNATURE_FAILED' },
-            ok: false,
-          }
-        }
-
-        const provider = new BrowserProvider(walletProvider)
-        const signer = await provider.getSigner()
-        const challenge = await createWalletChallenge({
-          address: wallet.address,
-          chainId: wallet.chainId,
-          signal,
-        })
-        const signature = await signer.signMessage(challenge.message)
-
-        if (signal.aborted) {
-          throw new DOMException('Wallet signature aborted.', 'AbortError')
-        }
-
-        const recoveredAddress = verifyMessage(challenge.message, signature)
-        if (recoveredAddress.toLowerCase() !== wallet.address.toLowerCase()) {
-          return {
-            error: { code: 'SIGNATURE_ADDRESS_MISMATCH' },
-            ok: false,
-          }
-        }
-        pendingSignatures.current.set(challenge.challengeId, signature)
-
-        return {
-          ok: true,
-          verificationId: challenge.challengeId,
-        }
-      } catch (error) {
-        if (signal.aborted) {
-          throw error
-        }
-
-        return {
-          error: {
-            code: isUserRejection(error)
-              ? 'SIGNATURE_REJECTED'
-              : 'SIGNATURE_FAILED',
-          },
-          ok: false,
-        }
-      }
-    },
-    [],
-  )
-
-  const completeConnection = useCallback<CompleteWalletConnection>(
-    async ({ intentKey, period, signal, verificationId, wallet }) => {
-      const signature = pendingSignatures.current.get(verificationId)
-      if (!signature) {
-        return { error: { code: 'SOURCE_SAVE_FAILED' }, ok: false }
-      }
-
-      let sourceId = pendingSourceIds.current.get(verificationId)
-      try {
-        if (!sourceId) {
-          const source = await registerWalletSource({
-            challengeId: verificationId,
-            signature,
-            chainIds: [wallet.chainId],
-            signal,
-          })
-          sourceId = source.id
-          pendingSourceIds.current.set(verificationId, sourceId)
-        }
-      } catch (error) {
-        if (signal.aborted) {
-          throw error
-        }
-        return { error: { code: 'SOURCE_SAVE_FAILED' }, ok: false }
-      }
-
-      const normalizedPeriod = normalizeEvmWalletPeriod(period)
-      try {
-        const { job } = await createSyncJob({
-          coverageEnd: normalizedPeriod.endDate,
-          coverageStart: normalizedPeriod.startDate,
-          intentKey,
-          signal,
-          sourceId,
-        })
-        pendingSignatures.current.delete(verificationId)
-        pendingSourceIds.current.delete(verificationId)
-        return {
-          jobId: job.id,
-          jobStatus: 'BACKFILLING',
-          normalizedPeriod,
-          ok: true,
-          sourceId,
-          sourceStatus: 'SOURCE_SAVED',
-        }
-      } catch (error) {
-        if (signal.aborted) {
-          throw error
-        }
-        return { error: { code: 'BACKFILL_FAILED' }, ok: false }
-      }
-    },
-    [],
-  )
-
-  return (
-    <EvmWalletConnectionPage
-      completeConnection={completeConnection}
-      connectWallet={connectWallet}
-      requestSignature={requestSignature}
-      watchSyncJob={watchSyncJob}
-    />
-  )
-}
-
-export function ReownEvmWalletConnectionRoute() {
+export function ReownWalletLauncher({
+  onCancelled,
+  onConnected,
+  onError,
+}: {
+  onCancelled?: () => void
+  onConnected: (wallet: ConnectedWallet) => void
+  onError?: () => void
+}) {
   return isReownAppKitConfigured ? (
-    <ConfiguredReownRoute />
+    <ConfiguredReownLauncher
+      onCancelled={onCancelled}
+      onConnected={onConnected}
+      onError={onError}
+    />
   ) : (
-    <MissingReownConfigurationRoute />
+    <MissingReownLauncher onError={onError} />
   )
 }
