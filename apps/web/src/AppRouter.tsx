@@ -5,11 +5,11 @@ import {
   useSession,
 } from './auth/session-store.ts'
 import { navigateTo } from './auth/navigation.ts'
+import { DashboardPage } from './features/dashboard/DashboardPage.tsx'
 import type { ProductPageKind } from './features/product/ProductPage.tsx'
 
 const loadReownEvmWalletConnectionRoute = () =>
   import('./features/sources/ReownEvmWalletConnectionRoute.tsx')
-const loadDashboardPage = () => import('./features/dashboard/DashboardPage.tsx')
 const loadLedgerPage = () => import('./features/ledger/LedgerPage.tsx')
 const loadReportPage = () => import('./features/reports/ReportPage.tsx')
 const loadSourceManagementPage = () =>
@@ -27,8 +27,6 @@ const ReownEvmWalletConnectionRoute = lazy(async () => {
 
   return { default: module.ReownEvmWalletConnectionRoute }
 })
-const DashboardPage = lazy(() =>
-  loadDashboardPage().then((module) => ({ default: module.DashboardPage })))
 const LedgerPage = lazy(() =>
   loadLedgerPage().then((module) => ({ default: module.LedgerPage })))
 const ReportPage = lazy(() =>
@@ -53,7 +51,6 @@ const ProductPage = lazy(() =>
   loadProductPage().then((module) => ({ default: module.ProductPage })))
 
 const routePreloaders: Record<string, () => Promise<unknown>> = {
-  '/dashboard': loadDashboardPage,
   '/ledger': loadLedgerPage,
   '/reports': loadReportPage,
   '/settings': loadProductPage,
@@ -155,8 +152,6 @@ export function AppRouter() {
     '/settings': 'settings',
   }
   const productPage = productRoutes[path]
-  const pending = <p role="status">화면을 준비하고 있습니다</p>
-
   if (isProtectedRoute) {
     if (session.status === 'error') {
       return (
@@ -198,7 +193,7 @@ export function AppRouter() {
       protectedPage = <ProductPage kind={productPage} />
     }
 
-    return <Suspense fallback={pending}>{protectedPage}</Suspense>
+    return <Suspense fallback={null}>{protectedPage}</Suspense>
   }
 
   if (
