@@ -828,6 +828,18 @@ const canonicalJSON = (value) => {
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 
+const decodePublicationTrustKey = (value) => {
+  if (!value) throw new Error('DAEJANG_PUBLICATION_POLICY_TRUST_KEY is missing')
+  const direct = Buffer.from(value, 'latin1')
+  if (direct.length === 32) return direct
+  if (/^[0-9a-f]{64}$/.test(value)) return Buffer.from(value, 'hex')
+  for (const encoding of ['base64', 'base64url']) {
+    const decoded = Buffer.from(value, encoding)
+    if (decoded.length === 32) return decoded
+  }
+  throw new Error('Publication policy trust key is not a 32-byte Ed25519 key')
+}
+
 const gitCommit = (repository) => {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], {
     cwd: repository,
@@ -964,6 +976,7 @@ const createTaxRuntime = async (queryURL) => {
     activation: join(configRoot, 'tax-activation-set.json'),
     profiles: join(configRoot, 'tax-downstream-profiles.json'),
     quotes: join(configRoot, 'tax-upbit-quotes.json'),
+    trustKey: join(configRoot, 'tax-publication-policy-trust-key.pub'),
   }
   for (const [path, contents] of [
     [files.policy, policy],
@@ -975,6 +988,12 @@ const createTaxRuntime = async (queryURL) => {
     writeFileSync(path, contents, { mode: 0o600 })
     chmodSync(path, 0o600)
   }
+  writeFileSync(
+    files.trustKey,
+    decodePublicationTrustKey(process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY),
+    { mode: 0o600 },
+  )
+  chmodSync(files.trustKey, 0o600)
 
   const schemaRepository = join(projectRoot, 'schema')
   const taxCommit = gitCommit(taxRepository)
@@ -1007,8 +1026,7 @@ const taxEnvironment = (taxURL, runtime) => serviceEnvironment([], [], {
   DAEJANG_TAXD_DOWNSTREAM_PROFILE_FILE: runtime.files.profiles,
   DAEJANG_TAXD_UPBIT_QUOTE_CONFIG_FILE: runtime.files.quotes,
   DAEJANG_TAXD_QUOTE_ARCHIVE_ROOT: join(runtimeRoot, 'quote-archive', 'upbit'),
-  DAEJANG_TAXD_PUBLICATION_POLICY_TRUST_KEY:
-    process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY,
+  DAEJANG_TAXD_PUBLICATION_POLICY_TRUST_KEY_FILE: runtime.files.trustKey,
   DAEJANG_TAXD_CANDIDATE_DIGEST: runtime.candidateDigest,
   DAEJANG_TAXD_CLAIM_CONTROL_DIR: join(stateRoot, 'tax-claim-control'),
   DAEJANG_TAXD_CLAIM_CONTROL_STATE_DIR:
