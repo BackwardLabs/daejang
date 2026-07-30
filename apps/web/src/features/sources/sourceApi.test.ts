@@ -1,11 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createSyncJob,
+  findLatestSyncJob,
   getSourceCapabilities,
   retrySyncJob,
+  type SyncJobApiModel,
   updateWalletSourceNetworks,
   watchSyncJob,
 } from './sourceApi.ts'
+
+const syncJob = (
+  overrides: Partial<SyncJobApiModel> = {},
+): SyncJobApiModel => ({
+  id: 'job-1',
+  sourceId: 'source-1',
+  sourceKind: 'EVM_WALLET',
+  state: 'FAILED',
+  phase: 'VALIDATE_SOURCE',
+  attempts: 1,
+  processedRecords: 0,
+  createdAt: '2026-07-30T00:00:00.000Z',
+  updatedAt: '2026-07-30T00:00:00.000Z',
+  ...overrides,
+})
 
 afterEach(() => {
   vi.useRealTimers()
@@ -13,6 +30,29 @@ afterEach(() => {
 })
 
 describe('EVM sync API integration', () => {
+  it('selects the newest source job regardless of API return order', () => {
+    const olderFailure = syncJob({
+      id: 'job-old',
+      failureCode: 'JIT_START_FAILED',
+    })
+    const newerSuccess = syncJob({
+      id: 'job-new',
+      state: 'SUCCEEDED',
+      phase: 'COMPLETE',
+      failureCode: undefined,
+      createdAt: '2026-07-30T00:01:00.000Z',
+      updatedAt: '2026-07-30T00:02:00.000Z',
+    })
+
+    expect(
+      findLatestSyncJob([olderFailure, newerSuccess], 'source-1'),
+    ).toEqual(newerSuccess)
+    expect(
+      findLatestSyncJob([newerSuccess, olderFailure], 'source-1'),
+    ).toEqual(newerSuccess)
+    expect(findLatestSyncJob([newerSuccess], 'other-source')).toBeUndefined()
+  })
+
   it('replaces the collection networks for an existing wallet source', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       id: 'source-1',

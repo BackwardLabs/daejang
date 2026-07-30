@@ -91,6 +91,26 @@ export async function listSyncJobs(signal?: AbortSignal) {
   return requestApi<{ items: SyncJobApiModel[] }>('/jobs', { signal })
 }
 
+export function findLatestSyncJob(
+  jobs: SyncJobApiModel[],
+  sourceId: string,
+) {
+  return jobs.reduce<SyncJobApiModel | undefined>((latest, candidate) => {
+    if (candidate.sourceId !== sourceId) return latest
+    if (!latest) return candidate
+
+    const candidateCreatedAt = Date.parse(candidate.createdAt)
+    const latestCreatedAt = Date.parse(latest.createdAt)
+    if (candidateCreatedAt !== latestCreatedAt) {
+      return candidateCreatedAt > latestCreatedAt ? candidate : latest
+    }
+
+    const candidateUpdatedAt = Date.parse(candidate.updatedAt)
+    const latestUpdatedAt = Date.parse(latest.updatedAt)
+    return candidateUpdatedAt > latestUpdatedAt ? candidate : latest
+  }, undefined)
+}
+
 export async function createSyncJob(input: {
   coverageEnd: string
   coverageStart: string
