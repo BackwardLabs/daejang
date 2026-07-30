@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { AppSidebar, defaultAppYear, type AppYear } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import { loadDashboard, loadLedger, loadReviews, type DashboardModel, type LedgerEventModel, type ReviewModel } from '../../api/productApi.ts'
-import { describeLedgerAction } from '../ledger/ledgerPresentation.ts'
+import {
+  describeLedgerAction,
+  formatLedgerQuantity,
+  parseLedgerAsset,
+} from '../ledger/ledgerPresentation.ts'
 import './dashboard.css'
 
 const monthLabels = [
@@ -21,6 +25,30 @@ const monthLabels = [
 ]
 
 const count = (value: string | number | undefined) => Number(value ?? 0)
+const feeRoles = new Set(['FEE', 'GAS'])
+
+const describeInterpretationSupport = (support: string) => {
+  if (support === 'FULL') return '근거 확인 완료'
+  if (support === 'DETECTED_ONLY') return '기본 거래 확인'
+  if (support === 'OBSERVATION_ONLY') return '원본 근거만 확인'
+  return support || '근거 확인 중'
+}
+
+const postingAsset = (posting: LedgerEventModel['postings'][number]) =>
+  parseLedgerAsset(
+    posting.assetId,
+    posting.assetSymbol,
+    posting.hasAssetDecimals ? posting.assetDecimals : undefined,
+    posting.assetVenue,
+  )
+
+const denominationAsset = (
+  event: LedgerEventModel,
+  denomination: string,
+) => {
+  const posting = event.postings.find((candidate) => candidate.assetId === denomination)
+  return posting ? postingAsset(posting) : parseLedgerAsset(denomination)
+}
 
 export function DashboardPage() {
   const [selectedYear, setSelectedYear] = useState<AppYear>(defaultAppYear)
@@ -229,7 +257,19 @@ export function DashboardPage() {
                 </thead>
                 <tbody>
                   {recentTransactions.map((transaction) => {
-                    const posting = transaction.postings[0]
+                    const materialPostings = transaction.postings.filter((posting) => !feeRoles.has(posting.role))
+                    const posting = materialPostings[0] ?? transaction.postings[0]
+                    const asset = posting ? postingAsset(posting) : undefined
+                    const quantity = posting && asset
+                      ? formatLedgerQuantity(posting.quantity, asset.decimals)
+                      : '—'
+                    const denomination = posting?.denomination
+                      ? denominationAsset(transaction, posting.denomination)
+                      : undefined
+                    const fairValue = posting?.fairValue && denomination
+                      ? `${formatLedgerQuantity(posting.fairValue, denomination.decimals)} ${denomination.symbol}`
+                      : '—'
+                    const additionalAssetCount = Math.max(0, materialPostings.length - 1)
                     const action = describeLedgerAction(
                       transaction.eventType,
                       transaction.flowShape,
@@ -238,15 +278,25 @@ export function DashboardPage() {
                     return <tr key={transaction.eventId}>
                       <td>{new Date(transaction.effectiveAt).toLocaleString('ko-KR')}</td>
                       <td>{action.label}</td>
-                      <td>{posting?.assetId ?? '—'}</td>
-                      <td><strong>{posting?.quantity ?? '—'}</strong></td>
-                      <td><strong>{posting?.fairValue ? `${posting.fairValue} ${posting.denomination}` : '—'}</strong></td>
                       <td>
-                        <span className={`dashboard-status dashboard-status--${transaction.resolution === 'RESOLVED' ? 'complete' : 'review'}`}>
-                          {transaction.resolution === 'RESOLVED' ? '완료' : '검토 필요'}
+                        <span className="dashboard-asset" title={posting?.assetId}>
+                          <strong>{asset?.symbol ?? '—'}</strong>
+                          {additionalAssetCount > 0 ? <small>외 {additionalAssetCount}개 자산</small> : null}
                         </span>
                       </td>
-                      <td>{transaction.interpretationSupport}</td>
+                      <td>
+                        <span className="dashboard-quantity">
+                          <strong>{quantity}{asset?.decimals !== undefined ? ` ${asset.symbol}` : ''}</strong>
+                          {posting ? <small data-direction={posting.direction}>{posting.direction}</small> : null}
+                        </span>
+                      </td>
+                      <td><strong>{fairValue}</strong></td>
+                      <td>
+                        <span className={`dashboard-status dashboard-status--${transaction.resolution === 'RESOLVED' ? 'complete' : 'review'}`}>
+                          {transaction.resolution === 'RESOLVED' ? '완료' : '일부 확인'}
+                        </span>
+                      </td>
+                      <td>{describeInterpretationSupport(transaction.interpretationSupport)}</td>
                     </tr>
                   })}
                   {status === 'ready' && recentTransactions.length === 0 ? <tr><td colSpan={7}>이 과세연도에 처리된 거래가 없습니다.</td></tr> : null}

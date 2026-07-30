@@ -457,6 +457,34 @@
   font-size: 12px;
 }
 
+.dashboard-asset,
+.dashboard-quantity {
+  display: grid;
+  align-content: center;
+  gap: 1px;
+  min-width: 0;
+}
+
+.dashboard-asset small,
+.dashboard-quantity small {
+  color: var(--dashboard-faint);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+}
+
+.dashboard-quantity strong {
+  white-space: nowrap;
+}
+
+.dashboard-quantity small[data-direction='IN'] {
+  color: var(--dashboard-positive);
+}
+
+.dashboard-quantity small[data-direction='OUT'] {
+  color: #b85d1f;
+}
+
 .dashboard-table-scroll tbody tr:last-child td {
   border-bottom: 0;
 }
