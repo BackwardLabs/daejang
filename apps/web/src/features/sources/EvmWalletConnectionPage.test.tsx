@@ -83,7 +83,7 @@ describe('EvmWalletConnectionPage', () => {
 
     expect(screen.getByText('Ethereum')).toBeInTheDocument()
     expect(screen.getByText('Optimism')).toBeInTheDocument()
-    expect(screen.getByText('GIWA Sepolia')).toBeInTheDocument()
+    expect(screen.queryByText('GIWA Sepolia')).not.toBeInTheDocument()
   })
 
   it('starts the Reown connection immediately when launched from source selection', async () => {
@@ -139,6 +139,8 @@ describe('EvmWalletConnectionPage', () => {
     )
 
     await screen.findByRole('heading', { name: '연결 및 수집 범위' })
+    expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Optimism' })).toBeChecked()
     expect(screen.getByLabelText('시작일')).toHaveValue('2026-07-28')
     expect(screen.getByLabelText('종료일')).toHaveValue('2026-07-28')
     expect(
@@ -155,6 +157,7 @@ describe('EvmWalletConnectionPage', () => {
     await screen.findByRole('heading', { name: '지갑 연결이 완료됐어요' })
     expect(completeConnection).toHaveBeenCalledWith(
       expect.objectContaining({
+        chainIds: ['eip155:1', 'eip155:10'],
         period: {
           endDate: '2026-07-28',
           mode: 'CUSTOM',

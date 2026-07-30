@@ -6,6 +6,7 @@ import type {
   WalletOwnershipChallenge,
   WalletSourceRegistry,
   WalletSourceStore,
+  UpdateWalletChainScopes,
 } from './wallet-source-store.js'
 
 type WalletChallengeRow = {
@@ -115,6 +116,29 @@ export class PostgresWalletSourceStore implements WalletSourceStore {
 
   listWallets(context: SourceRequestContext) {
     return this.registry.listWallets(context)
+  }
+
+  async updateChainScopes(input: UpdateWalletChainScopes) {
+    const source = (await this.registry.listWallets(input)).find(
+      (candidate) =>
+        candidate.id === input.sourceId && candidate.status === 'ACTIVE',
+    )
+    if (!source) {
+      return undefined
+    }
+
+    return this.registry.registerWallet({
+      challengeId: source.id,
+      userId: input.userId,
+      recoveredAddress: source.address,
+      verificationChainId: source.verificationChainId,
+      chainIds: input.chainIds,
+      label: source.label,
+      now: source.verifiedAt,
+      requestId: input.requestId,
+      sessionId: input.sessionId,
+      idempotencyKey: input.idempotencyKey ?? `chains:${source.id}`,
+    })
   }
 
   disconnectWallet(

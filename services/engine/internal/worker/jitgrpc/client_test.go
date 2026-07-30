@@ -112,6 +112,53 @@ func TestClientUsesExactCoverageMappingAndPublishedTerminalFragment(t *testing.T
 	}
 }
 
+func TestClientMaterializesEverySelectedNetworkForOneWalletAddress(t *testing.T) {
+	server := &recordingJITServer{}
+	connection := newTestConnection(t, server)
+	config := testConfig()
+	for _, chainID := range []string{"eip155:10"} {
+		chain := config.Chains[0]
+		chain.ChainID = chainID
+		chain.ChainStore = "chain-" + strings.TrimPrefix(chainID, "eip155:")
+		config.Chains = append(config.Chains, chain)
+	}
+	client, err := New(
+		jitv1.NewCandidateQueryServiceClient(connection),
+		jitv1.NewJitEngineServiceClient(connection),
+		config,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = client.Start(context.Background(), worker.EVMJITRequest{
+		IdempotencyKey: "job-multi-chain", SubjectID: "subject-1", SourceID: "wallet-1",
+		Address:       "0x1111111111111111111111111111111111111111",
+		ChainIDs:      []string{"eip155:10", "eip155:1"},
+		CoverageStart: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		CoverageEnd:   time.Date(2027, 12, 31, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.materialized) != 2 || server.started == nil || len(server.started.GetAccounts()) != 2 {
+		t.Fatalf("multi-chain JIT request is incomplete: materialized=%d started=%#v", len(server.materialized), server.started)
+	}
+	got := make([]string, 0, 2)
+	for _, account := range server.started.GetAccounts() {
+		got = append(got, account.GetChainId())
+	}
+	want := []string{"eip155:1", "eip155:10"}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("unexpected account chain order: got=%v want=%v", got, want)
+		}
+	}
+}
+
 func TestClientFailsClosedWithoutVerifiedCoverageMapping(t *testing.T) {
 	server := &recordingJITServer{}
 	connection := newTestConnection(t, server)

@@ -291,7 +291,7 @@ function ConfiguredReownRoute({
   )
 
   const completeConnection = useCallback<CompleteWalletConnection>(
-    async ({ intentKey, period, signal, verificationId, wallet }) => {
+    async ({ chainIds, intentKey, period, signal, verificationId }) => {
       const signature = pendingSignatures.current.get(verificationId)
       if (!signature) {
         return { error: { code: 'SOURCE_SAVE_FAILED' }, ok: false }
@@ -303,7 +303,7 @@ function ConfiguredReownRoute({
           const source = await registerWalletSource({
             challengeId: verificationId,
             signature,
-            chainIds: [wallet.chainId],
+            chainIds,
             signal,
           })
           sourceId = source.id

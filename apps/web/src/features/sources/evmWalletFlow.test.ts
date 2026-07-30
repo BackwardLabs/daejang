@@ -56,6 +56,7 @@ describe('evmWalletFlowReducer', () => {
     let state = advanceToScopeEditing()
 
     expect(state).toMatchObject({
+      chainIds: ['eip155:1', 'eip155:10'],
       error: null,
       intentKey: null,
       period: {
@@ -107,9 +108,8 @@ describe('evmWalletFlowReducer', () => {
 
     expect(state).toEqual({
       addressPreview: '0x1234…5678',
-      chainId: 'eip155:1',
+      chainIds: ['eip155:1', 'eip155:10'],
       jobId: 'job-wallet-1',
-      network: 'Ethereum',
       normalizedPeriod: result.normalizedPeriod,
       provider: 'rabby',
       sourceId: 'source-wallet-1',
@@ -119,6 +119,25 @@ describe('evmWalletFlowReducer', () => {
     })
     expect('wallet' in state).toBe(false)
     expect('verificationId' in state).toBe(false)
+  })
+
+  it('requires at least one supported collection network', () => {
+    let state = advanceToScopeEditing()
+    state = evmWalletFlowReducer(state, {
+      chainIds: [],
+      type: 'CHAIN_SCOPES_CHANGED',
+    })
+    state = evmWalletFlowReducer(state, {
+      intentKey: 'intent-without-network',
+      type: 'SCOPE_SUBMIT_STARTED',
+    })
+
+    expect(state).toMatchObject({
+      chainIds: [],
+      error: { code: 'CHAIN_SCOPE_INVALID' },
+      status: 'EDITING',
+      view: 'scope',
+    })
   })
 
   it('supports connection, ownership, and scope retries without changing the same intent', () => {
@@ -449,6 +468,7 @@ describe('EVM wallet flow helpers and test adapters', () => {
 
     await expect(
       completeWalletConnectionMock({
+        chainIds: ['eip155:1', 'eip155:10'],
         intentKey: 'intent-mock-1',
         period: {
           endDate: '2027-06-30',
@@ -494,6 +514,7 @@ describe('EVM wallet flow helpers and test adapters', () => {
 
     await expect(
       completeWalletConnectionMock({
+        chainIds: ['eip155:1', 'eip155:10'],
         intentKey: 'intent-aborted',
         period: {
           mode: 'TAX_YEAR',

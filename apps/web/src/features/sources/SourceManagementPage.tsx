@@ -4,14 +4,20 @@ import { AppLink } from '../../components/AppLink.tsx'
 import { useEffect, useRef, useState } from 'react'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import {
+  createSyncJob,
   disconnectWalletSource,
   listSyncJobs,
   listSources,
   retrySyncJob,
+  updateWalletSourceNetworks,
   type SourceApiModel,
   type SyncJobApiModel,
   watchSyncJob,
 } from './sourceApi.ts'
+import {
+  evmWalletNetworkMetadata,
+  getEvmWalletNetwork,
+} from './evmNetworks.ts'
 
 const jobStatusLabel: Record<SyncJobApiModel['state'], string> = {
   QUEUED: '처리 대기',
@@ -89,11 +95,26 @@ function createRetryIntentKey(jobId: string) {
   return `source-retry:${jobId}:${suffix}`
 }
 
+function createNetworkUpdateIntentKey(sourceId: string) {
+  const suffix =
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `source-networks:${sourceId}:${suffix}`
+}
+
 export function SourceManagementPage() {
   const [sources, setSources] = useState<SourceApiModel[]>([])
   const [jobs, setJobs] = useState<SyncJobApiModel[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [disconnectingId, setDisconnectingId] = useState<string>()
+  const [editingNetworksId, setEditingNetworksId] = useState<string>()
+  const [networkDraft, setNetworkDraft] = useState<string[]>([])
+  const [updatingNetworksId, setUpdatingNetworksId] = useState<string>()
+  const [networkUpdateMessage, setNetworkUpdateMessage] = useState<{
+    sourceId: string
+    tone: 'error' | 'success'
+    text: string
+  }>()
   const [expandedJobId, setExpandedJobId] = useState<string>()
   const [retryingJobId, setRetryingJobId] = useState<string>()
   const [retryFailure, setRetryFailure] = useState<{
@@ -142,6 +163,114 @@ export function SourceManagementPage() {
       setStatus('error')
     } finally {
       setDisconnectingId(undefined)
+    }
+  }
+
+  function openNetworkEditor(source: Extract<SourceApiModel, { type: 'EVM_WALLET' }>) {
+    setEditingNetworksId(source.id)
+    setNetworkDraft(
+      source.chainScopes
+        .filter(
+          (scope) =>
+            scope.status === 'ACTIVE' &&
+            evmWalletNetworkMetadata.some(
+              (network) => network.chainId === scope.chainId,
+            ),
+        )
+        .map((scope) => scope.chainId),
+    )
+    setNetworkUpdateMessage(undefined)
+  }
+
+  async function handleNetworkUpdate(
+    source: Extract<SourceApiModel, { type: 'EVM_WALLET' }>,
+    latestJob: SyncJobApiModel | undefined,
+  ) {
+    if (networkDraft.length === 0) {
+      setNetworkUpdateMessage({
+        sourceId: source.id,
+        tone: 'error',
+        text: '수집 네트워크를 하나 이상 선택해 주세요.',
+      })
+      return
+    }
+
+    setUpdatingNetworksId(source.id)
+    setNetworkUpdateMessage(undefined)
+    const controller = new AbortController()
+    let updated: Extract<SourceApiModel, { type: 'EVM_WALLET' }>
+    try {
+      updated = await updateWalletSourceNetworks({
+        chainIds: networkDraft,
+        signal: controller.signal,
+        sourceId: source.id,
+      })
+      setSources((current) =>
+        current.map((candidate) =>
+          candidate.id === updated.id ? updated : candidate,
+        ),
+      )
+    } catch {
+      controller.abort()
+      setNetworkUpdateMessage({
+        sourceId: source.id,
+        tone: 'error',
+        text: '수집 네트워크를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      })
+      setUpdatingNetworksId(undefined)
+      return
+    }
+
+    try {
+      if (latestJob?.requestedCoverageStart && latestJob.requestedCoverageEnd) {
+        const { job } = await createSyncJob({
+          coverageStart: latestJob.requestedCoverageStart,
+          coverageEnd: latestJob.requestedCoverageEnd,
+          intentKey: createNetworkUpdateIntentKey(source.id),
+          signal: controller.signal,
+          sourceId: source.id,
+        })
+        setJobs((current) => [job, ...current])
+        const watchKey = `networks:${source.id}`
+        retryWatchControllers.current.get(watchKey)?.abort()
+        retryWatchControllers.current.set(watchKey, controller)
+        void watchSyncJob({
+          jobId: job.id,
+          signal: controller.signal,
+          onUpdate: (snapshot) => {
+            setJobs((current) =>
+              current.map((candidate) =>
+                candidate.id === snapshot.id
+                  ? { ...candidate, ...snapshot }
+                  : candidate,
+              ),
+            )
+          },
+        })
+          .catch(() => undefined)
+          .finally(() => {
+            retryWatchControllers.current.delete(watchKey)
+          })
+      }
+
+      setEditingNetworksId(undefined)
+      setNetworkUpdateMessage({
+        sourceId: source.id,
+        tone: 'success',
+        text: latestJob?.requestedCoverageStart && latestJob.requestedCoverageEnd
+          ? '수집 네트워크를 저장하고 같은 기간의 새 수집을 시작했습니다.'
+          : '수집 네트워크를 저장했습니다.',
+      })
+    } catch {
+      controller.abort()
+      setEditingNetworksId(undefined)
+      setNetworkUpdateMessage({
+        sourceId: source.id,
+        tone: 'error',
+        text: '수집 네트워크는 저장했지만 새 수집을 시작하지 못했습니다. 잠시 후 다시 수집해 주세요.',
+      })
+    } finally {
+      setUpdatingNetworksId(undefined)
     }
   }
 
@@ -289,7 +418,10 @@ export function SourceManagementPage() {
                     {source.type === 'UPBIT_PDF'
                       ? `${source.coverageStart} – ${source.coverageEnd}`
                       : source.chainScopes
-                          .map(({ chainId }) => chainId)
+                          .filter(({ status: scopeStatus }) => scopeStatus === 'ACTIVE')
+                          .map(({ chainId }) =>
+                            getEvmWalletNetwork(chainId)?.label ?? chainId,
+                          )
                           .join(', ')}
                   </span>
                   <b data-status={source.status}>
@@ -307,16 +439,79 @@ export function SourceManagementPage() {
                 </div>
                 {source.status === 'ACTIVE' &&
                 source.type === 'EVM_WALLET' ? (
-                  <button
-                    className="source-list__disconnect"
-                    type="button"
-                    disabled={disconnectingId === source.id}
-                    onClick={() => void handleDisconnect(source.id)}
+                  <div className="source-list__actions">
+                    <button
+                      className="source-list__networks"
+                      type="button"
+                      aria-expanded={editingNetworksId === source.id}
+                      onClick={() => openNetworkEditor(source)}
+                    >
+                      수집 네트워크 관리
+                    </button>
+                    <button
+                      className="source-list__disconnect"
+                      type="button"
+                      disabled={disconnectingId === source.id}
+                      onClick={() => void handleDisconnect(source.id)}
+                    >
+                      {disconnectingId === source.id
+                        ? '해제 중…'
+                        : '연결 해제'}
+                    </button>
+                  </div>
+                ) : null}
+                {source.type === 'EVM_WALLET' &&
+                editingNetworksId === source.id ? (
+                  <section className="source-network-editor" aria-label="수집 네트워크 관리">
+                    <div>
+                      <h3>이 주소에서 수집할 네트워크</h3>
+                      <p>지갑을 다시 연결하거나 네트워크를 전환할 필요가 없습니다.</p>
+                    </div>
+                    <fieldset>
+                      <legend className="sr-only">수집 네트워크</legend>
+                      {evmWalletNetworkMetadata.map((network) => (
+                        <label key={network.chainId}>
+                          <input
+                            type="checkbox"
+                            checked={networkDraft.includes(network.chainId)}
+                            disabled={updatingNetworksId === source.id}
+                            onChange={(event) => {
+                              const checked = event.currentTarget.checked
+                              setNetworkDraft((current) =>
+                                checked
+                                  ? [...current, network.chainId]
+                                  : current.filter((chainId) => chainId !== network.chainId),
+                              )
+                            }}
+                          />
+                          {network.label}
+                        </label>
+                      ))}
+                    </fieldset>
+                    <div className="source-network-editor__actions">
+                      <button
+                        type="button"
+                        onClick={() => setEditingNetworksId(undefined)}
+                      >
+                        취소
+                      </button>
+                      <button
+                        type="button"
+                        disabled={updatingNetworksId === source.id}
+                        onClick={() => void handleNetworkUpdate(source, latestJob)}
+                      >
+                        {updatingNetworksId === source.id ? '저장 중…' : '저장하고 수집'}
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+                {networkUpdateMessage?.sourceId === source.id ? (
+                  <p
+                    className={`source-network-message source-network-message--${networkUpdateMessage.tone}`}
+                    role={networkUpdateMessage.tone === 'error' ? 'alert' : 'status'}
                   >
-                    {disconnectingId === source.id
-                      ? '해제 중…'
-                      : '연결 해제'}
-                  </button>
+                    {networkUpdateMessage.text}
+                  </p>
                 ) : null}
                 {isExpanded && latestJob ? (
                   <section

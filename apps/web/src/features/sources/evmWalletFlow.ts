@@ -1,3 +1,5 @@
+import { EVM_WALLET_SUPPORTED_CHAIN_IDS } from './evmNetworks.ts'
+
 export const EVM_WALLET_PROVIDER_IDS = [
   'rabby',
   'metamask',
@@ -87,7 +89,7 @@ export type EvmWalletOwnershipError = {
 export type EvmWalletCompletionError =
   | EvmWalletPeriodInvalidError
   | {
-      code: 'BACKFILL_FAILED' | 'SOURCE_SAVE_FAILED'
+      code: 'BACKFILL_FAILED' | 'CHAIN_SCOPE_INVALID' | 'SOURCE_SAVE_FAILED'
       requestId?: string
     }
 
@@ -161,6 +163,7 @@ type OwnershipErrorState = {
 }
 
 type ScopeEditingState = {
+  chainIds: string[]
   error: EvmWalletCompletionError | null
   intentKey: string | null
   period: EvmWalletPeriodDraft
@@ -171,6 +174,7 @@ type ScopeEditingState = {
 }
 
 type ScopeSubmittingState = {
+  chainIds: string[]
   intentKey: string
   period: EvmWalletPeriodDraft
   status: 'SUBMITTING'
@@ -181,9 +185,8 @@ type ScopeSubmittingState = {
 
 type CompleteState = {
   addressPreview: string
-  chainId: string
+  chainIds: string[]
   jobId?: string
-  network: string
   normalizedPeriod: NormalizedEvmWalletPeriod
   provider: EvmWalletProviderId
   sourceId: string
@@ -228,6 +231,10 @@ export type EvmWalletFlowAction =
   | {
       error: EvmWalletOwnershipError
       type: 'SIGNATURE_FAILED'
+    }
+  | {
+      chainIds: string[]
+      type: 'CHAIN_SCOPES_CHANGED'
     }
   | {
       period: EvmWalletPeriodDraft
@@ -337,6 +344,7 @@ export function evmWalletFlowReducer(
       }
 
       return {
+        chainIds: [...EVM_WALLET_SUPPORTED_CHAIN_IDS],
         error: null,
         intentKey: null,
         period: { ...DEFAULT_EVM_WALLET_PERIOD },
@@ -374,6 +382,21 @@ export function evmWalletFlowReducer(
         intentKey: null,
         period: action.period,
       }
+    case 'CHAIN_SCOPES_CHANGED':
+      if (state.view !== 'scope' || state.status !== 'EDITING') {
+        return state
+      }
+
+      return {
+        ...state,
+        chainIds: action.chainIds.filter((chainId) =>
+          EVM_WALLET_SUPPORTED_CHAIN_IDS.includes(
+            chainId as (typeof EVM_WALLET_SUPPORTED_CHAIN_IDS)[number],
+          ),
+        ),
+        error: null,
+        intentKey: null,
+      }
     case 'SCOPE_SUBMIT_STARTED': {
       if (
         state.view !== 'scope' ||
@@ -393,6 +416,14 @@ export function evmWalletFlowReducer(
         }
       }
 
+      if (state.chainIds.length === 0) {
+        return {
+          ...state,
+          error: { code: 'CHAIN_SCOPE_INVALID' },
+          intentKey: null,
+        }
+      }
+
       const intentKey =
         state.intentKey ?? action.intentKey.trim()
       if (intentKey.length === 0) {
@@ -400,6 +431,7 @@ export function evmWalletFlowReducer(
       }
 
       return {
+        chainIds: state.chainIds,
         intentKey,
         period: state.period,
         status: 'SUBMITTING',
@@ -414,6 +446,7 @@ export function evmWalletFlowReducer(
       }
 
       return {
+        chainIds: state.chainIds,
         error: action.error,
         intentKey: state.intentKey,
         period: state.period,
@@ -433,9 +466,8 @@ export function evmWalletFlowReducer(
 
       return {
         addressPreview: maskEvmAddress(state.wallet.address),
-        chainId: state.wallet.chainId,
+        chainIds: state.chainIds,
         ...(action.result.jobId ? { jobId: action.result.jobId } : {}),
-        network: state.wallet.network,
         normalizedPeriod: action.result.normalizedPeriod,
         provider: state.wallet.provider,
         sourceId: action.result.sourceId,
@@ -676,6 +708,7 @@ export type RequestOwnershipSignature = (
 ) => Promise<RequestOwnershipSignatureResult>
 
 export type CompleteWalletConnectionRequest = {
+  chainIds: string[]
   intentKey: string
   period: EvmWalletPeriodDraft
   signal: AbortSignal
