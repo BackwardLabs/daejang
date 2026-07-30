@@ -25,6 +25,7 @@ import {
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
+  normalizeMultichainSnapshotIds,
   pauseForSignalShutdown,
   privateObjectWriteEnvironment,
   finishSignalShutdown,
@@ -36,6 +37,74 @@ import {
   resolveRuntimeSubjectACLSource,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
+
+test('pins same-period multichain coverage to one deterministic snapshot', () => {
+  const input = {
+    chains: [
+      {
+        chainId: 'eip155:10',
+        chainStore: 'optimism-mainnet',
+        genesisHash: '0xoptimism',
+        profileHash: 'profile-op',
+        coverage: [{
+          coverageStart: '2026-07-28',
+          coverageEnd: '2026-07-28',
+          indexSnapshotId: 'op-source-snapshot',
+          fromBlock: 154799012,
+          toBlock: 154842211,
+        }],
+      },
+      {
+        chainId: 'eip155:1',
+        chainStore: 'ethereum-mainnet',
+        genesisHash: '0xethereum',
+        profileHash: 'profile-eth',
+        coverage: [{
+          coverageStart: '2026-07-28',
+          coverageEnd: '2026-07-28',
+          indexSnapshotId: 'eth-source-snapshot',
+          fromBlock: 25627591,
+          toBlock: 25634763,
+        }],
+      },
+    ],
+  }
+
+  const normalized = normalizeMultichainSnapshotIds(structuredClone(input))
+  const snapshotIds = normalized.chains.map(
+    (chain) => chain.coverage[0].indexSnapshotId,
+  )
+
+  assert.match(snapshotIds[0], /^[0-9a-f]{64}$/)
+  assert.equal(snapshotIds[0], snapshotIds[1])
+  assert.equal(
+    normalizeMultichainSnapshotIds(structuredClone(input)).chains[0]
+      .coverage[0].indexSnapshotId,
+    snapshotIds[0],
+  )
+})
+
+test('preserves a single-chain snapshot identity', () => {
+  const input = {
+    chains: [{
+      chainId: 'eip155:1',
+      chainStore: 'ethereum-mainnet',
+      coverage: [{
+        coverageStart: '2026-07-28',
+        coverageEnd: '2026-07-28',
+        indexSnapshotId: 'eth-source-snapshot',
+        fromBlock: 25627591,
+        toBlock: 25634763,
+      }],
+    }],
+  }
+
+  assert.equal(
+    normalizeMultichainSnapshotIds(structuredClone(input)).chains[0]
+      .coverage[0].indexSnapshotId,
+    'eth-source-snapshot',
+  )
+})
 
 test('prefers the canonical Posting repository and supports the historical checkout name', () => {
   const root = '/srv/giwa'

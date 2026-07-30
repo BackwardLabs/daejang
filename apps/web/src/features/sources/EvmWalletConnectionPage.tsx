@@ -20,6 +20,8 @@ import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import {
   EVM_WALLET_ALLOWED_TAX_YEARS,
+  EVM_WALLET_COVERAGE_END_DATE,
+  EVM_WALLET_COVERAGE_START_DATE,
   createEvmWalletIntentKey,
   evmWalletFlowReducer,
   initialEvmWalletFlowState,
@@ -710,9 +712,9 @@ function ScopeStep({
                 disabled={isSubmitting}
                 onChange={() =>
                   onPeriodChange({
-                    endDate: '2026-07-28',
+                    endDate: EVM_WALLET_COVERAGE_END_DATE,
                     mode: 'CUSTOM',
-                    startDate: '2026-07-28',
+                    startDate: EVM_WALLET_COVERAGE_START_DATE,
                   })
                 }
               />
@@ -803,7 +805,8 @@ function ScopeStep({
                   />
                 </label>
                 <p className="wallet-period-help" id="wallet-period-help">
-                  현재 검증된 범위: 2026-07-28 하루
+                  현재 검증된 범위: {EVM_WALLET_COVERAGE_START_DATE} ~{' '}
+                  {EVM_WALLET_COVERAGE_END_DATE}
                 </p>
               </>
             )}

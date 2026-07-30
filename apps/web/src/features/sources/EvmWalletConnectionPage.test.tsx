@@ -141,8 +141,8 @@ describe('EvmWalletConnectionPage', () => {
     await screen.findByRole('heading', { name: '연결 및 수집 범위' })
     expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'Optimism' })).toBeChecked()
-    expect(screen.getByLabelText('시작일')).toHaveValue('2026-07-28')
-    expect(screen.getByLabelText('종료일')).toHaveValue('2026-07-28')
+    expect(screen.getByLabelText('시작일')).toHaveValue('2026-07-21')
+    expect(screen.getByLabelText('종료일')).toHaveValue('2026-07-29')
     expect(
       screen.getByText(/사용자 요청 시 선택 범위 수집/),
     ).toBeInTheDocument()
@@ -159,9 +159,9 @@ describe('EvmWalletConnectionPage', () => {
       expect.objectContaining({
         chainIds: ['eip155:1', 'eip155:10'],
         period: {
-          endDate: '2026-07-28',
+          endDate: '2026-07-29',
           mode: 'CUSTOM',
-          startDate: '2026-07-28',
+          startDate: '2026-07-21',
         },
       }),
     )

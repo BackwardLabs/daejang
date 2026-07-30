@@ -123,10 +123,12 @@ export const EVM_WALLET_ALLOWED_TAX_YEARS = [
   '2026',
 ] as const
 export const EVM_WALLET_LATEST_ALLOWED_DATE = '2027-12-31'
+export const EVM_WALLET_COVERAGE_START_DATE = '2026-07-21'
+export const EVM_WALLET_COVERAGE_END_DATE = '2026-07-29'
 export const DEFAULT_EVM_WALLET_PERIOD: EvmWalletPeriodDraft = {
-  endDate: '2026-07-28',
+  endDate: EVM_WALLET_COVERAGE_END_DATE,
   mode: 'CUSTOM',
-  startDate: '2026-07-28',
+  startDate: EVM_WALLET_COVERAGE_START_DATE,
 }
 
 type SelectState = {

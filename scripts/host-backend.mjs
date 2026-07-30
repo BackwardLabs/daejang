@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   chmodSync,
@@ -226,6 +226,15 @@ const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, { stdio: 'inherit', ...options })
   if (result.status !== 0)
     throw new Error(`${command} failed with status ${result.status}`)
+}
+
+const runBestEffort = (command, args, options = {}) => {
+  const result = spawnSync(command, args, { stdio: 'inherit', ...options })
+  if (result.status === 0) return true
+  const reason = result.error?.message ??
+    (result.signal ? `signal ${result.signal}` : `status ${result.status}`)
+  console.warn(`${command} failed with ${reason}; continuing with resident service`)
+  return false
 }
 
 const spawnService = (name, command, args, environment, options = {}) => {
@@ -599,9 +608,45 @@ const createCombinedJITConfig = () => {
   return output
 }
 
+export const normalizeMultichainSnapshotIds = (config) => {
+  const coverageGroups = new Map()
+  for (const chain of config.chains ?? []) {
+    for (const coverage of chain.coverage ?? []) {
+      const key = `${coverage.coverageStart}\u0000${coverage.coverageEnd}`
+      const group = coverageGroups.get(key) ?? []
+      group.push({ chain, coverage })
+      coverageGroups.set(key, group)
+    }
+  }
+
+  for (const group of coverageGroups.values()) {
+    if (new Set(group.map(({ chain }) => chain.chainId)).size < 2) continue
+    const manifest = group
+      .map(({ chain, coverage }) => ({
+        chainId: chain.chainId,
+        chainStore: chain.chainStore,
+        coverageEnd: coverage.coverageEnd,
+        coverageStart: coverage.coverageStart,
+        fromBlock: coverage.fromBlock,
+        genesisHash: chain.genesisHash,
+        profileHash: chain.profileHash,
+        sourceSnapshotId: coverage.indexSnapshotId,
+        toBlock: coverage.toBlock,
+      }))
+      .sort((left, right) => left.chainId.localeCompare(right.chainId))
+    const snapshotId = createHash('sha256')
+      .update(JSON.stringify(manifest))
+      .digest('hex')
+    for (const { coverage } of group) coverage.indexSnapshotId = snapshotId
+  }
+  return config
+}
+
 const createRuntimeBridgeConfig = (source) => {
   const output = join(configRoot, 'jit-bridge.runtime.json')
-  const config = JSON.parse(readFileSync(source, 'utf8'))
+  const config = normalizeMultichainSnapshotIds(
+    JSON.parse(readFileSync(source, 'utf8')),
+  )
   config.endpoint = `unix://${join(socketRoot, 'jit.sock')}`
   const chainStores = new Map([
     ['eip155:1', 'ethereum-mainnet-tail'],
@@ -918,7 +963,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         sourceURL,
       ),
     )
-    run(
+    runBestEffort(
       join(binaryRoot, 'posting-worker'),
       [...postingArgs, '--once'],
       { cwd: postingRepository, env: postingEnvironment },
