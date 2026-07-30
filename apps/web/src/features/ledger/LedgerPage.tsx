@@ -122,7 +122,7 @@ function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
   const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
   const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
   const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
-  const transferEndpoint = event.eventType === 'TRANSFER'
+  const transferEndpoint = event.eventType === 'TRANSFER' && !['FIAT_IN', 'FIAT_OUT'].includes(event.flowShape)
     ? describeTransferEndpoint(event.postings, event.transferEndpoint)
     : undefined
   return <div className="ledger-explorer-detail">

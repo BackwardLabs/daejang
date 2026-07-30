@@ -78,13 +78,18 @@ func (s *Store) ListUnmaterialized(ctx context.Context, subjectID string, taxYea
 		SELECT observation.fragment_id,observation.origin_run_id,observation.origin_link_id,
 			observation.observation_id,observation.kind,observation.account_id,observation.asset_id,
 			observation.quantity,observation.occurred_at,
-			COALESCE(asset.symbol,''),asset.decimals,COALESCE(asset.venue,'')
+			COALESCE(asset.symbol,''),asset.decimals,COALESCE(asset.venue,''),
+			COALESCE(activity.activity_class,'UNSPECIFIED')
 		FROM current_observations AS observation
 		JOIN selected_records USING(fragment_id,origin_run_id,origin_link_id)
 		LEFT JOIN subject_evidence.asset AS asset
 		  ON asset.subject_id=$1
 		 AND asset.fragment_id=observation.fragment_id
 		 AND asset.asset_id=observation.asset_id
+		LEFT JOIN subject_evidence.observation_activity_v1 AS activity
+		  ON activity.subject_id=$1
+		 AND activity.fragment_id=observation.fragment_id
+		 AND activity.observation_id=observation.observation_id
 		ORDER BY selected_records.occurred_at DESC,observation.fragment_id,observation.origin_run_id,observation.origin_link_id,observation.local_index`, subjectID, taxYear, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list unmaterialized observations: %w", err)
@@ -95,16 +100,16 @@ func (s *Store) ListUnmaterialized(ctx context.Context, subjectID string, taxYea
 	result := []readmodelstore.LedgerEvent{}
 	for rows.Next() {
 		var fragment, run, record, observationID, kind, accountID, assetID, quantity string
-		var assetSymbol, assetVenue string
+		var assetSymbol, assetVenue, activityClass string
 		var assetDecimals *int16
 		var occurredAt time.Time
-		if err := rows.Scan(&fragment, &run, &record, &observationID, &kind, &accountID, &assetID, &quantity, &occurredAt, &assetSymbol, &assetDecimals, &assetVenue); err != nil {
+		if err := rows.Scan(&fragment, &run, &record, &observationID, &kind, &accountID, &assetID, &quantity, &occurredAt, &assetSymbol, &assetDecimals, &assetVenue, &activityClass); err != nil {
 			return nil, err
 		}
 		k := key{fragment, run, record}
 		position, exists := index[k]
 		if !exists {
-			eventType, flowShape := classify("", kind)
+			eventType, flowShape := classify("", kind, activityClass)
 			id := "observation-event:" + digest(fragment + "\x00" + run + "\x00" + record)[:32]
 			position = len(result)
 			index[k] = position
@@ -152,7 +157,17 @@ const currentObservationsSQL = `
 		  )
 	)`
 
-func classify(sourceCase, kind string) (string, string) {
+func classify(sourceCase, kind, activityClass string) (string, string) {
+	switch activityClass {
+	case "DEPOSIT_INTEREST":
+		return "REWARD", "DEPOSIT_INTEREST"
+	case "FIAT_DEPOSIT":
+		return "TRANSFER", "FIAT_IN"
+	case "FIAT_WITHDRAWAL":
+		return "TRANSFER", "FIAT_OUT"
+	case "AIRDROP":
+		return "REWARD", "AIRDROP"
+	}
 	switch sourceCase {
 	case "BUY", "SELL":
 		return "TRADE", "EXCHANGE"

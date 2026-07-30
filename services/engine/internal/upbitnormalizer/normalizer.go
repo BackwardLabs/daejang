@@ -20,7 +20,7 @@ import (
 
 const (
 	ProducerName    = "daejang-upbit-normalizer"
-	ProducerVersion = "observation/v4"
+	ProducerVersion = "observation/v5"
 	// Pinned from BackwardLabs/schema commit 310e9ae51d4d833c0a309cbea7b0532f17c3b340.
 	SchemaDigest              = "13415ef66497cc99e0f09e8ac0cad5aa094144bbc85d6b9ce88188f406466ab2"
 	normalizationReason       = "UPBIT_TRANSACTION_NORMALIZATION_UNSUPPORTED"
@@ -113,6 +113,7 @@ type exchangePayload struct {
 	RecordType       string      `json:"recordType"`
 	EventAt          sourceValue `json:"eventAt"`
 	EventType        sourceValue `json:"eventType"`
+	Description      sourceValue `json:"description"`
 	Asset            sourceValue `json:"asset"`
 	UnitPrice        sourceValue `json:"unitPrice"`
 	Quantity         sourceValue `json:"quantity"`
@@ -129,6 +130,7 @@ type observationDetail struct {
 	SchemaVersion    string                  `json:"schemaVersion"`
 	Semantic         string                  `json:"semantic"`
 	SourceCase       string                  `json:"sourceCase"`
+	ActivityClass    string                  `json:"activityClass"`
 	TransferEndpoint *transferEndpointDetail `json:"transferEndpoint,omitempty"`
 }
 
@@ -306,7 +308,7 @@ func Prepare(input Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	manifest := rootManifest{SchemaVersion: "daejang.upbit-observation-evidence.v3", ProviderID: "UPBIT", DocumentType: parsed.Document.DocumentType, SourceArtifactDigest: input.OriginalArtifact.Digest, SourceDocumentHash: parsed.Artifact.ContentHash.Value, InternalEvidenceDigest: input.InternalArtifact.Digest, ProjectionDigest: digest(projection), RecordCount: int64(len(records)), NormalizedCount: normalizedCount, TerminalStatus: terminalStatus, ReasonCode: reasonCode, AssetScalePolicy: cexScalePolicy}
+	manifest := rootManifest{SchemaVersion: "daejang.upbit-observation-evidence.v4", ProviderID: "UPBIT", DocumentType: parsed.Document.DocumentType, SourceArtifactDigest: input.OriginalArtifact.Digest, SourceDocumentHash: parsed.Artifact.ContentHash.Value, InternalEvidenceDigest: input.InternalArtifact.Digest, ProjectionDigest: digest(projection), RecordCount: int64(len(records)), NormalizedCount: normalizedCount, TerminalStatus: terminalStatus, ReasonCode: reasonCode, AssetScalePolicy: cexScalePolicy}
 	root, err := json.Marshal(manifest)
 	if err != nil {
 		return Result{}, err
@@ -347,8 +349,9 @@ func normalizeExchange(record internalRecord, accountID, runID string, input Inp
 	baseDecimals := cexDocumentDecimals
 	baseID := assetID(baseSymbol)
 	assets := []evidencestore.SubjectAsset{assetDefinition(baseID, baseSymbol, baseDecimals)}
+	activityClass := classifyActivity(eventType, baseSymbol, p.Description)
 	makeObservation := func(local uint64, kind, symbol, quantity, semantic string, transfer *transferEndpointDetail) evidencestore.Observation {
-		detail, _ := json.Marshal(observationDetail{AssetScalePolicy: cexScalePolicy, SchemaVersion: cexDetailSchema, Semantic: semantic, SourceCase: sourceCase(eventType), TransferEndpoint: transfer})
+		detail, _ := json.Marshal(observationDetail{AssetScalePolicy: cexScalePolicy, SchemaVersion: cexDetailSchema, Semantic: semantic, SourceCase: sourceCase(eventType), ActivityClass: activityClass, TransferEndpoint: transfer})
 		id := "cex-observation:" + digest([]byte(runID + "\x00" + record.SourceRecordID + fmt.Sprintf("\x00%d", local)))[:32]
 		at := occurredAt
 		return evidencestore.Observation{ID: id, Domain: "CEX", Kind: kind, NativeID: record.SourceRecordID + ":" + strings.ToLower(semantic), AccountID: accountID, AssetID: assetID(symbol), Quantity: quantity, OccurredAt: &at, OriginKind: "SOURCE_RECORD", OriginLinkID: record.SourceRecordID, OriginRunID: runID, CoordinateJSON: json.RawMessage(fmt.Sprintf(`{"page":%d,"itemIndex":%d}`, record.Source.SourcePage, record.Source.SourceItemIndex)), LocalIndex: local, DetailJSON: detail}
@@ -432,6 +435,27 @@ func normalizeExchange(record internalRecord, accountID, runID string, input Inp
 		links[i] = evidencestore.SourceOutcomeObservation{ExtractionRunID: runID, SourceRecordID: record.SourceRecordID, ObservationID: observation.ID, Ordinal: uint32(i)}
 	}
 	return normalization{assets: assets, observations: observations, links: links}, ""
+}
+
+func classifyActivity(eventType, symbol string, description sourceValue) string {
+	if description.State != "PRESENT" {
+		return "UNSPECIFIED"
+	}
+	value := strings.Join(strings.Fields(description.Raw), " ")
+	switch {
+	case eventType == "입금" && symbol == "KRW" && value == "예치금 이용료":
+		return "DEPOSIT_INTEREST"
+	case eventType == "입금" && symbol == "KRW" && value == "원화":
+		return "FIAT_DEPOSIT"
+	case eventType == "출금" && symbol == "KRW" && value == "원화":
+		return "FIAT_WITHDRAWAL"
+	case eventType == "입금" && symbol != "KRW" && value == "디지털 자산 지급":
+		return "AIRDROP"
+	case (eventType == "입금" || eventType == "출금") && symbol != "KRW" && value == "디지털 자산":
+		return "DIGITAL_ASSET_TRANSFER"
+	default:
+		return "UNSPECIFIED"
+	}
 }
 
 func resolveTransferEndpoint(payload exchangePayload, input Input) transferEndpointDetail {

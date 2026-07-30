@@ -42,11 +42,44 @@ func TestPrepareNormalizesBuyAndSellToDeterministicCEXObservations(t *testing.T)
 	if got[0].OccurredAt == nil || got[0].OccurredAt.Format(time.RFC3339) != "2026-07-28T15:04:05Z" {
 		t.Fatalf("KST timestamp was not normalized to UTC: %#v", got[0].OccurredAt)
 	}
-	if string(got[0].DetailJSON) != `{"assetScalePolicy":"upbit-document-decimal8/v1","schemaVersion":"tax.cex-interpretation-input.v2","semantic":"BASE","sourceCase":"BUY"}` {
+	if string(got[0].DetailJSON) != `{"assetScalePolicy":"upbit-document-decimal8/v1","schemaVersion":"tax.cex-interpretation-input.v2","semantic":"BASE","sourceCase":"BUY","activityClass":"UNSPECIFIED"}` {
 		t.Fatalf("unexpected tax-engine detail: %s", got[0].DetailJSON)
 	}
 	if strings.Contains(string(first.RootArtifact), "10005000") || strings.Contains(string(first.RootArtifact), "BTC") {
 		t.Fatal("root manifest retained transaction values")
+	}
+}
+
+func TestPrepareClassifiesAllowlistedTransferDescriptions(t *testing.T) {
+	tests := []struct {
+		name, eventType, asset, description, want string
+	}{
+		{name: "fiat deposit", eventType: "입금", asset: "KRW", description: "원화", want: "FIAT_DEPOSIT"},
+		{name: "fiat withdrawal", eventType: "출금", asset: "KRW", description: "원화", want: "FIAT_WITHDRAWAL"},
+		{name: "deposit interest", eventType: "입금", asset: "KRW", description: "예치금 이용료", want: "DEPOSIT_INTEREST"},
+		{name: "airdrop", eventType: "입금", asset: "TRUST", description: "디지털 자산 지급", want: "AIRDROP"},
+		{name: "digital asset deposit", eventType: "입금", asset: "USDT", description: "디지털 자산", want: "DIGITAL_ASSET_TRANSFER"},
+		{name: "unknown description", eventType: "입금", asset: "USDT", description: "기타", want: "UNSPECIFIED"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			record := mappedExchange("activity", 1, 0, test.eventType, test.asset, "1 "+test.asset, "1 "+test.asset, "0 "+test.asset, "1 "+test.asset)
+			record["payload"].(map[string]any)["description"] = present(test.description)
+			result, err := Prepare(validInput(t, []map[string]any{record}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Evidence.Observations) != 1 {
+				t.Fatalf("unexpected activity observations: %#v", result.Evidence.Observations)
+			}
+			var detail observationDetail
+			if err := json.Unmarshal(result.Evidence.Observations[0].DetailJSON, &detail); err != nil {
+				t.Fatal(err)
+			}
+			if detail.ActivityClass != test.want {
+				t.Fatalf("activity class = %q, want %q", detail.ActivityClass, test.want)
+			}
+		})
 	}
 }
 

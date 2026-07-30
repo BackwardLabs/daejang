@@ -72,6 +72,21 @@ describe('ledger posting presentation', () => {
     ])).toEqual({ label: '내 계정 이동', description: '내 계정 간 이동' })
   })
 
+  it('uses the statement activity for fiat, interest, and airdrop rows', () => {
+    expect(describeLedgerAction('TRANSFER', 'FIAT_IN', [{ direction: 'IN' }])).toEqual({
+      label: '원화 입금', description: '본인 원화 입금',
+    })
+    expect(describeLedgerAction('TRANSFER', 'FIAT_OUT', [{ direction: 'OUT' }])).toEqual({
+      label: '원화 출금', description: '본인 원화 출금',
+    })
+    expect(describeLedgerAction('REWARD', 'DEPOSIT_INTEREST', [{ direction: 'IN' }])).toEqual({
+      label: '예치금 이용료', description: '거래소 예치금 이용료',
+    })
+    expect(describeLedgerAction('REWARD', 'AIRDROP', [{ direction: 'IN' }])).toEqual({
+      label: '에어드롭', description: '에어드롭 지급',
+    })
+  })
+
   it('uses material posting direction when a transfer flow shape is incomplete', () => {
     expect(describeLedgerAction('TRANSFER', 'UNKNOWN', [
       { direction: 'IN', role: 'PRINCIPAL' },
