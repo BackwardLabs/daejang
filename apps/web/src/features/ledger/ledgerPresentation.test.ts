@@ -130,6 +130,12 @@ describe('ledger posting presentation', () => {
     expect(describeLedgerAction('REWARD', 'AIRDROP', [{ direction: 'IN' }])).toEqual({
       label: '에어드롭', description: '에어드롭 지급',
     })
+    expect(describeLedgerAction('REWARD', 'INCOME', [{ direction: 'IN' }], 'AIRDROP')).toEqual({
+      label: '에어드롭', description: '디지털 자산 지급',
+    })
+    expect(describeLedgerAction('TRANSFER', 'EXTERNAL_IN', [{ direction: 'IN' }], 'FIAT_DEPOSIT')).toEqual({
+      label: '원화 입금', description: '본인 원화 입금',
+    })
   })
 
   it('uses material posting direction when a transfer flow shape is incomplete', () => {

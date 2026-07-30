@@ -123,11 +123,13 @@ function LedgerStatusBadges({ event }: { event: LedgerEventModel }) {
 
 function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
   const source = describeLedgerSource(event.postings)
-  const action = describeLedgerAction(event.eventType, event.flowShape, event.postings)
+  const action = describeLedgerAction(event.eventType, event.flowShape, event.postings, event.subtype)
   const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
   const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
   const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
-  const transferEndpoint = event.eventType === 'TRANSFER' && !['FIAT_IN', 'FIAT_OUT'].includes(event.flowShape)
+  const transferEndpoint = event.eventType === 'TRANSFER'
+    && !['FIAT_IN', 'FIAT_OUT'].includes(event.flowShape)
+    && !['FIAT_DEPOSIT', 'FIAT_WITHDRAWAL'].includes(event.subtype ?? '')
     ? describeTransferEndpoint(event.postings, event.transferEndpoint)
     : undefined
   return <div className="ledger-explorer-detail">
@@ -470,7 +472,7 @@ export function LedgerPage() {
                     const source = describeLedgerSource(event.postings)
                     const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
                     const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
-                    const action = describeLedgerAction(event.eventType, event.flowShape, event.postings)
+                    const action = describeLedgerAction(event.eventType, event.flowShape, event.postings, event.subtype)
                     const isOpen = event.eventId === selectedId
                     return <Fragment key={event.eventId}>
                       <tr className={isOpen ? 'ledger-explorer__row is-open' : 'ledger-explorer__row'}>

@@ -242,7 +242,20 @@ export const describeLedgerAction = (
   eventType: string,
   flowShape: string,
   postings: Array<{ direction: string; role?: string }>,
+  subtype = '',
 ): LedgerActionPresentation => {
+  if (subtype === 'DEPOSIT_INTEREST') {
+    return { label: '예치금 이용료', description: '거래소 예치금 이용료' }
+  }
+  if (subtype === 'AIRDROP') {
+    return { label: '에어드롭', description: '디지털 자산 지급' }
+  }
+  if (subtype === 'FIAT_DEPOSIT') {
+    return { label: '원화 입금', description: '본인 원화 입금' }
+  }
+  if (subtype === 'FIAT_WITHDRAWAL') {
+    return { label: '원화 출금', description: '본인 원화 출금' }
+  }
   const description = describeFlowShape(flowShape)
   if (flowShape === 'DEPOSIT_INTEREST') return { label: '예치금 이용료', description }
   if (flowShape === 'AIRDROP') return { label: '에어드롭', description }

@@ -100,7 +100,7 @@ func (s *Service) ListLedgerEvents(ctx context.Context, req *enginev1.ListLedger
 	}
 	items := make([]*enginev1.LedgerEvent, 0, len(values))
 	for _, v := range values {
-		event := &enginev1.LedgerEvent{EventId: v.EventID, RevisionId: v.RevisionID, RevisionNumber: v.RevisionNumber, EventType: v.EventType, FlowShape: v.FlowShape, Resolution: v.Resolution, InterpretationSupport: v.InterpretationSupport, EffectiveAt: timestamppb.New(v.EffectiveAt)}
+		event := &enginev1.LedgerEvent{EventId: v.EventID, RevisionId: v.RevisionID, RevisionNumber: v.RevisionNumber, EventType: v.EventType, FlowShape: v.FlowShape, Subtype: v.Subtype, Resolution: v.Resolution, InterpretationSupport: v.InterpretationSupport, EffectiveAt: timestamppb.New(v.EffectiveAt)}
 		if v.TransferEndpoint != nil {
 			event.TransferEndpoint = &enginev1.LedgerTransferEndpoint{
 				Resolution:       v.TransferEndpoint.Resolution,

@@ -394,6 +394,7 @@ export function DashboardPage() {
                       transaction.eventType,
                       transaction.flowShape,
                       transaction.postings,
+                      transaction.subtype,
                     )
                     return <tr key={transaction.eventId}>
                       <td>{new Date(transaction.effectiveAt).toLocaleString('ko-KR')}</td>

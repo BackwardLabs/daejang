@@ -131,6 +131,7 @@ type observationDetail struct {
 	Semantic         string                  `json:"semantic"`
 	SourceCase       string                  `json:"sourceCase"`
 	ActivityClass    string                  `json:"activityClass"`
+	Description      string                  `json:"description,omitempty"`
 	TransferEndpoint *transferEndpointDetail `json:"transferEndpoint,omitempty"`
 }
 
@@ -350,8 +351,12 @@ func normalizeExchange(record internalRecord, accountID, runID string, input Inp
 	baseID := assetID(baseSymbol)
 	assets := []evidencestore.SubjectAsset{assetDefinition(baseID, baseSymbol, baseDecimals)}
 	activityClass := classifyActivity(eventType, baseSymbol, p.Description)
+	description := ""
+	if p.Description.State == "PRESENT" {
+		description = strings.Join(strings.Fields(p.Description.Raw), " ")
+	}
 	makeObservation := func(local uint64, kind, symbol, quantity, semantic string, transfer *transferEndpointDetail) evidencestore.Observation {
-		detail, _ := json.Marshal(observationDetail{AssetScalePolicy: cexScalePolicy, SchemaVersion: cexDetailSchema, Semantic: semantic, SourceCase: sourceCase(eventType), ActivityClass: activityClass, TransferEndpoint: transfer})
+		detail, _ := json.Marshal(observationDetail{AssetScalePolicy: cexScalePolicy, SchemaVersion: cexDetailSchema, Semantic: semantic, SourceCase: sourceCase(eventType), ActivityClass: activityClass, Description: description, TransferEndpoint: transfer})
 		id := "cex-observation:" + digest([]byte(runID + "\x00" + record.SourceRecordID + fmt.Sprintf("\x00%d", local)))[:32]
 		at := occurredAt
 		return evidencestore.Observation{ID: id, Domain: "CEX", Kind: kind, NativeID: record.SourceRecordID + ":" + strings.ToLower(semantic), AccountID: accountID, AssetID: assetID(symbol), Quantity: quantity, OccurredAt: &at, OriginKind: "SOURCE_RECORD", OriginLinkID: record.SourceRecordID, OriginRunID: runID, CoordinateJSON: json.RawMessage(fmt.Sprintf(`{"page":%d,"itemIndex":%d}`, record.Source.SourcePage, record.Source.SourceItemIndex)), LocalIndex: local, DetailJSON: detail}

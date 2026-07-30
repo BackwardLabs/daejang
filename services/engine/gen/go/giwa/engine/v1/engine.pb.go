@@ -2172,6 +2172,7 @@ type LedgerEvent struct {
 	EffectiveAt           *timestamppb.Timestamp  `protobuf:"bytes,8,opt,name=effective_at,json=effectiveAt,proto3" json:"effective_at,omitempty"`
 	Postings              []*LedgerPosting        `protobuf:"bytes,9,rep,name=postings,proto3" json:"postings,omitempty"`
 	TransferEndpoint      *LedgerTransferEndpoint `protobuf:"bytes,10,opt,name=transfer_endpoint,json=transferEndpoint,proto3" json:"transfer_endpoint,omitempty"`
+	Subtype               string                  `protobuf:"bytes,11,opt,name=subtype,proto3" json:"subtype,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -2274,6 +2275,13 @@ func (x *LedgerEvent) GetTransferEndpoint() *LedgerTransferEndpoint {
 		return x.TransferEndpoint
 	}
 	return nil
+}
+
+func (x *LedgerEvent) GetSubtype() string {
+	if x != nil {
+		return x.Subtype
+	}
+	return ""
 }
 
 type ListLedgerEventsResponse struct {
@@ -4238,7 +4246,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x10wallet_source_id\x18\x05 \x01(\tR\x0ewalletSourceId\x12)\n" +
 	"\x10chain_candidates\x18\x06 \x03(\tR\x0fchainCandidates\x12+\n" +
 	"\x11connection_status\x18\a \x01(\tR\x10connectionStatus\x12'\n" +
-	"\x0freview_required\x18\b \x01(\bR\x0ereviewRequired\"\xd6\x03\n" +
+	"\x0freview_required\x18\b \x01(\bR\x0ereviewRequired\"\xf0\x03\n" +
 	"\vLedgerEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1f\n" +
 	"\vrevision_id\x18\x02 \x01(\tR\n" +
@@ -4255,7 +4263,8 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\feffective_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\veffectiveAt\x129\n" +
 	"\bpostings\x18\t \x03(\v2\x1d.giwa.engine.v1.LedgerPostingR\bpostings\x12S\n" +
 	"\x11transfer_endpoint\x18\n" +
-	" \x01(\v2&.giwa.engine.v1.LedgerTransferEndpointR\x10transferEndpoint\"M\n" +
+	" \x01(\v2&.giwa.engine.v1.LedgerTransferEndpointR\x10transferEndpoint\x12\x18\n" +
+	"\asubtype\x18\v \x01(\tR\asubtype\"M\n" +
 	"\x18ListLedgerEventsResponse\x121\n" +
 	"\x05items\x18\x01 \x03(\v2\x1b.giwa.engine.v1.LedgerEventR\x05items\"\x83\x01\n" +
 	"\x12ListReviewsRequest\x128\n" +

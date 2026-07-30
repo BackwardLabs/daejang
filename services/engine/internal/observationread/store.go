@@ -113,7 +113,7 @@ func (s *Store) ListUnmaterialized(ctx context.Context, subjectID string, taxYea
 			id := "observation-event:" + digest(fragment + "\x00" + run + "\x00" + record)[:32]
 			position = len(result)
 			index[k] = position
-			result = append(result, readmodelstore.LedgerEvent{EventID: id, RevisionID: id + ":v1", RevisionNumber: 1, EventType: eventType, FlowShape: flowShape, Resolution: "PARTIAL", InterpretationSupport: "OBSERVATION_ONLY", EffectiveAt: occurredAt.UTC()})
+			result = append(result, readmodelstore.LedgerEvent{EventID: id, RevisionID: id + ":v1", RevisionNumber: 1, EventType: eventType, FlowShape: flowShape, Subtype: activityClass, Resolution: "PARTIAL", InterpretationSupport: "OBSERVATION_ONLY", EffectiveAt: occurredAt.UTC()})
 		}
 		direction := "IN"
 		absolute := quantity
