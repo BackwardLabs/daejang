@@ -57,8 +57,14 @@ const postingRepository = resolvePostingRepository(
 const taxRepository = resolve(
   process.env.GIWA_TAX_REPOSITORY ?? join(projectRoot, 'daejang-tax-engine'),
 )
+const deFiLabelRepository = resolve(
+  process.env.GIWA_DEFI_LABEL_REPOSITORY ?? join(projectRoot, 'DeFi-Label'),
+)
 const jitRepository = resolve(
   process.env.GIWA_JIT_REPOSITORY ?? join(projectRoot, 'daejang-jit-engine'),
+)
+const schemaRepository = resolve(
+  process.env.GIWA_SCHEMA_REPOSITORY ?? join(projectRoot, 'schema'),
 )
 const jitRuntime = resolve(
   process.env.GIWA_JIT_RUNTIME ?? join(projectRoot, 'daejang-jit-runtime'),
@@ -83,14 +89,24 @@ const sourcePublicationClaimPolicy = join(
   configRoot,
   'source-publication-claim-policy.json',
 )
+const evmPublicationClaimPolicy = join(
+  configRoot,
+  'evm-publication-claim-policy.json',
+)
+const taxdNoProfilesMarker = join(stateRoot, 'taxd.disabled-no-profiles')
+const jitArtifactRoot = resolve(
+  process.env.GIWA_JIT_ARTIFACT_ROOT ??
+    join(projectRoot, 'daejang-jit-data', 'artifacts'),
+)
+const jitArtifactTemp = resolve(
+  process.env.GIWA_JIT_ARTIFACT_TEMP ??
+    join(projectRoot, 'daejang-jit-data', 'tmp'),
+)
 const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
 const managedJITBinary = join(binaryRoot, 'jitd')
 const jitBinary = resolve(
-  process.env.GIWA_JIT_BINARY ??
-    (existsSync(managedJITBinary)
-      ? managedJITBinary
-      : join(jitRuntime, 'bin', 'jitd')),
+  process.env.GIWA_JIT_BINARY ?? managedJITBinary,
 )
 const pauseFile = join(stateRoot, 'paused')
 const supervisorLockFile = join(stateRoot, 'supervisor.lock')
@@ -105,7 +121,9 @@ const assertExternalRuntimeRoot = () => {
     databaseRepository,
     postingRepository,
     taxRepository,
+    deFiLabelRepository,
     jitRepository,
+    schemaRepository,
     jitRuntime,
   ]) {
     if (pathIsWithin(checkout, runtimeRoot)) {
@@ -198,15 +216,28 @@ const loadRuntimeEnvironment = () => {
   }
 }
 
-const serviceOrder = [
+const allServiceOrder = [
   'pdf-parser',
   'jit',
   'engine',
   'worker',
   'posting',
+  'evm-posting',
   'taxd',
   'web-api',
 ]
+const evmPostingEnabled = () => existsSync(evmPublicationClaimPolicy)
+const taxdEnabled = () => !existsSync(taxdNoProfilesMarker)
+export const hostActiveServiceOrder = ({
+  evmPosting = true,
+  taxd = true,
+} = {}) => allServiceOrder.filter((name) =>
+  (name !== 'evm-posting' || evmPosting) &&
+  (name !== 'taxd' || taxd))
+const activeServiceOrder = () => hostActiveServiceOrder({
+  evmPosting: evmPostingEnabled(),
+  taxd: taxdEnabled(),
+})
 const pidFile = (name) => join(pidRoot, `${name}.pid`)
 const logFile = (name) => join(logRoot, `${name}.log`)
 
@@ -378,6 +409,31 @@ export const hostPostingWorkerEnvironment = (
     DAEJANG_PUBLICATION_POLICY_TRUST_KEY: trustKey,
     DAEJANG_POSTING_DATABASE_URL: eventURL,
     DAEJANG_POSTING_ARTIFACT_DATABASE_URL: sourceURL,
+  }
+}
+
+export const hostEVMPostingWorkerArgs = (
+  artifacts,
+  temporaryArtifacts,
+  claimPolicy,
+) => [
+  '--mode',
+  'canonical',
+  '--artifact-root',
+  artifacts,
+  '--artifact-temp',
+  temporaryArtifacts,
+  '--claim-policy',
+  claimPolicy,
+]
+
+export const hostEVMPostingWorkerEnvironment = (trustKey, eventURL) => {
+  if (!trustKey) {
+    throw new Error('DAEJANG_PUBLICATION_POLICY_TRUST_KEY is missing')
+  }
+  return {
+    DAEJANG_PUBLICATION_POLICY_TRUST_KEY: trustKey,
+    DAEJANG_POSTING_DATABASE_URL: eventURL,
   }
 }
 
@@ -570,15 +626,16 @@ const taxReady = async () => {
 }
 
 const runtimeHealthy = async () => {
-  if (!serviceOrder.every(isRunning)) return false
+  if (!activeServiceOrder().every(isRunning)) return false
   const jitSocket = join(socketRoot, 'jit.sock')
+  const taxIsReady = !taxdEnabled() || await taxReady()
   return (
     await parserReady() &&
     existsSync(jitSocket) &&
     await unixReady(jitSocket) &&
     engineReady() &&
     existsSync(join(stateRoot, 'worker.ready')) &&
-    await taxReady() &&
+    taxIsReady &&
     await webReady()
   )
 }
@@ -596,6 +653,13 @@ const build = () => {
   run('npm', ['run', 'build', '--workspace', '@daejang/web-api'], {
     cwd: repositoryRoot,
     env: baseEnvironment(),
+  })
+  run('go', ['build', '-o', managedJITBinary, './cmd/jitd'], {
+    cwd: jitRepository,
+    env: {
+      ...baseEnvironment(),
+      GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
+    },
   })
   for (const [command, output] of [
     ['./cmd/engine-api', join(binaryRoot, 'engine-api')],
@@ -637,6 +701,17 @@ const build = () => {
       },
     })
   }
+  run('go', ['build', '-o', join(binaryRoot, 'evm-posting-worker'), './cmd/evm-posting-worker'], {
+    cwd: postingRepository,
+    env: {
+      ...baseEnvironment(),
+      GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
+      GOWORK: 'off',
+      GOPRIVATE: 'github.com/BackwardLabs',
+      GONOSUMDB: 'github.com/BackwardLabs',
+      GOPROXY: 'direct',
+    },
+  })
   const webAPIRuntime = join(runtimeRoot, 'app', 'web-api')
   rmSync(webAPIRuntime, { recursive: true, force: true })
   mkdirSync(dirname(webAPIRuntime), { recursive: true, mode: 0o700 })
@@ -658,8 +733,8 @@ const createCombinedJITConfig = () => {
     [
       'ea',
       `. as $item ireduce ({}; . * $item) | .server.listen = "unix://${join(socketRoot, 'jit.sock')}"`,
-      join(jitRuntime, 'configs', 'ethereum-mainnet.yaml'),
-      join(jitRuntime, 'configs', 'optimism-mainnet.yaml'),
+      join(jitRepository, 'configs', 'ethereum-mainnet.yaml'),
+      join(jitRepository, 'configs', 'optimism-mainnet.yaml'),
     ],
     { encoding: 'utf8' },
   )
@@ -743,6 +818,12 @@ export const createRuntimeSubjectACL = (
     throw new Error('JIT subject ACL must contain exactly one local UID grant')
   }
   localGrants[0].identity = `uid:${uid}`
+  // The authenticated local sync worker is the subject broker. Dashboard
+  // subjects are created dynamically, so a static per-user allowlist cannot
+  // represent the production trust boundary. Remote mTLS identities retain
+  // their explicit subject lists in the same document.
+  localGrants[0].subjects = []
+  localGrants[0].allowAnySubject = true
   writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
   chmodSync(output, 0o600)
   return output
@@ -892,9 +973,6 @@ export const createTaxProfiles = (rows) => {
       })),
     })
   }
-  if (profiles.length === 0) {
-    throw new Error('No subjects have fully canonical ledger assets for taxd')
-  }
   return { schemaVersion: 'tax.downstream-profile-set.v1', profiles }
 }
 
@@ -964,7 +1042,9 @@ const createTaxRuntime = async (queryURL) => {
       activationReceiptSha256: null,
     })),
   })
-  const profiles = canonicalJSON(createTaxProfiles(rows))
+  const profileSet = createTaxProfiles(rows)
+  if (profileSet.profiles.length === 0) return null
+  const profiles = canonicalJSON(profileSet)
   const upbitConfig = JSON.parse(readFileSync(
     join(taxRepository, 'config', 'upbit-quote-provider.v1.json'),
     'utf8',
@@ -997,7 +1077,6 @@ const createTaxRuntime = async (queryURL) => {
   )
   chmodSync(files.trustKey, 0o600)
 
-  const schemaRepository = join(projectRoot, 'schema')
   const taxCommit = gitCommit(taxRepository)
   const dbCommit = gitCommit(databaseRepository)
   const catalog = readFileSync(
@@ -1047,7 +1126,7 @@ const taxEnvironment = (taxURL, runtime) => serviceEnvironment([], [], {
 })
 
 const startServices = async ({ buildArtifacts = true } = {}) => {
-  if (serviceOrder.some(isRunning))
+  if (allServiceOrder.some(isRunning))
     throw new Error('Backend services are already running; use backend:restart')
   assertExternalRuntimeRoot()
   ensureRuntimeDirectories()
@@ -1060,6 +1139,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     join(binaryRoot, 'posting-worker'),
     join(binaryRoot, 'taxd'),
     join(binaryRoot, 'tax-backfill'),
+    join(binaryRoot, 'evm-posting-worker'),
     join(runtimeRoot, 'app', 'web-api', 'server.js'),
   ]) {
     if (!existsSync(requiredArtifact)) {
@@ -1178,11 +1258,13 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         '--indexer-config',
         indexerConfig,
         '--schema-dir',
-        join(jitRuntime, 'schema'),
+        schemaRepository,
         '--cue-binary',
         join(jitRuntime, 'bin', 'cue'),
         '--subject-acl',
         subjectACL,
+        '--defi-label-dir',
+        deFiLabelRepository,
       ],
       serviceEnvironment(['EVM_INDEXER_DATA_DIR'], ['ENV_RPC_URL_', 'ETHEREUM_', 'OPTIMISM_'], {
         ENV_POSTGRES_DSN: jitURL,
@@ -1278,16 +1360,65 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       throw new Error('Posting worker exited during startup')
     }
 
+    if (evmPostingEnabled()) {
+      const evmPostingArgs = hostEVMPostingWorkerArgs(
+        jitArtifactRoot,
+        jitArtifactTemp,
+        evmPublicationClaimPolicy,
+      )
+      const evmPostingEnvironment = serviceEnvironment(
+        [],
+        [],
+        hostEVMPostingWorkerEnvironment(
+          process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY,
+          eventURL,
+        ),
+      )
+      runBestEffort(
+        join(binaryRoot, 'evm-posting-worker'),
+        [...evmPostingArgs, '--once'],
+        { cwd: postingRepository, env: evmPostingEnvironment },
+      )
+      spawnService(
+        'evm-posting',
+        join(binaryRoot, 'evm-posting-worker'),
+        evmPostingArgs,
+        evmPostingEnvironment,
+        { cwd: postingRepository },
+      )
+      await sleep(1_000)
+      if (!isRunning('evm-posting')) {
+        throw new Error('JIT/EVM Posting worker exited during startup')
+      }
+    } else {
+      console.warn(
+        `JIT/EVM Posting worker is disabled until a signed policy is provisioned at ${evmPublicationClaimPolicy}`,
+      )
+    }
+
     const taxRuntime = await createTaxRuntime(queryURL)
-    const taxdEnvironment = taxEnvironment(taxURL, taxRuntime)
-    spawnService(
-      'taxd',
-      join(binaryRoot, 'taxd'),
-      [],
-      taxdEnvironment,
-      { cwd: taxRepository },
-    )
-    await waitFor('Tax Engine', taxReady, 30_000)
+    if (taxRuntime) {
+      rmSync(taxdNoProfilesMarker, { force: true })
+      const taxdEnvironment = taxEnvironment(taxURL, taxRuntime)
+      spawnService(
+        'taxd',
+        join(binaryRoot, 'taxd'),
+        [],
+        taxdEnvironment,
+        { cwd: taxRepository },
+      )
+      await waitFor('Tax Engine', taxReady, 30_000)
+    } else {
+      writeFileSync(
+        taxdNoProfilesMarker,
+        'No subjects have fully canonical ledger assets. Restart after canonical Posting materialization.\n',
+        { mode: 0o600 },
+      )
+      chmodSync(taxdNoProfilesMarker, 0o600)
+      console.warn(
+        'Tax Engine is disabled until at least one subject has fully canonical ledger assets; JIT and Posting remain available',
+      )
+    }
 
     const webAPIEnvironment = serviceEnvironment(
       [
@@ -1346,8 +1477,12 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
 
     if (shutdownRequested) throw new Error('Backend shutdown was requested')
     rmSync(pauseFile, { force: true })
+    const evmPostingStatus = evmPostingEnabled()
+      ? ', JIT/EVM Posting worker'
+      : ''
+    const taxStatus = taxRuntime ? ', Tax Engine' : ''
     console.log(
-      'Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, sync worker, Posting worker, Tax Engine, Web API',
+      `Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, sync worker, SOURCE Posting worker${evmPostingStatus}${taxStatus}, Web API`,
     )
   } catch (error) {
     await stopServices()
@@ -1356,7 +1491,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
 }
 
 const stopServices = async () => {
-  for (const name of [...serviceOrder].reverse()) {
+  for (const name of [...allServiceOrder].reverse()) {
     const state = readProcessState(name)
     if (!isRunning(name)) {
       rmSync(pidFile(name), { force: true })
@@ -1412,12 +1547,20 @@ const restart = () => withOperationLock(async () => {
 })
 
 const status = () => {
-  for (const name of serviceOrder)
-    console.log(`${name}: ${isRunning(name) ? 'running' : 'stopped'}`)
+  for (const name of allServiceOrder) {
+    const state = isRunning(name) ? 'running' : 'stopped'
+    let disabled = ''
+    if (name === 'evm-posting' && !evmPostingEnabled()) {
+      disabled = ' (disabled: signed claim policy not provisioned)'
+    } else if (name === 'taxd' && !taxdEnabled()) {
+      disabled = ' (disabled: no fully canonical ledger assets; restart after Posting materialization)'
+    }
+    console.log(`${name}: ${state}${disabled}`)
+  }
 }
 
 const logs = () => {
-  const files = serviceOrder
+  const files = allServiceOrder
     .filter((name) => existsSync(logFile(name)))
     .map(logFile)
   if (files.length === 0) throw new Error('No backend logs are available')
@@ -1437,7 +1580,7 @@ const supervise = async () => {
       if (!existsSync(pauseFile)) {
         await withOperationLock(async () => {
           if (existsSync(pauseFile) || await runtimeHealthy()) return
-          const running = serviceOrder.filter(isRunning)
+          const running = allServiceOrder.filter(isRunning)
           if (running.length > 0) await stopServices()
           await startServices({ buildArtifacts: false })
         }).catch((error) => console.error(error))
