@@ -1238,6 +1238,139 @@
   }
 }
 
+.report-attestation-deployment {
+  margin-top: 28px;
+  padding: 28px 32px;
+  border: 1px solid #dfe4ea;
+  border-radius: 20px;
+  background: #fff;
+}
+
+.report-attestation-deployment > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.report-attestation-deployment > header span {
+  color: #ed5b24;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.report-attestation-deployment > header h2 {
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+.report-attestation-deployment > header p {
+  color: #71717a;
+  font-size: 13px;
+}
+
+.report-attestation-deployment > .report-api-state {
+  margin: 22px 0 0;
+}
+
+.report-attestation-deployment__empty {
+  margin-top: 22px;
+  padding: 18px;
+  border: 1px solid #e4e4e7;
+  border-radius: 14px;
+  background: #f7f7f8;
+}
+
+.report-attestation-deployment__empty b {
+  font-size: 14px;
+}
+
+.report-attestation-deployment__empty p {
+  margin-top: 6px;
+  color: #60646c;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.report-attestation-deployment__status {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 18px;
+  border: 1px solid #e4e4e7;
+  border-radius: 14px;
+  background: #fafafa;
+}
+
+.report-attestation-deployment__status > b {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid #d4d4d8;
+  border-radius: 999px;
+  color: #52525b;
+  font-size: 11px;
+}
+
+.report-attestation-deployment__status > b[data-status='CONNECTED'] {
+  border-color: #86c69f;
+  color: #16794c;
+  background: #effaf4;
+}
+
+.report-attestation-deployment__status > b[data-status='UNAVAILABLE'],
+.report-attestation-deployment__status > b[data-status='MISCONFIGURED'] {
+  border-color: #e5b864;
+  color: #9a5d00;
+  background: #fff9ed;
+}
+
+.report-attestation-deployment__status h3 {
+  font-size: 15px;
+}
+
+.report-attestation-deployment__status p {
+  margin-top: 5px;
+  color: #60646c;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.report-attestation-deployment__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px !important;
+}
+
+.report-attestation-deployment__facts > div {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid #eceef1;
+  border-radius: 10px;
+}
+
+.report-attestation-deployment__facts dt {
+  color: #71717a;
+  font-size: 11px;
+}
+
+.report-attestation-deployment__facts dd {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.report-attestation-deployment__facts a {
+  color: #145ea8;
+}
+
+.report-attestation-deployment__facts code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
 .tax-report-section,
 .artifact-report-section {
   margin-top: 28px;
@@ -1430,6 +1563,18 @@
 }
 
 @media (max-width: 960px) {
+  .report-attestation-deployment {
+    padding: 24px 20px;
+  }
+
+  .report-attestation-deployment > header {
+    display: grid;
+  }
+
+  .report-attestation-deployment__facts {
+    grid-template-columns: 1fr;
+  }
+
   .tax-report-section,
   .artifact-report-section {
     padding: 24px 20px;

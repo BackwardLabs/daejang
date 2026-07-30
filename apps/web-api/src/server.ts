@@ -9,6 +9,7 @@ import { loadConfig } from './config.js'
 import { assertReportPaymentSchema, assertTaxReportSchema, assertWebAuthSchema } from './database/preflight.js'
 import { EngineMtlsClient } from './engine/mtls-client.js'
 import { HttpReportPaymentFacilitator } from './report-payment/facilitator.js'
+import { HttpReportAttestationDeploymentReader } from './report-attestation-deployment/reader.js'
 import { PostgresReportPaymentStore } from './report-payment/postgres-report-payment-store.js'
 import { PostgresWalletSourceStore } from './sources/postgres-wallet-source-store.js'
 import { PostgresTaxReportReader } from './tax-report/postgres-tax-report-reader.js'
@@ -53,6 +54,11 @@ const uploadStore = pool && config.privateObjectRoot
     )
   : undefined
 const taxReportReader = pool ? new PostgresTaxReportReader(pool) : undefined
+const reportAttestationDeploymentReader = config.reportAttestationDeployment
+  ? new HttpReportAttestationDeploymentReader(
+      config.reportAttestationDeployment,
+    )
+  : undefined
 
 if (pool) {
   await assertWebAuthSchema(pool)
@@ -98,6 +104,9 @@ const { app } = await buildApp({
           : {}),
         ...(uploadStore ? { uploadStore } : {}),
       }
+    : {}),
+  ...(reportAttestationDeploymentReader
+    ? { reportAttestationDeploymentReader }
     : {}),
   ...(pool
     ? {

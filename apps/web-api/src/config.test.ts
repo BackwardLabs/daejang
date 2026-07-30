@@ -38,6 +38,14 @@ describe('web api configuration', () => {
         'X402_MAX_TIMEOUT_SECONDS',
         'X402_TOKEN_NAME',
         'X402_TOKEN_VERSION',
+        'GIWA_REPORT_ATTESTATIONS_ENABLED',
+        'GIWA_REPORT_RPC_URL',
+        'GIWA_REPORT_EAS_ADDRESS',
+        'GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS',
+        'GIWA_REPORT_REGISTRY_PROXY_ADDRESS',
+        'GIWA_REPORT_CONSUMER_ADDRESS',
+        'GIWA_REPORT_SCHEMA_UID',
+        'GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST',
         'PRIVATE_OBJECT_ENCRYPTION_KEY',
         'PRIVATE_OBJECT_ENCRYPTION_KEY_ID',
         'PRIVATE_OBJECT_LEGACY_KEY_ID',
@@ -67,6 +75,90 @@ describe('web api configuration', () => {
       X402_REPORT_PAYMENTS_ENABLED: 'true',
       X402_FACILITATOR_URL: 'https://facilitator.example.com',
     })).toThrow('are required')
+  })
+
+  it('loads the GIWA report attestation deployment only as one complete binding', () => {
+    expect(loadConfig().reportAttestationDeployment).toBeUndefined()
+
+    const environment = {
+      GIWA_REPORT_ATTESTATIONS_ENABLED: 'true',
+      GIWA_REPORT_RPC_URL: 'https://sepolia-rpc.giwa.io',
+      GIWA_REPORT_EAS_ADDRESS:
+        '0x4200000000000000000000000000000000000021',
+      GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS:
+        '0x4200000000000000000000000000000000000020',
+      GIWA_REPORT_REGISTRY_PROXY_ADDRESS:
+        '0x1111111111111111111111111111111111111111',
+      GIWA_REPORT_CONSUMER_ADDRESS:
+        '0x2222222222222222222222222222222222222222',
+      GIWA_REPORT_SCHEMA_UID: `0x${'a'.repeat(64)}`,
+      GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST: `0x${'b'.repeat(64)}`,
+    }
+
+    expect(loadConfig(environment).reportAttestationDeployment).toEqual({
+      network: 'eip155:91342',
+      rpcUrl: 'https://sepolia-rpc.giwa.io',
+      easAddress: '0x4200000000000000000000000000000000000021',
+      schemaRegistryAddress:
+        '0x4200000000000000000000000000000000000020',
+      reportRegistryProxyAddress:
+        '0x1111111111111111111111111111111111111111',
+      reportConsumerAddress:
+        '0x2222222222222222222222222222222222222222',
+      schemaUID: `0x${'a'.repeat(64)}`,
+      evidenceSchemaDigest: `0x${'b'.repeat(64)}`,
+    })
+
+    expect(() =>
+      loadConfig({
+        ...environment,
+        GIWA_REPORT_CONSUMER_ADDRESS: undefined,
+      }),
+    ).toThrow('GIWA_REPORT_CONSUMER_ADDRESS')
+    expect(() =>
+      loadConfig({
+        GIWA_REPORT_ATTESTATIONS_ENABLED: 'false',
+        GIWA_REPORT_RPC_URL: environment.GIWA_REPORT_RPC_URL,
+      }),
+    ).toThrow('require GIWA_REPORT_ATTESTATIONS_ENABLED=true')
+  })
+
+  it('rejects a wrong network binding or zero deployment identifier', () => {
+    const environment = {
+      GIWA_REPORT_ATTESTATIONS_ENABLED: 'true',
+      GIWA_REPORT_RPC_URL: 'https://sepolia-rpc.giwa.io',
+      GIWA_REPORT_EAS_ADDRESS:
+        '0x4200000000000000000000000000000000000021',
+      GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS:
+        '0x4200000000000000000000000000000000000020',
+      GIWA_REPORT_REGISTRY_PROXY_ADDRESS:
+        '0x1111111111111111111111111111111111111111',
+      GIWA_REPORT_CONSUMER_ADDRESS:
+        '0x2222222222222222222222222222222222222222',
+      GIWA_REPORT_SCHEMA_UID: `0x${'a'.repeat(64)}`,
+      GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST: `0x${'b'.repeat(64)}`,
+    }
+
+    expect(() =>
+      loadConfig({
+        ...environment,
+        GIWA_REPORT_EAS_ADDRESS:
+          '0x3333333333333333333333333333333333333333',
+      }),
+    ).toThrow('pinned GIWA Sepolia')
+    expect(() =>
+      loadConfig({
+        ...environment,
+        GIWA_REPORT_SCHEMA_UID: `0x${'0'.repeat(64)}`,
+      }),
+    ).toThrow('nonzero bytes32')
+    expect(() =>
+      loadConfig({
+        ...environment,
+        GIWA_REPORT_CONSUMER_ADDRESS:
+          environment.GIWA_REPORT_REGISTRY_PROXY_ADDRESS,
+      }),
+    ).toThrow('must be distinct')
   })
 
   it('uses a host-only secure cookie name in production', () => {

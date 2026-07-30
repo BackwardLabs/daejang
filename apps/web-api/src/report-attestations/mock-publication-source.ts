@@ -1,3 +1,8 @@
+import type {
+  ReportAttestationPublication,
+  ReportAttestationPublicationSource,
+} from './publication-source.js'
+
 export const MOCK_REPORT_ID = 'giwa-local-report-2025'
 export const MOCK_REPORT_REVISION = 1
 
@@ -18,10 +23,9 @@ const CANONICAL_PUBLICATION_BYTES = new TextEncoder().encode(
   CANONICAL_PUBLICATION_JSON,
 )
 
-export type MockReportPublication = Readonly<{
+export type MockReportPublication = ReportAttestationPublication & Readonly<{
   reportId: typeof MOCK_REPORT_ID
   revision: typeof MOCK_REPORT_REVISION
-  safeArtifactBytes: Uint8Array
 }>
 
 /**
@@ -36,3 +40,16 @@ export const getMockReportPublication = (): MockReportPublication => ({
 
 export const getMockPublicationCanonicalJson = () =>
   CANONICAL_PUBLICATION_JSON
+
+export class MockReportAttestationPublicationSource
+  implements ReportAttestationPublicationSource
+{
+  async getPublication(
+    _ownerId: string,
+    reportId: string,
+  ): Promise<MockReportPublication | undefined> {
+    return reportId === MOCK_REPORT_ID
+      ? getMockReportPublication()
+      : undefined
+  }
+}

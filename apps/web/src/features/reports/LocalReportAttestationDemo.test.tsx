@@ -55,6 +55,7 @@ const usableVerification = {
 const createApi = (
   overrides: Partial<LocalReportAttestationApi> = {},
 ): LocalReportAttestationApi => ({
+  prepare: vi.fn(async () => status('PREPARED')),
   prepareFixture: vi.fn(async () => status('PREPARED')),
   submit: vi.fn(async () =>
     status('SUBMITTED', { submissionConfirmed: true }),

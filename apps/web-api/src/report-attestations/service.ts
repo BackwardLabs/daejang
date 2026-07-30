@@ -12,7 +12,7 @@ import type {
   ReportVerification,
 } from './types.js'
 import { MemoryReportAttestationStore } from './memory-store.js'
-import type { MockReportPublication } from './mock-publication-source.js'
+import type { ReportAttestationPublication } from './publication-source.js'
 
 const EMPTY_RESULT: RedactedExecutionResult = Object.freeze({
   status: 'FAILED',
@@ -96,7 +96,7 @@ export class LocalReportFixtureUnavailableError extends Error {
 
 export class ReportAttestationPreparationError extends Error {
   constructor() {
-    super('Local report fixture preparation failed')
+    super('Report publication preparation failed')
     this.name = 'ReportAttestationPreparationError'
   }
 }
@@ -129,22 +129,40 @@ export class ReportAttestationService {
     this.#identityKey = Buffer.from(identityKey)
   }
 
-  async prepareFixture(ownerId: string, fixture: MockReportPublication) {
+  async preparePublication(
+    ownerId: string,
+    publication: ReportAttestationPublication,
+  ) {
     this.#assertOpen()
-    const existing = await this.#store.get(ownerId, fixture.reportId)
+    if (
+      typeof publication.reportId !== 'string' ||
+      publication.reportId.length === 0 ||
+      publication.reportId.length > 120 ||
+      !Number.isInteger(publication.revision) ||
+      publication.revision < 1 ||
+      publication.revision > 0xffff_ffff ||
+      !(publication.safeArtifactBytes instanceof Uint8Array) ||
+      publication.safeArtifactBytes.byteLength === 0
+    ) {
+      throw new ReportAttestationPreparationError()
+    }
+    const existing = await this.#store.get(ownerId, publication.reportId)
     if (existing) {
       return serializeStatus(existing)
     }
 
     const now = this.#now()
-    const identity = this.#deriveOwnerIdentity(ownerId)
+    const identity = this.#deriveOwnerIdentity(
+      ownerId,
+      publication.reportId,
+    )
     const claim = await this.#store.create({
       ownerId,
-      reportId: fixture.reportId,
+      reportId: publication.reportId,
       preparedRecordId: identity.preparedRecordId,
       contractReportId: identity.contractReportId,
-      revision: fixture.revision,
-      safeArtifactBytes: fixture.safeArtifactBytes.slice(),
+      revision: publication.revision,
+      safeArtifactBytes: publication.safeArtifactBytes.slice(),
       commitment: undefined,
       lifecycle: 'PREPARING',
       submission: undefined,
@@ -165,13 +183,13 @@ export class ReportAttestationService {
       prepared = await this.#runtime.prepareSyntheticEvidence({
         preparedRecordId: identity.preparedRecordId,
         reportId: identity.contractReportId,
-        revision: fixture.revision,
-        safeArtifactBytes: fixture.safeArtifactBytes.slice(),
+        revision: publication.revision,
+        safeArtifactBytes: publication.safeArtifactBytes.slice(),
       })
     } catch {
       await this.#markPreparationFailed(
         ownerId,
-        fixture.reportId,
+        publication.reportId,
         'PREPARATION_EXECUTION_FAILED',
       )
       throw new ReportAttestationPreparationError()
@@ -182,19 +200,19 @@ export class ReportAttestationService {
       prepared.preparedRecordId !== identity.preparedRecordId ||
       !isHex32(prepared.reportId) ||
       prepared.reportId.toLowerCase() !== identity.contractReportId.toLowerCase() ||
-      prepared.revision !== fixture.revision ||
+      prepared.revision !== publication.revision ||
       !isHex32(prepared.commitment)
     ) {
       await this.#markPreparationFailed(
         ownerId,
-        fixture.reportId,
+        publication.reportId,
         'PREPARATION_RESULT_REJECTED',
       )
       throw new ReportAttestationPreparationError()
     }
     const completed = await this.#store.update(
       ownerId,
-      fixture.reportId,
+      publication.reportId,
       (record) => ({
         ...record,
         commitment: prepared.commitment,
@@ -545,7 +563,7 @@ export class ReportAttestationService {
     }
   }
 
-  #deriveOwnerIdentity(ownerId: string): {
+  #deriveOwnerIdentity(ownerId: string, reportId: string): {
     preparedRecordId: string
     contractReportId: Hex32
   } {
@@ -556,6 +574,8 @@ export class ReportAttestationService {
         .update(purpose)
         .update('\u0000')
         .update(ownerId)
+        .update('\u0000')
+        .update(reportId)
         .digest('hex')
 
     return {

@@ -68,6 +68,14 @@ function stubReportRequests(options: {
         }
         return jsonResponse(options.capability ?? { enabled: false })
       }
+      if (url.includes('/report-attestations/deployment')) {
+        return jsonResponse({
+          enabled: false,
+          network: 'eip155:91342',
+          mode: 'READ_ONLY',
+          status: 'NOT_CONFIGURED',
+        })
+      }
       if (url.includes('/tax-reports/2027/current')) {
         return jsonResponse({ report })
       }
@@ -96,6 +104,14 @@ describe('ReportPage', () => {
       await screen.findByRole('heading', {
         name: '장부 생성부터 EAS 검증까지',
       }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'GIWA Sepolia 장부 증명' }),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText(
+        'GIWA Sepolia 배포 정보가 아직 연결되지 않았습니다',
+      ),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('heading', { name: '발행 산출물 이력' }),
@@ -131,9 +147,15 @@ describe('ReportPage', () => {
     ).toBe(true)
     expect(
       fetchMock.mock.calls.some(([url]) =>
-        String(url).includes('/attestation'),
+        /\/api\/v1\/(?:dev\/reports\/.+attestation|reports\/.+\/attestation)/u
+          .test(String(url)),
       ),
     ).toBe(false)
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith('/api/v1/report-attestations/deployment'),
+      ),
+    ).toBe(true)
   })
 
   it('keeps payment hidden when the server capability is disabled', async () => {

@@ -21,6 +21,8 @@ import {
   ensureRuntimeIndexerView,
   hostPostingWorkerArgs,
   hostPostingWorkerEnvironment,
+  hostWebAPIForwardedEnvironmentNames,
+  hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
   privateObjectWriteEnvironment,
   finishSignalShutdown,
@@ -276,6 +278,20 @@ test('requires a signed SOURCE claim policy for the host Posting worker', () => 
     () => hostPostingWorkerEnvironment('', 'event-url', 'source-url'),
     /TRUST_KEY is missing/,
   )
+})
+
+test('forwards GIWA report deployment settings only to the Web API boundary', () => {
+  assert.deepEqual(hostWebAPIForwardedEnvironmentNames, [
+    'GIWA_REPORT_ATTESTATIONS_ENABLED',
+    'GIWA_REPORT_RPC_URL',
+    'GIWA_REPORT_EAS_ADDRESS',
+    'GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS',
+    'GIWA_REPORT_REGISTRY_PROXY_ADDRESS',
+    'GIWA_REPORT_CONSUMER_ADDRESS',
+    'GIWA_REPORT_SCHEMA_UID',
+    'GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST',
+  ])
+  assert.equal(hostWebAPIForwardedEnvironmentPrefixes.includes('GIWA_REPORT_'), false)
 })
 
 test('creates the runtime root before taking the first operation lock', () => {
