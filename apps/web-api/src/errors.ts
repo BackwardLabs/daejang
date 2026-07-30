@@ -48,6 +48,9 @@ export const invalidWalletSignature = () =>
     '연결한 지갑의 서명을 확인할 수 없습니다.',
   )
 
+export const walletSignatureVerificationUnavailable = () =>
+  new ApiError(503, 'WALLET_SIGNATURE_VERIFICATION_UNAVAILABLE', '지갑 서명 검증 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.')
+
 export const oauthProviderUnavailable = () =>
   new ApiError(
     503,

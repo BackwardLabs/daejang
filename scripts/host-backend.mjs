@@ -308,6 +308,8 @@ export const hostWebAPIForwardedEnvironmentPrefixes = Object.freeze([
 ])
 
 export const hostWebAPIForwardedEnvironmentNames = Object.freeze([
+  'ENV_RPC_URL_ETHEREUM_MAINNET',
+  'ENV_RPC_URL_OPTIMISM_MAINNET',
   'GIWA_REPORT_ATTESTATIONS_ENABLED',
   'GIWA_REPORT_RPC_URL',
   'GIWA_REPORT_EAS_ADDRESS',

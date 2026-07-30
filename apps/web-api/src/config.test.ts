@@ -30,6 +30,8 @@ describe('web api configuration', () => {
         'EMAIL_VERIFICATION_RESEND_AFTER_SECONDS',
         'IDENTITY_VERIFICATION_MODE',
         'UPBIT_PDF_IMPORT_ENABLED',
+        'ENV_RPC_URL_ETHEREUM_MAINNET',
+        'ENV_RPC_URL_OPTIMISM_MAINNET',
         'X402_REPORT_PAYMENTS_ENABLED',
         'X402_FACILITATOR_URL',
         'X402_ASSET_ADDRESS',
@@ -66,6 +68,16 @@ describe('web api configuration', () => {
         'ENGINE_ALLOW_INSECURE_LOOPBACK',
       ]),
     )
+  })
+
+  it('loads the two wallet signature verification RPC URLs', () => {
+    expect(loadConfig({
+      ENV_RPC_URL_ETHEREUM_MAINNET: 'https://eth-mainnet.g.alchemy.com/v2/test',
+      ENV_RPC_URL_OPTIMISM_MAINNET: 'https://opt-mainnet.g.alchemy.com/v2/test',
+    }).walletSignatureRpcUrls).toEqual(new Map([
+      ['eip155:1', 'https://eth-mainnet.g.alchemy.com/v2/test'],
+      ['eip155:10', 'https://opt-mainnet.g.alchemy.com/v2/test'],
+    ]))
   })
 
   it('loads GIWA Sepolia report payment terms only when explicitly enabled', () => {

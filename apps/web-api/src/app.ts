@@ -80,6 +80,7 @@ import type { ReportPaymentTaxReportReader } from './tax-report/types.js'
 import type { UploadStore } from './uploads/upload-store.js'
 import { registerReportAttestationDeploymentRoutes } from './routes/report-attestation-deployment.js'
 import type { ReportAttestationDeploymentReader } from './report-attestation-deployment/reader.js'
+import { EthersWalletSignatureVerifier, type WalletSignatureVerifier } from './sources/wallet-signature-verifier.js'
 
 type BuildAppOptions = {
   config?: AppConfig
@@ -106,6 +107,7 @@ type BuildAppOptions = {
     localSyntheticFixture?: boolean
   }
   reportAttestationDeploymentReader?: ReportAttestationDeploymentReader
+  walletSignatureVerifier?: WalletSignatureVerifier
   now?: () => Date
   readinessCheck?: () => Promise<void>
 }
@@ -336,6 +338,8 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       ? new UnavailableWalletSourceStore()
       : new MemoryWalletSourceStore()
   )
+  const walletSignatureVerifier = options.walletSignatureVerifier ??
+    new EthersWalletSignatureVerifier(config.walletSignatureRpcUrls ?? new Map())
   if (options.reportAttestations?.store?.recoverInterrupted) {
     await options.reportAttestations.store.recoverInterrupted()
   }
@@ -495,6 +499,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     await registerSourceRoutes(protectedApp, {
       config,
       walletSourceStore,
+      walletSignatureVerifier,
       authRateLimiter,
       ...(options.engineDataClient ? { engineDataClient: options.engineDataClient } : {}),
       ...(options.now ? { now: options.now } : {}),

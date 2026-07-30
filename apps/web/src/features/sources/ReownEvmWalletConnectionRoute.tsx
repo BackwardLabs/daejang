@@ -259,11 +259,11 @@ function ConfiguredReownRoute({
           throw new DOMException('Wallet signature aborted.', 'AbortError')
         }
 
-        const recoveredAddress = verifyMessage(challenge.message, signature)
-        if (recoveredAddress.toLowerCase() !== wallet.address.toLowerCase()) {
-          return {
-            error: { code: 'SIGNATURE_ADDRESS_MISMATCH' },
-            ok: false,
+        const code = await provider.getCode(wallet.address)
+        if (code === '0x') {
+          const recoveredAddress = verifyMessage(challenge.message, signature)
+          if (recoveredAddress.toLowerCase() !== wallet.address.toLowerCase()) {
+            return { error: { code: 'SIGNATURE_ADDRESS_MISMATCH' }, ok: false }
           }
         }
         pendingSignatures.current.set(challenge.challengeId, signature)

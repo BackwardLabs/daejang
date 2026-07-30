@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
 import type { FastifyInstance } from 'fastify'
-import { verifyMessage } from 'ethers'
 
 import type { AuthRateLimiter } from '../auth/rate-limit.js'
 import { createLoginRateLimitHook } from '../auth/rate-limit.js'
@@ -11,6 +10,7 @@ import {
   invalidWalletSignature,
   resourceNotFound,
   unauthorized,
+  walletSignatureVerificationUnavailable,
 } from '../errors.js'
 import type {
   WalletOwnershipChallenge,
@@ -18,6 +18,7 @@ import type {
   WalletSourceStore,
 } from '../sources/wallet-source-store.js'
 import type { EngineDataClient } from './data.js'
+import type { WalletSignatureVerifier } from '../sources/wallet-signature-verifier.js'
 
 type ChallengeBody = {
   address: string
@@ -143,6 +144,7 @@ export const registerSourceRoutes = async (
   options: {
     config: AppConfig
     walletSourceStore: WalletSourceStore
+    walletSignatureVerifier: WalletSignatureVerifier
     authRateLimiter: AuthRateLimiter
     engineDataClient?: EngineDataClient
     now?: () => Date
@@ -296,7 +298,7 @@ export const registerSourceRoutes = async (
           required: ['challengeId', 'signature', 'chainIds'],
           properties: {
             challengeId: { type: 'string', format: 'uuid' },
-            signature: { type: 'string', minLength: 1, maxLength: 1024 },
+            signature: { type: 'string', minLength: 1, maxLength: 16384 },
             chainIds: {
               type: 'array',
               minItems: 1,
@@ -328,20 +330,19 @@ export const registerSourceRoutes = async (
         throw invalidWalletChallenge()
       }
 
-      let recoveredAddress: string
-      try {
-        recoveredAddress = verifyMessage(challenge.message, request.body.signature).toLowerCase()
-      } catch {
-        throw invalidWalletSignature()
-      }
-      if (recoveredAddress !== challenge.address) {
+      const verification = await options.walletSignatureVerifier.verify({
+        address: challenge.address, message: challenge.message,
+        signature: request.body.signature, verificationChainId: challenge.verificationChainId,
+      })
+      if (verification === 'UNAVAILABLE') throw walletSignatureVerificationUnavailable()
+      if (verification !== 'VALID') {
         throw invalidWalletSignature()
       }
 
       const source = await options.walletSourceStore.completeRegistration({
         challengeId: challenge.id,
         userId: session.user.id,
-        recoveredAddress,
+        recoveredAddress: challenge.address,
         verificationChainId: challenge.verificationChainId,
         chainIds: request.body.chainIds,
         label: request.body.label,
