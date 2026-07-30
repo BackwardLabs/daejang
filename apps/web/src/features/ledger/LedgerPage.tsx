@@ -19,7 +19,9 @@ import {
   describePostingRole,
   describeTransferEndpoint,
   formatCanonicalQuantity,
+  formatLedgerMoney,
   formatLedgerQuantity,
+  formatLedgerUnitPrice,
   parseLedgerAsset,
 } from './ledgerPresentation.ts'
 import './ledger.css'
@@ -36,12 +38,9 @@ const formatLedgerDateTime = (value: string) => new Date(value).toLocaleString('
   year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit',
 })
 
-const formatMoney = (amount: string, denomination: string) =>
-  amount ? `${amount}${denomination ? ` ${denomination}` : ''}` : '—'
-
 export const formatReviewQuantity = formatCanonicalQuantity
 
-function LedgerPostingRow({ posting }: { posting: LedgerPostingModel }) {
+function LedgerPostingRow({ posting, postings }: { posting: LedgerPostingModel; postings: LedgerPostingModel[] }) {
   const asset = parseLedgerAsset(
     posting.assetId,
     posting.assetSymbol,
@@ -75,8 +74,9 @@ function LedgerPostingRow({ posting }: { posting: LedgerPostingModel }) {
         <small>{role.description}</small>
       </span>
     </td>
-    <td>{formatMoney(posting.fairValue, posting.denomination)}</td>
-    <td>{formatMoney(posting.costBasis, posting.denomination)}</td>
+    <td>{formatLedgerMoney(posting.fairValue, posting.denomination, postings)}</td>
+    <td>{formatLedgerUnitPrice(posting, postings)}</td>
+    <td>{formatLedgerMoney(posting.costBasis, posting.denomination, postings)}</td>
   </tr>
 }
 
@@ -144,7 +144,7 @@ function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
         <div><span>CANONICAL LEDGER</span><h3 id={`posting-title-${event.eventId}`}>자산 변동과 세무 입력</h3></div>
         <b>{event.postings.length} rows</b>
       </header>
-      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>평가액</th><th>취득원가</th></tr></thead><tbody>{event.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} />)}</tbody></table></div> : <p>이 revision에 확정된 Posting이 없습니다.</p>}
+      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>당시 취득·처분 금액</th><th>평균 단가</th><th>세무 취득원가</th></tr></thead><tbody>{event.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} postings={event.postings} />)}</tbody></table></div> : <p>이 revision에 확정된 Posting이 없습니다.</p>}
     </section>
 
     <details className="ledger-explorer-provenance">
