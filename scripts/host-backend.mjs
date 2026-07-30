@@ -37,6 +37,20 @@ const canonicalRepositoryRoot = resolve(
 const databaseRepository = resolve(
   process.env.GIWA_DATABASE_REPOSITORY ?? join(projectRoot, 'daejang-db'),
 )
+export const resolvePostingRepository = (
+  root,
+  override,
+  fileExists = existsSync,
+) => {
+  if (override) return resolve(override)
+  const canonical = join(root, 'daejang-posting-service')
+  const legacy = join(root, 'evm-posting-service')
+  return fileExists(canonical) ? canonical : fileExists(legacy) ? legacy : canonical
+}
+const postingRepository = resolvePostingRepository(
+  projectRoot,
+  process.env.GIWA_POSTING_REPOSITORY,
+)
 const jitRepository = resolve(
   process.env.GIWA_JIT_REPOSITORY ?? join(projectRoot, 'daejang-jit-engine'),
 )
@@ -76,7 +90,13 @@ const pathIsWithin = (parent, candidate) =>
   candidate === parent || candidate.startsWith(`${parent}/`)
 
 const assertExternalRuntimeRoot = () => {
-  for (const checkout of [repositoryRoot, databaseRepository, jitRepository, jitRuntime]) {
+  for (const checkout of [
+    repositoryRoot,
+    databaseRepository,
+    postingRepository,
+    jitRepository,
+    jitRuntime,
+  ]) {
     if (pathIsWithin(checkout, runtimeRoot)) {
       throw new Error(
         `GIWA_HOST_RUNTIME_ROOT must be outside Git checkouts: ${runtimeRoot}`,
@@ -161,7 +181,7 @@ const loadRuntimeEnvironment = () => {
   }
 }
 
-const serviceOrder = ['pdf-parser', 'jit', 'engine', 'worker', 'web-api']
+const serviceOrder = ['pdf-parser', 'jit', 'engine', 'worker', 'posting', 'web-api']
 const pidFile = (name) => join(pidRoot, `${name}.pid`)
 const logFile = (name) => join(logRoot, `${name}.log`)
 
@@ -481,6 +501,17 @@ const build = () => {
       },
     })
   }
+  run('go', ['build', '-o', join(binaryRoot, 'posting-worker'), './cmd/posting-worker'], {
+    cwd: postingRepository,
+    env: {
+      ...baseEnvironment(),
+      GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
+      GOWORK: 'off',
+      GOPRIVATE: 'github.com/BackwardLabs',
+      GONOSUMDB: 'github.com/BackwardLabs',
+      GOPROXY: 'direct',
+    },
+  })
   const webAPIRuntime = join(runtimeRoot, 'app', 'web-api')
   rmSync(webAPIRuntime, { recursive: true, force: true })
   mkdirSync(dirname(webAPIRuntime), { recursive: true, mode: 0o700 })
@@ -634,6 +665,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     join(binaryRoot, 'engine-api'),
     join(binaryRoot, 'engine-healthcheck'),
     join(binaryRoot, 'sync-worker'),
+    join(binaryRoot, 'posting-worker'),
     join(runtimeRoot, 'app', 'web-api', 'server.js'),
   ]) {
     if (!existsSync(requiredArtifact)) {
@@ -812,6 +844,28 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       10_000,
     )
 
+    spawnService(
+      'posting',
+      join(binaryRoot, 'posting-worker'),
+      [
+        '--artifact-root',
+        join(artifactRoot, 'source', 'root'),
+        '--artifact-temp',
+        join(artifactRoot, 'source', 'tmp'),
+        '--service-root',
+        postingRepository,
+      ],
+      serviceEnvironment([], [], {
+        DAEJANG_POSTING_DATABASE_URL: eventURL,
+        DAEJANG_POSTING_ARTIFACT_DATABASE_URL: sourceURL,
+      }),
+      { cwd: postingRepository },
+    )
+    await sleep(1_000)
+    if (!isRunning('posting')) {
+      throw new Error('Posting worker exited during startup')
+    }
+
     const webAPIEnvironment = serviceEnvironment(
       [
         'BODY_LIMIT_BYTES',
@@ -869,7 +923,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     if (shutdownRequested) throw new Error('Backend shutdown was requested')
     rmSync(pauseFile, { force: true })
     console.log(
-      'Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, worker, Web API',
+      'Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, sync worker, Posting worker, Web API',
     )
   } catch (error) {
     await stopServices()

@@ -1,7 +1,8 @@
 # Host backend supervisor
 
 같은 서버에서 실행되는 PostgreSQL, PDF parser, Ethereum/Optimism JIT, Engine,
-sync worker, Web API를 Docker 애플리케이션 이미지 없이 한 명령으로 관리한다.
+sync worker, SOURCE/CEX Posting worker, Web API를 Docker 애플리케이션 이미지 없이
+한 명령으로 관리한다.
 PostgreSQL만 기존 `daejang-db` Compose 서비스를 사용한다.
 
 ## 준비
@@ -9,6 +10,7 @@ PostgreSQL만 기존 `daejang-db` Compose 서비스를 사용한다.
 - `daejang-db/.env`
 - `daejang/deploy/production.env`
 - `daejang-jit-engine/.envrc`
+- `daejang-posting-service` checkout (기존 호스트의 `evm-posting-service` 이름도 지원)
 - Ethereum/Optimism을 모두 포함한 JIT bridge JSON
 - 빌드된 `daejang-jit-runtime/bin/jitd`, `daejang-jit-runtime/bin/cue`
 - PDF parser Python 가상환경
@@ -74,6 +76,11 @@ artifact로 재시작한다. 이 호스트처럼 LaunchAgent domain이 비활성
 동시에 조작하지 못하게 한다. build는 명시적인 start/restart 때만 수행하며 장애
 복구 loop는 runtime root의 prebuilt Go binaries, Web API dist, proto를 재사용한다.
 
+Posting worker는 `SOURCE` publication을 소비해 CEX Event·Posting·Relation을
+원자적으로 저장한다. JIT/EVM canonical writer는 별도의 단일-writer 전환 대상이므로
+이 supervisor가 자동으로 활성화하지 않는다. shadow parity, 기존 Tax Engine writer
+stop/drain, 서명된 publication claim policy 검증이 끝난 뒤에만 전환한다.
+
 Web API만 `127.0.0.1:3000`을 listen한다. Engine은 외부 TCP 포트를 열지 않고
 권한 `0700` socket directory 안의 소유자 전용 Unix socket(`0600`)으로만 Web API와
 통신한다. 따라서 같은 호스트 배포에서 별도 mTLS 인증서를 운영하지 않는다.
@@ -94,6 +101,7 @@ PDF parser 프로세스는 항상 시작한다. production PDF 업로드를 켤 
 - `GIWA_DATABASE_REPOSITORY`
 - `GIWA_JIT_REPOSITORY`
 - `GIWA_JIT_RUNTIME`
+- `GIWA_POSTING_REPOSITORY`
 - `GIWA_HOST_RUNTIME_ROOT`
 - `GIWA_HOST_SOCKET_ROOT`
 - `GIWA_JIT_BRIDGE_CONFIG`

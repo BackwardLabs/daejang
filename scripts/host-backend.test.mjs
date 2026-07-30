@@ -23,11 +23,30 @@ import {
   privateObjectWriteEnvironment,
   finishSignalShutdown,
   releaseProcessLock,
+  resolvePostingRepository,
   runRestartOperation,
   runSignalShutdown,
   resolveRuntimeSubjectACLSource,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
+
+test('prefers the canonical Posting repository and supports the historical checkout name', () => {
+  const root = '/srv/giwa'
+  assert.equal(
+    resolvePostingRepository(root, undefined, (path) =>
+      path === join(root, 'daejang-posting-service')),
+    join(root, 'daejang-posting-service'),
+  )
+  assert.equal(
+    resolvePostingRepository(root, undefined, (path) =>
+      path === join(root, 'evm-posting-service')),
+    join(root, 'evm-posting-service'),
+  )
+  assert.equal(
+    resolvePostingRepository(root, '/opt/giwa/posting', () => false),
+    '/opt/giwa/posting',
+  )
+})
 
 test('limits the runtime indexer config to the JIT chain stores', () => {
   const parent = mkdtempSync(join(tmpdir(), 'giwa-host-backend-indexer-test-'))
