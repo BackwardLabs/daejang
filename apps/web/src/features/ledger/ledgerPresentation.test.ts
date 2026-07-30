@@ -6,7 +6,9 @@ import {
   describePostingDirection,
   describePostingRole,
   describeTransferEndpoint,
+  formatLedgerMoney,
   formatLedgerQuantity,
+  formatLedgerUnitPrice,
   parseLedgerAsset,
 } from './ledgerPresentation.ts'
 
@@ -47,6 +49,31 @@ describe('ledger posting presentation', () => {
     expect(formatLedgerQuantity('27016310000000', 8)).toBe('270,163.1')
     expect(formatLedgerQuantity('2701600000', 8)).toBe('27.016')
     expect(formatLedgerQuantity('-1', 18)).toBe('-0.000000000000000001')
+  })
+
+  it('formats the transaction amount and derives the CEX statement unit price', () => {
+    const postings = [
+      {
+        assetId: 'asset-usdt-upbit', assetSymbol: 'USDT', assetDecimals: 8,
+        hasAssetDecimals: true, assetVenue: 'upbit', direction: 'IN',
+        quantity: '180108722461', role: 'PRINCIPAL', denomination: 'asset-krw-upbit',
+      },
+      {
+        assetId: 'asset-krw-upbit', assetSymbol: 'KRW', assetDecimals: 8,
+        hasAssetDecimals: true, assetVenue: 'upbit', direction: 'OUT',
+        quantity: '270163100000000', role: 'PRINCIPAL', denomination: 'asset-krw-upbit',
+      },
+      {
+        assetId: 'asset-krw-upbit', assetSymbol: 'KRW', assetDecimals: 8,
+        hasAssetDecimals: true, assetVenue: 'upbit', direction: 'OUT',
+        quantity: '27016000000', role: 'FEE', denomination: 'asset-krw-upbit',
+      },
+    ]
+
+    expect(formatLedgerMoney('270190116000000', 'asset-krw-upbit', postings)).toBe('2,701,901.16 KRW')
+    expect(formatLedgerUnitPrice(postings[0]!, postings)).toBe('1,500 KRW / USDT')
+    expect(formatLedgerUnitPrice(postings[1]!, postings)).toBe('—')
+    expect(formatLedgerUnitPrice(postings[2]!, postings)).toBe('—')
   })
 
   it('explains posting directions and roles in product language', () => {

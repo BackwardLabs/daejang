@@ -106,9 +106,21 @@ describe('LedgerPage', () => {
           direction: 'IN',
           quantity: '180108722461',
           role: 'PRINCIPAL',
-          fairValue: '',
+          fairValue: '270190116000000',
           costBasis: '',
-          denomination: '',
+          denomination: 'cex-document-asset:upbit:decimal8:krw',
+        },
+        {
+          legId: 'leg-quote',
+          accountId: 'account-upbit',
+          assetId: 'cex-document-asset:upbit:decimal8:krw',
+          occurredAt: ledgerEvent.effectiveAt,
+          direction: 'OUT',
+          quantity: '270163100000000',
+          role: 'PRINCIPAL',
+          fairValue: '270163100000000',
+          costBasis: '',
+          denomination: 'cex-document-asset:upbit:decimal8:krw',
         },
         {
           legId: 'leg-fee',
@@ -118,9 +130,9 @@ describe('LedgerPage', () => {
           direction: 'OUT',
           quantity: '2701600000',
           role: 'FEE',
-          fairValue: '',
+          fairValue: '2701600000',
           costBasis: '',
-          denomination: '',
+          denomination: 'cex-document-asset:upbit:decimal8:krw',
         },
       ],
     }
@@ -141,15 +153,20 @@ describe('LedgerPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '거래 거래 상세 보기' }))
 
     expect(screen.getAllByText('1,801.08722461 USDT')).toHaveLength(2)
-    expect(screen.getAllByText('27.016 KRW')).toHaveLength(2)
-    expect(screen.getAllByText('Upbit · 소수점 8자리')).toHaveLength(2)
+    expect(screen.getAllByText('27.016 KRW')).toHaveLength(3)
+    expect(screen.getAllByText('Upbit · 소수점 8자리')).toHaveLength(3)
     expect(screen.getAllByText('Upbit').length).toBeGreaterThan(0)
     expect(screen.getByText('장부 확정')).toBeInTheDocument()
-    expect(screen.getAllByText('평가 대기').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('평가 완료').length).toBeGreaterThan(0)
     expect(screen.getByText('들어옴')).toBeInTheDocument()
-    expect(screen.getByText('나감')).toBeInTheDocument()
-    expect(screen.getByText('매수·매도·입출금의 본체가 되는 자산 변동')).toBeInTheDocument()
+    expect(screen.getAllByText('나감')).toHaveLength(2)
+    expect(screen.getAllByText('매수·매도·입출금의 본체가 되는 자산 변동')).toHaveLength(2)
     expect(screen.getByText('거래소나 서비스에 지불한 처리 비용')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '당시 취득·처분 금액' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '평균 단가' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '세무 취득원가' })).toBeInTheDocument()
+    expect(screen.getByText('2,701,901.16 KRW')).toBeInTheDocument()
+    expect(screen.getByText('1,500 KRW / USDT')).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: '거래 처리 계보' })).not.toBeInTheDocument()
   })
 
