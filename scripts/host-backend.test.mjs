@@ -26,6 +26,7 @@ import {
   hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
   handoffSupervisorAfterSignal,
+  launchdServiceDomains,
   normalizeMultichainSnapshotIds,
   pauseForSignalShutdown,
   privateObjectWriteEnvironment,
@@ -36,6 +37,7 @@ import {
   runRestartOperation,
   runSignalShutdown,
   resolveRuntimeSubjectACLSource,
+  stableSupervisorPath,
   supervisorProcessSpec,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
@@ -512,8 +514,26 @@ test('cron fallback installs a PATH-aware reboot entry and watchdog', () => {
   assert.equal(entries.length, 2)
   assert.match(entries[0], /^@reboot /)
   assert.match(entries[0], /PATH='\/opt\/homebrew\/bin:\/usr\/bin:\/bin'/)
-  assert.match(entries[1], /^\* \* \* \* \* pgrep -f '\[h\]ost-backend\.mjs supervise'/)
+  assert.match(entries[1], /^\* \* \* \* \* cd /)
+  assert.match(entries[1], /host-backend\.mjs' watchdog >>/)
+  assert.doesNotMatch(entries[1], /pgrep/)
   assert.ok(entries.every((entry) => entry.endsWith('# GIWA_HOST_BACKEND')))
+})
+
+test('autostart tries the background user launchd domain after GUI', () => {
+  assert.deepEqual(launchdServiceDomains(502), ['gui/502', 'user/502'])
+})
+
+test('autostart uses a bounded host PATH without session tool directories', () => {
+  const path = stableSupervisorPath({
+    node: '/opt/homebrew/Cellar/node/26.5.0/bin/node',
+    home: '/Users/operator',
+  })
+  assert.equal(
+    path,
+    '/opt/homebrew/Cellar/node/26.5.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/operator/.orbstack/bin',
+  )
+  assert.doesNotMatch(path, /codex|node_modules/)
 })
 
 test('detached supervisor uses the stable runtime script and repository', () => {

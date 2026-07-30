@@ -1148,6 +1148,19 @@ const xmlEscape = (value) => value
 
 const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`
 
+export const launchdServiceDomains = (uid) => [`gui/${uid}`, `user/${uid}`]
+
+export const stableSupervisorPath = ({ node, home }) => [...new Set([
+  dirname(node),
+  '/opt/homebrew/bin',
+  '/usr/local/bin',
+  '/usr/bin',
+  '/bin',
+  '/usr/sbin',
+  '/sbin',
+  join(home, '.orbstack', 'bin'),
+])].join(':')
+
 export const cronAutostartEntries = ({
   repository,
   node,
@@ -1157,10 +1170,11 @@ export const cronAutostartEntries = ({
   marker,
 }) => {
   const environment = `PATH=${shellQuote(path)} GIWA_APP_REPOSITORY=${shellQuote(repository)}`
-  const supervise = `cd ${shellQuote(repository)} && ${environment} ${shellQuote(node)} ${shellQuote(script)} supervise >> ${shellQuote(log)} 2>&1`
+  const command = (operation) =>
+    `cd ${shellQuote(repository)} && ${environment} ${shellQuote(node)} ${shellQuote(script)} ${operation} >> ${shellQuote(log)} 2>&1`
   return [
-    `@reboot ${supervise} ${marker}`,
-    `* * * * * pgrep -f '[h]ost-backend.mjs supervise' >/dev/null || (${supervise}) ${marker}`,
+    `@reboot ${command('supervise')} ${marker}`,
+    `* * * * * ${command('watchdog')} ${marker}`,
   ]
 }
 
@@ -1184,7 +1198,7 @@ const startDetachedSupervisor = (script) => {
     repository: canonicalRepositoryRoot,
     node: process.execPath,
     script,
-    path: process.env.PATH ?? '',
+    path: stableSupervisorPath({ node: process.execPath, home: homedir() }),
   })
   const descriptor = openSync(join(logRoot, 'supervisor.log'), 'a', 0o600)
   const child = spawn(spec.command, spec.args, {
@@ -1194,6 +1208,23 @@ const startDetachedSupervisor = (script) => {
   child.unref()
   closeSync(descriptor)
   console.log(`Started detached backend supervisor as PID ${child.pid}`)
+}
+
+const runSupervisorWatchdog = (script) => {
+  ensureRuntimeDirectories()
+  let lease
+  try {
+    lease = tryAcquireProcessLock(supervisorLockFile)
+  } catch (error) {
+    if (!String(error?.message).startsWith('Stale backend lock requires manual removal:')) {
+      throw error
+    }
+    rmSync(supervisorLockFile)
+    lease = tryAcquireProcessLock(supervisorLockFile)
+  }
+  if (!lease) return
+  releaseProcessLock(supervisorLockFile, lease)
+  startDetachedSupervisor(script)
 }
 
 const installCronAutostart = (script) => {
@@ -1210,7 +1241,7 @@ const installCronAutostart = (script) => {
     node: process.execPath,
     script,
     log: join(logRoot, 'supervisor.log'),
-    path: process.env.PATH ?? '',
+    path: stableSupervisorPath({ node: process.execPath, home: homedir() }),
     marker,
   }))
   const installed = spawnSync('crontab', ['-'], {
@@ -1232,6 +1263,7 @@ const installAutostart = () => {
   mkdirSync(launchAgents, { recursive: true, mode: 0o700 })
   const plist = join(launchAgents, 'io.backwardlabs.giwa-host-backend.plist')
   const script = join(stateRoot, 'host-backend.mjs')
+  const servicePath = stableSupervisorPath({ node: process.execPath, home: homedir() })
   cpSync(fileURLToPath(import.meta.url), script)
   writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1249,28 +1281,38 @@ const installAutostart = () => {
   <key>StandardOutPath</key><string>${xmlEscape(join(logRoot, 'supervisor.log'))}</string>
   <key>StandardErrorPath</key><string>${xmlEscape(join(logRoot, 'supervisor.log'))}</string>
   <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>${xmlEscape(process.env.PATH ?? '')}</string>
+    <key>PATH</key><string>${xmlEscape(servicePath)}</string>
     <key>GIWA_HOST_RUNTIME_ROOT</key><string>${xmlEscape(runtimeRoot)}</string>
     <key>GIWA_APP_REPOSITORY</key><string>${xmlEscape(canonicalRepositoryRoot)}</string>
   </dict>
 </dict></plist>
 `, { mode: 0o600 })
-  const bootstrap = spawnSync(
-    'launchctl',
-    ['bootstrap', `gui/${process.getuid()}`, plist],
-    { stdio: 'inherit' },
-  )
-  let installedWith = 'launchd'
-  if (bootstrap.status !== 0) {
+  let installedWith
+  let launchdDomain
+  for (const domain of launchdServiceDomains(process.getuid())) {
+    const bootstrap = spawnSync(
+      'launchctl',
+      ['bootstrap', domain, plist],
+      { stdio: 'inherit' },
+    )
+    if (bootstrap.status === 0) {
+      installedWith = 'launchd'
+      launchdDomain = domain
+      break
+    }
+  }
+  if (!installedWith) {
     const load = spawnSync('launchctl', ['load', '-w', plist], {
       stdio: 'inherit',
     })
-    if (load.status !== 0) installedWith = installCronAutostart(script)
+    installedWith = load.status === 0 ? 'launchd' : installCronAutostart(script)
   }
   if (installedWith === 'launchd') {
-    console.log(`Installed login supervisor: ${plist}`)
+    console.log(
+      `Installed login supervisor${launchdDomain ? ` in ${launchdDomain}` : ''}: ${plist}`,
+    )
   } else {
-    startDetachedSupervisor(script)
+    runSupervisorWatchdog(script)
   }
 }
 
@@ -1362,5 +1404,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     })
   }
   else if (command === 'install-autostart') installAutostart()
-  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|supervise|install-autostart')
+  else if (command === 'watchdog') {
+    runSupervisorWatchdog(fileURLToPath(import.meta.url))
+  }
+  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|supervise|watchdog|install-autostart')
 }

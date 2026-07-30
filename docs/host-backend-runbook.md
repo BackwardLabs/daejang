@@ -69,9 +69,15 @@ npm run backend:install-autostart
 LaunchAgent를 설치하고, 로그인/재부팅 후 supervisor가 전체 서비스를 다시 올리며
 중간 프로세스가 종료되거나 readiness가 실패하면 전체 dependency set을 prebuilt
 artifact로 재시작한다. 이 호스트처럼 LaunchAgent domain이 비활성화된 경우에는
-동일한 stable runtime launcher를 사용자 crontab의 `@reboot`에 등록하고 설치 즉시
-detached supervisor를 시작한다. 1분 watchdog은 supervisor가 사라진 경우에만 이를
-다시 시작한다.
+GUI domain 다음으로 background `user/<uid>` launchd domain을 사용한다. 두 launchd
+domain과 legacy load가 모두 불가능한 경우에만 동일한 stable runtime launcher를
+사용자 crontab의 `@reboot`에 등록하고 설치 즉시 detached supervisor를 시작한다.
+1분 watchdog은 supervisor가 사라진 경우에만 이를 다시 시작한다.
+설치 시에도 같은 lock watchdog을 먼저 실행하므로 이전 강제 종료의 stale lock이
+남아 있어도 첫 1분 주기를 기다리지 않고 supervisor를 복구한다.
+launchd와 cron에는 설치 세션의 임시 도구 경로를 복사하지 않고 Node, Homebrew,
+시스템 도구와 OrbStack만 포함한 bounded `PATH`를 기록한다. 따라서 긴 개발 세션
+환경 때문에 crontab 명령이 잘리거나 재부팅 후 실행 경로가 달라지지 않는다.
 
 `backend:stop`은 pause marker를 먼저 기록하므로 supervisor가 서비스를 즉시 다시
 올리지 않는다. `backend:start` 또는 `backend:restart`가 전체 readiness를 통과한
@@ -84,6 +90,10 @@ supervisor 자체가 launchd·cron·운영 세션의 종료 신호를 받는 경
 다시 연결한다. supervisor는 종료 신호 처리 후 singleton lock을 반납하고 stable
 runtime script로 detached monitor를 직접 handoff하므로, cron 실행이 지연되거나
 비활성화된 로그인 세션에서도 감시 공백을 남기지 않는다.
+cron fallback의 1분 watchdog은 프로세스 이름 검색을 사용하지 않고 singleton lock에
+기록된 PID와 실제 명령 신원을 검사한다. supervisor가 강제 종료되어 stale lock이
+남아도 다른 프로세스가 해당 PID·명령을 소유하지 않음을 확인한 뒤 lock을 회수하고
+monitor만 다시 시작한다.
 
 Posting worker는 `SOURCE` publication을 소비해 CEX Event·Posting·Relation을
 원자적으로 저장한다. 시작 시 signed `normal-single-writer` policy로 한 번의 bounded
