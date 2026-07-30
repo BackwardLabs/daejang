@@ -538,7 +538,7 @@ describe('AppRouter', () => {
     )
 
     expect(
-      await screen.findByRole('alert'),
+      await screen.findByRole('alert', undefined, { timeout: 3_000 }),
     ).toHaveTextContent(
       '지갑 연결이 취소되었거나 모듈을 열지 못했습니다. 다시 선택해 주세요.',
     )

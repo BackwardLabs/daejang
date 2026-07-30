@@ -78,6 +78,14 @@ afterEach(() => {
 })
 
 describe('EvmWalletConnectionPage', () => {
+  it('shows every supported EVM network before connecting a wallet', () => {
+    render(<EvmWalletConnectionPage {...withTestFixtures()} />)
+
+    expect(screen.getByText('Ethereum')).toBeInTheDocument()
+    expect(screen.getByText('Optimism')).toBeInTheDocument()
+    expect(screen.getByText('GIWA Sepolia')).toBeInTheDocument()
+  })
+
   it('starts the Reown connection immediately when launched from source selection', async () => {
     const connectWallet = vi.fn(connectWalletTestFixture)
     const onInitialConnectionResult = vi.fn()
