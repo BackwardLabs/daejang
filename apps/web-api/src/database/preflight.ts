@@ -398,6 +398,8 @@ export const assertTaxReportSchema = async (pool: Pool) => {
 
 const reportPaymentContractDigest =
   '28f6894a953e6acc5c238b04e025662ee6bc7d3b5dbd31e783c40789b9e6dcf4'
+const reportAttestationContractDigest =
+  'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561'
 
 export const assertReportPaymentSchema = async (pool: Pool) => {
   const result = await pool.query<{
@@ -426,5 +428,140 @@ export const assertReportPaymentSchema = async (pool: Pool) => {
     row.migration_version !== '35'
   ) {
     throw new Error('report x402 payment migration contract is invalid')
+  }
+}
+
+export const assertReportAttestationSchema = async (pool: Pool) => {
+  const result = await pool.query<{
+    records_table: string | null
+    operations_table: string | null
+    contract_version: number | null
+    contract_digest: string | null
+    migration_version: string | null
+    record_guard: boolean
+    operation_guard: boolean
+    web_usage: boolean
+    web_create: boolean
+    records_select: boolean
+    operations_select: boolean
+    records_insert_identity: boolean
+    records_update_state: boolean
+    operations_insert_identity: boolean
+    operations_update_state: boolean
+    dangerous_write: boolean
+  }>(`
+    SELECT
+      to_regclass('web_private.report_attestation_records')::text
+        AS records_table,
+      to_regclass('web_private.report_attestation_operations')::text
+        AS operations_table,
+      (
+        SELECT version
+        FROM web_private.schema_contracts
+        WHERE component = 'report-attestation-persistence'
+      ) AS contract_version,
+      (
+        SELECT digest
+        FROM web_private.schema_contracts
+        WHERE component = 'report-attestation-persistence'
+      ) AS contract_digest,
+      (
+        SELECT migration_version::text
+        FROM daejang_meta.schema_contract
+        WHERE component = 'report-attestation-persistence'
+          AND contract_version = 1
+      ) AS migration_version,
+      EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid =
+          to_regclass('web_private.report_attestation_records')
+          AND tgname =
+            'report_attestation_records_validate_transition'
+          AND tgenabled IN ('O', 'A')
+          AND NOT tgisinternal
+      ) AS record_guard,
+      EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid =
+          to_regclass('web_private.report_attestation_operations')
+          AND tgname =
+            'report_attestation_operations_validate_transition'
+          AND tgenabled IN ('O', 'A')
+          AND NOT tgisinternal
+      ) AS operation_guard,
+      has_schema_privilege(current_user, 'web_private', 'USAGE')
+        AS web_usage,
+      has_schema_privilege(current_user, 'web_private', 'CREATE')
+        AS web_create,
+      has_table_privilege(
+        current_user,
+        'web_private.report_attestation_records',
+        'SELECT'
+      ) AS records_select,
+      has_table_privilege(
+        current_user,
+        'web_private.report_attestation_operations',
+        'SELECT'
+      ) AS operations_select,
+      has_column_privilege(
+        current_user,
+        'web_private.report_attestation_records',
+        'previous_submission_uid',
+        'INSERT'
+      ) AS records_insert_identity,
+      has_column_privilege(
+        current_user,
+        'web_private.report_attestation_records',
+        'state_version',
+        'UPDATE'
+      ) AS records_update_state,
+      has_column_privilege(
+        current_user,
+        'web_private.report_attestation_operations',
+        'operation_key',
+        'INSERT'
+      ) AS operations_insert_identity,
+      has_column_privilege(
+        current_user,
+        'web_private.report_attestation_operations',
+        'state_version',
+        'UPDATE'
+      ) AS operations_update_state,
+      has_table_privilege(
+        current_user,
+        'web_private.report_attestation_records',
+        'DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ) OR has_table_privilege(
+        current_user,
+        'web_private.report_attestation_operations',
+        'DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      ) AS dangerous_write
+  `)
+  const row = result.rows[0]
+  if (
+    row?.records_table !==
+      'web_private.report_attestation_records' ||
+    row.operations_table !==
+      'web_private.report_attestation_operations' ||
+    row.contract_version !== 1 ||
+    row.contract_digest !== reportAttestationContractDigest ||
+    row.migration_version !== '53' ||
+    !row.record_guard ||
+    !row.operation_guard ||
+    !row.web_usage ||
+    row.web_create ||
+    !row.records_select ||
+    !row.operations_select ||
+    !row.records_insert_identity ||
+    !row.records_update_state ||
+    !row.operations_insert_identity ||
+    !row.operations_update_state ||
+    row.dangerous_write
+  ) {
+    throw new Error(
+      'report attestation persistence migration contract is invalid',
+    )
   }
 }

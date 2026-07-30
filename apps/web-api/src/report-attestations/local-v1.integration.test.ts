@@ -13,9 +13,10 @@ const INTEGRATION_ENABLED =
   process.env.GIWA28_RUN_LOCAL_CONTRACTS_INTEGRATION === '1'
 const OWNER_A = '00000000-0000-4000-8000-000000000028'
 const OWNER_B = '00000000-0000-4000-8000-000000000029'
+const OWNER_C = '00000000-0000-4000-8000-000000000030'
 const IDENTITY_KEY = new Uint8Array(32).fill(28)
 
-type Owner = 'A' | 'B'
+type Owner = 'A' | 'B' | 'C'
 type IntegrationStatusBody = {
   reportId: string
   lifecycle: string
@@ -41,8 +42,10 @@ const readReviewOutcome = (): ReportReviewOutcome => {
 }
 
 const config = loadConfig({
-  NODE_ENV: 'test',
-  PUBLIC_ORIGIN: 'http://localhost:5173',
+  NODE_ENV: 'development',
+  HOST: '127.0.0.1',
+  PORT: '3100',
+  PUBLIC_ORIGIN: 'http://127.0.0.1:5174',
   RATE_LIMIT_HMAC_SECRET: 'local-v1-integration-test-secret',
 })
 
@@ -55,11 +58,11 @@ describe.runIf(INTEGRATION_ENABLED)(
       async () => {
         const reviewOutcome = readReviewOutcome()
         const runtime = await loadLocalReportAttestationRuntime({
-          runtimeMode: 'test',
+          runtimeMode: 'development',
           reviewOutcome,
         })
         const sameRuntime = await loadLocalReportAttestationRuntime({
-          runtimeMode: 'test',
+          runtimeMode: 'development',
           reviewOutcome,
         })
         expect(sameRuntime).toBe(runtime)
@@ -71,6 +74,7 @@ describe.runIf(INTEGRATION_ENABLED)(
             runtime,
             reviewOutcome,
             identityKey: IDENTITY_KEY,
+            localSyntheticFixture: true,
           },
         })
         const sessions = {
@@ -79,6 +83,9 @@ describe.runIf(INTEGRATION_ENABLED)(
           }),
           B: await context.sessionService.create({
             user: { id: OWNER_B, displayName: 'integration-owner-b' },
+          }),
+          C: await context.sessionService.create({
+            user: { id: OWNER_C, displayName: 'integration-owner-c' },
           }),
         }
         const request = (
@@ -201,6 +208,70 @@ describe.runIf(INTEGRATION_ENABLED)(
                   },
             )
           }
+
+          const syntheticInitial = await request(
+            'C',
+            'GET',
+            '/api/v1/report-attestations/synthetic-publication',
+          )
+          expect(syntheticInitial.statusCode).toBe(200)
+          expect(syntheticInitial.json()).toMatchObject({
+            capability: {
+              enabled: true,
+              network: 'eip155:31337',
+              mode: 'LOCAL_ANVIL',
+              explorerBaseUrl: null,
+              reasonCode: null,
+            },
+            status: null,
+            verification: null,
+          })
+
+          const syntheticSubmission = await request(
+            'C',
+            'POST',
+            '/api/v1/report-attestations/synthetic-publication/submission',
+          )
+          expect(syntheticSubmission.statusCode).toBe(200)
+          const syntheticSubmitted = await waitForLifecycle('C', [
+            'SUBMITTED',
+          ])
+          expect(syntheticSubmitted.submission).toMatchObject({
+            status: 'CONFIRMED',
+            transactionHash: expect.stringMatching(/^0x[0-9a-fA-F]{64}$/),
+            attestationUID: expect.stringMatching(/^0x[0-9a-fA-F]{64}$/),
+          })
+
+          const syntheticReview = await request(
+            'C',
+            'POST',
+            '/api/v1/report-attestations/synthetic-publication/review',
+          )
+          expect(syntheticReview.statusCode).toBe(200)
+          await waitForLifecycle('C', [expectedLifecycle])
+          const syntheticVerified = await request(
+            'C',
+            'GET',
+            '/api/v1/report-attestations/synthetic-publication',
+          )
+          expect(syntheticVerified.json()).toMatchObject(
+            reviewOutcome === 'APPROVE'
+              ? {
+                  status: { lifecycle: 'APPROVED' },
+                  verification: {
+                    lifecycle: 'APPROVED',
+                    result: 'USABLE',
+                    reasonCode: null,
+                  },
+                }
+              : {
+                  status: { lifecycle: expectedLifecycle },
+                  verification: {
+                    lifecycle: expectedLifecycle,
+                    result: 'UNUSABLE',
+                  },
+                },
+          )
 
           if (reviewOutcome === 'APPROVE') {
             await context.reportAttestationService?.mutateSafeArtifactForTest(

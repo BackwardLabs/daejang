@@ -1081,6 +1081,66 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.report-attestation-demo__steps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-attestation-demo__steps li {
+  display: flex;
+  gap: 11px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #e7ddd6;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.report-attestation-demo__steps li > b {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #78716c;
+  background: #f5f5f4;
+  font-size: 12px;
+}
+
+.report-attestation-demo__steps li[data-state='current'] {
+  border-color: #f1a17b;
+}
+
+.report-attestation-demo__steps li[data-state='current'] > b {
+  color: #fff;
+  background: #ed5b24;
+}
+
+.report-attestation-demo__steps li[data-state='complete'] > b {
+  color: #fff;
+  background: #16794c;
+}
+
+.report-attestation-demo__steps li > span {
+  display: grid;
+  gap: 4px;
+}
+
+.report-attestation-demo__steps strong {
+  font-size: 13px;
+}
+
+.report-attestation-demo__steps small {
+  color: #78716c;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .report-attestation-demo dl > div {
   min-width: 0;
   padding: 13px 14px;
@@ -1192,9 +1252,31 @@
   white-space: nowrap;
 }
 
-.report-attestation-demo__message {
-  color: #b42318 !important;
+.report-attestation-demo__evidence a {
+  color: #145ea8;
+}
+
+.report-attestation-demo__capability {
+  margin-top: 16px !important;
+  padding: 13px 14px;
+  border: 1px solid #e7c77d;
+  border-radius: 10px;
+  color: #8a5800 !important;
+  background: #fff9ed;
   font-weight: 700;
+}
+
+.report-attestation-demo__message {
+  margin-top: 14px !important;
+  font-weight: 700;
+}
+
+.report-attestation-demo__message.is-success {
+  color: #247a4d !important;
+}
+
+.report-attestation-demo__message.is-error {
+  color: #b42318 !important;
 }
 
 .report-attestation-demo__actions {
@@ -1221,12 +1303,13 @@
 }
 
 .report-attestation-demo__actions button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.58;
 }
 
 @media (max-width: 760px) {
   .report-attestation-demo__fixture,
+  .report-attestation-demo__steps,
   .report-attestation-demo__status,
   .report-attestation-demo__decision dl {
     grid-template-columns: 1fr;
@@ -1240,37 +1323,87 @@
 
 .report-attestation-deployment {
   margin-top: 28px;
-  padding: 28px 32px;
   border: 1px solid #dfe4ea;
   border-radius: 20px;
   background: #fff;
+  overflow: hidden;
 }
 
-.report-attestation-deployment > header {
+.report-attestation-deployment > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 22px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.report-attestation-deployment > summary::-webkit-details-marker {
+  display: none;
+}
+
+.report-attestation-deployment > summary > span {
+  display: grid;
+  gap: 3px;
+}
+
+.report-attestation-deployment > summary b {
+  font-size: 14px;
+}
+
+.report-attestation-deployment > summary small {
+  color: #71717a;
+  font-size: 12px;
+}
+
+.report-attestation-deployment > summary strong {
+  color: #145ea8;
+  font-size: 12px;
+}
+
+.report-attestation-deployment[open] > summary {
+  border-bottom: 1px solid #e4e4e7;
+}
+
+.report-attestation-deployment[open] > summary strong {
+  font-size: 0;
+}
+
+.report-attestation-deployment[open] > summary strong::after {
+  content: '접기';
+  font-size: 12px;
+}
+
+.report-attestation-deployment__body {
+  padding: 24px 32px 28px;
+}
+
+.report-attestation-deployment__body > header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
 }
 
-.report-attestation-deployment > header span {
+.report-attestation-deployment__body > header span {
   color: #ed5b24;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .08em;
 }
 
-.report-attestation-deployment > header h2 {
+.report-attestation-deployment__body > header h2 {
   margin-top: 4px;
   font-size: 22px;
 }
 
-.report-attestation-deployment > header p {
+.report-attestation-deployment__body > header p {
   color: #71717a;
   font-size: 13px;
 }
 
-.report-attestation-deployment > .report-api-state {
+.report-attestation-deployment__body > .report-api-state {
   margin: 22px 0 0;
 }
 
@@ -1563,11 +1696,11 @@
 }
 
 @media (max-width: 960px) {
-  .report-attestation-deployment {
-    padding: 24px 20px;
+  .report-attestation-deployment__body {
+    padding: 22px 20px 24px;
   }
 
-  .report-attestation-deployment > header {
+  .report-attestation-deployment__body > header {
     display: grid;
   }
 

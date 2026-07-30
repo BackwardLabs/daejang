@@ -80,6 +80,26 @@ function stubReportRequests(options: {
           status: 'NOT_CONFIGURED',
         })
       }
+      if (url.includes('/report-attestations/synthetic-publication')) {
+        return jsonResponse({
+          capability: {
+            enabled: false,
+            network: 'eip155:91342',
+            mode: 'SYNTHETIC_TESTNET',
+            explorerBaseUrl: 'https://sepolia-explorer.giwa.io',
+            reasonCode: 'NOT_CONFIGURED',
+          },
+          fixture: {
+            taxYear: 2025,
+            transactionCount: 12,
+            completeCount: 10,
+            exceptionCount: 2,
+            denomination: 'KRW',
+          },
+          status: null,
+          verification: null,
+        })
+      }
       if (url.includes('/tax-reports/2027/current')) {
         return jsonResponse({ report })
       }
@@ -107,12 +127,16 @@ describe('ReportPage', () => {
     ).toBeInTheDocument()
     expect(
       await screen.findByRole('heading', {
-        name: '장부 생성부터 EAS 검증까지',
+        name: '합성 장부 온체인 증명',
       }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: 'GIWA Sepolia 장부 증명' }),
+      screen.getByText('SYNTHETIC · GIWA SEPOLIA TESTNET'),
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '장부 생성 및 제출' }),
+    ).toBeDisabled()
+    expect(screen.getByText('기술 연결 정보')).toBeInTheDocument()
     expect(
       await screen.findByText(
         'GIWA Sepolia 배포 정보가 아직 연결되지 않았습니다',
@@ -161,6 +185,16 @@ describe('ReportPage', () => {
         String(url).endsWith('/api/v1/report-attestations/deployment'),
       ),
     ).toBe(true)
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith(
+          '/api/v1/report-attestations/synthetic-publication',
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === 'POST'),
+    ).toBe(false)
   })
 
   it('keeps payment hidden when the server capability is disabled', async () => {

@@ -2,6 +2,7 @@ import type { Pool } from 'pg'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  assertReportAttestationSchema,
   assertReportPaymentSchema,
   assertSubjectNameProvisionerSchema,
   assertTaxReportSchema,
@@ -97,6 +98,26 @@ const validReportPaymentContract = {
   contract_version: 1,
   contract_digest: '28f6894a953e6acc5c238b04e025662ee6bc7d3b5dbd31e783c40789b9e6dcf4',
   migration_version: '35',
+}
+
+const validReportAttestationContract = {
+  records_table: 'web_private.report_attestation_records',
+  operations_table: 'web_private.report_attestation_operations',
+  contract_version: 1,
+  contract_digest:
+    'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561',
+  migration_version: '53',
+  record_guard: true,
+  operation_guard: true,
+  web_usage: true,
+  web_create: false,
+  records_select: true,
+  operations_select: true,
+  records_insert_identity: true,
+  records_update_state: true,
+  operations_insert_identity: true,
+  operations_update_state: true,
+  dangerous_write: false,
 }
 
 function poolReturning<T>(row: T): Pool {
@@ -197,5 +218,38 @@ describe('report payment schema preflight', () => {
         authorizations_table: null,
       })),
     ).rejects.toThrow('report x402 payment migration contract is invalid')
+  })
+})
+
+describe('report attestation schema preflight', () => {
+  it('accepts the guarded DB53 report attestation contract', async () => {
+    await expect(
+      assertReportAttestationSchema(
+        poolReturning(validReportAttestationContract),
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  it('rejects a wrong digest or missing transition guard', async () => {
+    await expect(
+      assertReportAttestationSchema(
+        poolReturning({
+          ...validReportAttestationContract,
+          contract_digest: '0'.repeat(64),
+        }),
+      ),
+    ).rejects.toThrow(
+      'report attestation persistence migration contract is invalid',
+    )
+    await expect(
+      assertReportAttestationSchema(
+        poolReturning({
+          ...validReportAttestationContract,
+          operation_guard: false,
+        }),
+      ),
+    ).rejects.toThrow(
+      'report attestation persistence migration contract is invalid',
+    )
   })
 })

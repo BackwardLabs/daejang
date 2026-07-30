@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { GiwaReportAttestationPanel } from './GiwaReportAttestationPanel.tsx'
@@ -37,6 +37,8 @@ describe('GiwaReportAttestationPanel', () => {
 
     render(<GiwaReportAttestationPanel />)
 
+    expect(screen.getByText('기술 연결 정보')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('기술 연결 정보'))
     expect(
       screen.getByRole('heading', { name: 'GIWA Sepolia 장부 증명' }),
     ).toBeInTheDocument()
@@ -71,6 +73,7 @@ describe('GiwaReportAttestationPanel', () => {
     )
 
     render(<GiwaReportAttestationPanel />)
+    fireEvent.click(screen.getByText('기술 연결 정보'))
 
     expect(
       await screen.findByText('GIWA Sepolia 배포 연결값을 확인했습니다'),
@@ -94,6 +97,7 @@ describe('GiwaReportAttestationPanel', () => {
     )
 
     render(<GiwaReportAttestationPanel />)
+    fireEvent.click(screen.getByText('기술 연결 정보'))
 
     expect(
       await screen.findByText('배포 상태를 확인하지 못했습니다'),

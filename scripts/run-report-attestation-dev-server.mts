@@ -87,6 +87,7 @@ try {
     reportAttestations: {
       runtime,
       reviewOutcome: reviewOutcome as ReportReviewOutcome,
+      localSyntheticFixture: true,
     },
   })
 } catch (error) {

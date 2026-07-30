@@ -1,4 +1,4 @@
-FROM node:22.13-bookworm-slim AS build
+FROM node:24.18-bookworm-slim AS build
 WORKDIR /app
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends python3 make g++ \
@@ -12,7 +12,7 @@ COPY apps/web-api apps/web-api
 COPY proto proto
 RUN npm run build --workspace @daejang/web-api && npm prune --omit=dev
 
-FROM node:22.13-bookworm-slim AS runtime
+FROM node:24.18-bookworm-slim AS runtime
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
 WORKDIR /app
 RUN groupadd --system --gid 65532 daejang \

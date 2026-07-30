@@ -62,7 +62,7 @@ const sameAddress = (left: string, right: string) =>
 const hasNoRuntimeCode = (code: string) =>
   code === '0x' || /^0x0+$/u.test(code)
 
-const assessSnapshot = (
+export const assessReportAttestationDeploymentSnapshot = (
   config: ReportAttestationDeploymentConfig,
   snapshot: ReportAttestationDeploymentSnapshot,
 ): Readonly<{
@@ -256,7 +256,11 @@ export const registerReportAttestationDeploymentRoutes = async (
             'RPC_UNAVAILABLE',
           )
         }
-        const assessment = assessSnapshot(options.config, snapshot)
+        const assessment =
+          assessReportAttestationDeploymentSnapshot(
+            options.config,
+            snapshot,
+          )
         return configuredResponse(
           options.config,
           assessment.status,

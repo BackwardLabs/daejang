@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path'
+
 export type AppConfig = {
   runtimeMode: 'development' | 'test' | 'production'
   host: string
@@ -27,6 +29,8 @@ export type AppConfig = {
   privateObjectLegacyKeyId?: string
   privateObjectDecryptionKeys?: ReadonlyMap<string, Buffer>
   reportAttestationDeployment?: ReportAttestationDeploymentConfig
+  reportAttestationSyntheticTestnet?:
+    ReportAttestationSyntheticTestnetConfig
 }
 
 export type ReportPaymentConfig = {
@@ -47,8 +51,27 @@ export type ReportAttestationDeploymentConfig = {
   schemaRegistryAddress: string
   reportRegistryProxyAddress: string
   reportConsumerAddress: string
+  governanceSafeAddress: string
   schemaUID: string
   evidenceSchemaDigest: string
+}
+
+export type ReportAttestationSyntheticTestnetConfig = {
+  identityHmacKey: Buffer
+  issuerAddress: string
+  issuerKeystorePath: string
+  issuerPasswordFile: string
+  reviewerAddress: string
+  reviewerKeystorePath: string
+  reviewerPasswordFile: string
+  minimumConfirmations: number
+  dailyWriteLimits: {
+    user: number
+    ip: number
+    global: number
+  }
+  explorerBaseUrl: 'https://sepolia-explorer.giwa.io'
+  reviewOutcome: 'APPROVE'
 }
 
 export type SignupCapability = {
@@ -148,6 +171,10 @@ const loadReportAttestationDeploymentConfig = (
       'GIWA_REPORT_CONSUMER_ADDRESS',
       environment.GIWA_REPORT_CONSUMER_ADDRESS,
     ],
+    [
+      'GIWA_REPORT_GOVERNANCE_SAFE_ADDRESS',
+      environment.GIWA_REPORT_GOVERNANCE_SAFE_ADDRESS,
+    ],
     ['GIWA_REPORT_SCHEMA_UID', environment.GIWA_REPORT_SCHEMA_UID],
     [
       'GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST',
@@ -205,11 +232,14 @@ const loadReportAttestationDeploymentConfig = (
     environment.GIWA_REPORT_REGISTRY_PROXY_ADDRESS as string
   const reportConsumerAddress =
     environment.GIWA_REPORT_CONSUMER_ADDRESS as string
+  const governanceSafeAddress =
+    environment.GIWA_REPORT_GOVERNANCE_SAFE_ADDRESS as string
   const addresses = [
     easAddress,
     schemaRegistryAddress,
     reportRegistryProxyAddress,
     reportConsumerAddress,
+    governanceSafeAddress,
   ]
   if (
     addresses.some(
@@ -259,6 +289,7 @@ const loadReportAttestationDeploymentConfig = (
     schemaRegistryAddress,
     reportRegistryProxyAddress,
     reportConsumerAddress,
+    governanceSafeAddress,
     schemaUID,
     evidenceSchemaDigest,
   }
@@ -345,6 +376,169 @@ const parseBoolean = (value: string | undefined, fallback: boolean, name: string
     return false
   }
   throw new Error(`${name} must be true or false`)
+}
+
+const parseBase64Key = (
+  value: string | undefined,
+  name: string,
+) => {
+  if (!value) {
+    throw new Error(`${name} is required`)
+  }
+  const key = Buffer.from(value, 'base64')
+  if (
+    key.byteLength !== 32 ||
+    key.toString('base64').replace(/=+$/, '') !==
+      value.replace(/=+$/, '')
+  ) {
+    throw new Error(`${name} must be a base64-encoded 32-byte key`)
+  }
+  return key
+}
+
+const loadReportAttestationSyntheticTestnetConfig = (
+  environment: NodeJS.ProcessEnv,
+  deployment: ReportAttestationDeploymentConfig | undefined,
+): ReportAttestationSyntheticTestnetConfig | undefined => {
+  const enabled = parseBoolean(
+    environment.GIWA_REPORT_SYNTHETIC_TESTNET_ENABLED,
+    false,
+    'GIWA_REPORT_SYNTHETIC_TESTNET_ENABLED',
+  )
+  const entries = [
+    [
+      'GIWA_REPORT_IDENTITY_HMAC_KEY',
+      environment.GIWA_REPORT_IDENTITY_HMAC_KEY,
+    ],
+    [
+      'GIWA_REPORT_ISSUER_ADDRESS',
+      environment.GIWA_REPORT_ISSUER_ADDRESS,
+    ],
+    [
+      'GIWA_REPORT_ISSUER_KEYSTORE_PATH',
+      environment.GIWA_REPORT_ISSUER_KEYSTORE_PATH,
+    ],
+    [
+      'GIWA_REPORT_ISSUER_PASSWORD_FILE',
+      environment.GIWA_REPORT_ISSUER_PASSWORD_FILE,
+    ],
+    [
+      'GIWA_REPORT_REVIEWER_ADDRESS',
+      environment.GIWA_REPORT_REVIEWER_ADDRESS,
+    ],
+    [
+      'GIWA_REPORT_REVIEWER_KEYSTORE_PATH',
+      environment.GIWA_REPORT_REVIEWER_KEYSTORE_PATH,
+    ],
+    [
+      'GIWA_REPORT_REVIEWER_PASSWORD_FILE',
+      environment.GIWA_REPORT_REVIEWER_PASSWORD_FILE,
+    ],
+  ] as const
+  const configuredEntries = entries.filter(
+    ([, value]) => value !== undefined && value !== '',
+  )
+  if (!enabled) {
+    if (configuredEntries.length > 0) {
+      throw new Error(
+        'GIWA synthetic testnet writer values require GIWA_REPORT_SYNTHETIC_TESTNET_ENABLED=true',
+      )
+    }
+    return undefined
+  }
+  if (!deployment) {
+    throw new Error(
+      'GIWA_REPORT_SYNTHETIC_TESTNET_ENABLED=true requires GIWA report attestation deployment configuration',
+    )
+  }
+  const missing = entries
+    .filter(([, value]) => !value)
+    .map(([name]) => name)
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.join(', ')} are required when the GIWA synthetic testnet writer is enabled`,
+    )
+  }
+
+  const issuerKeystorePath =
+    environment.GIWA_REPORT_ISSUER_KEYSTORE_PATH as string
+  const issuerPasswordFile =
+    environment.GIWA_REPORT_ISSUER_PASSWORD_FILE as string
+  const reviewerKeystorePath =
+    environment.GIWA_REPORT_REVIEWER_KEYSTORE_PATH as string
+  const reviewerPasswordFile =
+    environment.GIWA_REPORT_REVIEWER_PASSWORD_FILE as string
+  for (const [name, path] of [
+    ['GIWA_REPORT_ISSUER_KEYSTORE_PATH', issuerKeystorePath],
+    ['GIWA_REPORT_ISSUER_PASSWORD_FILE', issuerPasswordFile],
+    ['GIWA_REPORT_REVIEWER_KEYSTORE_PATH', reviewerKeystorePath],
+    ['GIWA_REPORT_REVIEWER_PASSWORD_FILE', reviewerPasswordFile],
+  ] as const) {
+    if (!isAbsolute(path)) {
+      throw new Error(`${name} must be an absolute path`)
+    }
+  }
+  if (issuerKeystorePath === reviewerKeystorePath) {
+    throw new Error(
+      'GIWA issuer and reviewer keystore paths must be distinct',
+    )
+  }
+  const issuerAddress =
+    environment.GIWA_REPORT_ISSUER_ADDRESS as string
+  const reviewerAddress =
+    environment.GIWA_REPORT_REVIEWER_ADDRESS as string
+  if (
+    !evmAddressPattern.test(issuerAddress) ||
+    issuerAddress.toLowerCase() === zeroAddress ||
+    !evmAddressPattern.test(reviewerAddress) ||
+    reviewerAddress.toLowerCase() === zeroAddress
+  ) {
+    throw new Error(
+      'GIWA issuer and reviewer addresses must be nonzero EVM addresses',
+    )
+  }
+  if (issuerAddress.toLowerCase() === reviewerAddress.toLowerCase()) {
+    throw new Error(
+      'GIWA issuer and reviewer addresses must be distinct',
+    )
+  }
+
+  return {
+    identityHmacKey: parseBase64Key(
+      environment.GIWA_REPORT_IDENTITY_HMAC_KEY,
+      'GIWA_REPORT_IDENTITY_HMAC_KEY',
+    ),
+    issuerAddress,
+    issuerKeystorePath,
+    issuerPasswordFile,
+    reviewerAddress,
+    reviewerKeystorePath,
+    reviewerPasswordFile,
+    minimumConfirmations: parsePositiveInteger(
+      environment.GIWA_REPORT_MIN_CONFIRMATIONS,
+      1,
+      'GIWA_REPORT_MIN_CONFIRMATIONS',
+    ),
+    dailyWriteLimits: {
+      user: parsePositiveInteger(
+        environment.GIWA_REPORT_DAILY_USER_WRITE_LIMIT,
+        4,
+        'GIWA_REPORT_DAILY_USER_WRITE_LIMIT',
+      ),
+      ip: parsePositiveInteger(
+        environment.GIWA_REPORT_DAILY_IP_WRITE_LIMIT,
+        20,
+        'GIWA_REPORT_DAILY_IP_WRITE_LIMIT',
+      ),
+      global: parsePositiveInteger(
+        environment.GIWA_REPORT_DAILY_GLOBAL_WRITE_LIMIT,
+        100,
+        'GIWA_REPORT_DAILY_GLOBAL_WRITE_LIMIT',
+      ),
+    },
+    explorerBaseUrl: 'https://sepolia-explorer.giwa.io',
+    reviewOutcome: 'APPROVE',
+  }
 }
 
 const parseIdentityVerificationMode = (
@@ -642,6 +836,11 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   const reportPayments = loadReportPaymentConfig(environment, production)
   const reportAttestationDeployment =
     loadReportAttestationDeploymentConfig(environment, production)
+  const reportAttestationSyntheticTestnet =
+    loadReportAttestationSyntheticTestnetConfig(
+      environment,
+      reportAttestationDeployment,
+    )
   const identityVerificationMode = parseIdentityVerificationMode(
     environment.IDENTITY_VERIFICATION_MODE,
   )
@@ -752,6 +951,9 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     ),
     ...(reportPayments ? { reportPayments } : {}),
     ...(reportAttestationDeployment ? { reportAttestationDeployment } : {}),
+    ...(reportAttestationSyntheticTestnet
+      ? { reportAttestationSyntheticTestnet }
+      : {}),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(privateObjectEncryptionKey ? { privateObjectEncryptionKey } : {}),
     ...(privateObjectEncryptionKeyId ? { privateObjectEncryptionKeyId } : {}),
