@@ -11,17 +11,18 @@ import {
 } from './ledgerPresentation.ts'
 
 describe('ledger posting presentation', () => {
-  it('parses CEX asset metadata from the durable asset identifier', () => {
+  it('uses persisted CEX asset metadata before identifier compatibility parsing', () => {
+    expect(parseLedgerAsset('asset-usdt-upbit', 'USDT', 8, 'upbit')).toEqual({
+      symbol: 'USDT',
+      decimals: 8,
+      metadata: 'Upbit · 소수점 8자리',
+    })
     expect(parseLedgerAsset('cex-document-asset:upbit:decimal8:usdt')).toEqual({
       symbol: 'USDT',
       decimals: 8,
       metadata: 'Upbit · 소수점 8자리',
     })
-    expect(parseLedgerAsset('asset-krw-upbit')).toEqual({
-      symbol: 'KRW',
-      decimals: 8,
-      metadata: 'Upbit · 소수점 8자리',
-    })
+    expect(parseLedgerAsset('asset-krw-upbit')).toEqual({ symbol: 'asset-krw-upbit' })
     expect(parseLedgerAsset('asset:unmapped')).toEqual({ symbol: 'asset:unmapped' })
   })
 

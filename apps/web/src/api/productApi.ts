@@ -21,6 +21,10 @@ export type LedgerPostingModel = {
   fairValue: string
   costBasis: string
   denomination: string
+  assetSymbol?: string
+  assetDecimals?: number
+  hasAssetDecimals?: boolean
+  assetVenue?: string
 }
 
 export type LedgerTransferEndpointModel = {

@@ -1913,19 +1913,23 @@ func (x *ListLedgerEventsRequest) GetLimit() int32 {
 }
 
 type LedgerPosting struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	LegId         string                 `protobuf:"bytes,1,opt,name=leg_id,json=legId,proto3" json:"leg_id,omitempty"`
-	AccountId     string                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	AssetId       string                 `protobuf:"bytes,3,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
-	OccurredAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
-	Direction     string                 `protobuf:"bytes,5,opt,name=direction,proto3" json:"direction,omitempty"`
-	Quantity      string                 `protobuf:"bytes,6,opt,name=quantity,proto3" json:"quantity,omitempty"`
-	Role          string                 `protobuf:"bytes,7,opt,name=role,proto3" json:"role,omitempty"`
-	FairValue     string                 `protobuf:"bytes,8,opt,name=fair_value,json=fairValue,proto3" json:"fair_value,omitempty"`
-	CostBasis     string                 `protobuf:"bytes,9,opt,name=cost_basis,json=costBasis,proto3" json:"cost_basis,omitempty"`
-	Denomination  string                 `protobuf:"bytes,10,opt,name=denomination,proto3" json:"denomination,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	LegId            string                 `protobuf:"bytes,1,opt,name=leg_id,json=legId,proto3" json:"leg_id,omitempty"`
+	AccountId        string                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	AssetId          string                 `protobuf:"bytes,3,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
+	OccurredAt       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
+	Direction        string                 `protobuf:"bytes,5,opt,name=direction,proto3" json:"direction,omitempty"`
+	Quantity         string                 `protobuf:"bytes,6,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	Role             string                 `protobuf:"bytes,7,opt,name=role,proto3" json:"role,omitempty"`
+	FairValue        string                 `protobuf:"bytes,8,opt,name=fair_value,json=fairValue,proto3" json:"fair_value,omitempty"`
+	CostBasis        string                 `protobuf:"bytes,9,opt,name=cost_basis,json=costBasis,proto3" json:"cost_basis,omitempty"`
+	Denomination     string                 `protobuf:"bytes,10,opt,name=denomination,proto3" json:"denomination,omitempty"`
+	AssetSymbol      string                 `protobuf:"bytes,11,opt,name=asset_symbol,json=assetSymbol,proto3" json:"asset_symbol,omitempty"`
+	AssetDecimals    uint32                 `protobuf:"varint,12,opt,name=asset_decimals,json=assetDecimals,proto3" json:"asset_decimals,omitempty"`
+	HasAssetDecimals bool                   `protobuf:"varint,13,opt,name=has_asset_decimals,json=hasAssetDecimals,proto3" json:"has_asset_decimals,omitempty"`
+	AssetVenue       string                 `protobuf:"bytes,14,opt,name=asset_venue,json=assetVenue,proto3" json:"asset_venue,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *LedgerPosting) Reset() {
@@ -2024,6 +2028,34 @@ func (x *LedgerPosting) GetCostBasis() string {
 func (x *LedgerPosting) GetDenomination() string {
 	if x != nil {
 		return x.Denomination
+	}
+	return ""
+}
+
+func (x *LedgerPosting) GetAssetSymbol() string {
+	if x != nil {
+		return x.AssetSymbol
+	}
+	return ""
+}
+
+func (x *LedgerPosting) GetAssetDecimals() uint32 {
+	if x != nil {
+		return x.AssetDecimals
+	}
+	return 0
+}
+
+func (x *LedgerPosting) GetHasAssetDecimals() bool {
+	if x != nil {
+		return x.HasAssetDecimals
+	}
+	return false
+}
+
+func (x *LedgerPosting) GetAssetVenue() string {
+	if x != nil {
+		return x.AssetVenue
 	}
 	return ""
 }
@@ -4174,7 +4206,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x17ListLedgerEventsRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x19\n" +
 	"\btax_year\x18\x02 \x01(\x05R\ataxYear\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\x05R\x05limit\"\xcd\x02\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\"\xe6\x03\n" +
 	"\rLedgerPosting\x12\x15\n" +
 	"\x06leg_id\x18\x01 \x01(\tR\x05legId\x12\x1d\n" +
 	"\n" +
@@ -4190,7 +4222,12 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\n" +
 	"cost_basis\x18\t \x01(\tR\tcostBasis\x12\"\n" +
 	"\fdenomination\x18\n" +
-	" \x01(\tR\fdenomination\"\xb8\x02\n" +
+	" \x01(\tR\fdenomination\x12!\n" +
+	"\fasset_symbol\x18\v \x01(\tR\vassetSymbol\x12%\n" +
+	"\x0easset_decimals\x18\f \x01(\rR\rassetDecimals\x12,\n" +
+	"\x12has_asset_decimals\x18\r \x01(\bR\x10hasAssetDecimals\x12\x1f\n" +
+	"\vasset_venue\x18\x0e \x01(\tR\n" +
+	"assetVenue\"\xb8\x02\n" +
 	"\x16LedgerTransferEndpoint\x12\x1e\n" +
 	"\n" +
 	"resolution\x18\x01 \x01(\tR\n" +
