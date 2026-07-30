@@ -12,11 +12,12 @@ import (
 
 func TestClassifyCEXObservationRecords(t *testing.T) {
 	tests := []struct {
-		name       string
-		sourceCase string
-		kind       string
-		eventType  string
-		flowShape  string
+		name          string
+		sourceCase    string
+		kind          string
+		activityClass string
+		eventType     string
+		flowShape     string
 	}{
 		{name: "buy", sourceCase: "BUY", kind: "FILL", eventType: "TRADE", flowShape: "EXCHANGE"},
 		{name: "sell", sourceCase: "SELL", kind: "FILL", eventType: "TRADE", flowShape: "EXCHANGE"},
@@ -24,10 +25,14 @@ func TestClassifyCEXObservationRecords(t *testing.T) {
 		{name: "withdrawal", sourceCase: "WITHDRAWAL", kind: "WITHDRAWAL", eventType: "TRANSFER", flowShape: "UNKNOWN"},
 		{name: "fallback deposit", kind: "DEPOSIT", eventType: "TRANSFER", flowShape: "UNKNOWN"},
 		{name: "unknown", kind: "FEE", eventType: "OTHER", flowShape: "UNKNOWN"},
+		{name: "fiat deposit", kind: "DEPOSIT", activityClass: "FIAT_DEPOSIT", eventType: "TRANSFER", flowShape: "FIAT_IN"},
+		{name: "fiat withdrawal", kind: "WITHDRAWAL", activityClass: "FIAT_WITHDRAWAL", eventType: "TRANSFER", flowShape: "FIAT_OUT"},
+		{name: "deposit interest", kind: "DEPOSIT", activityClass: "DEPOSIT_INTEREST", eventType: "REWARD", flowShape: "DEPOSIT_INTEREST"},
+		{name: "airdrop", kind: "DEPOSIT", activityClass: "AIRDROP", eventType: "REWARD", flowShape: "AIRDROP"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			eventType, flowShape := classify(test.sourceCase, test.kind)
+			eventType, flowShape := classify(test.sourceCase, test.kind, test.activityClass)
 			if eventType != test.eventType || flowShape != test.flowShape {
 				t.Fatalf("classify(%q, %q) = (%q, %q), want (%q, %q)", test.sourceCase, test.kind, eventType, flowShape, test.eventType, test.flowShape)
 			}

@@ -71,6 +71,10 @@ const flowShapeLabels: Record<string, string> = {
   EXTERNAL_IN: '외부에서 들어온 자산',
   EXTERNAL_OUT: '외부로 나간 자산',
   INCOME: '수익 발생',
+  DEPOSIT_INTEREST: '거래소 예치금 이용료',
+  AIRDROP: '에어드롭 지급',
+  FIAT_IN: '본인 원화 입금',
+  FIAT_OUT: '본인 원화 출금',
   COST_ONLY: '비용 발생',
   POSITION_CHANGE: '포지션 변경',
   UNKNOWN: '흐름 확인 필요',
@@ -223,6 +227,10 @@ export const describeLedgerAction = (
   postings: Array<{ direction: string; role?: string }>,
 ): LedgerActionPresentation => {
   const description = describeFlowShape(flowShape)
+  if (flowShape === 'DEPOSIT_INTEREST') return { label: '예치금 이용료', description }
+  if (flowShape === 'AIRDROP') return { label: '에어드롭', description }
+  if (flowShape === 'FIAT_IN') return { label: '원화 입금', description }
+  if (flowShape === 'FIAT_OUT') return { label: '원화 출금', description }
   if (eventType !== 'TRANSFER') {
     return {
       label: eventTypeLabels[eventType] ?? (eventType || '미분류'),
