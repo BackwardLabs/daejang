@@ -8,9 +8,17 @@ import {
   loadReviews,
   resolveReview,
   type LedgerEventModel,
+  type LedgerPostingModel,
   type ReviewDetailModel,
   type ReviewModel,
 } from '../../api/productApi.ts'
+import {
+  describePostingDirection,
+  describePostingRole,
+  formatCanonicalQuantity,
+  formatLedgerQuantity,
+  parseLedgerAsset,
+} from './ledgerPresentation.ts'
 import './ledger.css'
 
 const eventLabels: Record<string, string> = {
@@ -20,16 +28,39 @@ const eventLabels: Record<string, string> = {
 }
 const statusLabel = (value: string) => value === 'RESOLVED' ? '완료' : value === 'PARTIAL' ? '일부 확인' : '검토 필요'
 
-export const formatReviewQuantity = (quantity: string, assetDecimals?: number) => {
-  if (!/^-?\d+$/.test(quantity)) return quantity || '—'
-  if (assetDecimals === undefined) return `${quantity} raw units`
-  const negative = quantity.startsWith('-')
-  const digits = negative ? quantity.slice(1) : quantity
-  if (assetDecimals === 0) return `${negative ? '-' : ''}${digits}`
-  const padded = digits.padStart(assetDecimals + 1, '0')
-  const integer = padded.slice(0, -assetDecimals)
-  const fraction = padded.slice(-assetDecimals).replace(/0+$/, '')
-  return `${negative ? '-' : ''}${integer}${fraction ? `.${fraction}` : ''}`
+export const formatReviewQuantity = formatCanonicalQuantity
+
+function LedgerPostingRow({ posting }: { posting: LedgerPostingModel }) {
+  const asset = parseLedgerAsset(posting.assetId)
+  const role = describePostingRole(posting.role)
+  const quantity = formatLedgerQuantity(posting.quantity, asset.decimals)
+  return <tr>
+    <td>
+      <span className="ledger-posting-value" title={posting.assetId}>
+        <strong>{asset.symbol}</strong>
+        {asset.metadata ? <small>{asset.metadata}</small> : null}
+      </span>
+    </td>
+    <td>
+      <span className="ledger-posting-value ledger-posting-direction" data-direction={posting.direction}>
+        <strong>{describePostingDirection(posting.direction)}</strong>
+        <small>{posting.direction}</small>
+      </span>
+    </td>
+    <td>
+      <span className="ledger-posting-value ledger-posting-quantity">
+        <strong>{quantity}{asset.decimals !== undefined ? ` ${asset.symbol}` : ''}</strong>
+        {asset.decimals !== undefined ? <small>원시값 {posting.quantity}</small> : null}
+      </span>
+    </td>
+    <td>
+      <span className="ledger-posting-value ledger-posting-role">
+        <strong>{role.label}</strong>
+        <small>{role.description}</small>
+      </span>
+    </td>
+    <td>{posting.fairValue ? `${posting.fairValue} ${posting.denomination}` : '—'}</td>
+  </tr>
 }
 
 export function LedgerPage() {
@@ -316,7 +347,7 @@ export function LedgerPage() {
                 <header><div><span>EVENT</span><h2>{eventLabels[selected.eventType] ?? selected.eventType}</h2></div><b>{statusLabel(selected.resolution)}</b></header>
                 <dl><div><dt>Event ID</dt><dd>{selected.eventId}</dd></div><div><dt>현재 revision</dt><dd>rev.{selected.revisionNumber} · {selected.revisionId}</dd></div><div><dt>해석 상태</dt><dd>{selected.interpretationSupport}</dd></div><div><dt>흐름</dt><dd>{selected.flowShape}</dd></div></dl>
                 <h3>자산 변동</h3>
-                {selected.postings.length ? <table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>평가액</th></tr></thead><tbody>{selected.postings.map((posting) => <tr key={posting.legId}><td>{posting.assetId}</td><td>{posting.direction}</td><td>{posting.quantity}</td><td>{posting.role}</td><td>{posting.fairValue ? `${posting.fairValue} ${posting.denomination}` : '—'}</td></tr>)}</tbody></table> : <p>이 revision에 확정된 posting이 없습니다.</p>}
+                {selected.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>평가액</th></tr></thead><tbody>{selected.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} />)}</tbody></table></div> : <p>이 revision에 확정된 posting이 없습니다.</p>}
               </article> : null}
             </section>
           )

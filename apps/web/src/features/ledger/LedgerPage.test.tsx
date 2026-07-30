@@ -94,6 +94,54 @@ describe('LedgerPage', () => {
     expect(formatReviewQuantity('-1', 18)).toBe('-0.000000000000000001')
   })
 
+  it('shows parsed CEX assets, decimal quantities, and posting role explanations', async () => {
+    const cexEvent = {
+      ...ledgerEvent,
+      postings: [
+        {
+          legId: 'leg-principal',
+          accountId: 'account-upbit',
+          assetId: 'cex-document-asset:upbit:decimal8:usdt',
+          occurredAt: ledgerEvent.effectiveAt,
+          direction: 'IN',
+          quantity: '180108722461',
+          role: 'PRINCIPAL',
+          fairValue: '',
+          costBasis: '',
+          denomination: '',
+        },
+        {
+          legId: 'leg-fee',
+          accountId: 'account-upbit',
+          assetId: 'cex-document-asset:upbit:decimal8:krw',
+          occurredAt: ledgerEvent.effectiveAt,
+          direction: 'OUT',
+          quantity: '2701600000',
+          role: 'FEE',
+          fairValue: '',
+          costBasis: '',
+          denomination: '',
+        },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [cexEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect(await screen.findByText('1,801.08722461 USDT')).toBeInTheDocument()
+    expect(screen.getByText('27.016 KRW')).toBeInTheDocument()
+    expect(screen.getAllByText('Upbit · 소수점 8자리')).toHaveLength(2)
+    expect(screen.getByText('들어옴')).toBeInTheDocument()
+    expect(screen.getByText('나감')).toBeInTheDocument()
+    expect(screen.getByText('매수·매도·입출금의 본체가 되는 자산 변동')).toBeInTheDocument()
+    expect(screen.getByText('거래소나 서비스에 지불한 처리 비용')).toBeInTheDocument()
+  })
+
   it('shows the real empty state when the API has no events', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
     render(<LedgerPage />)
