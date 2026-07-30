@@ -2,7 +2,7 @@ annotated-types==0.8.0
 cffi==2.1.0
 charset-normalizer==3.4.9
 cryptography==49.0.0
-giwa-pdf-parser @ git+https://github.com/BackwardLabs/pdf-parser.git@49cb63008cf3ebdf1854a6db26d430d5077b9580
+giwa-pdf-parser @ git+https://github.com/BackwardLabs/pdf-parser.git@bf97249cc16e10d2849b1325cdc4ba5f87704962
 pdfminer.six==20251230
 pdfplumber==0.11.9
 pillow==12.3.0
