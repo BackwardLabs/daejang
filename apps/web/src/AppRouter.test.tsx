@@ -489,7 +489,8 @@ describe('AppRouter', () => {
     render(<AppRouter />)
 
     fireEvent.click(await screen.findByRole('button', { name: /김대장/ }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '로그아웃' }))
+    expect(screen.getByRole('dialog', { name: '마이페이지' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
 
     await waitFor(() => expect(window.location.pathname).toBe('/login'))
     expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument()

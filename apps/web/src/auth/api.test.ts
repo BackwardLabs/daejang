@@ -152,6 +152,7 @@ describe('Web auth API client', () => {
             user: {
               id: '018f47a2-4b1c-7def-8abc-0123456789ab',
               displayName: '김대장',
+              email: 'captain@example.com',
             },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -163,7 +164,31 @@ describe('Web auth API client', () => {
       user: {
         id: '018f47a2-4b1c-7def-8abc-0123456789ab',
         displayName: '김대장',
+        email: 'captain@example.com',
       },
+    })
+  })
+
+  it('rejects malformed email data in a successful current-user response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            user: {
+              id: '018f47a2-4b1c-7def-8abc-0123456789ab',
+              displayName: '김대장',
+              email: 'not-an-email',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+
+    await expect(getCurrentUser()).rejects.toMatchObject({
+      status: 502,
+      code: 'INVALID_AUTH_RESPONSE',
     })
   })
 

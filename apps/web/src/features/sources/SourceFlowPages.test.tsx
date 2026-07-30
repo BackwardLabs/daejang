@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SourceManagementPage } from './SourceManagementPage.tsx'
 import { SourceMethodIntroPage } from './SourceMethodIntroPage.tsx'
@@ -67,6 +67,109 @@ describe('source flow pages', () => {
     expect(
       screen.queryByRole('heading', { name: '아직 연결된 데이터 소스가 없어요' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('shows failed collection details and starts a new tracked job', async () => {
+    const source = {
+      id: '33333333-3333-4333-8333-333333333333',
+      type: 'EVM_WALLET',
+      address: '0x239000000000000000000000000000000000f2b2',
+      accountType: 'EOA',
+      verificationChainId: 'eip155:1',
+      verifiedAt: '2027-01-01T00:00:00.000Z',
+      label: 'EVM Wallet',
+      status: 'ACTIVE',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:00:00.000Z',
+      chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+    }
+    const failedJob = {
+      id: '55555555-5555-4555-8555-555555555555',
+      sourceId: source.id,
+      sourceKind: 'EVM_WALLET',
+      state: 'FAILED',
+      phase: 'VALIDATE_SOURCE',
+      attempts: 3,
+      processedRecords: 0,
+      failureCode: 'JIT_START_FAILED',
+      failureMessage: 'JIT 실행 요청에 실패했습니다.',
+      requestedCoverageStart: '2027-01-01',
+      requestedCoverageEnd: '2027-12-31',
+      trigger: 'USER_REQUEST',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:05:00.000Z',
+    }
+    const queuedJob = {
+      ...failedJob,
+      id: '66666666-6666-4666-8666-666666666666',
+      state: 'QUEUED',
+      phase: 'QUEUED',
+      attempts: 0,
+      failureCode: undefined,
+      failureMessage: undefined,
+      updatedAt: '2027-01-01T00:06:00.000Z',
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/sources') {
+        return new Response(JSON.stringify({ items: [source] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === '/api/v1/jobs') {
+        return new Response(JSON.stringify({ items: [failedJob] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === `/api/v1/jobs/${failedJob.id}/retry`) {
+        return new Response(JSON.stringify({ job: queuedJob }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === `/api/v1/jobs/${queuedJob.id}`) {
+        return new Response(JSON.stringify({
+          job: { ...queuedJob, state: 'SUCCEEDED', phase: 'COMPLETE' },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SourceManagementPage />)
+
+    const statusButton = await screen.findByRole('button', {
+      name: /처리 확인 필요 · JIT_START_FAILED/,
+    })
+    fireEvent.click(statusButton)
+
+    expect(
+      screen.getByRole('heading', { name: '수집 문제를 확인해 주세요' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('JIT 실행 요청에 실패했습니다.')).toBeInTheDocument()
+    expect(screen.getByText('JIT_START_FAILED')).toBeInTheDocument()
+    expect(screen.getByText('2027-01-01 – 2027-12-31')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '다시 수집' }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('link', { name: /처리 완료.*장부 보기/ }),
+      ).toHaveAttribute('href', '/ledger')
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/jobs/${failedJob.id}/retry`,
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"intentKey":"source-retry:'),
+      }),
+    )
   })
 
   it('keeps Upbit PDF disabled when the safe import path is unavailable', () => {

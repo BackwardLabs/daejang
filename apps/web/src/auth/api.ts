@@ -17,6 +17,7 @@ export type AuthCapabilities = {
 export type AuthenticatedUser = {
   id: string
   displayName: string
+  email?: string
 }
 
 export type AuthenticatedSessionResponse = {
@@ -55,6 +56,7 @@ export class WebApiError extends Error {
 const defaultApiBase = '/api/v1'
 const userIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u
 
 function invalidAuthResponse(message: string) {
   return new WebApiError(502, 'INVALID_AUTH_RESPONSE', message)
@@ -78,7 +80,9 @@ function parseAuthenticatedUser(value: unknown): AuthenticatedUser {
     typeof value.id !== 'string' ||
     !userIdPattern.test(value.id) ||
     typeof value.displayName !== 'string' ||
-    !value.displayName.trim()
+    !value.displayName.trim() ||
+    (value.email !== undefined &&
+      (typeof value.email !== 'string' || !emailPattern.test(value.email)))
   ) {
     throw invalidAuthResponse('회원 정보를 확인하지 못했습니다')
   }
@@ -86,6 +90,9 @@ function parseAuthenticatedUser(value: unknown): AuthenticatedUser {
   return {
     id: value.id,
     displayName: value.displayName,
+    ...(typeof value.email === 'string'
+      ? { email: value.email }
+      : {}),
   }
 }
 

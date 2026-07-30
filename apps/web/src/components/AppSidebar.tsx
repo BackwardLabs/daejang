@@ -6,8 +6,10 @@ import navSources from '../assets/dashboard/nav-sources.svg'
 import userAvatar from '../assets/dashboard/user-avatar.svg'
 import { logout } from '../auth/api.ts'
 import { setCurrentUser, useCurrentUser } from '../auth/session-store.ts'
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useState } from 'react'
+import { AccountProfileDialog } from './AccountProfileDialog.tsx'
 import { AppLink } from './AppLink.tsx'
+import { LedgerGuideDialog } from './LedgerGuideDialog.tsx'
 import './app-sidebar.css'
 
 export type AppPage = 'dashboard' | 'ledger' | 'reports' | 'settings' | 'sources'
@@ -56,26 +58,14 @@ export function AppSidebar({
   year: AppYear
 }) {
   const user = useCurrentUser()
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [isGuideOpen, setIsGuideOpen] = useState(false)
+  const [isProfileOpen, setIsProfileOpen] = useState(false)
   const [logoutPending, setLogoutPending] = useState(false)
   const [logoutError, setLogoutError] = useState('')
-  const userMenuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!isUserMenuOpen) return
-
-    function closeUserMenu(event: MouseEvent) {
-      if (
-        event.target instanceof Node &&
-        !userMenuRef.current?.contains(event.target)
-      ) {
-        setIsUserMenuOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', closeUserMenu)
-    return () => document.removeEventListener('mousedown', closeUserMenu)
-  }, [isUserMenuOpen])
+  const accountLabel =
+    user?.email ??
+    (user?.displayName === 'GIWA 사용자' ? undefined : user?.displayName) ??
+    '계정'
 
   async function handleLogout() {
     setLogoutPending(true)
@@ -172,44 +162,48 @@ export function AppSidebar({
         </ul>
       </nav>
 
-      <AppLink className="app-sidebar__guide" href="/ledger">
+      <button
+        aria-haspopup="dialog"
+        className="app-sidebar__guide"
+        type="button"
+        onClick={() => setIsGuideOpen(true)}
+      >
         <strong>처음 사용하시나요?</strong>
-        <span>장부 만들기 가이드를 확인하세요.</span>
-      </AppLink>
+        <span>장부 만들기 가이드를 확인하세요</span>
+      </button>
 
-      <div className="app-sidebar__user-area" ref={userMenuRef}>
-        {isUserMenuOpen && (
-          <div className="app-sidebar__user-menu" role="menu">
-            <div>
-              <strong>{user?.displayName || '계정'}</strong>
-              <span>개인 장부 계정</span>
-            </div>
-            {logoutError ? <p role="alert">{logoutError}</p> : null}
-            <button
-              type="button"
-              role="menuitem"
-              disabled={logoutPending}
-              onClick={handleLogout}
-            >
-              {logoutPending ? '로그아웃 중' : '로그아웃'}
-            </button>
-          </div>
-        )}
+      <div className="app-sidebar__user-area">
         <button
           type="button"
           className="app-sidebar__user"
-          aria-expanded={isUserMenuOpen}
-          aria-haspopup="menu"
-          onClick={() => setIsUserMenuOpen((value) => !value)}
+          aria-expanded={isProfileOpen}
+          aria-haspopup="dialog"
+          onClick={() => setIsProfileOpen(true)}
         >
           <img src={userAvatar} alt="" />
           <span>
-            <strong>{user?.displayName || '계정'}</strong>
+            <strong>{accountLabel}</strong>
             <small>개인 장부</small>
           </span>
-          <i aria-hidden="true">⌃</i>
+          <i aria-hidden="true">›</i>
         </button>
       </div>
+
+      {isGuideOpen ? (
+        <LedgerGuideDialog onClose={() => setIsGuideOpen(false)} />
+      ) : null}
+      {isProfileOpen ? (
+        <AccountProfileDialog
+          logoutError={logoutError}
+          logoutPending={logoutPending}
+          user={user}
+          onClose={() => {
+            setLogoutError('')
+            setIsProfileOpen(false)
+          }}
+          onLogout={handleLogout}
+        />
+      ) : null}
     </aside>
   )
 }

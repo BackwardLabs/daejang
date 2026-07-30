@@ -96,7 +96,11 @@ describe('web api authentication boundary', () => {
 
   const createSession = async () => {
     const session = {
-      user: { id: USER_ID, displayName: '김대장' },
+      user: {
+        id: USER_ID,
+        displayName: '김대장',
+        email: 'account@example.com',
+      },
       verifiedSubjectName: {
         normalizedValue: '김대장',
       },
@@ -290,7 +294,11 @@ describe('web api authentication boundary', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
-      user: { id: USER_ID, displayName: '김대장' },
+      user: {
+        id: USER_ID,
+        displayName: '김대장',
+        email: 'account@example.com',
+      },
     })
   })
 
