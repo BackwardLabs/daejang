@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import {
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
+  cronAutostartEntries,
   ensureRuntimeIndexerView,
   hostPostingWorkerArgs,
   hostPostingWorkerEnvironment,
@@ -401,4 +402,20 @@ test('supervisor command exits after its lock-release finally completes', () => 
     exit: (code) => exitCodes.push(code),
   })
   assert.deepEqual(exitCodes, [143])
+})
+
+test('cron fallback installs a PATH-aware reboot entry and watchdog', () => {
+  const entries = cronAutostartEntries({
+    repository: '/srv/giwa app',
+    node: '/opt/homebrew/bin/node',
+    script: '/srv/runtime/host-backend.mjs',
+    log: '/srv/runtime/supervisor.log',
+    path: '/opt/homebrew/bin:/usr/bin:/bin',
+    marker: '# GIWA_HOST_BACKEND',
+  })
+  assert.equal(entries.length, 2)
+  assert.match(entries[0], /^@reboot /)
+  assert.match(entries[0], /PATH='\/opt\/homebrew\/bin:\/usr\/bin:\/bin'/)
+  assert.match(entries[1], /^\* \* \* \* \* pgrep -f '\[h\]ost-backend\.mjs supervise'/)
+  assert.ok(entries.every((entry) => entry.endsWith('# GIWA_HOST_BACKEND')))
 })
