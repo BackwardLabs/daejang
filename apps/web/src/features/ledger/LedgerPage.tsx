@@ -437,11 +437,13 @@ export function LedgerPage() {
                     return <Fragment key={event.eventId}>
                       <tr className={isOpen ? 'ledger-explorer__row is-open' : 'ledger-explorer__row'}>
                         <td className="ledger-explorer__time">
-                          <button type="button" aria-label={`${action.label} 거래 상세 ${isOpen ? '접기' : '보기'}`} aria-expanded={isOpen} aria-controls={`ledger-detail-${event.eventId}`} onClick={() => setSelectedId(isOpen ? undefined : event.eventId)}>{isOpen ? '접기' : '보기'}</button>
-                          <time dateTime={event.effectiveAt}>{formatLedgerDateTime(event.effectiveAt)}</time>
+                          <span className="ledger-explorer__time-content">
+                            <button type="button" aria-label={`${action.label} 거래 상세 ${isOpen ? '접기' : '보기'}`} aria-expanded={isOpen} aria-controls={`ledger-detail-${event.eventId}`} onClick={() => setSelectedId(isOpen ? undefined : event.eventId)}>{isOpen ? '접기' : '보기'}</button>
+                            <time dateTime={event.effectiveAt}>{formatLedgerDateTime(event.effectiveAt)}</time>
+                          </span>
                         </td>
                         <td><span className="ledger-explorer__source"><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]} · {compactIdentifier(source.detail)}</small></span></td>
-                        <td><span className="ledger-explorer__action" data-flow-shape={event.flowShape}><strong>{action.label}</strong><small>{action.description}</small></span></td>
+                        <td><span className="ledger-explorer__action" data-action={action.label}><strong>{action.label}</strong><small>{action.description}</small></span></td>
                         <td><LedgerMovementList postings={material} /></td>
                         <td><LedgerMovementList postings={fees} /></td>
                         <td><LedgerStatusBadges event={event} /></td>

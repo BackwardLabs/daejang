@@ -216,6 +216,43 @@ describe('LedgerPage', () => {
     expect(screen.getByText('거래 목적 확인 필요')).toBeInTheDocument()
   })
 
+  it('renders normalized Upbit postings with decimal quantities, source, and action tones', async () => {
+    const depositEvent = {
+      ...ledgerEvent,
+      eventId: 'normalized-deposit',
+      revisionId: 'normalized-deposit-revision',
+      eventType: 'TRANSFER',
+      flowShape: 'UNKNOWN',
+      resolution: 'PARTIAL',
+      postings: [{
+        legId: 'normalized-leg',
+        accountId: 'cex-account:upbit:acb59c011f',
+        assetId: 'asset-krw-upbit',
+        occurredAt: ledgerEvent.effectiveAt,
+        direction: 'IN',
+        quantity: '298100000000',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: '',
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [depositEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect(await screen.findByText('2,981 KRW')).toBeInTheDocument()
+    expect(screen.getByText('Upbit')).toBeInTheDocument()
+    expect(screen.queryByText(/raw units/)).not.toBeInTheDocument()
+    expect(screen.queryByText('출처 확인 중')).not.toBeInTheDocument()
+    expect(screen.getByText('입금').closest('.ledger-explorer__action')).toHaveAttribute('data-action', '입금')
+  })
+
   it('shows a registered counterpart as a pending owned-wallet movement', async () => {
     const ownedTransfer = {
       ...ledgerEvent,
