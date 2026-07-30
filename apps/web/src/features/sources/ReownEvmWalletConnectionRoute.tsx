@@ -1,4 +1,10 @@
-import { useCallback, useRef } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import {
   useAppKit,
   type Provider,
@@ -9,6 +15,7 @@ import { EvmWalletConnectionPage } from './EvmWalletConnectionPage.tsx'
 import {
   type CompleteWalletConnection,
   type ConnectWallet,
+  type ConnectWalletResult,
   type EvmWalletProviderId,
   type RequestOwnershipSignature,
   normalizeEvmWalletPeriod,
@@ -54,12 +61,17 @@ function isUserRejection(error: unknown) {
   )
 }
 
-function waitForEvmConnection(signal: AbortSignal) {
+function waitForEvmConnection(
+  signal: AbortSignal,
+  cancelWhenModalCloses = false,
+) {
   return new Promise<{ address: string; chainId: string }>((resolve, reject) => {
     const startedAt = Date.now()
+    let unsubscribeState: (() => void) | undefined
 
     function finish() {
       window.clearInterval(intervalId)
+      unsubscribeState?.()
       signal.removeEventListener('abort', handleAbort)
     }
 
@@ -87,6 +99,15 @@ function waitForEvmConnection(signal: AbortSignal) {
       }
     }, 100)
 
+    if (cancelWhenModalCloses) {
+      unsubscribeState = reownAppKit?.subscribeState((state) => {
+        if (!state.open && !reownAppKit?.getCaipAddress('eip155')) {
+          finish()
+          reject({ code: 4001 })
+        }
+      })
+    }
+
     signal.addEventListener('abort', handleAbort, { once: true })
   })
 }
@@ -101,7 +122,41 @@ function getDirectWalletName(provider: EvmWalletProviderId) {
   return null
 }
 
-function MissingReownConfigurationRoute() {
+type ReownRouteProps = {
+  launchImmediately?: boolean
+  onLaunchFailed?: (result: ConnectWalletResult) => void
+  onExitRequested?: () => void
+  pendingView?: ReactNode
+}
+
+function MissingImmediateLaunch({
+  onLaunchFailed,
+  pendingView,
+}: Pick<ReownRouteProps, 'onLaunchFailed' | 'pendingView'>) {
+  useEffect(() => {
+    onLaunchFailed?.({
+      error: { code: 'PROVIDER_UNAVAILABLE' },
+      ok: false,
+    })
+  }, [onLaunchFailed])
+
+  return pendingView
+}
+
+function MissingReownConfigurationRoute({
+  launchImmediately = false,
+  onLaunchFailed,
+  pendingView,
+}: ReownRouteProps) {
+  if (launchImmediately) {
+    return (
+      <MissingImmediateLaunch
+        onLaunchFailed={onLaunchFailed}
+        pendingView={pendingView}
+      />
+    )
+  }
+
   return (
     <EvmWalletConnectionPage
       completeConnection={unavailableCompleteConnection}
@@ -111,9 +166,17 @@ function MissingReownConfigurationRoute() {
   )
 }
 
-function ConfiguredReownRoute() {
+function ConfiguredReownRoute({
+  launchImmediately = false,
+  onExitRequested,
+  onLaunchFailed,
+  pendingView,
+}: ReownRouteProps) {
   const { open } = useAppKit()
   const walletButton = useAppKitWallet({ namespace: 'eip155' })
+  const [initialConnectionComplete, setInitialConnectionComplete] = useState(
+    !launchImmediately,
+  )
   const pendingSignatures = useRef(new Map<string, string>())
   const pendingSourceIds = useRef(new Map<string, string>())
 
@@ -128,7 +191,10 @@ function ConfiguredReownRoute() {
           await open({ namespace: 'eip155', view: 'Connect' })
         }
 
-        const connection = await waitForEvmConnection(signal)
+        const connection = await waitForEvmConnection(
+          signal,
+          directWalletName === null,
+        )
 
         if (connection.chainId !== 'eip155:1') {
           return {
@@ -274,20 +340,39 @@ function ConfiguredReownRoute() {
     [],
   )
 
+  const handleInitialConnectionResult = useCallback(
+    (result: ConnectWalletResult) => {
+      if (result.ok) {
+        setInitialConnectionComplete(true)
+        return
+      }
+      onLaunchFailed?.(result)
+    },
+    [onLaunchFailed],
+  )
+
   return (
-    <EvmWalletConnectionPage
-      completeConnection={completeConnection}
-      connectWallet={connectWallet}
-      requestSignature={requestSignature}
-      watchSyncJob={watchSyncJob}
-    />
+    <>
+      {launchImmediately && !initialConnectionComplete ? pendingView : null}
+      <div hidden={launchImmediately && !initialConnectionComplete}>
+        <EvmWalletConnectionPage
+          autoConnectProvider={launchImmediately ? 'other' : undefined}
+          completeConnection={completeConnection}
+          connectWallet={connectWallet}
+          onExitRequested={onExitRequested}
+          onInitialConnectionResult={handleInitialConnectionResult}
+          requestSignature={requestSignature}
+          watchSyncJob={watchSyncJob}
+        />
+      </div>
+    </>
   )
 }
 
-export function ReownEvmWalletConnectionRoute() {
+export function ReownEvmWalletConnectionRoute(props: ReownRouteProps = {}) {
   return isReownAppKitConfigured ? (
-    <ConfiguredReownRoute />
+    <ConfiguredReownRoute {...props} />
   ) : (
-    <MissingReownConfigurationRoute />
+    <MissingReownConfigurationRoute {...props} />
   )
 }

@@ -28,6 +28,7 @@ import {
   type CompleteWalletConnection,
   type ConnectedWallet,
   type ConnectWallet,
+  type ConnectWalletResult,
   type EvmWalletCompletionError,
   type EvmWalletConnectionError,
   type EvmWalletFlowError,
@@ -1017,19 +1018,34 @@ function getPageCopy(state: EvmWalletFlowState) {
 }
 
 export function EvmWalletConnectionPage({
+  autoConnectProvider,
   completeConnection,
   connectWallet,
+  onExitRequested,
+  onInitialConnectionResult,
   requestSignature,
   watchSyncJob,
 }: {
+  autoConnectProvider?: EvmWalletProviderId
   completeConnection: CompleteWalletConnection
   connectWallet: ConnectWallet
+  onExitRequested?: () => void
+  onInitialConnectionResult?: (result: ConnectWalletResult) => void
   requestSignature: RequestOwnershipSignature
   watchSyncJob?: WatchWalletSyncJob
 }) {
   const [state, dispatch] = useReducer(
     evmWalletFlowReducer,
-    initialEvmWalletFlowState,
+    autoConnectProvider,
+    (provider): EvmWalletFlowState =>
+      provider
+        ? {
+            error: null,
+            provider,
+            status: 'SELECTING',
+            view: 'select',
+          }
+        : initialEvmWalletFlowState,
   )
   const [signatureReminder, setSignatureReminder] = useState('')
   const [syncJob, setSyncJob] = useState<WalletSyncJobSnapshot | null>(null)
@@ -1039,6 +1055,7 @@ export function EvmWalletConnectionPage({
   const requestPendingRef = useRef(false)
   const stepContentRef = useRef<HTMLDivElement>(null)
   const previousFocusKeyRef = useRef('')
+  const autoConnectStartedRef = useRef(false)
   const startDateRef = useRef<HTMLInputElement>(null)
   const taxYearRef = useRef<HTMLSelectElement>(null)
   const currentStep = getCurrentStep(state)
@@ -1134,12 +1151,22 @@ export function EvmWalletConnectionPage({
       } else {
         dispatch({ error: result.error, type: 'CONNECT_FAILED' })
       }
+      if (autoConnectProvider) {
+        onInitialConnectionResult?.(result)
+      }
     } catch {
       if (isCurrentRequest(requestId, controller)) {
-        dispatch({
+        const result: ConnectWalletResult = {
           error: { code: 'CONNECTION_FAILED' },
+          ok: false,
+        }
+        dispatch({
+          error: result.error,
           type: 'CONNECT_FAILED',
         })
+        if (autoConnectProvider) {
+          onInitialConnectionResult?.(result)
+        }
       }
     } finally {
       finishRequest(requestId)
@@ -1257,12 +1284,26 @@ export function EvmWalletConnectionPage({
   }
 
   function handleBack() {
+    if (autoConnectProvider && state.view === 'ownership') {
+      onExitRequested?.()
+      return
+    }
+
     activeRequestRef.current += 1
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     requestPendingRef.current = false
     dispatch({ type: 'BACK_REQUESTED' })
   }
+
+  useEffect(() => {
+    if (!autoConnectProvider || autoConnectStartedRef.current) {
+      return
+    }
+
+    autoConnectStartedRef.current = true
+    void handleConnect()
+  }, [autoConnectProvider])
 
   return (
     <SourceFlowLayout
@@ -1340,7 +1381,13 @@ export function EvmWalletConnectionPage({
             jobSnapshot={syncJob}
             network={state.network}
             normalizedPeriod={state.normalizedPeriod}
-            onReset={() => dispatch({ type: 'RESET' })}
+            onReset={() => {
+              if (autoConnectProvider) {
+                onExitRequested?.()
+                return
+              }
+              dispatch({ type: 'RESET' })
+            }}
             syncStatus={state.status}
             watchError={syncWatchError}
           />

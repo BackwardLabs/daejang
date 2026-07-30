@@ -1,8 +1,22 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SourceManagementPage } from './SourceManagementPage.tsx'
 import { SourceMethodIntroPage } from './SourceMethodIntroPage.tsx'
 import { SourceTypeSelectionPage } from './SourceTypeSelectionPage.tsx'
+
+vi.mock('./ReownEvmWalletConnectionRoute.tsx', () => ({
+  ReownEvmWalletConnectionRoute: ({
+    pendingView,
+  }: {
+    pendingView?: ReactNode
+  }) => (
+    <>
+      {pendingView}
+      <div role="dialog" aria-label="Reown 지갑 연결" />
+    </>
+  ),
+}))
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -192,8 +206,8 @@ describe('source flow pages', () => {
       within(methods).queryByRole('link', { name: 'Upbit PDF 선택' }),
     ).not.toBeInTheDocument()
     expect(
-      within(methods).getByRole('link', { name: 'EVM Wallet 선택' }),
-    ).toHaveAttribute('href', '/sources/new/wallet')
+      within(methods).getByRole('button', { name: 'EVM Wallet 선택' }),
+    ).toBeEnabled()
     expect(
       within(methods).getByText('암호화되지 않은 PDF 지원'),
     ).toBeInTheDocument()
@@ -204,6 +218,23 @@ describe('source flow pages', () => {
       screen.getByText(
         'Upbit는 PDF 업로드, EVM은 브라우저 지갑의 읽기 전용 연결 방식으로 등록합니다.',
       ),
+    ).toBeInTheDocument()
+  })
+
+  it('opens Reown directly without leaving the source type selection route', async () => {
+    window.history.pushState({}, '', '/sources/new')
+    render(<SourceTypeSelectionPage />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'EVM Wallet 선택' }),
+    )
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Reown 지갑 연결' }),
+    ).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/sources/new')
+    expect(
+      screen.getByRole('heading', { name: '데이터 소스 추가' }),
     ).toBeInTheDocument()
   })
 
