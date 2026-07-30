@@ -1669,6 +1669,28 @@
   min-width: 180px;
 }
 
+.ledger-browser {
+  align-items: start;
+}
+
+.ledger-browser__list {
+  max-height: calc(100dvh - 190px);
+  padding: 2px 10px 2px 2px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-color: #c9c9ce transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ledger-browser__detail {
+  position: sticky;
+  top: 32px;
+  min-width: 0;
+}
+
 .ledger-review-browser {
   display: grid;
   grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
@@ -2108,6 +2130,14 @@
 }
 
 @media (max-width: 900px) {
+  .ledger-browser__list {
+    max-height: min(70dvh, 720px);
+  }
+
+  .ledger-browser__detail {
+    position: static;
+  }
+
   .ledger-state-card {
     width: calc(100% - 40px);
     margin: 24px 20px 32px;
