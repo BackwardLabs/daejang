@@ -1,23 +1,17 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
-import {
-  AppSidebar,
-  type AppYear,
-} from '../../components/AppSidebar.tsx'
+import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
+import {
+  loadAppPreferences,
+  saveAppYear,
+  type AppYear,
+} from '../../preferences/appPreferences.ts'
 import './source-flow.css'
 
 type SourceHeaderBadge = {
   label: string
   tone: 'evm' | 'upbit'
-}
-
-const sourceFlowYearStorageKey = 'source-flow-year.v1'
-
-function readSourceFlowYear(): AppYear {
-  const storedYear = window.sessionStorage.getItem(sourceFlowYearStorageKey)
-
-  return storedYear === '2026' ? '2026' : '2027'
 }
 
 export function SourceFlowLayout({
@@ -34,11 +28,11 @@ export function SourceFlowLayout({
   title: string
 }) {
   const [selectedYear, setSelectedYear] =
-    useState<AppYear>(readSourceFlowYear)
+    useState<AppYear>(() => loadAppPreferences().year)
 
   function handleYearChange(year: AppYear) {
-    window.sessionStorage.setItem(sourceFlowYearStorageKey, year)
     setSelectedYear(year)
+    saveAppYear(year)
   }
 
   return (

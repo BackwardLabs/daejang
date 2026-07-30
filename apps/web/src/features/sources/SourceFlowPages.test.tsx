@@ -33,35 +33,63 @@ describe('source flow pages', () => {
     expect(
       screen.getByRole('heading', { name: '데이터 소스 관리' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('현재 연결된 소스 0개')).toBeInTheDocument()
+    expect(screen.getByText('현재 연결된 소스 확인 중')).toBeInTheDocument()
     expect(
       await screen.findByRole('heading', {
         name: '아직 연결된 데이터 소스가 없어요',
       }),
     ).toBeInTheDocument()
+    expect(screen.getByText('현재 연결된 소스 0개')).toBeInTheDocument()
     expect(
       screen.getAllByRole('link', { name: '데이터 소스 추가' }),
     ).toHaveLength(2)
     expect(
       screen.getAllByRole('link', { name: '데이터 소스 추가' })[0],
     ).toHaveAttribute('href', '/sources/new')
+    expect(
+      screen.getByText(
+        '각 데이터 소스의 연결 해제와 거래 데이터 삭제는 별도로 관리됩니다.',
+      ),
+    ).toBeInTheDocument()
 
     const period = screen.getByRole('combobox', { name: '조회 기간' })
-    expect(period).toHaveValue('2027')
-    expect(screen.queryByText('2027 과세연도')).not.toBeInTheDocument()
-
-    fireEvent.change(period, { target: { value: '2026' } })
-
     expect(period).toHaveValue('2026')
     expect(screen.queryByText('2026 과세연도')).not.toBeInTheDocument()
+
+    fireEvent.change(period, { target: { value: '2025' } })
+
+    expect(period).toHaveValue('2025')
+    expect(screen.queryByText('2025 과세연도')).not.toBeInTheDocument()
 
     unmount()
     render(<SourceTypeSelectionPage />)
 
     expect(screen.getByRole('combobox', { name: '조회 기간' })).toHaveValue(
-      '2026',
+      '2025',
     )
-    expect(screen.queryByText('2026 과세연도')).not.toBeInTheDocument()
+    expect(screen.queryByText('2025 과세연도')).not.toBeInTheDocument()
+  })
+
+  it('does not report zero sources while the source count is still loading', () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    )
+
+    render(<SourceManagementPage />)
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '데이터 소스를 불러오는 중입니다',
+    )
+    expect(screen.getByText('현재 연결된 소스 확인 중')).toBeInTheDocument()
+    expect(
+      screen.queryByText('현재 연결된 소스 0개'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        '각 데이터 소스의 연결 해제와 거래 데이터 삭제는 별도로 관리됩니다.',
+      ),
+    ).not.toBeInTheDocument()
   })
 
   it('uses production-safe copy when source services are unavailable', async () => {
@@ -74,12 +102,31 @@ describe('source flow pages', () => {
 
     render(<SourceManagementPage />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      '데이터 소스를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.',
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveClass(
+      'source-state-card',
+      'source-state-card--error',
     )
+    expect(
+      within(alert).getByRole('heading', {
+        name: '데이터 소스를 불러오지 못했습니다',
+      }),
+    ).toBeInTheDocument()
+    expect(alert).toHaveTextContent('잠시 후 다시 시도해 주세요')
+    expect(
+      screen.getByText('현재 연결된 소스 수를 확인할 수 없습니다'),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('현재 연결된 소스 0개'),
+    ).not.toBeInTheDocument()
     expect(screen.queryByText(/로컬 데이터베이스/)).not.toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: '아직 연결된 데이터 소스가 없어요' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        '각 데이터 소스의 연결 해제와 거래 데이터 삭제는 별도로 관리됩니다.',
+      ),
     ).not.toBeInTheDocument()
   })
 
@@ -158,15 +205,29 @@ describe('source flow pages', () => {
     render(<SourceManagementPage />)
 
     const statusButton = await screen.findByRole('button', {
-      name: /처리 확인 필요 · JIT_START_FAILED/,
+      name: '처리 확인 필요',
     })
+    expect(screen.queryByText('JIT_START_FAILED')).not.toBeInTheDocument()
+    expect(
+      screen.queryByTitle('JIT 실행 요청에 실패했습니다.'),
+    ).not.toBeInTheDocument()
     fireEvent.click(statusButton)
 
     expect(
-      screen.getByRole('heading', { name: '수집 문제를 확인해 주세요' }),
+      screen.getByRole('heading', {
+        name: '거래 수집이 잠시 중단되었습니다',
+      }),
     ).toBeInTheDocument()
-    expect(screen.getByText('JIT 실행 요청에 실패했습니다.')).toBeInTheDocument()
-    expect(screen.getByText('JIT_START_FAILED')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '수집 서비스 연결이 원활하지 않습니다. 잠시 후 다시 수집해 주세요.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('수집 서비스 일시 오류')).toBeInTheDocument()
+    expect(
+      screen.queryByText('JIT 실행 요청에 실패했습니다.'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('JIT_START_FAILED')).not.toBeInTheDocument()
     expect(screen.getByText('2027-01-01 – 2027-12-31')).toBeInTheDocument()
     expect(screen.getByText('3')).toBeInTheDocument()
 
@@ -184,6 +245,118 @@ describe('source flow pages', () => {
         body: expect.stringContaining('"intentKey":"source-retry:'),
       }),
     )
+  })
+
+  it('uses a safe fallback for unknown failures and shares the same right-control structure', async () => {
+    const pdfSource = {
+      id: '11111111-1111-4111-8111-111111111111',
+      type: 'UPBIT_PDF',
+      provider: 'UPBIT',
+      originalFilename: 'upbit-history.pdf',
+      mediaType: 'application/pdf',
+      byteLength: 1024,
+      artifactDigest: 'a'.repeat(64),
+      coverageStart: '2027-01-01',
+      coverageEnd: '2027-12-31',
+      status: 'ACTIVE',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:00:00.000Z',
+    }
+    const walletSource = {
+      id: '33333333-3333-4333-8333-333333333333',
+      type: 'EVM_WALLET',
+      address: '0x239000000000000000000000000000000000f2b2',
+      accountType: 'EOA',
+      verificationChainId: 'eip155:1',
+      verifiedAt: '2027-01-01T00:00:00.000Z',
+      label: '세무 지갑',
+      status: 'ACTIVE',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:00:00.000Z',
+      chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+    }
+    const failedJob = {
+      id: '77777777-7777-4777-8777-777777777777',
+      sourceId: pdfSource.id,
+      sourceKind: 'UPBIT_PDF',
+      state: 'FAILED',
+      phase: 'EXTRACT',
+      attempts: 1,
+      processedRecords: 0,
+      failureCode: 'INTERNAL_STORAGE_FAILURE',
+      failureMessage: 'Backend detail must stay private.',
+      requestedCoverageStart: '2027-01-01',
+      requestedCoverageEnd: '2027-12-31',
+      trigger: 'USER_REQUEST',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:05:00.000Z',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/api/v1/sources') {
+          return new Response(
+            JSON.stringify({ items: [pdfSource, walletSource] }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (url === '/api/v1/jobs') {
+          return new Response(JSON.stringify({ items: [failedJob] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+
+    render(<SourceManagementPage />)
+
+    const sourceList = await screen.findByRole('region', {
+      name: '등록된 데이터 소스',
+    })
+    const sourceItems = within(sourceList).getAllByRole('article')
+    expect(sourceItems).toHaveLength(2)
+    const pdfSourceItem = sourceItems[0]
+    if (!pdfSourceItem) {
+      throw new Error('Expected the PDF source row to be rendered.')
+    }
+    for (const item of sourceItems) {
+      expect(item.children).toHaveLength(2)
+      expect(item.children[1]).toHaveClass('source-list__right-controls')
+    }
+    expect(screen.getByText('현재 연결된 소스 2개')).toBeInTheDocument()
+
+    fireEvent.click(
+      within(pdfSourceItem).getByRole('button', {
+        name: '처리 확인 필요',
+      }),
+    )
+
+    expect(
+      screen.getByRole('heading', {
+        name: '수집 작업을 완료하지 못했습니다',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('수집 처리 문제')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '일시적인 문제가 발생했습니다. 잠시 후 다시 수집해 주세요.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('INTERNAL_STORAGE_FAILURE'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Backend detail must stay private.'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTitle('Backend detail must stay private.'),
+    ).not.toBeInTheDocument()
   })
 
   it('adds networks to the same wallet source and starts collection without another signature', async () => {

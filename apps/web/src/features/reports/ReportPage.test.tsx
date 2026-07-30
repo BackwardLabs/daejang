@@ -1,6 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  loadAppPreferences,
+  saveAppPreferences,
+} from '../../preferences/appPreferences.ts'
 import { ReportPage } from './ReportPage.tsx'
 
 const partialTaxReport = {
@@ -88,6 +92,7 @@ function stubReportRequests(options: {
 }
 
 beforeEach(() => {
+  saveAppPreferences({ currency: 'KRW', year: '2027' })
   stubReportRequests()
 })
 
@@ -208,5 +213,33 @@ describe('ReportPage', () => {
     expect(
       screen.queryByRole('button', { name: 'Mock USD로 내려받기' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('uses and updates the shared tax-year preference', async () => {
+    saveAppPreferences({ currency: 'KRW', year: '2026' })
+
+    render(<ReportPage />)
+
+    expect(screen.getByRole('combobox', { name: '조회 기간' })).toHaveValue(
+      '2026',
+    )
+    expect(
+      await screen.findByText(
+        '현재 세금 계산 결과는 2027년 이후 과세연도부터 제공됩니다.',
+      ),
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        vi.mocked(fetch).mock.calls.some(([url]) =>
+          String(url).endsWith('/api/v1/reports?taxYear=2026'),
+        ),
+      ).toBe(true)
+    })
+
+    fireEvent.change(screen.getByRole('combobox', { name: '조회 기간' }), {
+      target: { value: '2025' },
+    })
+
+    expect(loadAppPreferences().year).toBe('2025')
   })
 })

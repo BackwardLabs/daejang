@@ -252,6 +252,13 @@
   margin-inline: auto;
 }
 
+.ledger-review-scope {
+  margin-block: 0;
+  color: var(--ledger-muted);
+  font-size: 13px;
+  text-align: right;
+}
+
 .ledger-pipeline {
   height: 150px;
   padding: 14px 16px 10px;

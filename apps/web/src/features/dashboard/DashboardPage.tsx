@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AppSidebar, defaultAppYear, type AppYear } from '../../components/AppSidebar.tsx'
+import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
-import { loadDashboard, loadLedger, loadReviews, type DashboardModel, type LedgerEventModel, type ReviewModel } from '../../api/productApi.ts'
+import {
+  loadDashboard,
+  loadLedger,
+  type DashboardModel,
+  type LedgerEventModel,
+} from '../../api/productApi.ts'
+import {
+  loadAppPreferences,
+  saveAppYear,
+  type AppYear,
+} from '../../preferences/appPreferences.ts'
 import {
   describeLedgerAction,
   formatLedgerQuantity,
@@ -29,9 +39,11 @@ const feeRoles = new Set(['FEE', 'GAS'])
 
 const describeInterpretationSupport = (support: string) => {
   if (support === 'FULL') return '근거 확인 완료'
+  if (support === 'SUPPORTED') return '근거 연결됨'
+  if (support === 'PARTIAL') return '일부 근거 연결'
   if (support === 'DETECTED_ONLY') return '기본 거래 확인'
   if (support === 'OBSERVATION_ONLY') return '원본 근거만 확인'
-  return support || '근거 확인 중'
+  return '근거 확인 중'
 }
 
 const postingAsset = (posting: LedgerEventModel['postings'][number]) =>
@@ -51,23 +63,34 @@ const denominationAsset = (
 }
 
 export function DashboardPage() {
-  const [selectedYear, setSelectedYear] = useState<AppYear>(defaultAppYear)
+  const [selectedYear, setSelectedYear] = useState<AppYear>(
+    () => loadAppPreferences().year,
+  )
   const [dashboard, setDashboard] = useState<DashboardModel>()
   const [events, setEvents] = useState<LedgerEventModel[]>([])
-  const [reviews, setReviews] = useState<ReviewModel[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [isSyncing, setIsSyncing] = useState(false)
-  const [syncMessage, setSyncMessage] = useState('')
+  const [syncFeedback, setSyncFeedback] = useState<{
+    message: string
+    tone: 'error' | 'status'
+  }>()
 
   const refresh = useCallback(async (year: AppYear, signal?: AbortSignal) => {
     setStatus('loading')
     try {
-      const [dashboardResult, ledgerResult, reviewResult] = await Promise.all([
-        loadDashboard(year, signal), loadLedger(year, signal), loadReviews({ signal }),
+      const [dashboardResult, ledgerResult] = await Promise.all([
+        loadDashboard(year, signal),
+        loadLedger(year, signal),
       ])
-      setDashboard(dashboardResult.dashboard); setEvents(ledgerResult.items); setReviews(reviewResult.items); setStatus('ready')
+      setDashboard(dashboardResult.dashboard)
+      setEvents(ledgerResult.items)
+      setStatus('ready')
+      return true
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) setStatus('error')
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        setStatus('error')
+      }
+      return false
     }
   }, [])
 
@@ -75,39 +98,74 @@ export function DashboardPage() {
 
   function handleYearChange(year: AppYear) {
     setSelectedYear(year)
-    setSyncMessage('')
+    saveAppYear(year)
+    setSyncFeedback(undefined)
   }
 
-  function handleSync() {
+  async function handleSync() {
     if (isSyncing) return
     setIsSyncing(true)
-    setSyncMessage('서버의 최신 처리 상태를 확인하고 있습니다.')
-    void refresh(selectedYear).then(() => setSyncMessage('최신 처리 상태를 불러왔습니다.')).finally(() => setIsSyncing(false))
+    setSyncFeedback({
+      message: '서버의 최신 처리 상태를 확인하고 있습니다.',
+      tone: 'status',
+    })
+    const succeeded = await refresh(selectedYear)
+    setSyncFeedback(
+      succeeded
+        ? {
+            message: '최신 처리 상태를 불러왔습니다.',
+            tone: 'status',
+          }
+        : {
+            message:
+              '최신 처리 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+            tone: 'error',
+          },
+    )
+    setIsSyncing(false)
   }
 
+  const openReviewCount = count(dashboard?.openReviewCount)
+  const readyValue = (value: string) => status === 'ready' ? value : '—'
+  const pendingDetail = status === 'loading' ? '불러오는 중' : '확인 필요'
   const metrics = [
     {
       label: '전체 거래',
-      value: `${count(dashboard?.transactionCount).toLocaleString()}건`,
-      detail: '현재 원장 기준',
+      value: readyValue(
+        `${count(dashboard?.transactionCount).toLocaleString()}건`,
+      ),
+      detail: status === 'ready' ? '현재 원장 기준' : pendingDetail,
       tone: 'positive',
     },
     {
       label: '검토 필요',
-      value: `${count(dashboard?.openReviewCount).toLocaleString()}건`,
-      detail: count(dashboard?.openReviewCount) > 0 ? '확인이 필요한 항목' : '열린 검토 없음',
-      tone: 'review',
+      value: readyValue(`${openReviewCount.toLocaleString()}건`),
+      detail: status !== 'ready'
+        ? pendingDetail
+        : openReviewCount > 0
+          ? '확인이 필요한 항목'
+          : '검토 완료',
+      tone:
+        status === 'ready' && openReviewCount === 0
+          ? 'positive'
+          : 'review',
     },
     {
       label: '연결 소스',
-      value: `${count(dashboard?.sourceCount).toLocaleString()}개`,
-      detail: '활성 데이터 소스',
+      value: readyValue(
+        `${count(dashboard?.sourceCount).toLocaleString()}개`,
+      ),
+      detail: status === 'ready' ? '활성 데이터 소스' : pendingDetail,
       tone: 'neutral',
     },
     {
       label: '처리 완료',
-      value: `${count(dashboard?.completedCount).toLocaleString()}건`,
-      detail: `${count(dashboard?.exceptionCount).toLocaleString()}건 예외`,
+      value: readyValue(
+        `${count(dashboard?.completedCount).toLocaleString()}건`,
+      ),
+      detail: status === 'ready'
+        ? `${count(dashboard?.exceptionCount).toLocaleString()}건 예외`
+        : pendingDetail,
       tone: 'positive',
     },
   ] as const
@@ -155,22 +213,50 @@ export function DashboardPage() {
 
           {status === 'error' ? <p className="dashboard-year-notice" role="alert">장부 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p> : null}
 
-          <p
-            className="dashboard-sync-message"
-            role="status"
-            aria-live="polite"
-            hidden={!syncMessage}
-          >
-            {syncMessage}
-          </p>
-
-          <section className="dashboard-review-alert" aria-label="검토 대기 알림">
-            <span aria-hidden="true">!</span>
-            <p>
-              <strong>{count(dashboard?.openReviewCount)}건</strong>의 거래가
-              검토를 기다리고 있습니다. 근거를 연결하면 신고 준비도가 올라갑니다.
+          {syncFeedback ? (
+            <p
+              className={`dashboard-sync-message is-${syncFeedback.tone}`}
+              role={syncFeedback.tone === 'error' ? 'alert' : 'status'}
+              aria-live="polite"
+            >
+              {syncFeedback.message}
             </p>
-            <AppLink href="/ledger">검토 필요</AppLink>
+          ) : null}
+
+          <section
+            className={`dashboard-review-alert ${
+              status === 'ready' && openReviewCount === 0
+                ? 'is-complete'
+                : ''
+            }`}
+            aria-label="검토 현황"
+            data-state={
+              status === 'ready' && openReviewCount === 0
+                ? 'complete'
+                : status
+            }
+          >
+            <span aria-hidden="true">
+              {status === 'ready' && openReviewCount === 0 ? '✓' : '!'}
+            </span>
+            {status === 'loading' ? (
+              <p>검토 현황을 불러오는 중입니다.</p>
+            ) : status === 'error' ? (
+              <p>검토 현황을 확인하지 못했습니다.</p>
+            ) : openReviewCount === 0 ? (
+              <p>
+                <strong>검토 대기 항목이 없습니다.</strong> 현재 장부의 검토가
+                모두 완료되었습니다.
+              </p>
+            ) : (
+              <p>
+                <strong>{openReviewCount}건</strong>의 거래가 검토를 기다리고
+                있습니다. 근거를 연결하면 신고 준비도가 올라갑니다.
+              </p>
+            )}
+            {status === 'ready' && openReviewCount > 0 ? (
+              <AppLink href="/ledger">검토 필요</AppLink>
+            ) : null}
           </section>
 
           <section className="dashboard-metrics" aria-label="장부 핵심 지표">
@@ -188,7 +274,10 @@ export function DashboardPage() {
             ))}
           </section>
 
-          <section className="dashboard-workspace" aria-label="거래 흐름과 검토 큐">
+          <section
+            className="dashboard-workspace"
+            aria-label={`${selectedYear}년 거래 흐름과 검토 현황`}
+          >
             <article className="dashboard-chart-card">
               <header>
                 <div>
@@ -214,20 +303,51 @@ export function DashboardPage() {
 
             <article className="dashboard-review-queue">
               <header>
-                <h2>검토 큐</h2>
-                <AppLink href="/ledger">전체 보기 →</AppLink>
+                <h2>{selectedYear}년 검토 현황</h2>
+                {status === 'ready' && openReviewCount > 0 ? (
+                  <AppLink href="/ledger">검토 목록 보기 →</AppLink>
+                ) : null}
               </header>
               <ul>
-                {reviews.slice(0, 3).map((item) => (
-                  <li key={item.id}>
+                {status === 'loading' ? (
+                  <li>
                     <span>
-                      <strong>{item.reasonCodes[0] ?? '검토 필요'}</strong>
-                      <small>{item.id}</small>
+                      <strong>검토 현황을 불러오는 중입니다</strong>
+                      <small>잠시만 기다려 주세요.</small>
                     </span>
-                    <b>{new Date(item.createdAt).toLocaleDateString('ko-KR')}</b>
                   </li>
-                ))}
-                {reviews.length === 0 ? <li><span><strong>열린 검토가 없습니다</strong><small>새로운 검토가 생기면 여기에 표시됩니다.</small></span></li> : null}
+                ) : null}
+                {status === 'error' ? (
+                  <li>
+                    <span>
+                      <strong>검토 현황을 확인하지 못했습니다</strong>
+                      <small>새로고침으로 다시 확인해 주세요.</small>
+                    </span>
+                  </li>
+                ) : null}
+                {status === 'ready' && openReviewCount > 0 ? (
+                  <li>
+                    <span>
+                      <strong>
+                        확인이 필요한 거래가 {openReviewCount.toLocaleString()}건
+                        있습니다
+                      </strong>
+                      <small>
+                        거래 장부에서 사유와 근거를 확인해 주세요.
+                      </small>
+                    </span>
+                  </li>
+                ) : null}
+                {status === 'ready' && openReviewCount === 0 ? (
+                  <li>
+                    <span>
+                      <strong>검토가 모두 완료되었습니다</strong>
+                      <small>
+                        이 조회 연도에는 확인이 필요한 거래가 없습니다.
+                      </small>
+                    </span>
+                  </li>
+                ) : null}
               </ul>
             </article>
           </section>
@@ -299,7 +419,7 @@ export function DashboardPage() {
                       <td>{describeInterpretationSupport(transaction.interpretationSupport)}</td>
                     </tr>
                   })}
-                  {status === 'ready' && recentTransactions.length === 0 ? <tr><td colSpan={7}>이 과세연도에 처리된 거래가 없습니다.</td></tr> : null}
+                  {status === 'ready' && recentTransactions.length === 0 ? <tr><td colSpan={7}>이 조회 연도에 처리된 거래가 없습니다.</td></tr> : null}
                 </tbody>
               </table>
             </div>
