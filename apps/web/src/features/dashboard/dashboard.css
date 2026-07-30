@@ -109,10 +109,24 @@
 
 .dashboard-action--sync {
   gap: 8px;
-  color: var(--dashboard-muted);
-  background: var(--dashboard-subtle);
-  border-color: transparent;
+  border-color: var(--dashboard-line-strong);
+  color: var(--dashboard-ink);
+  background: var(--dashboard-paper);
+  box-shadow: 0 1px 2px rgb(26 26 26 / 6%);
   cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.dashboard-action--sync:hover:not(:disabled) {
+  border-color: var(--dashboard-ink);
+  background: var(--dashboard-subtle);
+}
+
+.dashboard-action--sync:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .dashboard-action--sync:disabled {
@@ -121,10 +135,26 @@
 }
 
 .dashboard-action--sync i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--dashboard-positive);
+  width: 16px;
+  height: 16px;
+  color: var(--dashboard-accent);
+  font-style: normal;
+  line-height: 16px;
+}
+
+.dashboard-action--sync i::before {
+  content: '↻';
+  font-size: 17px;
+}
+
+.dashboard-action--sync:disabled i {
+  animation: dashboard-spin 900ms linear infinite;
+}
+
+@keyframes dashboard-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .dashboard-year-notice,
@@ -148,6 +178,11 @@
   color: #fff;
   background: var(--dashboard-ink);
   box-shadow: 0 8px 24px rgb(26 26 26 / 12%);
+}
+
+.dashboard-sync-message.is-error {
+  border-color: #9e3529;
+  background: #8b2d22;
 }
 
 .dashboard-review-alert {
@@ -189,6 +224,16 @@
   font-size: 11px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.dashboard-review-alert.is-complete {
+  border-color: #b9dfc8;
+  background: #f4fbf6;
+}
+
+.dashboard-review-alert.is-complete > span,
+.dashboard-review-alert.is-complete p strong {
+  color: var(--dashboard-positive);
 }
 
 .dashboard-metrics {
@@ -446,7 +491,7 @@
 }
 
 .dashboard-table-scroll tbody td {
-  height: 42px;
+  height: 52px;
 }
 
 .dashboard-table-scroll th {
@@ -487,6 +532,20 @@
 
 .dashboard-table-scroll tbody tr:last-child td {
   border-bottom: 0;
+}
+
+.dashboard-asset strong,
+.dashboard-asset small {
+  display: block;
+}
+
+.dashboard-asset small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--dashboard-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dashboard-status {

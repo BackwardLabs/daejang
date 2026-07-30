@@ -1,8 +1,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { ApiClientError } from '../../api/client.ts'
 import { loadReports, type ReportModel } from '../../api/productApi.ts'
-import { AppSidebar, type AppYear } from '../../components/AppSidebar.tsx'
+import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
+import {
+  loadAppPreferences,
+  saveAppYear,
+  type AppYear,
+} from '../../preferences/appPreferences.ts'
 import {
   downloadPaidFinalReport,
   loadReportPaymentCapability,
@@ -127,7 +132,9 @@ function CurrentTaxReport({ report }: { report: TaxReportModel }) {
 }
 
 export function ReportPage() {
-  const [year, setYear] = useState<AppYear>('2027')
+  const [year, setYear] = useState<AppYear>(
+    () => loadAppPreferences().year,
+  )
   const [reports, setReports] = useState<ReportModel[]>([])
   const [selectedId, setSelectedId] = useState<string>()
   const [artifactStatus, setArtifactStatus] =
@@ -262,9 +269,18 @@ export function ReportPage() {
     }
   }
 
+  function handleYearChange(nextYear: AppYear) {
+    setYear(nextYear)
+    saveAppYear(nextYear)
+  }
+
   return (
     <div className="ledger-page report-page product-shell">
-      <AppSidebar activePage="reports" year={year} onYearChange={setYear} />
+      <AppSidebar
+        activePage="reports"
+        year={year}
+        onYearChange={handleYearChange}
+      />
       <main className="report-main">
         <PageHeader
           description="현재 세금 계산 결과와 발행된 불변 산출물을 구분해 확인합니다."

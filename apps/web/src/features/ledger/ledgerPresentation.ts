@@ -106,6 +106,11 @@ const eventTypeLabels: Record<string, string> = {
   OTHER: '기타',
 }
 
+const reviewReasonLabels: Record<string, string> = {
+  UNKNOWN_TRANSACTION: '거래 유형 확인 필요',
+  NEEDS_CONTEXT: '추가 정보 필요',
+}
+
 const nonMaterialPostingRoles = new Set(['FEE', 'GAS'])
 
 const evmNetworkMetadata: Record<string, { label: string; nativeSymbol: string; decimals: number }> = {
@@ -163,7 +168,7 @@ export const parseLedgerAsset = (
   }
   const evmMatch = assetId.match(/^asset:eip155:(\d+):(native|erc20)(?::(.+))?$/i)
   if (evmMatch) {
-    const [, chainId = '', assetKind = '', locator] = evmMatch
+    const [, chainId = '', assetKind = ''] = evmMatch
     const network = evmNetworkMetadata[chainId]
     const networkLabel = network?.label ?? `EVM ${chainId}`
     if (assetKind.toLowerCase() === 'native' && network) {
@@ -175,19 +180,19 @@ export const parseLedgerAsset = (
     }
     if (assetKind.toLowerCase() === 'native') {
       return {
-        symbol: assetId,
+        symbol: '네이티브 자산',
         metadata: `${networkLabel} · 네이티브 자산 메타데이터 확인 필요`,
       }
     }
-    const compactLocator = locator && locator.length > 18
-      ? `${locator.slice(0, 10)}…${locator.slice(-6)}`
-      : locator
     return {
-      symbol: compactLocator || 'ERC-20',
+      symbol: 'ERC-20 토큰',
       metadata: `${networkLabel} · 토큰 메타데이터 확인 필요`,
     }
   }
-  return { symbol: assetId || '알 수 없는 자산' }
+  return {
+    symbol: '자산 확인 필요',
+    metadata: assetId ? '원본 자산 식별자를 확인해 주세요' : undefined,
+  }
 }
 
 export const describeLedgerSource = (
@@ -231,7 +236,7 @@ export const describeLedgerSource = (
 }
 
 export const describeFlowShape = (flowShape: string) =>
-  flowShapeLabels[flowShape] ?? (flowShape || '흐름 확인 필요')
+  flowShapeLabels[flowShape] ?? '흐름 확인 필요'
 
 export const describeLedgerAction = (
   eventType: string,
@@ -245,7 +250,7 @@ export const describeLedgerAction = (
   if (flowShape === 'FIAT_OUT') return { label: '원화 출금', description }
   if (eventType !== 'TRANSFER') {
     return {
-      label: eventTypeLabels[eventType] ?? (eventType || '미분류'),
+      label: eventTypeLabels[eventType] ?? '거래 유형 확인 필요',
       description,
     }
   }
@@ -336,7 +341,7 @@ export const formatCanonicalQuantity = (
   assetDecimals?: number,
 ) => {
   if (!integerQuantityPattern.test(quantity)) return quantity || '—'
-  if (assetDecimals === undefined) return `${quantity} raw units`
+  if (assetDecimals === undefined) return `${quantity} (단위 확인 필요)`
   const negative = quantity.startsWith('-')
   const digits = negative ? quantity.slice(1) : quantity
   if (assetDecimals === 0) return `${negative ? '-' : ''}${digits}`
@@ -351,7 +356,9 @@ export const formatLedgerQuantity = (
   assetDecimals?: number,
 ) => {
   const formatted = formatCanonicalQuantity(quantity, assetDecimals)
-  if (formatted.endsWith(' raw units') || formatted === '—') return formatted
+  if (formatted.endsWith(' (단위 확인 필요)') || formatted === '—') {
+    return formatted
+  }
   const negative = formatted.startsWith('-')
   const unsigned = negative ? formatted.slice(1) : formatted
   const [integer = '', fraction] = unsigned.split('.')
@@ -412,9 +419,12 @@ export const formatLedgerUnitPrice = (
 
 export const describePostingRole = (role: string) =>
   postingRoles[role] ?? {
-    label: role || '역할 미확인',
+    label: '역할 확인 필요',
     description: '원본 역할 코드를 아직 사용자용 설명으로 변환하지 못했습니다',
   }
 
 export const describePostingDirection = (direction: string) =>
-  directionLabels[direction] ?? (direction || '미확인')
+  directionLabels[direction] ?? '방향 확인 필요'
+
+export const describeReviewReason = (reasonCode: string) =>
+  reviewReasonLabels[reasonCode] ?? '추가 확인 필요'

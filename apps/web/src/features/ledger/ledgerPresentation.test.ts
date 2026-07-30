@@ -5,6 +5,7 @@ import {
   describeLedgerSource,
   describePostingDirection,
   describePostingRole,
+  describeReviewReason,
   describeTransferEndpoint,
   formatLedgerMoney,
   formatLedgerQuantity,
@@ -24,8 +25,14 @@ describe('ledger posting presentation', () => {
       decimals: 8,
       metadata: 'Upbit · 소수점 8자리',
     })
-    expect(parseLedgerAsset('asset-krw-upbit')).toEqual({ symbol: 'asset-krw-upbit' })
-    expect(parseLedgerAsset('asset:unmapped')).toEqual({ symbol: 'asset:unmapped' })
+    expect(parseLedgerAsset('asset-krw-upbit')).toEqual({
+      symbol: '자산 확인 필요',
+      metadata: '원본 자산 식별자를 확인해 주세요',
+    })
+    expect(parseLedgerAsset('asset:unmapped')).toEqual({
+      symbol: '자산 확인 필요',
+      metadata: '원본 자산 식별자를 확인해 주세요',
+    })
   })
 
   it('presents known EVM assets without inventing token metadata', () => {
@@ -35,11 +42,11 @@ describe('ledger posting presentation', () => {
       metadata: 'Optimism · 네이티브 자산',
     })
     expect(parseLedgerAsset('asset:eip155:1:erc20:0x1234567890abcdef1234')).toEqual({
-      symbol: '0x12345678…ef1234',
+      symbol: 'ERC-20 토큰',
       metadata: 'Ethereum · 토큰 메타데이터 확인 필요',
     })
     expect(parseLedgerAsset('asset:eip155:137:native')).toEqual({
-      symbol: 'asset:eip155:137:native',
+      symbol: '네이티브 자산',
       metadata: 'EVM 137 · 네이티브 자산 메타데이터 확인 필요',
     })
   })
@@ -82,6 +89,17 @@ describe('ledger posting presentation', () => {
     expect(describePostingRole('PRINCIPAL')).toMatchObject({ label: '주 거래' })
     expect(describePostingRole('FEE')).toMatchObject({ label: '거래 수수료' })
     expect(describeFlowShape('EXCHANGE')).toBe('자산 교환')
+    expect(describePostingDirection('UNKNOWN_DIRECTION')).toBe('방향 확인 필요')
+    expect(describePostingRole('UNKNOWN_ROLE')).toMatchObject({
+      label: '역할 확인 필요',
+    })
+    expect(describeFlowShape('UNKNOWN_FLOW_CODE')).toBe('흐름 확인 필요')
+  })
+
+  it('presents review reason codes without exposing internal codes', () => {
+    expect(describeReviewReason('UNKNOWN_TRANSACTION')).toBe('거래 유형 확인 필요')
+    expect(describeReviewReason('NEEDS_CONTEXT')).toBe('추가 정보 필요')
+    expect(describeReviewReason('NEW_INTERNAL_REASON')).toBe('추가 확인 필요')
   })
 
   it('labels transfers as deposits or withdrawals from durable flow evidence', () => {

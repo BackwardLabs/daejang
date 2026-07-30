@@ -5,7 +5,7 @@ import {
   resetSessionStateForTests,
   setCurrentUser,
 } from '../auth/session-store.ts'
-import { AppSidebar } from './AppSidebar.tsx'
+import { abbreviateEmail, AppSidebar } from './AppSidebar.tsx'
 
 afterEach(() => {
   resetSessionStateForTests()
@@ -32,8 +32,9 @@ describe('AppSidebar', () => {
     expect(
       screen.getByRole('dialog', { name: '장부 만들기 가이드' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('데이터 소스 연결')).toBeInTheDocument()
-    expect(screen.getByText('거래 수집 상태 확인')).toBeInTheDocument()
+    expect(screen.getByText('거래소·지갑 연결')).toBeInTheDocument()
+    expect(screen.getByText('거래 수집 확인')).toBeInTheDocument()
+    expect(screen.getByText('장부 검토')).toBeInTheDocument()
     expect(screen.getByText('보고서 확인')).toBeInTheDocument()
 
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -74,7 +75,27 @@ describe('AppSidebar', () => {
     })
     renderSidebar()
 
-    expect(screen.getByRole('button', { name: /계정개인 장부/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '계정 계정 메뉴 열기' })).toBeInTheDocument()
     expect(screen.queryByText('GIWA 사용자')).not.toBeInTheDocument()
+  })
+
+  it('abbreviates a long email deterministically while preserving the full label', () => {
+    const email = 'very.long.account.identifier@subdomain.example-company.com'
+    setCurrentUser({
+      id: '018f47a2-4b1c-7def-8abc-0123456789ab',
+      displayName: 'GIWA 사용자',
+      email,
+    })
+    renderSidebar()
+
+    const accountButton = screen.getByRole('button', {
+      name: `${email} 계정 메뉴 열기`,
+    })
+    const abbreviated = abbreviateEmail(email)
+    expect(abbreviated).toHaveLength(28)
+    expect(abbreviated).toContain('@')
+    expect(accountButton).toHaveAttribute('title', email)
+    expect(within(accountButton).getByText(abbreviated)).toBeInTheDocument()
+    expect(within(accountButton).queryByText(email)).not.toBeInTheDocument()
   })
 })

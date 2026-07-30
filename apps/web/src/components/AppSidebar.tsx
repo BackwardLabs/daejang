@@ -7,19 +7,40 @@ import userAvatar from '../assets/dashboard/user-avatar.svg'
 import { logout } from '../auth/api.ts'
 import { setCurrentUser, useCurrentUser } from '../auth/session-store.ts'
 import { Fragment, useState } from 'react'
+import type { AppYear } from '../preferences/appPreferences.ts'
 import { AccountProfileDialog } from './AccountProfileDialog.tsx'
 import { AppLink } from './AppLink.tsx'
 import { LedgerGuideDialog } from './LedgerGuideDialog.tsx'
 import './app-sidebar.css'
 
 export type AppPage = 'dashboard' | 'ledger' | 'reports' | 'settings' | 'sources'
-export type AppYear = '2025' | '2026' | '2027'
+export {
+  defaultAppYear,
+  type AppYear,
+} from '../preferences/appPreferences.ts'
 
-export const defaultAppYear = (now = new Date()): AppYear => {
-  const year = now.getFullYear()
-  if (year <= 2025) return '2025'
-  if (year >= 2027) return '2027'
-  return '2026'
+const abbreviateMiddle = (value: string, maxLength: number) => {
+  if (value.length <= maxLength) return value
+  if (maxLength <= 1) return '…'
+  const headLength = Math.ceil((maxLength - 1) / 2)
+  const tailLength = Math.floor((maxLength - 1) / 2)
+  return `${value.slice(0, headLength)}…${value.slice(-tailLength)}`
+}
+
+export const abbreviateEmail = (email: string, maxLength = 28) => {
+  if (email.length <= maxLength) return email
+  const atIndex = email.lastIndexOf('@')
+  if (atIndex <= 0 || atIndex === email.length - 1) {
+    return abbreviateMiddle(email, maxLength)
+  }
+
+  const local = email.slice(0, atIndex)
+  const domain = email.slice(atIndex + 1)
+  const preferredDomainLength = Math.min(domain.length, 18)
+  const localLength = Math.max(3, maxLength - preferredDomainLength - 1)
+  const compactLocal = abbreviateMiddle(local, localLength)
+  const domainLength = Math.max(3, maxLength - compactLocal.length - 1)
+  return `${compactLocal}@${abbreviateMiddle(domain, domainLength)}`
 }
 
 export type AppSidebarSecondaryItem = {
@@ -73,6 +94,9 @@ export function AppSidebar({
     user?.email ??
     (user?.displayName === 'GIWA 사용자' ? undefined : user?.displayName) ??
     '계정'
+  const accountDisplayLabel = user?.email
+    ? abbreviateEmail(user.email)
+    : accountLabel
 
   async function handleLogout() {
     setLogoutPending(true)
@@ -183,13 +207,15 @@ export function AppSidebar({
         <button
           type="button"
           className="app-sidebar__user"
+          aria-label={`${accountLabel} 계정 메뉴 열기`}
           aria-expanded={isProfileOpen}
           aria-haspopup="dialog"
+          title={accountLabel}
           onClick={() => setIsProfileOpen(true)}
         >
           <img src={userAvatar} alt="" />
           <span>
-            <strong>{accountLabel}</strong>
+            <strong>{accountDisplayLabel}</strong>
             <small>개인 장부</small>
           </span>
           <i aria-hidden="true">›</i>

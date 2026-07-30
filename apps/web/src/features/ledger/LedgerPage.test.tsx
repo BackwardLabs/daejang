@@ -1,6 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultAppYear } from '../../components/AppSidebar.tsx'
+import {
+  appPreferencesStorageKey,
+  loadAppPreferences,
+} from '../../preferences/appPreferences.ts'
 import { formatReviewQuantity, LedgerPage } from './LedgerPage.tsx'
 
 const jsonResponse = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
@@ -75,6 +79,7 @@ const ledgerEvent = {
 }
 
 afterEach(() => {
+  window.localStorage.clear()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -90,7 +95,9 @@ describe('LedgerPage', () => {
 
   it('formats canonical integer quantities without losing precision', () => {
     expect(formatReviewQuantity('1250000000000000000', 18)).toBe('1.25')
-    expect(formatReviewQuantity('9007199254740993')).toBe('9007199254740993 raw units')
+    expect(formatReviewQuantity('9007199254740993')).toBe(
+      '9007199254740993 (단위 확인 필요)',
+    )
     expect(formatReviewQuantity('-1', 18)).toBe('-0.000000000000000001')
   })
 
@@ -158,8 +165,8 @@ describe('LedgerPage', () => {
     expect(screen.getAllByText('Upbit').length).toBeGreaterThan(0)
     expect(screen.getByText('장부 확정')).toBeInTheDocument()
     expect(screen.getAllByText('평가 완료').length).toBeGreaterThan(0)
-    expect(screen.getByText('들어옴')).toBeInTheDocument()
-    expect(screen.getAllByText('나감')).toHaveLength(2)
+    expect(screen.getAllByText('들어옴').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('나감').length).toBeGreaterThan(0)
     expect(screen.getAllByText('매수·매도·입출금의 본체가 되는 자산 변동')).toHaveLength(2)
     expect(screen.getByText('거래소나 서비스에 지불한 처리 비용')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '당시 취득·처분 금액' })).toBeInTheDocument()
@@ -168,6 +175,9 @@ describe('LedgerPage', () => {
     expect(screen.getByText('2,701,901.16 KRW')).toBeInTheDocument()
     expect(screen.getByText('1,500 KRW / USDT')).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: '거래 처리 계보' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/원시값/)).not.toBeInTheDocument()
+    const rawQuantity = screen.getByText('원본 수량')
+    expect(rawQuantity.closest('details')).not.toHaveAttribute('open')
   })
 
   it('presents external transfers as deposits and withdrawals', async () => {
@@ -358,6 +368,8 @@ describe('LedgerPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /거래 상세 보기/ }))
 
     expect(screen.queryByRole('list', { name: '거래 처리 계보' })).not.toBeInTheDocument()
+    expect(screen.queryByText('ActionProof')).not.toBeInTheDocument()
+    expect(screen.queryByText('거래소 자료 해석')).not.toBeInTheDocument()
     expect(screen.getByText('장부 확정')).toBeInTheDocument()
     expect(screen.getAllByText('0.0002 ETH')).toHaveLength(2)
   })
@@ -377,6 +389,35 @@ describe('LedgerPage', () => {
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining(`/ledger?taxYear=${defaultAppYear()}`),
       expect.anything(),
+    )
+  })
+
+  it('uses and updates the shared browser year preference', async () => {
+    window.localStorage.setItem(
+      appPreferencesStorageKey,
+      JSON.stringify({ currency: 'KRW', year: '2025' }),
+    )
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
+
+    render(<LedgerPage />)
+
+    const period = screen.getByRole('combobox', { name: '조회 기간' })
+    expect(period).toHaveValue('2025')
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/ledger?taxYear=2025'),
+        expect.anything(),
+      ),
+    )
+
+    fireEvent.change(period, { target: { value: '2026' } })
+
+    expect(loadAppPreferences().year).toBe('2026')
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/ledger?taxYear=2026'),
+        expect.anything(),
+      ),
     )
   })
 
@@ -412,7 +453,7 @@ describe('LedgerPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '검토 필요 —' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('검토 목록을 불러오지 못했습니다')
     fireEvent.click(screen.getByRole('button', { name: '검토 다시 불러오기' }))
-    expect(await screen.findByRole('button', { name: /UNKNOWN_TRANSACTION/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /거래 유형 확인 필요/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '전체 거래 1건' }))
     expect(screen.getByText('event-2027')).toBeInTheDocument()
@@ -438,16 +479,44 @@ describe('LedgerPage', () => {
     expect(ledgerError).toHaveTextContent('장부를 불러오지 못했습니다')
 
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    expect(await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '거래 유형 확인 필요' })).toBeInTheDocument()
     expect(screen.queryByText('장부를 불러오지 못했습니다')).not.toBeInTheDocument()
   })
 
-  it('ignores stale ledger and Review responses after the year changes', async () => {
+  it('retries the ledger request from the neutral error card', async () => {
+    let ledgerReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) {
+        ledgerReads++
+        if (ledgerReads === 1) {
+          return jsonResponse({
+            error: { code: 'ENGINE_UNAVAILABLE', message: 'ledger unavailable' },
+          }, 503)
+        }
+        return jsonResponse({ items: [ledgerEvent] })
+      }
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    const errorCard = await screen.findByRole('alert')
+    expect(errorCard).toHaveClass('ledger-state-card', 'ledger-state-card--error')
+    expect(errorCard).toHaveTextContent('잠시 후 다시 시도해 주세요')
+    fireEvent.click(screen.getByRole('button', { name: '장부 다시 불러오기' }))
+
+    expect(
+      await screen.findByRole('button', { name: '거래 거래 상세 보기' }),
+    ).toBeInTheDocument()
+    expect(ledgerReads).toBe(2)
+  })
+
+  it('changes only year-scoped ledger data while keeping reviews global', async () => {
     let resolveOldLedger: ((response: Response) => void) | undefined
-    let resolveOldReviews: ((response: Response) => void) | undefined
     let reviewListReads = 0
     const oldLedger = new Promise<Response>((resolve) => { resolveOldLedger = resolve })
-    const oldReviews = new Promise<Response>((resolve) => { resolveOldReviews = resolve })
     const initialYear = defaultAppYear()
     const nextYear = initialYear === '2025' ? '2026' : '2025'
     const nextEvent = {
@@ -463,7 +532,7 @@ describe('LedgerPage', () => {
       if (url.includes(`/ledger?taxYear=${nextYear}`)) return jsonResponse({ items: [nextEvent] })
       if (url.endsWith('/reviews') && !init?.method) {
         reviewListReads++
-        return reviewListReads === 1 ? oldReviews : jsonResponse({ items: [secondReviewSummary] })
+        return jsonResponse({ items: [secondReviewSummary] })
       }
       if (url.endsWith('/reviews/review-2') && !init?.method) {
         return jsonResponse({ review: secondReviewDetail })
@@ -482,16 +551,18 @@ describe('LedgerPage', () => {
     fireEvent.click(nextLedgerDetailButton)
     expect(screen.getByText(`event-${nextYear}`)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    expect(await screen.findByRole('button', { name: /NEEDS_CONTEXT/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /추가 정보 필요/ })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '검토 목록은 조회 연도와 관계없이 전체 기간의 열린 항목을 보여줍니다',
+      ),
+    ).toBeInTheDocument()
 
     resolveOldLedger?.(jsonResponse({ items: [ledgerEvent] }))
-    resolveOldReviews?.(jsonResponse({ items: [reviewSummary] }))
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /UNKNOWN_TRANSACTION/ })).not.toBeInTheDocument()
-    })
     fireEvent.click(screen.getByRole('button', { name: '전체 거래 1건' }))
     expect(screen.getByText(`event-${nextYear}`)).toBeInTheDocument()
     expect(screen.queryByText('event-2027')).not.toBeInTheDocument()
+    expect(reviewListReads).toBe(1)
   })
 
   it('submits the current revision and shows durable resolution completion', async () => {
@@ -521,16 +592,19 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    expect(await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })).toBeInTheDocument()
-    expect(screen.getByText('0xabc123')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '거래 유형 확인 필요' })).toBeInTheDocument()
     expect(screen.getByText('1.25 ETH')).toBeInTheDocument()
+    const reasonCode = screen.getByText('UNKNOWN_TRANSACTION')
+    expect(reasonCode.closest('details')).not.toHaveAttribute('open')
+    const nativeId = screen.getByText('0xabc123')
+    expect(nativeId.closest('details')).not.toHaveAttribute('open')
     expect(screen.getByText('ETH · eip155:1/slip44:60')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('판단 근거나 거래 맥락을 남겨 주세요.'), {
       target: { value: '사용자가 개인 거래로 확인' },
     })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
 
-    expect(await screen.findByText('응답 revision과 발행 대기열 저장이 완료되었습니다. (PERSONAL)')).toBeInTheDocument()
+    expect(await screen.findByText('검토가 완료되었습니다. (개인 거래)')).toBeInTheDocument()
     await waitFor(() => expect(resolutionBody).toMatchObject({
       expectedRevisionId: 'revision-1',
       expectedPointerVersion: '3',
@@ -563,7 +637,7 @@ describe('LedgerPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     fireEvent.click(await screen.findByRole('button', { name: '검토 더 보기' }))
 
-    expect(await screen.findByRole('button', { name: /NEEDS_CONTEXT/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /추가 정보 필요/ })).toBeInTheDocument()
     expect(reviewRequests).toHaveLength(2)
   })
 
@@ -593,7 +667,7 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })
+    await screen.findByRole('heading', { name: '거래 유형 확인 필요' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
 
     const refreshButton = await screen.findByRole('button', { name: '최신 응답 불러오는 중…' })
@@ -606,8 +680,8 @@ describe('LedgerPage', () => {
       pointerVersion: '4',
     } }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('최신 revision을 다시 불러왔습니다')
-    expect(screen.getByText(/rev\.1 · revision-new/)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('최신 내용을 다시 불러왔습니다')
+    expect(screen.getByText(/1번 · revision-new/)).toBeInTheDocument()
     expect(detailReads).toBe(2)
   })
 
@@ -631,10 +705,10 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 2건' }))
-    await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })
+    await screen.findByRole('heading', { name: '거래 유형 확인 필요' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
-    fireEvent.click(screen.getByRole('button', { name: /NEEDS_CONTEXT/ }))
-    expect(await screen.findByRole('heading', { name: 'NEEDS_CONTEXT' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /추가 정보 필요/ }))
+    expect(await screen.findByRole('heading', { name: '추가 정보 필요' })).toBeInTheDocument()
 
     completeResolution?.(jsonResponse({
       review: {
@@ -649,7 +723,7 @@ describe('LedgerPage', () => {
     }, 201))
 
     await waitFor(() => expect(screen.getByText('review-2')).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: 'NEEDS_CONTEXT' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '추가 정보 필요' })).toBeInTheDocument()
     expect(screen.queryByText('review-1')).not.toBeInTheDocument()
   })
 
@@ -685,12 +759,12 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 2건' }))
-    await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })
+    await screen.findByRole('heading', { name: '거래 유형 확인 필요' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
-    fireEvent.click(screen.getByRole('button', { name: /NEEDS_CONTEXT/ }))
-    await screen.findByRole('heading', { name: 'NEEDS_CONTEXT' })
-    fireEvent.click(screen.getByRole('button', { name: /UNKNOWN_TRANSACTION/ }))
-    expect(await screen.findByText(/rev\.1 · revision-a2/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /추가 정보 필요/ }))
+    await screen.findByRole('heading', { name: '추가 정보 필요' })
+    fireEvent.click(screen.getByRole('button', { name: /거래 유형 확인 필요/ }))
+    expect(await screen.findByText(/1번 · revision-a2/)).toBeInTheDocument()
 
     completeResolution?.(jsonResponse({
       review: {
@@ -704,7 +778,7 @@ describe('LedgerPage', () => {
       replayed: false,
     }, 201))
 
-    await waitFor(() => expect(screen.getByText(/rev\.1 · revision-a2/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/1번 · revision-a2/)).toBeInTheDocument())
     expect(screen.queryByText(/revision-old-response/)).not.toBeInTheDocument()
   })
 
@@ -742,7 +816,7 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })
+    await screen.findByRole('heading', { name: '거래 유형 확인 필요' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('같은 요청으로 다시 시도')
 

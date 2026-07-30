@@ -1,5 +1,5 @@
 import { Fragment, type FormEvent, useEffect, useRef, useState } from 'react'
-import { AppSidebar, defaultAppYear, type AppYear } from '../../components/AppSidebar.tsx'
+import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import { ApiClientError } from '../../api/client.ts'
 import {
@@ -13,10 +13,16 @@ import {
   type ReviewModel,
 } from '../../api/productApi.ts'
 import {
+  loadAppPreferences,
+  saveAppYear,
+  type AppYear,
+} from '../../preferences/appPreferences.ts'
+import {
   describeLedgerAction,
   describeLedgerSource,
   describePostingDirection,
   describePostingRole,
+  describeReviewReason,
   describeTransferEndpoint,
   formatCanonicalQuantity,
   formatLedgerMoney,
@@ -30,13 +36,13 @@ const statusLabel = (value: string) => value === 'RESOLVED' ? '완료' : value =
 const feeRoles = new Set(['FEE', 'GAS'])
 const sourceKindLabels = { CEX: '거래소', WALLET: '개인지갑', UNKNOWN: '출처 미확인' } as const
 
-const compactIdentifier = (value: string) => value.length > 30
-  ? `${value.slice(0, 16)}…${value.slice(-10)}`
-  : value
-
 const formatLedgerDateTime = (value: string) => new Date(value).toLocaleString('ko-KR', {
   year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit',
 })
+
+const describeReviewResolution = (review: ReviewDetailModel) =>
+  review.options.find((option) => option.code === review.resolutionCode)?.label ??
+  '선택한 처리 방식'
 
 export const formatReviewQuantity = formatCanonicalQuantity
 
@@ -51,7 +57,7 @@ function LedgerPostingRow({ posting, postings }: { posting: LedgerPostingModel; 
   const quantity = formatLedgerQuantity(posting.quantity, asset.decimals)
   return <tr>
     <td>
-      <span className="ledger-posting-value" title={posting.assetId}>
+      <span className="ledger-posting-value">
         <strong>{asset.symbol}</strong>
         {asset.metadata ? <small>{asset.metadata}</small> : null}
       </span>
@@ -59,13 +65,12 @@ function LedgerPostingRow({ posting, postings }: { posting: LedgerPostingModel; 
     <td>
       <span className="ledger-posting-value ledger-posting-direction" data-direction={posting.direction}>
         <strong>{describePostingDirection(posting.direction)}</strong>
-        <small>{posting.direction}</small>
+        <small>{posting.direction === 'IN' ? '자산 증가' : posting.direction === 'OUT' ? '자산 감소' : '확인 필요'}</small>
       </span>
     </td>
     <td>
       <span className="ledger-posting-value ledger-posting-quantity">
         <strong>{quantity}{asset.decimals !== undefined ? ` ${asset.symbol}` : ''}</strong>
-        {asset.decimals !== undefined ? <small>원시값 {posting.quantity}</small> : null}
       </span>
     </td>
     <td>
@@ -92,7 +97,7 @@ function LedgerMovementList({ postings }: { postings: LedgerPostingModel[] }) {
       )
       const quantity = formatLedgerQuantity(posting.quantity, asset.decimals)
       return <span key={posting.legId} className="ledger-explorer__movement" data-direction={posting.direction}>
-        <b>{posting.direction}</b>
+        <b>{describePostingDirection(posting.direction)}</b>
         <strong>{quantity}{asset.decimals !== undefined ? ` ${asset.symbol}` : ''}</strong>
         {asset.decimals === undefined ? <small>{asset.symbol}</small> : null}
       </span>
@@ -127,10 +132,10 @@ function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
     : undefined
   return <div className="ledger-explorer-detail">
     <div className="ledger-explorer-detail__summary">
-      <section><span>입력 출처</span><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]} · {compactIdentifier(source.detail)}</small></section>
+      <section><span>입력 출처</span><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]}</small></section>
       <section><span>확인된 액션</span><strong>{action.label}</strong><small>{action.description}</small></section>
       <section><span>장부 반영</span><strong>{material.length}건</strong><small>자산 변동 · 수수료 {fees.length}건</small></section>
-      <section><span>세무 처리</span><strong>{valued.length ? `${valued.length}건 평가` : '평가 대기'}</strong><small>원가·Lot·세금 결과로 연결</small></section>
+      <section><span>세무 처리</span><strong>{valued.length ? `${valued.length}건 평가` : '평가 대기'}</strong><small>취득 원가와 세금 결과로 연결</small></section>
     </div>
 
     {transferEndpoint ? <section className="ledger-explorer-endpoint" data-tone={transferEndpoint.tone}>
@@ -141,26 +146,38 @@ function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
 
     <section className="ledger-explorer-detail__postings" aria-labelledby={`posting-title-${event.eventId}`}>
       <header>
-        <div><span>CANONICAL LEDGER</span><h3 id={`posting-title-${event.eventId}`}>자산 변동과 세무 입력</h3></div>
-        <b>{event.postings.length} rows</b>
+        <div><span>확정 장부</span><h3 id={`posting-title-${event.eventId}`}>자산 변동과 세무 입력</h3></div>
+        <b>{event.postings.length}건</b>
       </header>
-      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>당시 취득·처분 금액</th><th>평균 단가</th><th>세무 취득원가</th></tr></thead><tbody>{event.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} postings={event.postings} />)}</tbody></table></div> : <p>이 revision에 확정된 Posting이 없습니다.</p>}
+      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>당시 취득·처분 금액</th><th>평균 단가</th><th>세무 취득원가</th></tr></thead><tbody>{event.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} postings={event.postings} />)}</tbody></table></div> : <p>현재 변경본에 확정된 장부 반영 내역이 없습니다.</p>}
     </section>
 
     <details className="ledger-explorer-provenance">
-      <summary>검증 정보 · Event와 revision</summary>
+      <summary>검증용 원본 정보</summary>
       <dl>
-        <div><dt>Event ID</dt><dd>{event.eventId}</dd></div>
-        <div><dt>현재 revision</dt><dd>rev.{event.revisionNumber} · {event.revisionId}</dd></div>
+        <div><dt>출처 식별자</dt><dd>{source.detail}</dd></div>
+        <div><dt>거래 식별자</dt><dd>{event.eventId}</dd></div>
+        <div><dt>자산 식별자</dt><dd>{[...new Set(event.postings.map((posting) => posting.assetId))].join(' · ') || '없음'}</dd></div>
+        <div><dt>현재 변경본</dt><dd>{event.revisionNumber}번 · {event.revisionId}</dd></div>
         <div><dt>해석 상태</dt><dd>{event.interpretationSupport}</dd></div>
         <div><dt>흐름 코드</dt><dd>{event.flowShape}</dd></div>
+        <div>
+          <dt>원본 수량</dt>
+          <dd>
+            {event.postings
+              .map((posting) => `${posting.legId}: ${posting.quantity}`)
+              .join(' · ') || '없음'}
+          </dd>
+        </div>
       </dl>
     </details>
   </div>
 }
 
 export function LedgerPage() {
-  const [year, setYear] = useState<AppYear>(defaultAppYear)
+  const [year, setYear] = useState<AppYear>(
+    () => loadAppPreferences().year,
+  )
   const [events, setEvents] = useState<LedgerEventModel[]>([])
   const ledgerGenerationRef = useRef(0)
   const [reviews, setReviews] = useState<ReviewModel[]>([])
@@ -181,6 +198,12 @@ export function LedgerPage() {
   const [resolutionIntentKey, setResolutionIntentKey] = useState<string>()
   const [view, setView] = useState<'ledger' | 'review'>('ledger')
   const [ledgerStatus, setLedgerStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [ledgerReloadKey, setLedgerReloadKey] = useState(0)
+
+  function handleYearChange(nextYear: AppYear) {
+    setYear(nextYear)
+    saveAppYear(nextYear)
+  }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -201,7 +224,7 @@ export function LedgerPage() {
         ) setLedgerStatus('error')
       })
     return () => controller.abort()
-  }, [year])
+  }, [ledgerReloadKey, year])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -229,7 +252,7 @@ export function LedgerPage() {
         ) setReviewStatus('error')
       })
     return () => controller.abort()
-  }, [reviewReloadKey, year])
+  }, [reviewReloadKey])
 
   useEffect(() => {
     selectedReviewIdRef.current = selectedReviewId
@@ -378,7 +401,11 @@ export function LedgerPage() {
 
   return (
     <div className="ledger-page product-shell">
-      <AppSidebar activePage="ledger" year={year} onYearChange={setYear} />
+      <AppSidebar
+        activePage="ledger"
+        year={year}
+        onYearChange={handleYearChange}
+      />
       <main className="ledger-main">
         <section className="ledger-header" aria-labelledby="ledger-page-title">
           <div className="ledger-header__copy">
@@ -413,7 +440,8 @@ export function LedgerPage() {
         {view === 'ledger' && ledgerStatus === 'error' ? (
           <section className="ledger-state-card ledger-state-card--error" role="alert">
             <h2>장부를 불러오지 못했습니다</h2>
-            <p>Engine과 데이터베이스 연결을 확인한 뒤 다시 시도해 주세요</p>
+            <p>잠시 후 다시 시도해 주세요. 계속 문제가 생기면 운영팀에 문의해 주세요</p>
+            <button type="button" onClick={() => setLedgerReloadKey((current) => current + 1)}>장부 다시 불러오기</button>
           </section>
         ) : null}
         {view === 'ledger' && ledgerStatus === 'loading' ? (
@@ -426,14 +454,14 @@ export function LedgerPage() {
           events.length === 0 ? (
             <section className="ledger-state-card ledger-state-card--empty">
               <h2>아직 처리된 거래가 없습니다</h2>
-              <p>데이터 소스를 등록하고 Sync Job이 완료되면 실제 거래가 여기에 표시됩니다</p>
+              <p>데이터 소스를 등록하고 거래 수집이 완료되면 실제 거래가 여기에 표시됩니다</p>
               <AppLink href="/sources">데이터 소스 관리</AppLink>
             </section>
           ) : (
             <section className="ledger-explorer" aria-label="거래 장부">
               <header className="ledger-explorer__heading">
-                <div><h2>거래</h2><span>{events.length}건 · Posting {events.reduce((count, event) => count + event.postings.length, 0)}개</span></div>
-                <small>Evidence부터 세무 처리까지 한 거래 단위로 확인합니다.</small>
+                <div><h2>거래</h2><span>{events.length}건 · 장부 반영 {events.reduce((count, event) => count + event.postings.length, 0)}건</span></div>
+                <small>원본 근거부터 세무 처리까지 거래별로 확인합니다.</small>
               </header>
               <div className="ledger-explorer__table-wrap">
                 <table className="ledger-explorer__table">
@@ -452,7 +480,7 @@ export function LedgerPage() {
                             <time dateTime={event.effectiveAt}>{formatLedgerDateTime(event.effectiveAt)}</time>
                           </span>
                         </td>
-                        <td><span className="ledger-explorer__source"><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]} · {compactIdentifier(source.detail)}</small></span></td>
+                        <td><span className="ledger-explorer__source"><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]}</small></span></td>
                         <td><span className="ledger-explorer__action" data-action={action.label}><strong>{action.label}</strong><small>{action.description}</small></span></td>
                         <td><LedgerMovementList postings={material} /></td>
                         <td><LedgerMovementList postings={fees} /></td>
@@ -467,6 +495,11 @@ export function LedgerPage() {
           )
         ) : null}
 
+        {view === 'review' ? (
+          <p className="ledger-review-scope">
+            검토 목록은 조회 연도와 관계없이 전체 기간의 열린 항목을 보여줍니다
+          </p>
+        ) : null}
         {view === 'review' && reviewStatus === 'loading' ? (
           <section className="ledger-state-card ledger-state-card--loading" role="status">
             <p>검토 목록을 불러오는 중입니다</p>
@@ -481,11 +514,11 @@ export function LedgerPage() {
         ) : null}
 
         {reviewStatus === 'ready' && view === 'review' ? (
-          reviews.length === 0 ? <section className="ledger-state-card ledger-state-card--empty"><h2>열린 검토가 없습니다</h2><p>Engine이 판단 보류 항목을 만들면 사유와 근거가 여기에 표시됩니다</p></section> :
+          reviews.length === 0 ? <section className="ledger-state-card ledger-state-card--empty"><h2>열린 검토가 없습니다</h2><p>추가 확인이 필요한 거래가 생기면 사유와 근거가 여기에 표시됩니다</p></section> :
           <section className="ledger-review-browser" aria-label="열린 검토">
             <div className="ledger-review-browser__list">
               {reviews.map((review) => <button type="button" key={review.id} className={review.id === selectedReviewId ? 'is-selected' : undefined} onClick={() => selectReview(review.id)}>
-                <span><strong>{review.reasonCodes[0] ?? '추가 확인 필요'}</strong><small>{new Date(review.createdAt).toLocaleString('ko-KR')}</small></span>
+                <span><strong>{describeReviewReason(review.reasonCodes[0] ?? '')}</strong><small>{new Date(review.createdAt).toLocaleString('ko-KR')}</small></span>
                 <b>{statusLabel(review.status)}</b>
               </button>)}
               {reviewCursor ? <button type="button" className="ledger-review-browser__more" onClick={loadMoreReviews} disabled={reviewPageStatus === 'loading'}>
@@ -497,20 +530,23 @@ export function LedgerPage() {
               {reviewDetailStatus === 'loading' ? <p role="status">검토 상세를 불러오는 중입니다.</p> : null}
               {reviewDetailStatus === 'error' ? <p role="alert">검토 상세를 불러오지 못했습니다.</p> : null}
               {reviewDetailStatus === 'ready' && reviewDetail ? <article>
-                <header><div><span>ACCOUNT REVIEW</span><h2>{reviewDetail.reasonCodes[0] ?? '추가 확인 필요'}</h2></div><b>{statusLabel(reviewDetail.status)}</b></header>
-                <p>{reviewDetail.reasonCodes.join(' · ')}</p>
-                <dl>
-                  <div><dt>Review ID</dt><dd>{reviewDetail.id}</dd></div>
-                  <div><dt>현재 revision</dt><dd>rev.{reviewDetail.revisionNumber} · {reviewDetail.revisionId}</dd></div>
-                  <div><dt>Pointer</dt><dd>{String(reviewDetail.pointerVersion)}</dd></div>
-                  <div><dt>연결된 관찰</dt><dd>{reviewDetail.observations.length}건</dd></div>
-                </dl>
+                <header><div><span>거래 검토</span><h2>{describeReviewReason(reviewDetail.reasonCodes[0] ?? '')}</h2></div><b>{statusLabel(reviewDetail.status)}</b></header>
+                <p>{reviewDetail.reasonCodes.map(describeReviewReason).join(' · ') || '추가 확인이 필요한 거래입니다'}</p>
+                <details className="ledger-explorer-provenance">
+                  <summary>검증용 원본 정보</summary>
+                  <dl>
+                    <div><dt>검토 식별자</dt><dd>{reviewDetail.id}</dd></div>
+                    <div><dt>현재 변경본</dt><dd>{reviewDetail.revisionNumber}번 · {reviewDetail.revisionId}</dd></div>
+                    <div><dt>연결 버전</dt><dd>{String(reviewDetail.pointerVersion)}</dd></div>
+                    <div><dt>원본 사유 코드</dt><dd>{reviewDetail.reasonCodes.join(' · ') || '없음'}</dd></div>
+                  </dl>
+                </details>
                 <section className="ledger-review-evidence" aria-labelledby="review-evidence-heading">
                   <header>
-                    <div><span>REVIEW EVIDENCE</span><h3 id="review-evidence-heading">응답할 거래 근거</h3></div>
+                    <div><span>검토 근거</span><h3 id="review-evidence-heading">응답할 거래 근거</h3></div>
                     <b>{reviewDetail.observations.length}건</b>
                   </header>
-                  <p>아래 거래 식별자·시각·계정·자산 수량을 확인한 뒤 응답해 주세요.</p>
+                  <p>자산과 수량을 먼저 확인하고, 필요하면 원본 정보를 펼쳐 보세요.</p>
                   <ul>
                     {reviewDetail.observations.map((observation) => {
                       const quantity = formatReviewQuantity(
@@ -519,16 +555,19 @@ export function LedgerPage() {
                       )
                       return <li key={`${observation.fragmentId}:${observation.observationId}`}>
                         <div className="ledger-review-evidence__summary">
-                          <strong>{observation.assetSymbol || observation.kind || '거래 근거'}</strong>
+                          <strong>{observation.assetSymbol || '거래 근거'}</strong>
                           <b>{quantity}{observation.assetSymbol ? ` ${observation.assetSymbol}` : ''}</b>
                         </div>
-                        <dl>
-                          <div><dt>거래/원본 ID</dt><dd>{observation.nativeId || observation.originLinkId || observation.observationId}</dd></div>
-                          <div><dt>발생 시각</dt><dd>{observation.occurredAt ? new Date(observation.occurredAt).toLocaleString('ko-KR') : '제공되지 않음'}</dd></div>
-                          <div><dt>계정·지갑</dt><dd>{[observation.accountLabel, observation.accountLocator, observation.accountChainId].filter(Boolean).join(' · ') || '제공되지 않음'}</dd></div>
-                          <div><dt>자산 식별자</dt><dd>{[observation.assetSymbol, observation.assetLocator].filter(Boolean).join(' · ') || '제공되지 않음'}</dd></div>
-                          <div><dt>근거 유형</dt><dd>{[observation.domain, observation.kind].filter(Boolean).join(' · ') || observation.originKind || '제공되지 않음'}</dd></div>
-                        </dl>
+                        <details className="ledger-explorer-provenance">
+                          <summary>거래 원본 정보 확인</summary>
+                          <dl>
+                            <div><dt>거래·원본 식별자</dt><dd>{observation.nativeId || observation.originLinkId || observation.observationId}</dd></div>
+                            <div><dt>발생 시각</dt><dd>{observation.occurredAt ? new Date(observation.occurredAt).toLocaleString('ko-KR') : '제공되지 않음'}</dd></div>
+                            <div><dt>계정·지갑</dt><dd>{[observation.accountLabel, observation.accountLocator, observation.accountChainId].filter(Boolean).join(' · ') || '제공되지 않음'}</dd></div>
+                            <div><dt>자산 식별자</dt><dd>{[observation.assetSymbol, observation.assetLocator].filter(Boolean).join(' · ') || '제공되지 않음'}</dd></div>
+                            <div><dt>근거 유형</dt><dd>{[observation.domain, observation.kind].filter(Boolean).join(' · ') || observation.originKind || '제공되지 않음'}</dd></div>
+                          </dl>
+                        </details>
                       </li>
                     })}
                   </ul>
@@ -538,7 +577,7 @@ export function LedgerPage() {
                     <legend>이 거래를 어떻게 처리할까요?</legend>
                     {reviewDetail.options.map((option) => <label key={option.code}>
                       <input type="radio" name="resolutionCode" value={option.code} checked={resolutionCode === option.code} onChange={() => changeResolutionCode(option.code)} />
-                      <span><strong>{option.label}</strong><small>{option.code}{option.requiresEvidence ? ' · 근거 설명 필수' : ''}</small></span>
+                      <span><strong>{option.label}</strong><small>{option.requiresEvidence ? '근거 설명 필수' : '추가 설명 선택'}</small></span>
                     </label>)}
                   </fieldset>
                   <label className="ledger-review-form__note">
@@ -548,17 +587,17 @@ export function LedgerPage() {
                   <button type="submit" disabled={!resolutionCode || resolutionBusy || resolutionBlocked || Boolean(selectedOption?.requiresEvidence && !resolutionNote.trim())}>
                     {resolutionStatus === 'submitting' ? '응답 저장 중…' : resolutionStatus === 'refreshing' ? '최신 응답 불러오는 중…' : resolutionStatus === 'reanalyze' ? '운영 확인 필요' : '이 응답으로 검토 완료'}
                   </button>
-                  {resolutionStatus === 'submitting' ? <p role="status">응답 revision과 ReviewRoom 전달 대기열을 안전하게 저장하는 중입니다.</p> : null}
-                  {resolutionStatus === 'refreshing' ? <p role="status">다른 변경이 먼저 반영되어 최신 revision을 불러오는 중입니다.</p> : null}
-                  {resolutionStatus === 'success' ? <p className="is-success" role="status">응답 revision과 ReviewRoom 전달 대기열 저장이 완료되었습니다.</p> : null}
-                  {resolutionStatus === 'stale' ? <p role="alert">다른 변경이 먼저 반영되어 최신 revision을 다시 불러왔습니다. 응답을 확인해 다시 제출해 주세요.</p> : null}
-                  {resolutionStatus === 'stale-error' ? <p role="alert">변경된 최신 revision을 불러오지 못했습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.</p> : null}
-                  {resolutionStatus === 'conflict' ? <p role="alert">이전 요청 키와 응답 내용이 달라 새 요청으로 다시 제출해야 합니다.</p> : null}
-                  {resolutionStatus === 'reanalyze' ? <p role="alert">이 검토에는 해결에 필요한 분석 계보가 없어 응답을 저장하지 않았습니다. 운영팀이 DB migration과 cutover 상태를 확인해야 합니다.</p> : null}
+                  {resolutionStatus === 'submitting' ? <p role="status">검토 응답을 안전하게 저장하는 중입니다.</p> : null}
+                  {resolutionStatus === 'refreshing' ? <p role="status">다른 변경이 먼저 반영되어 최신 내용을 불러오는 중입니다.</p> : null}
+                  {resolutionStatus === 'success' ? <p className="is-success" role="status">검토가 완료되었습니다.</p> : null}
+                  {resolutionStatus === 'stale' ? <p role="alert">다른 변경이 먼저 반영되어 최신 내용을 다시 불러왔습니다. 응답을 확인해 다시 제출해 주세요.</p> : null}
+                  {resolutionStatus === 'stale-error' ? <p role="alert">변경된 최신 내용을 불러오지 못했습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.</p> : null}
+                  {resolutionStatus === 'conflict' ? <p role="alert">같은 요청을 처리하는 중 내용이 달라졌습니다. 최신 내용을 확인한 뒤 다시 제출해 주세요.</p> : null}
+                  {resolutionStatus === 'reanalyze' ? <p role="alert">이 검토에는 필요한 분석 정보가 없어 응답을 저장하지 않았습니다. 운영팀이 데이터 준비 상태를 확인해야 합니다.</p> : null}
                   {resolutionStatus === 'error' ? <p role="alert">응답을 저장하지 못했습니다. 같은 요청으로 다시 시도할 수 있습니다.</p> : null}
                 </form> : <p className="ledger-review-resolved" role="status">{resolutionStatus === 'success'
-                  ? `응답 revision과 발행 대기열 저장이 완료되었습니다. (${reviewDetail.resolutionCode})`
-                  : `이 검토는 ${reviewDetail.resolutionCode} 응답으로 완료되었습니다.`}</p>}
+                  ? `검토가 완료되었습니다. (${describeReviewResolution(reviewDetail)})`
+                  : `이 검토는 '${describeReviewResolution(reviewDetail)}' 처리로 완료되었습니다.`}</p>}
               </article> : null}
             </div>
           </section>

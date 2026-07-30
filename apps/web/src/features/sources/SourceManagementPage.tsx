@@ -6,6 +6,7 @@ import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import {
   createSyncJob,
   disconnectWalletSource,
+  findLatestSyncJob,
   listSyncJobs,
   listSources,
   retrySyncJob,
@@ -26,6 +27,132 @@ const jobStatusLabel: Record<SyncJobApiModel['state'], string> = {
   FAILED: '처리 확인 필요',
 }
 
+type SourceJobFailurePresentation = {
+  kind: string
+  message: string
+  title: string
+}
+
+const temporaryCollectionFailure: SourceJobFailurePresentation = {
+  kind: '수집 서비스 일시 오류',
+  title: '거래 수집이 잠시 중단되었습니다',
+  message:
+    '수집 서비스 연결이 원활하지 않습니다. 잠시 후 다시 수집해 주세요.',
+}
+
+const invalidCollectionResponse: SourceJobFailurePresentation = {
+  kind: '수집 처리 응답 오류',
+  title: '거래 수집을 완료하지 못했습니다',
+  message:
+    '수집 결과를 확인하는 동안 문제가 발생했습니다. 잠시 후 다시 수집해 주세요.',
+}
+
+const sourceJobFailureFallback: SourceJobFailurePresentation = {
+  kind: '수집 처리 문제',
+  title: '수집 작업을 완료하지 못했습니다',
+  message: '일시적인 문제가 발생했습니다. 잠시 후 다시 수집해 주세요.',
+}
+
+const sourceJobFailurePresentationByCode: Record<
+  string,
+  SourceJobFailurePresentation
+> = {
+  JIT_START_FAILED: temporaryCollectionFailure,
+  JIT_SELECTION_FAILED: temporaryCollectionFailure,
+  JIT_STATUS_FAILED: temporaryCollectionFailure,
+  JIT_AWAIT_TIMEOUT: temporaryCollectionFailure,
+  JIT_RUN_FAILED: temporaryCollectionFailure,
+  JIT_RETRYABLE_FAILURE: temporaryCollectionFailure,
+  SYNC_UPSTREAM_TIMEOUT: temporaryCollectionFailure,
+  SYNC_RETRYABLE_FAILURE: temporaryCollectionFailure,
+  EVM_JIT_UNAVAILABLE: {
+    kind: '수집 서비스 준비 필요',
+    title: '거래 수집을 시작할 수 없습니다',
+    message:
+      '수집 서비스가 아직 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.',
+  },
+  SOURCE_NOT_FOUND: {
+    kind: '연결 정보 확인 필요',
+    title: '데이터 소스 연결을 확인해 주세요',
+    message:
+      '연결된 데이터 소스를 찾을 수 없습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.',
+  },
+  SYNC_COVERAGE_MISSING: {
+    kind: '수집 기간 확인 필요',
+    title: '수집 기간을 확인할 수 없습니다',
+    message: '조회 기간을 다시 확인한 뒤 새 수집을 시작해 주세요.',
+  },
+  JIT_COVERAGE_MAPPING_UNAVAILABLE: {
+    kind: '수집 기간 확인 필요',
+    title: '선택한 기간의 거래를 수집할 수 없습니다',
+    message:
+      '현재 선택한 기간은 수집할 수 없습니다. 조회 기간을 확인한 뒤 다시 시도해 주세요.',
+  },
+  JIT_CHAIN_UNSUPPORTED: {
+    kind: '지원 네트워크 확인 필요',
+    title: '선택한 네트워크를 수집할 수 없습니다',
+    message:
+      '지원하는 수집 네트워크를 선택한 뒤 다시 수집해 주세요.',
+  },
+  JIT_REQUEST_INVALID: {
+    kind: '수집 정보 확인 필요',
+    title: '수집 요청 정보를 확인해 주세요',
+    message:
+      '지갑 연결과 수집 기간을 확인한 뒤 다시 수집해 주세요.',
+  },
+  JIT_REQUEST_FAILED: invalidCollectionResponse,
+  JIT_START_INVALID_RESPONSE: invalidCollectionResponse,
+  JIT_SELECTION_INVALID_RESPONSE: invalidCollectionResponse,
+  JIT_RUN_INVALID: invalidCollectionResponse,
+  JIT_STATUS_INVALID_RESPONSE: invalidCollectionResponse,
+  JIT_TERMINAL_FRAGMENT_MISSING: invalidCollectionResponse,
+  JIT_STATUS_UNKNOWN: invalidCollectionResponse,
+  JIT_SNAPSHOT_MISMATCH: invalidCollectionResponse,
+  UNSUPPORTED_SOURCE_KIND: {
+    kind: '지원 소스 확인 필요',
+    title: '이 데이터 소스는 아직 수집할 수 없습니다',
+    message: '지원하는 데이터 소스를 연결한 뒤 다시 시도해 주세요.',
+  },
+  INVALID_OBJECT_KEY: {
+    kind: '등록 파일 확인 필요',
+    title: '등록한 PDF를 확인할 수 없습니다',
+    message: 'Upbit 거래내역서 PDF를 다시 등록해 주세요.',
+  },
+  OBJECT_NOT_FOUND: {
+    kind: '등록 파일 확인 필요',
+    title: '등록한 PDF를 찾을 수 없습니다',
+    message: 'Upbit 거래내역서 PDF를 다시 등록해 주세요.',
+  },
+  OBJECT_DECRYPT_FAILED: {
+    kind: '등록 파일 확인 필요',
+    title: '등록한 PDF를 읽을 수 없습니다',
+    message: 'Upbit 거래내역서 PDF를 다시 등록해 주세요.',
+  },
+  INVALID_PDF: {
+    kind: 'PDF 파일 확인 필요',
+    title: 'PDF 파일을 처리할 수 없습니다',
+    message: '올바른 Upbit 거래내역서 PDF를 다시 등록해 주세요.',
+  },
+  DIGEST_MISMATCH: {
+    kind: '파일 무결성 확인 필요',
+    title: '등록한 PDF를 안전하게 확인할 수 없습니다',
+    message: '원본 Upbit 거래내역서 PDF를 다시 등록해 주세요.',
+  },
+  UPBIT_PDF_LAYOUT_UNSUPPORTED: {
+    kind: '지원 형식 확인 필요',
+    title: '현재 지원하지 않는 PDF 형식입니다',
+    message: '지원되는 Upbit 거래내역서 형식인지 확인해 주세요.',
+  },
+}
+
+function getSourceJobFailurePresentation(failureCode: string | undefined) {
+  if (!failureCode) return sourceJobFailureFallback
+  return (
+    sourceJobFailurePresentationByCode[failureCode] ??
+    sourceJobFailureFallback
+  )
+}
+
 function SourceJobStatus({
   expanded,
   job,
@@ -37,7 +164,6 @@ function SourceJobStatus({
 }) {
   if (!job) return null
   if (job.state === 'FAILED') {
-    const label = `${jobStatusLabel[job.state]}${job.failureCode ? ` · ${job.failureCode}` : ''}`
     return (
       <button
         aria-controls={`source-job-details-${job.id}`}
@@ -47,7 +173,7 @@ function SourceJobStatus({
         onClick={onToggle}
         type="button"
       >
-        <span>{label}</span>
+        <span>{jobStatusLabel[job.state]}</span>
         <span aria-hidden="true">{expanded ? '접기' : '확인'}</span>
       </button>
     )
@@ -68,10 +194,7 @@ function SourceJobStatus({
       ? '자동 재시도 중'
       : jobStatusLabel[job.state]
   return (
-    <small data-job-state={job.state} title={job.failureMessage}>
-      {label}
-      {job.failureCode ? ` · ${job.failureCode}` : ''}
-    </small>
+    <small data-job-state={job.state}>{label}</small>
   )
 }
 
@@ -124,6 +247,12 @@ export function SourceManagementPage() {
   const retryIntentKeys = useRef(new Map<string, string>())
   const retryWatchControllers = useRef(new Map<string, AbortController>())
   const activeSources = sources.filter((source) => source.status === 'ACTIVE')
+  const sourceCountText =
+    status === 'ready'
+      ? `현재 연결된 소스 ${activeSources.length}개`
+      : status === 'loading'
+        ? '현재 연결된 소스 확인 중'
+        : '현재 연결된 소스 수를 확인할 수 없습니다'
 
   useEffect(() => {
     const controller = new AbortController()
@@ -352,7 +481,7 @@ export function SourceManagementPage() {
       >
         <div>
           <h2 id="connected-source-title">연결된 데이터 소스</h2>
-          <p>현재 연결된 소스 {activeSources.length}개</p>
+          <p aria-live="polite">{sourceCountText}</p>
         </div>
         <AppLink className="source-primary-action" href="/sources/new">
           데이터 소스 추가 <span aria-hidden="true">→</span>
@@ -360,21 +489,28 @@ export function SourceManagementPage() {
       </section>
 
       {status === 'loading' ? (
-        <p className="source-api-notice" role="status">
-          데이터 소스를 불러오는 중입니다.
-        </p>
+        <section
+          className="source-state-card source-state-card--loading"
+          role="status"
+        >
+          <p>데이터 소스를 불러오는 중입니다</p>
+        </section>
       ) : null}
 
       {status === 'error' ? (
-        <p className="source-api-notice" role="alert">
-          데이터 소스를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.
-        </p>
+        <section
+          className="source-state-card source-state-card--error"
+          role="alert"
+        >
+          <h2>데이터 소스를 불러오지 못했습니다</h2>
+          <p>잠시 후 다시 시도해 주세요</p>
+        </section>
       ) : null}
 
       {status === 'ready' && sources.length > 0 ? (
         <section className="source-list" aria-label="등록된 데이터 소스">
           {sources.map((source) => {
-            const latestJob = jobs.find((job) => job.sourceId === source.id)
+            const latestJob = findLatestSyncJob(jobs, source.id)
             const isExpanded =
               latestJob?.state === 'FAILED' &&
               expandedJobId === latestJob.id
@@ -385,6 +521,10 @@ export function SourceManagementPage() {
                 latestJob.requestedCoverageStart &&
                   latestJob.requestedCoverageEnd,
               )
+            const failurePresentation =
+              latestJob?.state === 'FAILED'
+                ? getSourceJobFailurePresentation(latestJob.failureCode)
+                : undefined
 
             return (
               <article
@@ -413,53 +553,61 @@ export function SourceManagementPage() {
                     </span>
                   </div>
                 </div>
-                <div className="source-list__meta">
-                  <span>
-                    {source.type === 'UPBIT_PDF'
-                      ? `${source.coverageStart} – ${source.coverageEnd}`
-                      : source.chainScopes
-                          .filter(({ status: scopeStatus }) => scopeStatus === 'ACTIVE')
-                          .map(({ chainId }) =>
-                            getEvmWalletNetwork(chainId)?.label ?? chainId,
-                          )
-                          .join(', ')}
-                  </span>
-                  <b data-status={source.status}>
-                    {source.status === 'ACTIVE' ? '연결됨' : '연결 해제'}
-                  </b>
-                  <SourceJobStatus
-                    expanded={isExpanded}
-                    job={latestJob}
-                    onToggle={() =>
-                      setExpandedJobId((current) =>
-                        current === latestJob?.id ? undefined : latestJob?.id,
-                      )
-                    }
-                  />
-                </div>
-                {source.status === 'ACTIVE' &&
-                source.type === 'EVM_WALLET' ? (
-                  <div className="source-list__actions">
-                    <button
-                      className="source-list__networks"
-                      type="button"
-                      aria-expanded={editingNetworksId === source.id}
-                      onClick={() => openNetworkEditor(source)}
-                    >
-                      수집 네트워크 관리
-                    </button>
-                    <button
-                      className="source-list__disconnect"
-                      type="button"
-                      disabled={disconnectingId === source.id}
-                      onClick={() => void handleDisconnect(source.id)}
-                    >
-                      {disconnectingId === source.id
-                        ? '해제 중…'
-                        : '연결 해제'}
-                    </button>
+                <div className="source-list__right-controls">
+                  <div className="source-list__meta">
+                    <span>
+                      {source.type === 'UPBIT_PDF'
+                        ? `${source.coverageStart} – ${source.coverageEnd}`
+                        : source.chainScopes
+                            .filter(
+                              ({ status: scopeStatus }) =>
+                                scopeStatus === 'ACTIVE',
+                            )
+                            .map(
+                              ({ chainId }) =>
+                                getEvmWalletNetwork(chainId)?.label ?? chainId,
+                            )
+                            .join(', ')}
+                    </span>
+                    <b data-status={source.status}>
+                      {source.status === 'ACTIVE' ? '연결됨' : '연결 해제'}
+                    </b>
+                    <SourceJobStatus
+                      expanded={isExpanded}
+                      job={latestJob}
+                      onToggle={() =>
+                        setExpandedJobId((current) =>
+                          current === latestJob?.id
+                            ? undefined
+                            : latestJob?.id,
+                        )
+                      }
+                    />
                   </div>
-                ) : null}
+                  {source.status === 'ACTIVE' &&
+                  source.type === 'EVM_WALLET' ? (
+                    <div className="source-list__actions">
+                      <button
+                        className="source-list__networks"
+                        type="button"
+                        aria-expanded={editingNetworksId === source.id}
+                        onClick={() => openNetworkEditor(source)}
+                      >
+                        수집 네트워크 관리
+                      </button>
+                      <button
+                        className="source-list__disconnect"
+                        type="button"
+                        disabled={disconnectingId === source.id}
+                        onClick={() => void handleDisconnect(source.id)}
+                      >
+                        {disconnectingId === source.id
+                          ? '해제 중…'
+                          : '연결 해제'}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 {source.type === 'EVM_WALLET' &&
                 editingNetworksId === source.id ? (
                   <section className="source-network-editor" aria-label="수집 네트워크 관리">
@@ -513,7 +661,7 @@ export function SourceManagementPage() {
                     {networkUpdateMessage.text}
                   </p>
                 ) : null}
-                {isExpanded && latestJob ? (
+                {isExpanded && latestJob && failurePresentation ? (
                   <section
                     className="source-job-details"
                     id={`source-job-details-${latestJob.id}`}
@@ -523,7 +671,7 @@ export function SourceManagementPage() {
                       <div>
                         <span>수집 상태</span>
                         <h3 id={`source-job-details-title-${latestJob.id}`}>
-                          수집 문제를 확인해 주세요
+                          {failurePresentation.title}
                         </h3>
                       </div>
                       <button
@@ -536,13 +684,12 @@ export function SourceManagementPage() {
                       </button>
                     </div>
                     <p className="source-job-details__message">
-                      {latestJob.failureMessage ??
-                        '수집 작업을 완료하지 못했습니다. 연동 상태를 확인한 뒤 다시 시도해 주세요.'}
+                      {failurePresentation.message}
                     </p>
                     <dl className="source-job-details__facts">
                       <div>
-                        <dt>오류 코드</dt>
-                        <dd>{latestJob.failureCode ?? '확인되지 않음'}</dd>
+                        <dt>문제 유형</dt>
+                        <dd>{failurePresentation.kind}</dd>
                       </div>
                       <div>
                         <dt>마지막 시도</dt>
@@ -631,9 +778,11 @@ export function SourceManagementPage() {
         </section>
       ) : null}
 
-      <p className="source-footer-note">
-        각 데이터 소스의 연결 해제와 거래 데이터 삭제는 별도로 관리됩니다.
-      </p>
+      {status === 'ready' ? (
+        <p className="source-footer-note">
+          각 데이터 소스의 연결 해제와 거래 데이터 삭제는 별도로 관리됩니다.
+        </p>
+      ) : null}
     </SourceFlowLayout>
   )
 }
