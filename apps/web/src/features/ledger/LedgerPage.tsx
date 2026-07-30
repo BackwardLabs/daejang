@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type FormEvent, useEffect, useRef, useState } from 'react'
 import { AppSidebar, defaultAppYear, type AppYear } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import { ApiClientError } from '../../api/client.ts'
@@ -13,6 +13,8 @@ import {
   type ReviewModel,
 } from '../../api/productApi.ts'
 import {
+  describeFlowShape,
+  describeLedgerSource,
   describePostingDirection,
   describePostingRole,
   formatCanonicalQuantity,
@@ -27,6 +29,19 @@ const eventLabels: Record<string, string> = {
   UNKNOWN: '미분류', OTHER: '기타',
 }
 const statusLabel = (value: string) => value === 'RESOLVED' ? '완료' : value === 'PARTIAL' ? '일부 확인' : '검토 필요'
+const feeRoles = new Set(['FEE', 'GAS'])
+const sourceKindLabels = { CEX: '거래소', WALLET: '개인지갑', UNKNOWN: '출처 미확인' } as const
+
+const compactIdentifier = (value: string) => value.length > 30
+  ? `${value.slice(0, 16)}…${value.slice(-10)}`
+  : value
+
+const formatLedgerDateTime = (value: string) => new Date(value).toLocaleString('ko-KR', {
+  year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit',
+})
+
+const formatMoney = (amount: string, denomination: string) =>
+  amount ? `${amount}${denomination ? ` ${denomination}` : ''}` : '—'
 
 export const formatReviewQuantity = formatCanonicalQuantity
 
@@ -59,8 +74,81 @@ function LedgerPostingRow({ posting }: { posting: LedgerPostingModel }) {
         <small>{role.description}</small>
       </span>
     </td>
-    <td>{posting.fairValue ? `${posting.fairValue} ${posting.denomination}` : '—'}</td>
+    <td>{formatMoney(posting.fairValue, posting.denomination)}</td>
+    <td>{formatMoney(posting.costBasis, posting.denomination)}</td>
   </tr>
+}
+
+function LedgerMovementList({ postings }: { postings: LedgerPostingModel[] }) {
+  if (!postings.length) return <span className="ledger-explorer__empty-value">—</span>
+  return <span className="ledger-explorer__movements">
+    {postings.map((posting) => {
+      const asset = parseLedgerAsset(posting.assetId)
+      const quantity = formatLedgerQuantity(posting.quantity, asset.decimals)
+      return <span key={posting.legId} className="ledger-explorer__movement" data-direction={posting.direction}>
+        <b>{posting.direction}</b>
+        <strong>{quantity}{asset.decimals !== undefined ? ` ${asset.symbol}` : ''}</strong>
+        {asset.decimals === undefined ? <small>{asset.symbol}</small> : null}
+      </span>
+    })}
+  </span>
+}
+
+function LedgerStatusBadges({ event }: { event: LedgerEventModel }) {
+  const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
+  const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
+  return <span className="ledger-explorer__badges">
+    <b data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}>{statusLabel(event.resolution)}</b>
+    {event.postings.length
+      ? <b data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}>{event.resolution === 'RESOLVED' ? '장부 확정' : '장부 일부 반영'}</b>
+      : <b data-tone="neutral">장부 미반영</b>}
+    {valued.length === material.length && material.length > 0
+      ? <b data-tone="success">평가 완료</b>
+      : valued.length > 0
+        ? <b data-tone="warning">일부 평가</b>
+        : <b data-tone="neutral">평가 대기</b>}
+  </span>
+}
+
+function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
+  const source = describeLedgerSource(event.postings)
+  const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
+  const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
+  const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
+  return <div className="ledger-explorer-detail">
+    <div className="ledger-explorer-detail__summary">
+      <section><span>입력 출처</span><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]} · {compactIdentifier(source.detail)}</small></section>
+      <section><span>확인된 액션</span><strong>{eventLabels[event.eventType] ?? event.eventType}</strong><small>{describeFlowShape(event.flowShape)}</small></section>
+      <section><span>장부 반영</span><strong>{material.length}건</strong><small>자산 변동 · 수수료 {fees.length}건</small></section>
+      <section><span>세무 처리</span><strong>{valued.length ? `${valued.length}건 평가` : '평가 대기'}</strong><small>원가·Lot·세금 결과로 연결</small></section>
+    </div>
+
+    <ol className="ledger-explorer-lineage" aria-label="거래 처리 계보">
+      <li className="is-complete"><i>1</i><span><strong>Evidence</strong><small>{source.label} 관찰 근거</small></span></li>
+      <li className={event.resolution === 'RESOLVED' ? 'is-complete' : 'is-pending'}><i>2</i><span><strong>{source.kind === 'WALLET' ? 'ActionProof' : source.kind === 'CEX' ? '결정적 CEX 해석' : '해석 입력'}</strong><small>{source.kind === 'WALLET' ? 'JIT가 봉인한 실행·effect 증명' : `${describeFlowShape(event.flowShape)} 입력`}</small></span></li>
+      <li className={event.postings.length ? 'is-complete' : 'is-pending'}><i>3</i><span><strong>Event · Posting</strong><small>{event.postings.length ? `${eventLabels[event.eventType] ?? event.eventType} · ${event.postings.length}개 장부 행` : '분류·장부 확정 대기'}</small></span></li>
+      <li className={valued.length ? 'is-complete' : 'is-pending'}><i>4</i><span><strong>KRW Valuation</strong><small>{valued.length ? `${valued.length}건 평가 연결` : 'Tax Engine 처리 대기'}</small></span></li>
+      <li className="is-pending"><i>5</i><span><strong>Lot · Tax Report</strong><small>세금 리포트에서 최종 결과 확인</small></span></li>
+    </ol>
+
+    <section className="ledger-explorer-detail__postings" aria-labelledby={`posting-title-${event.eventId}`}>
+      <header>
+        <div><span>CANONICAL LEDGER</span><h3 id={`posting-title-${event.eventId}`}>자산 변동과 세무 입력</h3></div>
+        <b>{event.postings.length} rows</b>
+      </header>
+      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>평가액</th><th>취득원가</th></tr></thead><tbody>{event.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} />)}</tbody></table></div> : <p>이 revision에 확정된 Posting이 없습니다.</p>}
+    </section>
+
+    <details className="ledger-explorer-provenance">
+      <summary>검증 정보 · Event와 revision</summary>
+      <dl>
+        <div><dt>Event ID</dt><dd>{event.eventId}</dd></div>
+        <div><dt>현재 revision</dt><dd>rev.{event.revisionNumber} · {event.revisionId}</dd></div>
+        <div><dt>해석 상태</dt><dd>{event.interpretationSupport}</dd></div>
+        <div><dt>흐름 코드</dt><dd>{event.flowShape}</dd></div>
+      </dl>
+    </details>
+  </div>
 }
 
 export function LedgerPage() {
@@ -169,7 +257,6 @@ export function LedgerPage() {
     return () => controller.abort()
   }, [selectedReviewId])
 
-  const selected = useMemo(() => events.find((event) => event.eventId === selectedId), [events, selectedId])
   const selectedOption = reviewDetail?.options.find((option) => option.code === resolutionCode)
   const resolutionBusy = resolutionStatus === 'submitting' || resolutionStatus === 'refreshing'
   const resolutionBlocked = resolutionStatus === 'reanalyze'
@@ -336,19 +423,36 @@ export function LedgerPage() {
               <AppLink href="/sources">데이터 소스 관리</AppLink>
             </section>
           ) : (
-            <section className="ledger-browser" aria-label="거래 장부">
-              <div className="ledger-browser__list">
-                {events.map((event) => <button type="button" key={event.eventId} className={event.eventId === selectedId ? 'is-selected' : undefined} onClick={() => setSelectedId(event.eventId)}>
-                  <span><strong>{eventLabels[event.eventType] ?? event.eventType}</strong><small>{new Date(event.effectiveAt).toLocaleString('ko-KR')}</small></span>
-                  <b data-status={event.resolution}>{statusLabel(event.resolution)}</b>
-                </button>)}
+            <section className="ledger-explorer" aria-label="거래 장부">
+              <header className="ledger-explorer__heading">
+                <div><h2>거래</h2><span>{events.length}건 · Posting {events.reduce((count, event) => count + event.postings.length, 0)}개</span></div>
+                <small>Evidence부터 세무 처리까지 한 거래 단위로 확인합니다.</small>
+              </header>
+              <div className="ledger-explorer__table-wrap">
+                <table className="ledger-explorer__table">
+                  <thead><tr><th>시간</th><th>출처 / 거래</th><th>확인된 액션</th><th>내 자산 변화</th><th>수수료</th><th>상태</th></tr></thead>
+                  <tbody>{events.map((event) => {
+                    const source = describeLedgerSource(event.postings)
+                    const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
+                    const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
+                    const isOpen = event.eventId === selectedId
+                    return <Fragment key={event.eventId}>
+                      <tr className={isOpen ? 'ledger-explorer__row is-open' : 'ledger-explorer__row'}>
+                        <td className="ledger-explorer__time">
+                          <button type="button" aria-expanded={isOpen} aria-controls={`ledger-detail-${event.eventId}`} onClick={() => setSelectedId(isOpen ? undefined : event.eventId)}>{isOpen ? '닫기' : '상세'}</button>
+                          <time dateTime={event.effectiveAt}>{formatLedgerDateTime(event.effectiveAt)}</time>
+                        </td>
+                        <td><span className="ledger-explorer__source"><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]} · {compactIdentifier(source.detail)}</small></span></td>
+                        <td><span className="ledger-explorer__action"><strong>{eventLabels[event.eventType] ?? event.eventType}</strong><small>{describeFlowShape(event.flowShape)}</small></span></td>
+                        <td><LedgerMovementList postings={material} /></td>
+                        <td><LedgerMovementList postings={fees} /></td>
+                        <td><LedgerStatusBadges event={event} /></td>
+                      </tr>
+                      {isOpen ? <tr className="ledger-explorer__detail-row"><td colSpan={6}><div id={`ledger-detail-${event.eventId}`}><LedgerExplorerDetail event={event} /></div></td></tr> : null}
+                    </Fragment>
+                  })}</tbody>
+                </table>
               </div>
-              {selected ? <article className="ledger-browser__detail">
-                <header><div><span>EVENT</span><h2>{eventLabels[selected.eventType] ?? selected.eventType}</h2></div><b>{statusLabel(selected.resolution)}</b></header>
-                <dl><div><dt>Event ID</dt><dd>{selected.eventId}</dd></div><div><dt>현재 revision</dt><dd>rev.{selected.revisionNumber} · {selected.revisionId}</dd></div><div><dt>해석 상태</dt><dd>{selected.interpretationSupport}</dd></div><div><dt>흐름</dt><dd>{selected.flowShape}</dd></div></dl>
-                <h3>자산 변동</h3>
-                {selected.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>평가액</th></tr></thead><tbody>{selected.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} />)}</tbody></table></div> : <p>이 revision에 확정된 posting이 없습니다.</p>}
-              </article> : null}
             </section>
           )
         ) : null}

@@ -13,6 +13,12 @@ export type LedgerPostingRolePresentation = {
   description: string
 }
 
+export type LedgerSourcePresentation = {
+  kind: 'CEX' | 'WALLET' | 'UNKNOWN'
+  label: string
+  detail: string
+}
+
 const postingRoles: Record<string, LedgerPostingRolePresentation> = {
   PRINCIPAL: {
     label: '주 거래',
@@ -45,6 +51,23 @@ const directionLabels: Record<string, string> = {
   OUT: '나감',
 }
 
+const flowShapeLabels: Record<string, string> = {
+  EXCHANGE: '자산 교환',
+  INFLOW_OUTFLOW: '자산 교환',
+  SELF_TRANSFER: '내 계정 간 이동',
+  EXTERNAL_IN: '외부에서 들어온 자산',
+  EXTERNAL_OUT: '외부로 나간 자산',
+  INCOME: '수익 발생',
+  COST_ONLY: '비용 발생',
+  POSITION_CHANGE: '포지션 변경',
+  UNKNOWN: '흐름 확인 필요',
+}
+
+const evmNetworkMetadata: Record<string, { label: string; nativeSymbol: string; decimals: number }> = {
+  '1': { label: 'Ethereum', nativeSymbol: 'ETH', decimals: 18 },
+  '10': { label: 'Optimism', nativeSymbol: 'ETH', decimals: 18 },
+}
+
 const formatVenue = (value: string) =>
   value ? `${value.slice(0, 1).toUpperCase()}${value.slice(1).toLowerCase()}` : ''
 
@@ -68,8 +91,67 @@ export const parseLedgerAsset = (assetId: string): LedgerAssetPresentation => {
       metadata: `${formatVenue(venue)} · 소수점 ${decimals}자리`,
     }
   }
+  const evmMatch = assetId.match(/^asset:eip155:(\d+):(native|erc20)(?::(.+))?$/i)
+  if (evmMatch) {
+    const [, chainId = '', assetKind = '', locator] = evmMatch
+    const network = evmNetworkMetadata[chainId]
+    const networkLabel = network?.label ?? `EVM ${chainId}`
+    if (assetKind.toLowerCase() === 'native' && network) {
+      return {
+        symbol: network.nativeSymbol,
+        decimals: network.decimals,
+        metadata: `${network.label} · 네이티브 자산`,
+      }
+    }
+    if (assetKind.toLowerCase() === 'native') {
+      return {
+        symbol: assetId,
+        metadata: `${networkLabel} · 네이티브 자산 메타데이터 확인 필요`,
+      }
+    }
+    const compactLocator = locator && locator.length > 18
+      ? `${locator.slice(0, 10)}…${locator.slice(-6)}`
+      : locator
+    return {
+      symbol: compactLocator || 'ERC-20',
+      metadata: `${networkLabel} · 토큰 메타데이터 확인 필요`,
+    }
+  }
   return { symbol: assetId || '알 수 없는 자산' }
 }
+
+export const describeLedgerSource = (
+  postings: Array<{ accountId: string; assetId: string }>,
+): LedgerSourcePresentation => {
+  for (const posting of postings) {
+    const cexMatch = posting.assetId.match(/^cex-document-asset:([^:]+):/i)
+    if (cexMatch?.[1]) {
+      return {
+        kind: 'CEX',
+        label: formatVenue(cexMatch[1]),
+        detail: posting.accountId || '거래소 계정',
+      }
+    }
+  }
+  for (const posting of postings) {
+    const evmMatch = posting.assetId.match(/^asset:eip155:(\d+):/i)
+    if (evmMatch?.[1]) {
+      return {
+        kind: 'WALLET',
+        label: evmNetworkMetadata[evmMatch[1]]?.label ?? `EVM ${evmMatch[1]}`,
+        detail: posting.accountId || '개인지갑',
+      }
+    }
+  }
+  return {
+    kind: 'UNKNOWN',
+    label: '출처 확인 중',
+    detail: postings[0]?.accountId || '연결 정보 없음',
+  }
+}
+
+export const describeFlowShape = (flowShape: string) =>
+  flowShapeLabels[flowShape] ?? (flowShape || '흐름 확인 필요')
 
 export const formatCanonicalQuantity = (
   quantity: string,
