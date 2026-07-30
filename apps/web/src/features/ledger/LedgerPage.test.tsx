@@ -133,17 +133,24 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
 
-    expect(await screen.findAllByText('1,801.08722461 USDT')).toHaveLength(2)
+    expect(await screen.findAllByText('1,801.08722461 USDT')).toHaveLength(1)
+    expect(screen.getAllByText('27.016 KRW')).toHaveLength(1)
+    expect(screen.queryByRole('heading', { name: '자산 변동과 세무 입력' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '거래 거래 상세 보기' })).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(screen.getByRole('button', { name: '거래 거래 상세 보기' }))
+
+    expect(screen.getAllByText('1,801.08722461 USDT')).toHaveLength(2)
     expect(screen.getAllByText('27.016 KRW')).toHaveLength(2)
     expect(screen.getAllByText('Upbit · 소수점 8자리')).toHaveLength(2)
     expect(screen.getAllByText('Upbit').length).toBeGreaterThan(0)
-    expect(screen.getByText('결정적 CEX 해석')).toBeInTheDocument()
     expect(screen.getByText('장부 확정')).toBeInTheDocument()
     expect(screen.getAllByText('평가 대기').length).toBeGreaterThan(0)
     expect(screen.getByText('들어옴')).toBeInTheDocument()
     expect(screen.getByText('나감')).toBeInTheDocument()
     expect(screen.getByText('매수·매도·입출금의 본체가 되는 자산 변동')).toBeInTheDocument()
     expect(screen.getByText('거래소나 서비스에 지불한 처리 비용')).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '거래 처리 계보' })).not.toBeInTheDocument()
   })
 
   it('presents external transfers as deposits and withdrawals', async () => {
@@ -199,8 +206,11 @@ describe('LedgerPage', () => {
     expect((await screen.findAllByText('입금')).length).toBeGreaterThan(0)
     expect(screen.getByText('출금')).toBeInTheDocument()
     expect(screen.queryByText('전송')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '입금 거래 상세 접기' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '입금 거래 상세 보기' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '출금 거래 상세 보기' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '입금 거래 상세 보기' }))
+
     expect(screen.getByText('보낸 곳')).toBeInTheDocument()
     expect(screen.getByText('외부 지갑')).toBeInTheDocument()
     expect(screen.getByText('거래 목적 확인 필요')).toBeInTheDocument()
@@ -246,12 +256,15 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
 
     expect((await screen.findAllByText('내 계정 이동')).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '내 계정 이동 거래 상세 보기' }))
+
     expect(screen.getByText('보낸 곳')).toBeInTheDocument()
     expect(screen.getByText('내 등록 지갑')).toBeInTheDocument()
     expect(screen.getByText('반대편 지갑 장부 확인 대기')).toBeInTheDocument()
   })
 
-  it('shows the wallet-only ActionProof lineage without treating it as a CEX field', async () => {
+  it('shows wallet postings without an intermediate processing step bar', async () => {
     const walletEvent = {
       ...ledgerEvent,
       eventType: 'SWAP',
@@ -279,9 +292,10 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
 
     expect((await screen.findAllByText('Optimism')).length).toBeGreaterThan(0)
-    expect(screen.getByText('ActionProof')).toBeInTheDocument()
-    expect(screen.getByText('JIT가 봉인한 실행·effect 증명')).toBeInTheDocument()
-    expect(screen.queryByText('결정적 CEX 해석')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /거래 상세 보기/ }))
+
+    expect(screen.queryByRole('list', { name: '거래 처리 계보' })).not.toBeInTheDocument()
     expect(screen.getByText('장부 확정')).toBeInTheDocument()
     expect(screen.getAllByText('0.0002 ETH')).toHaveLength(2)
   })
@@ -328,7 +342,10 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    expect(await screen.findByText('event-2027')).toBeInTheDocument()
+    const ledgerDetailButton = await screen.findByRole('button', { name: '거래 거래 상세 보기' })
+    expect(ledgerDetailButton).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(ledgerDetailButton)
+    expect(screen.getByText('event-2027')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '검토 필요 —' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('검토 목록을 불러오지 못했습니다')
@@ -398,7 +415,10 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
     fireEvent.change(screen.getByLabelText('조회 기간'), { target: { value: nextYear } })
 
-    expect(await screen.findByText(`event-${nextYear}`)).toBeInTheDocument()
+    const nextLedgerDetailButton = await screen.findByRole('button', { name: '거래 거래 상세 보기' })
+    expect(nextLedgerDetailButton).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(nextLedgerDetailButton)
+    expect(screen.getByText(`event-${nextYear}`)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     expect(await screen.findByRole('button', { name: /NEEDS_CONTEXT/ })).toBeInTheDocument()
 
