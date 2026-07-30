@@ -19,6 +19,7 @@ import {
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
   ensureRuntimeIndexerView,
+  hostWebAPIEngineEnvironment,
   privateObjectWriteEnvironment,
   finishSignalShutdown,
   releaseProcessLock,
@@ -168,6 +169,16 @@ test('passes the private object key and its ID as one unit', () => {
     PRIVATE_OBJECT_ENCRYPTION_KEY: 'base64-key',
     PRIVATE_OBJECT_ENCRYPTION_KEY_ID: 'primary',
   })
+})
+
+test('pins both host Web API Engine targets to the runtime Unix socket', () => {
+  assert.deepEqual(
+    hostWebAPIEngineEnvironment('/private/tmp/giwa/engine.sock'),
+    {
+      ENGINE_GRPC_INSECURE_TARGET: 'unix:/private/tmp/giwa/engine.sock',
+      GIWA_HOST_ENGINE_TARGET: 'unix:/private/tmp/giwa/engine.sock',
+    },
+  )
 })
 
 test('creates the runtime root before taking the first operation lock', () => {
