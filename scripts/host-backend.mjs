@@ -73,6 +73,10 @@ const socketRoot = resolve(
     ),
 )
 const configRoot = join(stateRoot, 'config')
+const sourcePublicationClaimPolicy = join(
+  configRoot,
+  'source-publication-claim-policy.json',
+)
 const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
 const managedJITBinary = join(binaryRoot, 'jitd')
@@ -278,6 +282,36 @@ export const hostWebAPIEngineEnvironment = (engineSocket) => {
   return {
     ENGINE_GRPC_INSECURE_TARGET: target,
     GIWA_HOST_ENGINE_TARGET: target,
+  }
+}
+
+export const hostPostingWorkerArgs = (
+  artifacts,
+  repository,
+  claimPolicy,
+) => [
+  '--artifact-root',
+  join(artifacts, 'source', 'root'),
+  '--artifact-temp',
+  join(artifacts, 'source', 'tmp'),
+  '--service-root',
+  repository,
+  '--claim-policy',
+  claimPolicy,
+]
+
+export const hostPostingWorkerEnvironment = (
+  trustKey,
+  eventURL,
+  sourceURL,
+) => {
+  if (!trustKey) {
+    throw new Error('DAEJANG_PUBLICATION_POLICY_TRUST_KEY is missing')
+  }
+  return {
+    DAEJANG_PUBLICATION_POLICY_TRUST_KEY: trustKey,
+    DAEJANG_POSTING_DATABASE_URL: eventURL,
+    DAEJANG_POSTING_ARTIFACT_DATABASE_URL: sourceURL,
   }
 }
 
@@ -844,21 +878,35 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       10_000,
     )
 
+    if (!existsSync(sourcePublicationClaimPolicy)) {
+      throw new Error(
+        `SOURCE publication claim policy is missing: ${sourcePublicationClaimPolicy}`,
+      )
+    }
+    const postingArgs = hostPostingWorkerArgs(
+      artifactRoot,
+      postingRepository,
+      sourcePublicationClaimPolicy,
+    )
+    const postingEnvironment = serviceEnvironment(
+      [],
+      [],
+      hostPostingWorkerEnvironment(
+        process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY,
+        eventURL,
+        sourceURL,
+      ),
+    )
+    run(
+      join(binaryRoot, 'posting-worker'),
+      [...postingArgs, '--once'],
+      { cwd: postingRepository, env: postingEnvironment },
+    )
     spawnService(
       'posting',
       join(binaryRoot, 'posting-worker'),
-      [
-        '--artifact-root',
-        join(artifactRoot, 'source', 'root'),
-        '--artifact-temp',
-        join(artifactRoot, 'source', 'tmp'),
-        '--service-root',
-        postingRepository,
-      ],
-      serviceEnvironment([], [], {
-        DAEJANG_POSTING_DATABASE_URL: eventURL,
-        DAEJANG_POSTING_ARTIFACT_DATABASE_URL: sourceURL,
-      }),
+      postingArgs,
+      postingEnvironment,
       { cwd: postingRepository },
     )
     await sleep(1_000)
