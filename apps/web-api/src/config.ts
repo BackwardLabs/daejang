@@ -29,6 +29,7 @@ export type AppConfig = {
   privateObjectLegacyKeyId?: string
   privateObjectDecryptionKeys?: ReadonlyMap<string, Buffer>
   reportAttestationDeployment?: ReportAttestationDeploymentConfig
+  walletSignatureRpcUrls?: ReadonlyMap<string, string>
   reportAttestationSyntheticTestnet?:
     ReportAttestationSyntheticTestnetConfig
 }
@@ -136,6 +137,13 @@ const parseOrigin = (value: string) => {
   }
 
   return url.origin
+}
+
+const loadWalletSignatureRpcUrls = (environment: NodeJS.ProcessEnv) => {
+  const rpcUrls = new Map<string, string>()
+  if (environment.ENV_RPC_URL_ETHEREUM_MAINNET) rpcUrls.set('eip155:1', environment.ENV_RPC_URL_ETHEREUM_MAINNET)
+  if (environment.ENV_RPC_URL_OPTIMISM_MAINNET) rpcUrls.set('eip155:10', environment.ENV_RPC_URL_OPTIMISM_MAINNET)
+  return rpcUrls
 }
 
 const evmAddressPattern = /^0x[0-9a-fA-F]{40}$/
@@ -945,6 +953,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     signup,
     identityVerificationMode,
     upbitPdfImportEnabled,
+    walletSignatureRpcUrls: loadWalletSignatureRpcUrls(environment),
     engineMtls: loadEngineMtlsConfig(
       environment,
       production && engineInsecureTarget === undefined,

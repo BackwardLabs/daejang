@@ -390,6 +390,8 @@ test('requires a signed SOURCE claim policy for the host Posting worker', () => 
 
 test('forwards GIWA report deployment settings only to the Web API boundary', () => {
   assert.deepEqual(hostWebAPIForwardedEnvironmentNames, [
+    'ENV_RPC_URL_ETHEREUM_MAINNET',
+    'ENV_RPC_URL_OPTIMISM_MAINNET',
     'GIWA_REPORT_ATTESTATIONS_ENABLED',
     'GIWA_REPORT_RPC_URL',
     'GIWA_REPORT_EAS_ADDRESS',
