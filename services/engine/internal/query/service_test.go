@@ -65,7 +65,7 @@ func TestObservationReadProjectionMergesBeforeApplyingLedgerLimit(t *testing.T) 
 func TestLedgerProjectionIncludesSafeTransferEndpointSummary(t *testing.T) {
 	at := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
 	reads := &fakeReadStore{ledger: []readmodelstore.LedgerEvent{{
-		EventID: "transfer", EventType: "TRANSFER", FlowShape: "SELF_TRANSFER", EffectiveAt: at,
+		EventID: "transfer", EventType: "TRANSFER", FlowShape: "SELF_TRANSFER", Subtype: "FIAT_DEPOSIT", EffectiveAt: at,
 		TransferEndpoint: &readmodelstore.TransferEndpoint{
 			Resolution: "OWNED_REGISTERED", Kind: "WALLET_ADDRESS", Display: "0x123456…abcdef",
 			AddressFamily: "EVM", WalletSourceID: "wallet-source-1",
@@ -80,6 +80,9 @@ func TestLedgerProjectionIncludesSafeTransferEndpointSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpoint := ledger.GetItems()[0].GetTransferEndpoint()
+	if ledger.GetItems()[0].GetSubtype() != "FIAT_DEPOSIT" {
+		t.Fatalf("ledger subtype was not projected: %#v", ledger.GetItems()[0])
+	}
 	if endpoint.GetResolution() != "OWNED_REGISTERED" || endpoint.GetDisplay() != "0x123456…abcdef" ||
 		endpoint.GetWalletSourceId() != "wallet-source-1" || !endpoint.GetReviewRequired() ||
 		len(endpoint.GetChainCandidates()) != 1 || endpoint.GetChainCandidates()[0] != "eip155:10" {

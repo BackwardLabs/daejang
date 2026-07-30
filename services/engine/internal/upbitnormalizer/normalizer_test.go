@@ -42,7 +42,7 @@ func TestPrepareNormalizesBuyAndSellToDeterministicCEXObservations(t *testing.T)
 	if got[0].OccurredAt == nil || got[0].OccurredAt.Format(time.RFC3339) != "2026-07-28T15:04:05Z" {
 		t.Fatalf("KST timestamp was not normalized to UTC: %#v", got[0].OccurredAt)
 	}
-	if string(got[0].DetailJSON) != `{"assetScalePolicy":"upbit-document-decimal8/v1","schemaVersion":"tax.cex-interpretation-input.v2","semantic":"BASE","sourceCase":"BUY","activityClass":"UNSPECIFIED"}` {
+	if string(got[0].DetailJSON) != `{"assetScalePolicy":"upbit-document-decimal8/v1","schemaVersion":"tax.cex-interpretation-input.v2","semantic":"BASE","sourceCase":"BUY","activityClass":"UNSPECIFIED","description":"fixture"}` {
 		t.Fatalf("unexpected tax-engine detail: %s", got[0].DetailJSON)
 	}
 	if strings.Contains(string(first.RootArtifact), "10005000") || strings.Contains(string(first.RootArtifact), "BTC") {
@@ -78,6 +78,9 @@ func TestPrepareClassifiesAllowlistedTransferDescriptions(t *testing.T) {
 			}
 			if detail.ActivityClass != test.want {
 				t.Fatalf("activity class = %q, want %q", detail.ActivityClass, test.want)
+			}
+			if detail.Description != test.description {
+				t.Fatalf("description = %q, want %q", detail.Description, test.description)
 			}
 		})
 	}

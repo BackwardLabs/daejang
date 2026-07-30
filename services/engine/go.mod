@@ -3,7 +3,7 @@ module github.com/BackwardLabs/daejang/services/engine
 go 1.26
 
 require (
-	github.com/BackwardLabs/daejang-db v0.0.0-20260730181248-3d7e5a4d7bd3
+	github.com/BackwardLabs/daejang-db v0.0.0-20260730223337-90f48c3999d9
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 )

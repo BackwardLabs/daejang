@@ -44,6 +44,7 @@ export type LedgerEventModel = {
   revisionNumber: number
   eventType: string
   flowShape: string
+  subtype?: string
   resolution: string
   interpretationSupport: string
   effectiveAt: string

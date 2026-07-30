@@ -246,6 +246,7 @@ message LedgerEvent {
   google.protobuf.Timestamp effective_at = 8;
   repeated LedgerPosting postings = 9;
   LedgerTransferEndpoint transfer_endpoint = 10;
+  string subtype = 11;
 }
 message ListLedgerEventsResponse { repeated LedgerEvent items = 1; }
 
