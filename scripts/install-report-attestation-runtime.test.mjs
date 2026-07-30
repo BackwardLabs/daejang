@@ -3,12 +3,26 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import {
+  reportAttestationRuntimeInstallDirectory,
   validateReportAttestationRuntimeArchiveEntries,
   verifyReportAttestationRuntimeTarball,
 } from './install-report-attestation-runtime.mjs'
+
+test('installs into the root node_modules used by the host runtime', () => {
+  assert.equal(
+    reportAttestationRuntimeInstallDirectory,
+    fileURLToPath(
+      new URL(
+        '../node_modules/@backward-labs/daejang-contracts',
+        import.meta.url,
+      ),
+    ),
+  )
+})
 
 test('accepts only an absolute regular tarball with the pinned SHA-256', async () => {
   const directory = await mkdtemp(

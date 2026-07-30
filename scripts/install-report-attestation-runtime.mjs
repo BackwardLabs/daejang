@@ -26,11 +26,11 @@ const EXPECTED_PACKAGE_NAME =
 const EXPECTED_RUNTIME_EXPORT =
   './dist/public/giwaSepoliaV1.js'
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u
-const WEB_API_DIRECTORY = fileURLToPath(
-  new URL('../apps/web-api/', import.meta.url),
+const REPOSITORY_DIRECTORY = fileURLToPath(
+  new URL('../', import.meta.url),
 )
 const PACKAGE_PARENT_DIRECTORY = join(
-  WEB_API_DIRECTORY,
+  REPOSITORY_DIRECTORY,
   'node_modules',
   '@backward-labs',
 )
@@ -48,6 +48,8 @@ const installedRuntimeEntry = (packageDirectory) =>
 const INSTALLED_RUNTIME_ENTRY = installedRuntimeEntry(
   INSTALLED_PACKAGE_DIRECTORY,
 )
+export const reportAttestationRuntimeInstallDirectory =
+  INSTALLED_PACKAGE_DIRECTORY
 
 const archiveCommand = (
   arguments_,
