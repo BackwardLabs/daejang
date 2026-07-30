@@ -1,3 +1,4 @@
+import { lazy, Suspense, useCallback, useState } from 'react'
 import {
   sourceMethodBullets,
   sourceMethodDefinitions,
@@ -7,12 +8,27 @@ import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import { useSourceCapabilities } from './useSourceCapabilities.ts'
 
+const loadReownWalletFlow = () =>
+  import('./ReownEvmWalletConnectionRoute.tsx')
+
+const DirectReownWalletFlow = lazy(async () => {
+  const module = await loadReownWalletFlow()
+
+  return { default: module.ReownEvmWalletConnectionRoute }
+})
+
+function preloadReownWalletFlow() {
+  void loadReownWalletFlow().catch(() => undefined)
+}
+
 function SourceMethodCard({
   disabled = false,
   method,
+  onSelect,
 }: {
   disabled?: boolean
   method: SourceMethodDefinition
+  onSelect?: () => void
 }) {
   return (
     <article className={`source-method-card source-method-card--${method.tone}`}>
@@ -42,9 +58,20 @@ function SourceMethodCard({
         <span className="source-primary-action" aria-disabled="true">
           Upbit PDF 등록 불가
         </span>
+      ) : method.id === 'evm-wallet' ? (
+        <button
+          className="source-primary-action"
+          type="button"
+          onClick={onSelect}
+          onFocus={preloadReownWalletFlow}
+          onPointerEnter={preloadReownWalletFlow}
+        >
+          EVM Wallet 선택
+          <span aria-hidden="true">→</span>
+        </button>
       ) : (
         <AppLink className="source-primary-action" href={method.href}>
-          {method.id === 'upbit-pdf' ? 'Upbit PDF 선택' : 'EVM Wallet 선택'}
+          Upbit PDF 선택
           <span aria-hidden="true">→</span>
         </AppLink>
       )}
@@ -52,7 +79,13 @@ function SourceMethodCard({
   )
 }
 
-export function SourceTypeSelectionPage() {
+function SourceTypeSelectionView({
+  onWalletSelect,
+  walletError,
+}: {
+  onWalletSelect: () => void
+  walletError: string
+}) {
   const capabilities = useSourceCapabilities()
 
   return (
@@ -68,17 +101,65 @@ export function SourceTypeSelectionPage() {
         </span>
       </div>
 
+      {walletError ? (
+        <div className="source-api-notice" role="alert">
+          {walletError}
+        </div>
+      ) : null}
+
       <section className="source-method-grid" aria-label="데이터 소스 연결 방식">
         <SourceMethodCard
           disabled={!capabilities.upbitPdf.registrationEnabled}
           method={sourceMethodDefinitions['upbit-pdf']}
         />
-        <SourceMethodCard method={sourceMethodDefinitions['evm-wallet']} />
+        <SourceMethodCard
+          method={sourceMethodDefinitions['evm-wallet']}
+          onSelect={onWalletSelect}
+        />
       </section>
 
       <p className="source-footer-note">
         두 방식 모두 수집 범위를 확인한 뒤 최초 수집 작업을 시작합니다.
       </p>
     </SourceFlowLayout>
+  )
+}
+
+export function SourceTypeSelectionPage() {
+  const [launchWallet, setLaunchWallet] = useState(false)
+  const [walletError, setWalletError] = useState('')
+
+  const returnToSelection = useCallback(() => {
+    setLaunchWallet(false)
+  }, [])
+  const handleLaunchFailed = useCallback(() => {
+    setWalletError(
+      '지갑 연결이 취소되었거나 모듈을 열지 못했습니다. 다시 선택해 주세요.',
+    )
+    setLaunchWallet(false)
+  }, [])
+  const selectionView = (
+    <SourceTypeSelectionView
+      walletError={walletError}
+      onWalletSelect={() => {
+        setWalletError('')
+        setLaunchWallet(true)
+      }}
+    />
+  )
+
+  if (!launchWallet) {
+    return selectionView
+  }
+
+  return (
+    <Suspense fallback={selectionView}>
+      <DirectReownWalletFlow
+        launchImmediately
+        pendingView={selectionView}
+        onExitRequested={returnToSelection}
+        onLaunchFailed={handleLaunchFailed}
+      />
+    </Suspense>
   )
 }

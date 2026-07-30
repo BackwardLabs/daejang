@@ -8,8 +8,6 @@ import { navigateTo } from './auth/navigation.ts'
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx'
 import type { ProductPageKind } from './features/product/ProductPage.tsx'
 
-const loadReownEvmWalletConnectionRoute = () =>
-  import('./features/sources/ReownEvmWalletConnectionRoute.tsx')
 const loadLedgerPage = () => import('./features/ledger/LedgerPage.tsx')
 const loadReportPage = () => import('./features/reports/ReportPage.tsx')
 const loadSourceManagementPage = () =>
@@ -22,11 +20,6 @@ const loadUpbitPdfRegistrationPage = () =>
   import('./features/sources/UpbitPdfRegistrationPage.tsx')
 const loadProductPage = () => import('./features/product/ProductPage.tsx')
 
-const ReownEvmWalletConnectionRoute = lazy(async () => {
-  const module = await loadReownEvmWalletConnectionRoute()
-
-  return { default: module.ReownEvmWalletConnectionRoute }
-})
 const LedgerPage = lazy(() =>
   loadLedgerPage().then((module) => ({ default: module.LedgerPage })))
 const ReportPage = lazy(() =>
@@ -58,7 +51,6 @@ const routePreloaders: Record<string, () => Promise<unknown>> = {
   '/sources/new': loadSourceTypeSelectionPage,
   '/sources/new/upbit': loadSourceMethodIntroPage,
   '/sources/new/upbit/upload': loadUpbitPdfRegistrationPage,
-  '/sources/new/wallet': loadReownEvmWalletConnectionRoute,
 }
 
 function preloadRoute(pathname: string) {
@@ -69,8 +61,11 @@ function preloadRoute(pathname: string) {
 function normalizePath(pathname: string) {
   const normalized = pathname.replace(/\/+$/, '')
 
-  if (normalized === '/sources/new/wallet/connect') {
-    return '/sources/new/wallet'
+  if (
+    normalized === '/sources/new/wallet' ||
+    normalized === '/sources/new/wallet/connect'
+  ) {
+    return '/sources/new'
   }
 
   return normalized || '/'
@@ -207,8 +202,6 @@ export function AppRouter() {
       protectedPage = <SourceMethodIntroPage methodId="upbit-pdf" />
     } else if (path === '/sources/new/upbit/upload') {
       protectedPage = <UpbitPdfRegistrationPage />
-    } else if (path === '/sources/new/wallet') {
-      protectedPage = <ReownEvmWalletConnectionRoute />
     } else if (productPage) {
       protectedPage = <ProductPage kind={productPage} />
     }

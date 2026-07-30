@@ -78,6 +78,29 @@ afterEach(() => {
 })
 
 describe('EvmWalletConnectionPage', () => {
+  it('starts the Reown connection immediately when launched from source selection', async () => {
+    const connectWallet = vi.fn(connectWalletTestFixture)
+    const onInitialConnectionResult = vi.fn()
+
+    render(
+      <EvmWalletConnectionPage
+        {...withTestFixtures({ connectWallet })}
+        autoConnectProvider="other"
+        onInitialConnectionResult={onInitialConnectionResult}
+      />,
+    )
+
+    expect(connectWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'other' }),
+    )
+    expect(
+      await screen.findByRole('heading', { name: '지갑 소유권 확인' }),
+    ).toBeInTheDocument()
+    expect(onInitialConnectionResult).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: true }),
+    )
+  })
+
   it('completes the Figma wallet connection, signature, scope, and backfill flow', async () => {
     const completeConnection = vi.fn(completeWalletConnectionTestFixture)
     render(
