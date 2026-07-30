@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createSyncJob,
   getSourceCapabilities,
+  retrySyncJob,
   watchSyncJob,
 } from './sourceApi.ts'
 
@@ -67,6 +68,53 @@ describe('EVM sync API integration', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/v1/jobs/job-1', expect.any(Object))
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/jobs/job-1', expect.any(Object))
+  })
+
+  it('reuses the caller-owned intent key when retrying a failed job', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      job: {
+        id: 'job-2',
+        sourceId: 'source-1',
+        sourceKind: 'EVM_WALLET',
+        state: 'QUEUED',
+        phase: 'QUEUED',
+        attempts: 0,
+        processedRecords: 0,
+        createdAt: '',
+        updatedAt: '',
+      },
+    }), { status: 201, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await retrySyncJob({
+      intentKey: 'stable-retry-intent',
+      jobId: 'job/with spaces',
+      signal: controller.signal,
+    })
+    await retrySyncJob({
+      intentKey: 'stable-retry-intent',
+      jobId: 'job/with spaces',
+      signal: controller.signal,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/jobs/job%2Fwith%20spaces/retry',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ intentKey: 'stable-retry-intent' }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/jobs/job%2Fwith%20spaces/retry',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ intentKey: 'stable-retry-intent' }),
+      }),
+    )
   })
 })
 

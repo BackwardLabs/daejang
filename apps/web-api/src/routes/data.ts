@@ -245,6 +245,44 @@ const upbitPdfImportUnavailable = () =>
     '현재 Upbit 문서 가져오기를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.',
   )
 
+const retryableSyncInput = (
+  job: Record<string, unknown>,
+): Parameters<EngineDataClient['enqueueSync']>[1] => {
+  if (job.state !== 'FAILED') {
+    throw new ApiError(
+      409,
+      'SYNC_RETRY_NOT_ALLOWED',
+      '완료되지 않은 실패 작업만 다시 수집할 수 있습니다.',
+    )
+  }
+
+  const sourceKind = job.sourceKind
+  const sourceId = job.sourceId
+  const requestedCoverageStart = job.requestedCoverageStart
+  const requestedCoverageEnd = job.requestedCoverageEnd
+  if (
+    (sourceKind !== 'UPBIT_PDF' && sourceKind !== 'EVM_WALLET') ||
+    typeof sourceId !== 'string' ||
+    typeof requestedCoverageStart !== 'string' ||
+    typeof requestedCoverageEnd !== 'string' ||
+    !validDateRange(requestedCoverageStart, requestedCoverageEnd)
+  ) {
+    throw new ApiError(
+      409,
+      'SYNC_RETRY_UNAVAILABLE',
+      '기존 수집 작업의 범위를 확인할 수 없어 다시 시작할 수 없습니다.',
+    )
+  }
+
+  return {
+    sourceKind,
+    sourceId,
+    requestedCoverageStart,
+    requestedCoverageEnd,
+    trigger: 'USER_REQUEST' as const,
+  }
+}
+
 const uploadContentLength = (header: string | string[] | undefined) => {
   if (typeof header !== 'string' || !/^[1-9][0-9]*$/.test(header)) {
     throw new ApiError(
@@ -522,6 +560,50 @@ export const registerDataRoutes = async (
         requestedCoverageEnd: request.body.coverageEnd,
         trigger: request.body.trigger,
       })
+      return reply.status(201).send({ job })
+    } catch (error) {
+      return mapScopedReadError(error)
+    }
+  })
+
+  app.post<{
+    Params: { jobId: string }
+    Body: { intentKey: string }
+  }>('/api/v1/jobs/:jobId/retry', {
+    schema: {
+      params: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['jobId'],
+        properties: { jobId: { type: 'string', format: 'uuid' } },
+      },
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['intentKey'],
+        properties: {
+          intentKey: { type: 'string', minLength: 1, maxLength: 200 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const failedJob = await engine.getSyncJob(
+        contextFor(request),
+        request.params.jobId,
+      )
+      const input = retryableSyncInput(failedJob)
+      if (
+        input.sourceKind === 'UPBIT_PDF' &&
+        (!options.upbitPdfImportEnabled ||
+          configuredEngine?.upbitPdfImportSupported !== true)
+      ) {
+        throw upbitPdfImportUnavailable()
+      }
+      const job = await engine.enqueueSync(
+        contextFor(request, request.body.intentKey),
+        input,
+      )
       return reply.status(201).send({ job })
     } catch (error) {
       return mapScopedReadError(error)

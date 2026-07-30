@@ -797,6 +797,103 @@ describe('sync and tax report data routes', () => {
     })
   })
 
+  it('restarts a failed sync from its server-owned immutable input', async () => {
+    const failedJob = {
+      id: '55555555-5555-4555-8555-555555555555',
+      sourceKind: 'EVM_WALLET',
+      sourceId: '33333333-3333-4333-8333-333333333333',
+      state: 'FAILED',
+      requestedCoverageStart: '2027-01-01',
+      requestedCoverageEnd: '2027-12-31',
+    }
+    const getSyncJob = vi.fn(async () => failedJob)
+    const enqueueSync = vi.fn(async () => ({
+      ...failedJob,
+      id: '66666666-6666-4666-8666-666666666666',
+      state: 'QUEUED',
+    }))
+    const app = await buildRouteApp(engineClient({ enqueueSync, getSyncJob }))
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/jobs/${failedJob.id}/retry`,
+      payload: { intentKey: 'retry-failed-job-1' },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(getSyncJob).toHaveBeenCalledWith(
+      expect.objectContaining({ userId, sessionId: session.id }),
+      failedJob.id,
+    )
+    expect(enqueueSync).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      userId,
+      sessionId: session.id,
+      idempotencyKey: 'retry-failed-job-1',
+    }, {
+      sourceKind: 'EVM_WALLET',
+      sourceId: failedJob.sourceId,
+      requestedCoverageStart: '2027-01-01',
+      requestedCoverageEnd: '2027-12-31',
+      trigger: 'USER_REQUEST',
+    })
+    expect(response.json()).toMatchObject({
+      job: {
+        id: '66666666-6666-4666-8666-666666666666',
+        state: 'QUEUED',
+      },
+    })
+  })
+
+  it('does not create a duplicate sync while the existing job is still active', async () => {
+    const enqueueSync = vi.fn(async () => ({}))
+    const app = await buildRouteApp(engineClient({
+      enqueueSync,
+      getSyncJob: vi.fn(async () => ({
+        id: '55555555-5555-4555-8555-555555555555',
+        sourceKind: 'EVM_WALLET',
+        sourceId: '33333333-3333-4333-8333-333333333333',
+        state: 'RUNNING',
+        requestedCoverageStart: '2027-01-01',
+        requestedCoverageEnd: '2027-12-31',
+      })),
+    }))
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/jobs/55555555-5555-4555-8555-555555555555/retry',
+      payload: { intentKey: 'retry-running-job' },
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toMatchObject({
+      error: { code: 'SYNC_RETRY_NOT_ALLOWED' },
+    })
+    expect(enqueueSync).not.toHaveBeenCalled()
+  })
+
+  it('does not reveal a failed sync owned by another account during retry', async () => {
+    const enqueueSync = vi.fn(async () => ({}))
+    const app = await buildRouteApp(engineClient({
+      enqueueSync,
+      getSyncJob: vi.fn(async () => {
+        throw new EngineRpcError(grpcStatus.NOT_FOUND)
+      }),
+    }))
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/jobs/55555555-5555-4555-8555-555555555555/retry',
+      payload: { intentKey: 'retry-foreign-job' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toMatchObject({
+      error: { code: 'RESOURCE_NOT_FOUND' },
+    })
+    expect(enqueueSync).not.toHaveBeenCalled()
+  })
+
   it('rejects an inverted sync range before calling Engine', async () => {
     const enqueueSync = vi.fn(async () => ({}))
     const app = await buildRouteApp(engineClient({ enqueueSync }))

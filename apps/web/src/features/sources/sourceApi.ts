@@ -112,6 +112,21 @@ export async function createSyncJob(input: {
   })
 }
 
+export async function retrySyncJob(input: {
+  intentKey: string
+  jobId: string
+  signal: AbortSignal
+}) {
+  return requestApi<{ job: SyncJobApiModel }>(
+    `/jobs/${encodeURIComponent(input.jobId)}/retry`,
+    {
+      method: 'POST',
+      signal: input.signal,
+      body: JSON.stringify({ intentKey: input.intentKey }),
+    },
+  )
+}
+
 export async function getSyncJob(jobId: string, signal?: AbortSignal) {
   return requestApi<{ job: SyncJobApiModel }>(
     `/jobs/${encodeURIComponent(jobId)}`,
