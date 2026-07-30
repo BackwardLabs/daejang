@@ -30,8 +30,6 @@ import {
 import type { Hex32 } from './types.js'
 
 const GIWA_SEPOLIA_CHAIN_ID = 91_342
-const REQUIRED_NODE_MAJOR = 24
-const REQUIRED_NODE_MINOR = 18
 
 const giwaSepolia = (rpcUrl: string) =>
   defineChain({
@@ -56,24 +54,6 @@ const giwaSepolia = (rpcUrl: string) =>
 
 const normalizeAddress = (value: string) =>
   getAddress(value.toLowerCase())
-
-export const assertGiwaReportRuntimeNodeVersion = (
-  version = process.versions.node,
-) => {
-  const match = /^(\d+)\.(\d+)\.(\d+)/u.exec(version)
-  const major = Number(match?.[1])
-  const minor = Number(match?.[2])
-  if (
-    !Number.isSafeInteger(major) ||
-    !Number.isSafeInteger(minor) ||
-    major !== REQUIRED_NODE_MAJOR ||
-    minor < REQUIRED_NODE_MINOR
-  ) {
-    throw new Error(
-      'GIWA report attestations require Node.js >=24.18.0 <25',
-    )
-  }
-}
 
 const deploymentInput = (
   deployment: ReportAttestationDeploymentConfig,
@@ -148,7 +128,6 @@ export const createGiwaSepoliaReportAttestationServerRuntime =
     deployment: ReportAttestationDeploymentConfig
     writer: ReportAttestationSyntheticTestnetConfig
   }) => {
-    assertGiwaReportRuntimeNodeVersion()
     const publicationSource =
       new SyntheticTestnetReportAttestationPublicationSource()
     const store = new PostgresReportAttestationStore(
