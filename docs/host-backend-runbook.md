@@ -69,13 +69,21 @@ npm run backend:install-autostart
 LaunchAgent를 설치하고, 로그인/재부팅 후 supervisor가 전체 서비스를 다시 올리며
 중간 프로세스가 종료되거나 readiness가 실패하면 전체 dependency set을 prebuilt
 artifact로 재시작한다. 이 호스트처럼 LaunchAgent domain이 비활성화된 경우에는
-동일한 stable runtime launcher를 사용자 crontab의 `@reboot`에 등록한다.
+동일한 stable runtime launcher를 사용자 crontab의 `@reboot`에 등록하고 설치 즉시
+detached supervisor를 시작한다. 1분 watchdog은 supervisor가 사라진 경우에만 이를
+다시 시작한다.
 
 `backend:stop`은 pause marker를 먼저 기록하므로 supervisor가 서비스를 즉시 다시
 올리지 않는다. `backend:start` 또는 `backend:restart`가 전체 readiness를 통과한
 뒤 pause를 해제한다. supervisor singleton lock은 monitor가 둘 이상 PID와 socket을
 동시에 조작하지 못하게 한다. build는 명시적인 start/restart 때만 수행하며 장애
 복구 loop는 runtime root의 prebuilt Go binaries, Web API dist, proto를 재사용한다.
+supervisor 자체가 launchd·cron·운영 세션의 종료 신호를 받는 경우에는 이미 정상
+실행 중인 resident 서비스를 내리지 않는다. 명시적인 `backend:stop`과
+`backend:restart`만 dependency set을 종료하며, watchdog은 다음 주기에 supervisor만
+다시 연결한다. supervisor는 종료 신호 처리 후 singleton lock을 반납하고 stable
+runtime script로 detached monitor를 직접 handoff하므로, cron 실행이 지연되거나
+비활성화된 로그인 세션에서도 감시 공백을 남기지 않는다.
 
 Posting worker는 `SOURCE` publication을 소비해 CEX Event·Posting·Relation을
 원자적으로 저장한다. 시작 시 signed `normal-single-writer` policy로 한 번의 bounded

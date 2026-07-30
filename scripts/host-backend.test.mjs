@@ -25,6 +25,7 @@ import {
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
+  handoffSupervisorAfterSignal,
   normalizeMultichainSnapshotIds,
   pauseForSignalShutdown,
   privateObjectWriteEnvironment,
@@ -35,6 +36,7 @@ import {
   runRestartOperation,
   runSignalShutdown,
   resolveRuntimeSubjectACLSource,
+  supervisorProcessSpec,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
 
@@ -452,6 +454,17 @@ test('signal shutdown waits for the active operation before serialized stop', as
   assert.deepEqual(events, ['pause', 'stop'])
 })
 
+test('supervisor signal shutdown preserves healthy resident services', async () => {
+  const events = []
+  await runSignalShutdown({
+    preserveServices: true,
+    pause: () => events.push('pause'),
+    activeOperation: undefined,
+    stop: async () => events.push('stop'),
+  })
+  assert.deepEqual(events, ['pause'])
+})
+
 test('supervisor signal shutdown returns through its lock-release finally', () => {
   const exitCodes = []
   finishSignalShutdown({
@@ -474,6 +487,19 @@ test('supervisor command exits after its lock-release finally completes', () => 
   assert.deepEqual(exitCodes, [143])
 })
 
+test('supervisor signal performs a detached monitor handoff', () => {
+  const events = []
+  handoffSupervisorAfterSignal({
+    shutdown: true,
+    start: () => events.push('start'),
+  })
+  handoffSupervisorAfterSignal({
+    shutdown: false,
+    start: () => events.push('unexpected-start'),
+  })
+  assert.deepEqual(events, ['start'])
+})
+
 test('cron fallback installs a PATH-aware reboot entry and watchdog', () => {
   const entries = cronAutostartEntries({
     repository: '/srv/giwa app',
@@ -488,6 +514,21 @@ test('cron fallback installs a PATH-aware reboot entry and watchdog', () => {
   assert.match(entries[0], /PATH='\/opt\/homebrew\/bin:\/usr\/bin:\/bin'/)
   assert.match(entries[1], /^\* \* \* \* \* pgrep -f '\[h\]ost-backend\.mjs supervise'/)
   assert.ok(entries.every((entry) => entry.endsWith('# GIWA_HOST_BACKEND')))
+})
+
+test('detached supervisor uses the stable runtime script and repository', () => {
+  const spec = supervisorProcessSpec({
+    repository: '/srv/giwa app',
+    node: '/opt/homebrew/bin/node',
+    script: '/srv/runtime/host-backend.mjs',
+    path: '/opt/homebrew/bin:/usr/bin:/bin',
+  })
+  assert.equal(spec.command, '/opt/homebrew/bin/node')
+  assert.deepEqual(spec.args, ['/srv/runtime/host-backend.mjs', 'supervise'])
+  assert.equal(spec.options.cwd, '/srv/giwa app')
+  assert.equal(spec.options.detached, true)
+  assert.equal(spec.options.env.PATH, '/opt/homebrew/bin:/usr/bin:/bin')
+  assert.equal(spec.options.env.GIWA_APP_REPOSITORY, '/srv/giwa app')
 })
 
 test('only explicit service commands persist pause during signal shutdown', () => {

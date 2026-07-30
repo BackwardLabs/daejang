@@ -1164,6 +1164,38 @@ export const cronAutostartEntries = ({
   ]
 }
 
+export const supervisorProcessSpec = ({ repository, node, script, path }) => ({
+  command: node,
+  args: [script, 'supervise'],
+  options: {
+    cwd: repository,
+    detached: true,
+    env: {
+      ...baseEnvironment(),
+      PATH: path,
+      GIWA_APP_REPOSITORY: repository,
+      GIWA_HOST_RUNTIME_ROOT: runtimeRoot,
+    },
+  },
+})
+
+const startDetachedSupervisor = (script) => {
+  const spec = supervisorProcessSpec({
+    repository: canonicalRepositoryRoot,
+    node: process.execPath,
+    script,
+    path: process.env.PATH ?? '',
+  })
+  const descriptor = openSync(join(logRoot, 'supervisor.log'), 'a', 0o600)
+  const child = spawn(spec.command, spec.args, {
+    ...spec.options,
+    stdio: ['ignore', descriptor, descriptor],
+  })
+  child.unref()
+  closeSync(descriptor)
+  console.log(`Started detached backend supervisor as PID ${child.pid}`)
+}
+
 const installCronAutostart = (script) => {
   const existing = spawnSync('crontab', ['-l'], { encoding: 'utf8' })
   if (existing.status !== 0 && existing.status !== 1) {
@@ -1237,14 +1269,21 @@ const installAutostart = () => {
   }
   if (installedWith === 'launchd') {
     console.log(`Installed login supervisor: ${plist}`)
+  } else {
+    startDetachedSupervisor(script)
   }
 }
 
 let handlingSignal = false
-export const runSignalShutdown = async ({ pause, activeOperation, stop }) => {
+export const runSignalShutdown = async ({
+  pause,
+  activeOperation,
+  stop,
+  preserveServices = false,
+}) => {
   pause()
   if (activeOperation) await activeOperation.catch(() => {})
-  await stop()
+  if (!preserveServices) await stop()
 }
 
 export const finishSignalShutdown = ({ supervising, exitCode, exit }) => {
@@ -1254,6 +1293,10 @@ export const finishSignalShutdown = ({ supervising, exitCode, exit }) => {
 
 export const finishSuperviseCommand = ({ shutdown, exitCode, exit }) => {
   if (shutdown) exit(exitCode ?? 0)
+}
+
+export const handoffSupervisorAfterSignal = ({ shutdown, start }) => {
+  if (shutdown) start()
 }
 
 export const pauseForSignalShutdown = ({ supervising, pause }) => {
@@ -1272,6 +1315,7 @@ for (const [signal, exitCode] of [
     ensureRuntimeDirectories()
     try {
       await runSignalShutdown({
+        preserveServices: supervising,
         pause: () => pauseForSignalShutdown({
           supervising,
           pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
@@ -1307,6 +1351,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   else if (command === 'logs') logs()
   else if (command === 'supervise') {
     await supervise()
+    handoffSupervisorAfterSignal({
+      shutdown: shutdownRequested,
+      start: () => startDetachedSupervisor(fileURLToPath(import.meta.url)),
+    })
     finishSuperviseCommand({
       shutdown: shutdownRequested,
       exitCode: process.exitCode,
