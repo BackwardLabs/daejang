@@ -1186,6 +1186,10 @@ export const finishSignalShutdown = ({ supervising, exitCode, exit }) => {
   if (!supervising) exit(exitCode)
 }
 
+export const finishSuperviseCommand = ({ shutdown, exitCode, exit }) => {
+  if (shutdown) exit(exitCode ?? 0)
+}
+
 for (const [signal, exitCode] of [
   ['SIGINT', 130],
   ['SIGTERM', 143],
@@ -1224,7 +1228,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     await restart()
   } else if (command === 'status') status()
   else if (command === 'logs') logs()
-  else if (command === 'supervise') await supervise()
+  else if (command === 'supervise') {
+    await supervise()
+    finishSuperviseCommand({
+      shutdown: shutdownRequested,
+      exitCode: process.exitCode,
+      exit: process.exit,
+    })
+  }
   else if (command === 'install-autostart') installAutostart()
   else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|supervise|install-autostart')
 }

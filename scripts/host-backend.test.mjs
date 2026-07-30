@@ -26,6 +26,7 @@ import {
   hostWebAPIEngineEnvironment,
   privateObjectWriteEnvironment,
   finishSignalShutdown,
+  finishSuperviseCommand,
   releaseProcessLock,
   resolvePostingRepository,
   runRestartOperation,
@@ -390,4 +391,14 @@ test('supervisor signal shutdown returns through its lock-release finally', () =
   assert.deepEqual(exitCodes, [])
   assert.equal(process.exitCode, 143)
   process.exitCode = undefined
+})
+
+test('supervisor command exits after its lock-release finally completes', () => {
+  const exitCodes = []
+  finishSuperviseCommand({
+    shutdown: true,
+    exitCode: 143,
+    exit: (code) => exitCodes.push(code),
+  })
+  assert.deepEqual(exitCodes, [143])
 })
