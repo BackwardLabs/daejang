@@ -133,13 +133,52 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
 
-    expect(await screen.findByText('1,801.08722461 USDT')).toBeInTheDocument()
-    expect(screen.getByText('27.016 KRW')).toBeInTheDocument()
+    expect(await screen.findAllByText('1,801.08722461 USDT')).toHaveLength(2)
+    expect(screen.getAllByText('27.016 KRW')).toHaveLength(2)
     expect(screen.getAllByText('Upbit · 소수점 8자리')).toHaveLength(2)
+    expect(screen.getAllByText('Upbit').length).toBeGreaterThan(0)
+    expect(screen.getByText('결정적 CEX 해석')).toBeInTheDocument()
+    expect(screen.getByText('장부 확정')).toBeInTheDocument()
+    expect(screen.getAllByText('평가 대기').length).toBeGreaterThan(0)
     expect(screen.getByText('들어옴')).toBeInTheDocument()
     expect(screen.getByText('나감')).toBeInTheDocument()
     expect(screen.getByText('매수·매도·입출금의 본체가 되는 자산 변동')).toBeInTheDocument()
     expect(screen.getByText('거래소나 서비스에 지불한 처리 비용')).toBeInTheDocument()
+  })
+
+  it('shows the wallet-only ActionProof lineage without treating it as a CEX field', async () => {
+    const walletEvent = {
+      ...ledgerEvent,
+      eventType: 'SWAP',
+      flowShape: 'EXCHANGE',
+      postings: [{
+        legId: 'leg-native',
+        accountId: 'wallet-1',
+        assetId: 'asset:eip155:10:native',
+        occurredAt: ledgerEvent.effectiveAt,
+        direction: 'OUT',
+        quantity: '200000000000000',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: '',
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [walletEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect((await screen.findAllByText('Optimism')).length).toBeGreaterThan(0)
+    expect(screen.getByText('ActionProof')).toBeInTheDocument()
+    expect(screen.getByText('JIT가 봉인한 실행·effect 증명')).toBeInTheDocument()
+    expect(screen.queryByText('결정적 CEX 해석')).not.toBeInTheDocument()
+    expect(screen.getByText('장부 확정')).toBeInTheDocument()
+    expect(screen.getAllByText('0.0002 ETH')).toHaveLength(2)
   })
 
   it('shows the real empty state when the API has no events', async () => {
