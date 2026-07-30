@@ -556,6 +556,17 @@ export const createRuntimeSubjectACL = (
   return output
 }
 
+export const resolveRuntimeSubjectACLSource = (
+  defaultSource,
+  overrideSource,
+  fileExists = existsSync,
+) => {
+  if (!isAbsolute(defaultSource) || !isAbsolute(overrideSource)) {
+    throw new Error('JIT subject ACL source paths must be absolute')
+  }
+  return fileExists(overrideSource) ? overrideSource : defaultSource
+}
+
 export const createRuntimeIndexerConfig = (
   localSource,
   bulkSource,
@@ -698,8 +709,12 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     if (!ethereumRPC) throw new Error('ENV_RPC_URL_ETHEREUM_MAINNET is missing')
 
     const jitConfig = createCombinedJITConfig()
-    const subjectACL = createRuntimeSubjectACL(
+    const subjectACLSource = resolveRuntimeSubjectACLSource(
       join(jitRuntime, 'configs', 'subject-acl.json'),
+      join(configRoot, 'subject-acl.source.json'),
+    )
+    const subjectACL = createRuntimeSubjectACL(
+      subjectACLSource,
       join(configRoot, 'subject-acl.runtime.json'),
     )
     const indexerView = ensureRuntimeIndexerView(

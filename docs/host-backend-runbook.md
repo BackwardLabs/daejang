@@ -29,6 +29,25 @@ bridge JSON은 기본적으로 아래 경로에 두며 secret으로 취급하지
 실행기는 bridge의 `endpoint`를 실제 통합 JIT Unix socket으로 자동 교체한다.
 현재 coverage 범위와 chain metadata는 입력 JSON을 그대로 사용한다.
 
+### JIT subject ACL
+
+JIT는 호출자의 peer identity와 요청의 `subject_id`를 함께 검사한다. 기본 ACL은
+`daejang-jit-runtime/configs/subject-acl.json`을 사용한다. 운영 서버에서 저장소 ACL을
+직접 수정할 수 없거나 사용자 subject를 별도로 승인해야 하면 runtime root의
+`supervisor/config/subject-acl.source.json`에 운영자 소유 override를 둔다. 이 파일이
+있으면 기본 ACL보다 우선한다.
+
+override는 `version: 1`과 정확히 하나의 로컬 `uid:<number>` grant를 포함해야 한다.
+backend 시작 시 그 identity만 현재 서비스 UID로 재작성하여
+`subject-acl.runtime.json`을 권한 `0600`으로 생성한다. `subjects`에는 승인된 subject ID를
+명시적으로 나열하며 wildcard나 전체 허용 grant를 사용하지 않는다. subject ID는 운영
+식별자이므로 override를 Git이나 로그에 남기지 않고 감사 가능한 provisioning 절차로만
+추가한다.
+
+JIT는 ACL을 시작 시점에 snapshot으로 읽으므로 override 변경 후 backend를 재시작해야
+한다. ACL 거부로 실패한 sync job은 원본 실패 이력을 수정하지 말고, 재시작과 readiness
+확인 후 인증된 재수집 경로로 새 작업을 생성한다.
+
 ## 명령
 
 ```bash
@@ -55,7 +74,7 @@ artifact로 재시작한다. 이 호스트처럼 LaunchAgent domain이 비활성
 동시에 조작하지 못하게 한다. build는 명시적인 start/restart 때만 수행하며 장애
 복구 loop는 runtime root의 prebuilt Go binaries, Web API dist, proto를 재사용한다.
 
-Web API만 `127.0.0.1:3001`을 listen한다. Engine은 외부 TCP 포트를 열지 않고
+Web API만 `127.0.0.1:3000`을 listen한다. Engine은 외부 TCP 포트를 열지 않고
 권한 `0700` socket directory 안의 소유자 전용 Unix socket(`0600`)으로만 Web API와
 통신한다. 따라서 같은 호스트 배포에서 별도 mTLS 인증서를 운영하지 않는다.
 
