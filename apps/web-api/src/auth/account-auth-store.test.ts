@@ -112,4 +112,56 @@ describe('PostgresAccountAuthStore', () => {
     ).toBe(false)
     expect(calls.at(-1)?.sql).toBe('COMMIT')
   })
+
+  it('lets PostgreSQL assign the immutable consent occurrence time', async () => {
+    const documentId = '00000000-0000-4000-8000-000000000010'
+    const calls: Array<{ sql: string; values: unknown[] | undefined }> = []
+    const query = vi.fn(async (sql: string, values?: unknown[]) => {
+      calls.push({ sql, values })
+      if (sql.includes('FROM web_private.legal_documents')) {
+        return queryResult([
+          {
+            id: documentId,
+            document_type: 'terms',
+          },
+        ])
+      }
+      return queryResult([])
+    })
+    const client = {
+      query,
+      release: vi.fn(),
+    } as unknown as PoolClient
+    const pool = {
+      connect: vi.fn().mockResolvedValue(client),
+    } as unknown as Pool
+    const store = new PostgresAccountAuthStore(pool)
+
+    await store.recordSignupConsents({
+      userId: '00000000-0000-4000-8000-000000000011',
+      locale: 'ko-KR',
+      applicableDocumentTypes: ['terms'],
+      requiredDocumentTypes: ['terms'],
+      decisions: [
+        {
+          id: '00000000-0000-4000-8000-000000000012',
+          legalDocumentId: documentId,
+          action: 'accepted',
+        },
+      ],
+      now: new Date('2027-07-20T00:00:00.000Z'),
+    })
+
+    const consentInsert = calls.find(({ sql }) =>
+      sql.includes('INSERT INTO web_private.user_consents'),
+    )
+    expect(consentInsert?.sql).not.toContain('occurred_at')
+    expect(consentInsert?.values).toEqual([
+      '00000000-0000-4000-8000-000000000012',
+      '00000000-0000-4000-8000-000000000011',
+      documentId,
+      'accepted',
+    ])
+    expect(calls.at(-1)?.sql).toBe('COMMIT')
+  })
 })

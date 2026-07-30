@@ -192,6 +192,8 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       '000014_grant_query_runtime_access.sql',
       '000015_create_web_oauth_email_persistence.sql',
       '000029_create_verified_subject_name_claim.sql',
+      '000036_publish_20260731_legal_documents.sql',
+      '000037_correct_20260730_legal_effective_date.sql',
     ]) {
       const migrationUrl = process.env.WEB_AUTH_MIGRATION_DIRECTORY
         ? pathToFileURL(resolve(process.env.WEB_AUTH_MIGRATION_DIRECTORY, filename))
@@ -889,7 +891,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('activates an identity-disabled signup with terms and privacy consent only', async () => {
+  it('activates an identity-disabled signup after required and optional consent decisions', async () => {
     const documents = [
       {
         id: '00000000-0000-4000-8000-000000000611',
@@ -992,6 +994,7 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
           id: string
           documentType: string
           required: boolean
+          consentMode: 'required' | 'optional' | 'notice'
         }>
       }>().documents
       expect(
@@ -1000,7 +1003,9 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
           required,
         })),
       ).toEqual([
-        { documentType: 'privacy', required: true },
+        { documentType: 'marketing', required: false },
+        { documentType: 'privacy', required: false },
+        { documentType: 'privacy_collection', required: true },
         { documentType: 'terms', required: true },
       ])
 
@@ -1013,10 +1018,15 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
         },
         payload: {
           locale: 'ko-KR',
-          decisions: applicableDocuments.map((document) => ({
-            legalDocumentId: document.id,
-            action: 'accepted',
-          })),
+          decisions: applicableDocuments
+            .filter(({ consentMode }) => consentMode !== 'notice')
+            .map((document) => ({
+              legalDocumentId: document.id,
+              action:
+                document.documentType === 'marketing'
+                  ? 'withdrawn'
+                  : 'accepted',
+            })),
         },
       })
       expect(consent.statusCode).toBe(200)
@@ -1061,10 +1071,171 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
           [userId],
         ),
       ).resolves.toMatchObject({
-        rows: [{ document_type: 'privacy' }, { document_type: 'terms' }],
+        rows: [
+          { document_type: 'marketing' },
+          { document_type: 'privacy_collection' },
+          { document_type: 'terms' },
+        ],
       })
     } finally {
       await context.app.close()
+    }
+  })
+
+  it('records and completes signup as the production role without client-controlled consent timestamps', async () => {
+    const runtimePool = new Pool({
+      connectionString: databaseUrl,
+      max: 1,
+      options: '-c role=daejang_web_app',
+    })
+    const runtimeAccounts = new PostgresAccountAuthStore(runtimePool)
+    const now = new Date()
+    const userId = '00000000-0000-4000-8000-000000000710'
+    const documentId = '00000000-0000-4000-8000-000000000711'
+    const signupSessionId = '00000000-0000-4000-8000-000000000712'
+    const consentId = '00000000-0000-4000-8000-000000000713'
+    const marketingDocumentId = '00000000-0000-4000-8000-000000000714'
+    const marketingConsentId = '00000000-0000-4000-8000-000000000715'
+    const signupTokenHash = 'r'.repeat(43)
+    const documentContent = 'terms accepted through the production database role'
+    const marketingContent = 'optional marketing consent may be declined'
+
+    await users.upsertUser({ id: userId, displayName: '운영 역할 가입 테스트' })
+    for (const [id, type, content] of [
+      [documentId, 'terms', documentContent],
+      [marketingDocumentId, 'marketing', marketingContent],
+    ] as const) {
+      await pool.query(
+        `
+          INSERT INTO web_private.legal_documents (
+            id,
+            document_type,
+            locale,
+            version,
+            content_hash,
+            effective_at
+          ) VALUES ($1, $2, 'ko-KR', $3, $4, $5)
+        `,
+        [
+          id,
+          type,
+          `runtime-role-${type}-${now.getTime()}`,
+          createHash('sha256').update(content).digest('hex'),
+          new Date(now.getTime() - 1_000),
+        ],
+      )
+      await pool.query(
+        `
+          INSERT INTO web_private.legal_document_contents (
+            legal_document_id,
+            content
+          ) VALUES ($1, $2)
+        `,
+        [id, content],
+      )
+    }
+
+    try {
+      await expect(
+        runtimePool.query<{
+          current_user: string
+          can_insert_occurred_at: boolean
+        }>(
+          `
+            SELECT
+              current_user,
+              has_column_privilege(
+                current_user,
+                'web_private.user_consents',
+                'occurred_at',
+                'INSERT'
+              ) AS can_insert_occurred_at
+          `,
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            current_user: 'daejang_web_app',
+            can_insert_occurred_at: false,
+          },
+        ],
+      })
+
+      await runtimeAccounts.createSignupSession({
+        id: signupSessionId,
+        tokenHash: signupTokenHash,
+        userId,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 3_600_000),
+      })
+      await runtimeAccounts.recordSignupConsents({
+        userId,
+        locale: 'ko-KR',
+        applicableDocumentTypes: ['terms', 'marketing'],
+        requiredDocumentTypes: ['terms'],
+        decisions: [
+          {
+            id: consentId,
+            legalDocumentId: documentId,
+            action: 'accepted',
+          },
+          {
+            id: marketingConsentId,
+            legalDocumentId: marketingDocumentId,
+            action: 'withdrawn',
+          },
+        ],
+        now,
+      })
+
+      await expect(
+        runtimeAccounts.completeSignup({
+          userId,
+          signupTokenHash,
+          now: new Date(now.getTime() + 5_000),
+          requiredDocumentTypes: ['terms'],
+        }),
+      ).resolves.toMatchObject({
+        id: userId,
+        displayName: '운영 역할 가입 테스트',
+        status: 'active',
+      })
+      await expect(
+        pool.query<{
+          action: string
+          occurred_at: Date
+          completed_at: Date
+        }>(
+          `
+            SELECT
+              consent.action,
+              consent.occurred_at,
+              signup_session.completed_at
+            FROM web_private.user_consents consent
+            JOIN web_private.signup_sessions signup_session
+              ON signup_session.user_id = consent.user_id
+            WHERE consent.id = ANY($1::uuid[])
+              AND signup_session.id = $2
+            ORDER BY consent.id
+          `,
+          [[consentId, marketingConsentId], signupSessionId],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            action: 'accepted',
+            occurred_at: expect.any(Date),
+            completed_at: expect.any(Date),
+          },
+          {
+            action: 'withdrawn',
+            occurred_at: expect.any(Date),
+            completed_at: expect.any(Date),
+          },
+        ],
+      })
+    } finally {
+      await runtimePool.end()
     }
   })
 

@@ -891,16 +891,14 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
               id,
               user_id,
               legal_document_id,
-              action,
-              occurred_at
-            ) VALUES ($1, $2, $3, $4, $5)
+              action
+            ) VALUES ($1, $2, $3, $4)
           `,
           [
             decision.id,
             input.userId,
             decision.legalDocumentId,
             decision.action,
-            input.now,
           ],
         )
       }
