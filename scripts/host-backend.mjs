@@ -1103,6 +1103,22 @@ const xmlEscape = (value) => value
 
 const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`
 
+export const cronAutostartEntries = ({
+  repository,
+  node,
+  script,
+  log,
+  path,
+  marker,
+}) => {
+  const environment = `PATH=${shellQuote(path)} GIWA_APP_REPOSITORY=${shellQuote(repository)}`
+  const supervise = `cd ${shellQuote(repository)} && ${environment} ${shellQuote(node)} ${shellQuote(script)} supervise >> ${shellQuote(log)} 2>&1`
+  return [
+    `@reboot ${supervise} ${marker}`,
+    `* * * * * pgrep -f '[h]ost-backend.mjs supervise' >/dev/null || (${supervise}) ${marker}`,
+  ]
+}
+
 const installCronAutostart = (script) => {
   const existing = spawnSync('crontab', ['-l'], { encoding: 'utf8' })
   if (existing.status !== 0 && existing.status !== 1) {
@@ -1112,9 +1128,14 @@ const installCronAutostart = (script) => {
   const retained = (existing.stdout ?? '')
     .split(/\r?\n/)
     .filter((line) => line && !line.includes(marker))
-  retained.push(
-    `@reboot cd ${shellQuote(canonicalRepositoryRoot)} && GIWA_APP_REPOSITORY=${shellQuote(canonicalRepositoryRoot)} ${shellQuote(process.execPath)} ${shellQuote(script)} supervise >> ${shellQuote(join(logRoot, 'supervisor.log'))} 2>&1 ${marker}`,
-  )
+  retained.push(...cronAutostartEntries({
+    repository: canonicalRepositoryRoot,
+    node: process.execPath,
+    script,
+    log: join(logRoot, 'supervisor.log'),
+    path: process.env.PATH ?? '',
+    marker,
+  }))
   const installed = spawnSync('crontab', ['-'], {
     input: `${retained.join('\n')}\n`,
     encoding: 'utf8',
