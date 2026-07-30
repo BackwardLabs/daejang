@@ -25,6 +25,7 @@ import {
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
+  pauseForSignalShutdown,
   privateObjectWriteEnvironment,
   finishSignalShutdown,
   finishSuperviseCommand,
@@ -418,4 +419,17 @@ test('cron fallback installs a PATH-aware reboot entry and watchdog', () => {
   assert.match(entries[0], /PATH='\/opt\/homebrew\/bin:\/usr\/bin:\/bin'/)
   assert.match(entries[1], /^\* \* \* \* \* pgrep -f '\[h\]ost-backend\.mjs supervise'/)
   assert.ok(entries.every((entry) => entry.endsWith('# GIWA_HOST_BACKEND')))
+})
+
+test('only explicit service commands persist pause during signal shutdown', () => {
+  const events = []
+  pauseForSignalShutdown({
+    supervising: true,
+    pause: () => events.push('supervisor-pause'),
+  })
+  pauseForSignalShutdown({
+    supervising: false,
+    pause: () => events.push('command-pause'),
+  })
+  assert.deepEqual(events, ['command-pause'])
 })
