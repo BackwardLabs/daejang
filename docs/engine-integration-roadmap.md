@@ -22,7 +22,7 @@
 | Upbit 행 추출·Observation 정규화 | 구현 | 매수·매도·입금·출금, 명시적 미지원 outcome, immutable successor backfill |
 | 미물질화 Observation 장부 조회 | 구현 | `OBSERVATION_ONLY`·`PARTIAL`, 실제 posting 생성 시 자동 제외 |
 | Source coverage 보고서 | 구현 | 연도별 거래·완료·예외 집계, 손익 `UNKNOWN`, private manifest |
-| Ledger 재계산·세금 Lot | 후속 | resolved Review revision을 producer 입력으로 연결 필요 |
+| DEX·CEX 통합 Lot·세금 Report | 구현 | 원본 generation member, 행별 CEX outcome, UNKNOWN·Review provenance 보존 |
 | Review delivery·anchor·Report gate·PDF | 후속 | delivery worker, anchor/application receipt, latest proof 일치, immutable manifest 필요 |
 | 운영 환경 배포 | 배포 대기 | DB 변경 commit 배포, 인증서·DSN·Cloudflare `/api/*` route 필요 |
 
@@ -41,18 +41,20 @@ flowchart TD
   activity --> review[Review read model]
   review --> resolution[Account-scoped Review resolution]
   resolution --> delivery[ReviewResolved V2 + durable delivery rows]
-  delivery -. 미구현 workers·proof gate .-> report[Immutable Report snapshot]
+  delivery --> tax[DEX·CEX 통합 Lot·Tax 계산]
+  tax --> report[Immutable Report snapshot]
 ```
 
 Upbit PDF의 매수·매도·입금·출금 행은 Source Evidence Observation으로 정규화되고,
 아직 tax posting이 없는 Observation도 `PARTIAL` 장부와 source coverage 보고서에서
-조회됩니다. 다음 구현은 이 Observation을 기존 ledger/review/lot 저장 계약으로
-물질화한 뒤 resolved Review를 재계산에 반영하고 anchor·Report gate를 거쳐 최종
-세금 Report 산출을 활성화합니다. delivery row는 downstream handoff가 저장됐다는
+조회됩니다. 지원하는 매수·매도는 기존 ledger/review/lot 저장 계약으로 물질화되고,
+DEX와 CEX의 원본 generation member를 보존한 하나의 연간 Report를 구성합니다.
+열린 Review나 알 수 없는 가격이 있으면 Report는 `PARTIAL`과 `UNKNOWN`을 유지합니다.
+delivery row는 downstream handoff가 저장됐다는
 뜻일 뿐 recalculation, anchor 또는 report delivery 완료 신호가 아닙니다. parser가
 없는 문서는 성공한 거래 0건으로 위장하지 않고 지원 불가 실패로 종료해야 합니다.
 
-세부 매핑과 재처리 불변조건은 [Upbit PDF Observation 정규화](upbit-observation-pipeline.md)를 따릅니다.
+세부 매핑과 재처리 불변조건은 [Upbit PDF Observation 정규화](upbit-observation-pipeline.md), 통합 계산과 증빙 연결은 [DEX·CEX 통합 세금 보고서 흐름](dex-cex-tax-report-flow.md)을 따릅니다.
 
 ## 단계별 완료 조건
 
