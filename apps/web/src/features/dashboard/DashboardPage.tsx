@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AppSidebar, type AppYear } from '../../components/AppSidebar.tsx'
+import { AppSidebar, defaultAppYear, type AppYear } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import { loadDashboard, loadLedger, loadReviews, type DashboardModel, type LedgerEventModel, type ReviewModel } from '../../api/productApi.ts'
 import './dashboard.css'
@@ -23,7 +23,7 @@ const count = (value: string | number | undefined) => Number(value ?? 0)
 const eventTypeLabel: Record<string, string> = { TRADE: '거래', TRANSFER: '전송', SWAP: '스왑', REWARD: '보상', OTHER: '기타', UNKNOWN: '미분류' }
 
 export function DashboardPage() {
-  const [selectedYear, setSelectedYear] = useState<AppYear>('2027')
+  const [selectedYear, setSelectedYear] = useState<AppYear>(defaultAppYear)
   const [dashboard, setDashboard] = useState<DashboardModel>()
   const [events, setEvents] = useState<LedgerEventModel[]>([])
   const [reviews, setReviews] = useState<ReviewModel[]>([])

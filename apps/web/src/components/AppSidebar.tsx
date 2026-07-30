@@ -15,6 +15,13 @@ import './app-sidebar.css'
 export type AppPage = 'dashboard' | 'ledger' | 'reports' | 'settings' | 'sources'
 export type AppYear = '2025' | '2026' | '2027'
 
+export const defaultAppYear = (now = new Date()): AppYear => {
+  const year = now.getFullYear()
+  if (year <= 2025) return '2025'
+  if (year >= 2027) return '2027'
+  return '2026'
+}
+
 export type AppSidebarSecondaryItem = {
   badge?: string
   disabled?: boolean
