@@ -220,6 +220,10 @@ message LedgerPosting {
   string fair_value = 8;
   string cost_basis = 9;
   string denomination = 10;
+  string asset_symbol = 11;
+  uint32 asset_decimals = 12;
+  bool has_asset_decimals = 13;
+  string asset_venue = 14;
 }
 message LedgerTransferEndpoint {
   string resolution = 1;

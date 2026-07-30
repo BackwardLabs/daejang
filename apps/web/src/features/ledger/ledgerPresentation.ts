@@ -106,7 +106,26 @@ const describeChainCandidate = (value: string) => {
 const formatVenue = (value: string) =>
   value ? `${value.slice(0, 1).toUpperCase()}${value.slice(1).toLowerCase()}` : ''
 
-export const parseLedgerAsset = (assetId: string): LedgerAssetPresentation => {
+export const parseLedgerAsset = (
+  assetId: string,
+  assetSymbol?: string,
+  assetDecimals?: number,
+  assetVenue?: string,
+): LedgerAssetPresentation => {
+  if (
+    assetSymbol &&
+    assetDecimals !== undefined &&
+    Number.isSafeInteger(assetDecimals) &&
+    assetDecimals >= 0 &&
+    assetDecimals <= 255
+  ) {
+    const venue = formatVenue(assetVenue ?? '')
+    return {
+      symbol: assetSymbol,
+      decimals: assetDecimals,
+      metadata: `${venue ? `${venue} · ` : ''}소수점 ${assetDecimals}자리`,
+    }
+  }
   const [kind, venue, scale, symbol, ...remainder] = assetId.split(':')
   const scaleMatch = scale?.match(decimalScalePattern)
   const decimals = scaleMatch ? Number(scaleMatch[1]) : undefined
@@ -124,14 +143,6 @@ export const parseLedgerAsset = (assetId: string): LedgerAssetPresentation => {
       symbol: symbol.toUpperCase(),
       decimals,
       metadata: `${formatVenue(venue)} · 소수점 ${decimals}자리`,
-    }
-  }
-  const canonicalCexMatch = assetId.match(/^asset-([a-z0-9]+)-upbit$/i)
-  if (canonicalCexMatch?.[1]) {
-    return {
-      symbol: canonicalCexMatch[1].toUpperCase(),
-      decimals: 8,
-      metadata: 'Upbit · 소수점 8자리',
     }
   }
   const evmMatch = assetId.match(/^asset:eip155:(\d+):(native|erc20)(?::(.+))?$/i)

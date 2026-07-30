@@ -42,7 +42,12 @@ const formatMoney = (amount: string, denomination: string) =>
 export const formatReviewQuantity = formatCanonicalQuantity
 
 function LedgerPostingRow({ posting }: { posting: LedgerPostingModel }) {
-  const asset = parseLedgerAsset(posting.assetId)
+  const asset = parseLedgerAsset(
+    posting.assetId,
+    posting.assetSymbol,
+    posting.hasAssetDecimals ? posting.assetDecimals : undefined,
+    posting.assetVenue,
+  )
   const role = describePostingRole(posting.role)
   const quantity = formatLedgerQuantity(posting.quantity, asset.decimals)
   return <tr>
@@ -79,7 +84,12 @@ function LedgerMovementList({ postings }: { postings: LedgerPostingModel[] }) {
   if (!postings.length) return <span className="ledger-explorer__empty-value">—</span>
   return <span className="ledger-explorer__movements">
     {postings.map((posting) => {
-      const asset = parseLedgerAsset(posting.assetId)
+      const asset = parseLedgerAsset(
+        posting.assetId,
+        posting.assetSymbol,
+        posting.hasAssetDecimals ? posting.assetDecimals : undefined,
+        posting.assetVenue,
+      )
       const quantity = formatLedgerQuantity(posting.quantity, asset.decimals)
       return <span key={posting.legId} className="ledger-explorer__movement" data-direction={posting.direction}>
         <b>{posting.direction}</b>

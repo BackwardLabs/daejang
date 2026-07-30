@@ -171,6 +171,10 @@ describe('LedgerPage', () => {
         fairValue: '',
         costBasis: '',
         denomination: '',
+        assetSymbol: 'KRW',
+        assetDecimals: 8,
+        hasAssetDecimals: true,
+        assetVenue: 'upbit',
       }],
       transferEndpoint: {
         resolution: 'EXTERNAL_KNOWN',
@@ -235,6 +239,10 @@ describe('LedgerPage', () => {
         fairValue: '',
         costBasis: '',
         denomination: '',
+        assetSymbol: 'KRW',
+        assetDecimals: 8,
+        hasAssetDecimals: true,
+        assetVenue: 'upbit',
       }],
     }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

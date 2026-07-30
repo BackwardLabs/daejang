@@ -87,6 +87,29 @@ func TestLedgerProjectionIncludesSafeTransferEndpointSummary(t *testing.T) {
 	}
 }
 
+func TestLedgerProjectionIncludesPersistedAssetMetadata(t *testing.T) {
+	at := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	decimals := uint8(8)
+	reads := &fakeReadStore{ledger: []readmodelstore.LedgerEvent{{
+		EventID: "trade", EffectiveAt: at,
+		Postings: []readmodelstore.Posting{{
+			LegID: "leg-usdt", AssetID: "asset-usdt-upbit", AssetSymbol: "USDT",
+			AssetDecimals: &decimals, AssetVenue: "upbit", OccurredAt: at,
+			Direction: "IN", Quantity: "180108722461", Role: "PRINCIPAL",
+		}},
+	}}}
+	service := &Service{Reads: reads}
+
+	ledger, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{Context: queryTestContext(), TaxYear: 2026, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	posting := ledger.GetItems()[0].GetPostings()[0]
+	if posting.GetAssetSymbol() != "USDT" || posting.GetAssetDecimals() != 8 || !posting.GetHasAssetDecimals() || posting.GetAssetVenue() != "upbit" {
+		t.Fatalf("asset metadata was not projected: %#v", posting)
+	}
+}
+
 func (f *fakeTaxReportStore) GetCurrentReportForYear(_ context.Context, subject string, taxYear int) (taxreportstore.CurrentReportDetail, bool, error) {
 	f.lastSubject, f.lastTaxYear = subject, taxYear
 	return f.current, f.found, f.err
