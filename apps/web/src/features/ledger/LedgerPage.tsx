@@ -13,7 +13,6 @@ import {
   type ReviewModel,
 } from '../../api/productApi.ts'
 import {
-  describeFlowShape,
   describeLedgerAction,
   describeLedgerSource,
   describePostingDirection,
@@ -130,14 +129,6 @@ function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
       <b>{transferEndpoint.status}</b>
     </section> : null}
 
-    <ol className="ledger-explorer-lineage" aria-label="거래 처리 계보">
-      <li className="is-complete"><i>1</i><span><strong>Evidence</strong><small>{source.label} 관찰 근거</small></span></li>
-      <li className={event.resolution === 'RESOLVED' ? 'is-complete' : 'is-pending'}><i>2</i><span><strong>{source.kind === 'WALLET' ? 'ActionProof' : source.kind === 'CEX' ? '결정적 CEX 해석' : '해석 입력'}</strong><small>{source.kind === 'WALLET' ? 'JIT가 봉인한 실행·effect 증명' : `${describeFlowShape(event.flowShape)} 입력`}</small></span></li>
-      <li className={event.postings.length ? 'is-complete' : 'is-pending'}><i>3</i><span><strong>Event · Posting</strong><small>{event.postings.length ? `${action.label} · ${event.postings.length}개 장부 행` : '분류·장부 확정 대기'}</small></span></li>
-      <li className={valued.length ? 'is-complete' : 'is-pending'}><i>4</i><span><strong>KRW Valuation</strong><small>{valued.length ? `${valued.length}건 평가 연결` : 'Tax Engine 처리 대기'}</small></span></li>
-      <li className="is-pending"><i>5</i><span><strong>Lot · Tax Report</strong><small>세금 리포트에서 최종 결과 확인</small></span></li>
-    </ol>
-
     <section className="ledger-explorer-detail__postings" aria-labelledby={`posting-title-${event.eventId}`}>
       <header>
         <div><span>CANONICAL LEDGER</span><h3 id={`posting-title-${event.eventId}`}>자산 변동과 세무 입력</h3></div>
@@ -191,7 +182,6 @@ export function LedgerPage() {
       .then((ledger) => {
         if (ledgerGenerationRef.current !== generation) return
         setEvents(ledger.items)
-        setSelectedId(ledger.items[0]?.eventId)
         setLedgerStatus('ready')
       })
       .catch((error: unknown) => {

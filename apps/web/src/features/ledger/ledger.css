@@ -17,6 +17,10 @@
   --ledger-ui-border-strong: #cbd5e1;
   --ledger-ui-surface-muted: #f8fafc;
   --ledger-ui-surface-selected: #f1f5f9;
+  --ledger-ui-surface-header: #f4f7fa;
+  --ledger-ui-surface-hover: #fafbfc;
+  --ledger-ui-surface-active: #fff8f4;
+  --ledger-ui-surface-detail: #f3f6f9;
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
   width: 100%;
@@ -2040,7 +2044,7 @@
 
 .ledger-explorer__table {
   width: 100%;
-  min-width: 1160px;
+  min-width: 1260px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -2058,14 +2062,14 @@
   z-index: 3;
   top: 0;
   color: var(--ledger-ui-muted);
-  background: var(--ledger-ui-surface-muted);
+  background: var(--ledger-ui-surface-header);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: .01em;
   white-space: nowrap;
 }
 
-.ledger-explorer__table th:nth-child(1) { width: 190px; }
+.ledger-explorer__table th:nth-child(1) { width: 260px; }
 .ledger-explorer__table th:nth-child(2) { width: 210px; }
 .ledger-explorer__table th:nth-child(3) { width: 170px; }
 .ledger-explorer__table th:nth-child(4) { width: 255px; }
@@ -2078,12 +2082,12 @@
 }
 
 .ledger-explorer__row:hover {
-  background: var(--ledger-ui-surface-muted);
+  background: var(--ledger-ui-surface-hover);
 }
 
 .ledger-explorer__row.is-open {
-  background: var(--ledger-ui-surface-selected);
-  box-shadow: inset 3px 0 var(--ledger-ui-foreground);
+  background: var(--ledger-ui-surface-active);
+  box-shadow: inset 3px 0 var(--ledger-accent);
 }
 
 .ledger-explorer__time,
@@ -2128,6 +2132,7 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1.45;
+  white-space: nowrap;
 }
 
 .ledger-explorer__source strong,
@@ -2274,21 +2279,22 @@
 
 .ledger-explorer__detail-row > td {
   padding: 0;
-  background: var(--ledger-ui-surface-muted);
+  background: var(--ledger-ui-surface-detail);
 }
 
 .ledger-explorer-detail {
   display: grid;
   gap: 16px;
   padding: 20px;
-  border-bottom: 1px solid var(--ledger-ui-border);
+  border-bottom: 1px solid var(--ledger-ui-border-strong);
+  box-shadow: inset 3px 0 var(--ledger-accent);
 }
 
 .ledger-explorer-detail__summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   overflow: hidden;
-  border: 1px solid var(--ledger-ui-border);
+  border: 1px solid var(--ledger-ui-border-strong);
   border-radius: 8px;
   background: #fff;
 }
@@ -2326,7 +2332,7 @@
   align-items: center;
   min-height: 58px;
   padding: 11px 14px;
-  border: 1px solid var(--ledger-ui-border);
+  border: 1px solid var(--ledger-ui-border-strong);
   border-radius: 8px;
   background: #fff;
 }
@@ -2373,94 +2379,9 @@
   background: #fffbeb;
 }
 
-.ledger-explorer-lineage {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--ledger-ui-border);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.ledger-explorer-lineage li {
-  position: relative;
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
-  gap: 9px;
-  align-items: center;
-  min-width: 0;
-}
-
-.ledger-explorer-lineage li::after {
-  position: absolute;
-  z-index: 0;
-  top: 13px;
-  right: 7px;
-  left: 34px;
-  height: 1px;
-  background: var(--ledger-ui-border);
-  content: '';
-}
-
-.ledger-explorer-lineage li:last-child::after {
-  display: none;
-}
-
-.ledger-explorer-lineage i {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--ledger-ui-border);
-  border-radius: 50%;
-  color: var(--ledger-ui-muted);
-  background: #fff;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 800;
-}
-
-.ledger-explorer-lineage li > span {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding-right: 8px;
-  background: #fff;
-}
-
-.ledger-explorer-lineage strong,
-.ledger-explorer-lineage small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ledger-explorer-lineage strong { font-size: 10px; }
-.ledger-explorer-lineage small { color: var(--ledger-ui-muted); font-size: 9px; }
-
-.ledger-explorer-lineage .is-complete i {
-  border-color: var(--ledger-ui-foreground);
-  color: #fff;
-  background: var(--ledger-ui-foreground);
-}
-
-.ledger-explorer-lineage .is-complete::after {
-  background: var(--ledger-ui-foreground);
-}
-
-.ledger-explorer-lineage .is-pending i {
-  color: var(--ledger-ui-muted);
-  background: var(--ledger-ui-surface-muted);
-}
-
 .ledger-explorer-detail__postings {
   overflow: hidden;
-  border: 1px solid var(--ledger-ui-border);
+  border: 1px solid var(--ledger-ui-border-strong);
   border-radius: 8px;
   background: #fff;
 }
