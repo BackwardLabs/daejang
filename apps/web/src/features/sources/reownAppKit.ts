@@ -1,6 +1,6 @@
 import { createAppKit, type AppKit } from '@reown/appkit/react'
-import { mainnet } from '@reown/appkit/networks'
 import { EthersAdapter } from '@reown/appkit-adapter-ethers'
+import { evmWalletNetworks } from './evmNetworks.ts'
 
 const projectId = import.meta.env.VITE_REOWN_PROJECT_ID?.trim()
 
@@ -24,7 +24,7 @@ function initializeReownAppKit(): AppKit | null {
       url: origin,
       icons: [`${origin}/daejang-app-icon.png`],
     },
-    networks: [mainnet],
+    networks: evmWalletNetworks,
     projectId,
     themeMode: 'light',
   })

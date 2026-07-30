@@ -42,6 +42,7 @@ import {
   type WalletSyncJobSnapshot,
   type WatchWalletSyncJob,
 } from './evmWalletFlow.ts'
+import { evmWalletNetworkMetadata } from './evmNetworks.ts'
 import './evm-wallet-flow.css'
 
 const walletProviders: ReadonlyArray<{
@@ -245,8 +246,9 @@ function SafetyAside() {
         <h2>현재 지원 범위</h2>
         <p>EVM 호환 공개 주소를 기준으로 연결합니다.</p>
         <div className="wallet-supported-chains">
-          <span>Ethereum</span>
-          <span>추후 확장</span>
+          {evmWalletNetworkMetadata.map((network) => (
+            <span key={network.chainId}>{network.label}</span>
+          ))}
         </div>
       </section>
     </aside>

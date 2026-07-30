@@ -21,6 +21,10 @@ import {
   normalizeEvmWalletPeriod,
 } from './evmWalletFlow.ts'
 import {
+  getEvmWalletNetwork,
+  toEvmCaipChainId,
+} from './evmNetworks.ts'
+import {
   isReownAppKitConfigured,
   reownAppKit,
 } from './reownAppKit.ts'
@@ -88,7 +92,7 @@ function waitForEvmConnection(
         const address = caipAddress.split(':').at(-1)
         if (address) {
           finish()
-          resolve({ address, chainId: `eip155:${chainId}` })
+          resolve({ address, chainId: toEvmCaipChainId(chainId) })
           return
         }
       }
@@ -196,7 +200,8 @@ function ConfiguredReownRoute({
           directWalletName === null,
         )
 
-        if (connection.chainId !== 'eip155:1') {
+        const network = getEvmWalletNetwork(connection.chainId)
+        if (!network) {
           return {
             error: { code: 'CONNECTION_FAILED' },
             ok: false,
@@ -208,7 +213,7 @@ function ConfiguredReownRoute({
           wallet: {
             address: connection.address,
             chainId: connection.chainId,
-            network: 'Ethereum',
+            network: network.label,
             provider,
           },
         }
