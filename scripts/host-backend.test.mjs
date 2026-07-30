@@ -25,6 +25,7 @@ import {
   releaseProcessLock,
   runRestartOperation,
   runSignalShutdown,
+  resolveRuntimeSubjectACLSource,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
 
@@ -156,6 +157,57 @@ test('fails closed when the JIT ACL local identity is ambiguous', () => {
   } finally {
     rmSync(parent, { recursive: true, force: true })
   }
+})
+
+test('prefers the operator-owned JIT ACL override when it exists', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'giwa-host-backend-acl-source-test-'))
+  const defaultSource = join(parent, 'default-subject-acl.json')
+  const overrideSource = join(parent, 'subject-acl.source.json')
+  const output = join(parent, 'subject-acl.runtime.json')
+  try {
+    writeFileSync(defaultSource, JSON.stringify({
+      version: 1,
+      grants: [{ identity: 'uid:505', subjects: ['audit-public'] }],
+    }))
+    writeFileSync(overrideSource, JSON.stringify({
+      version: 1,
+      grants: [{ identity: 'uid:505', subjects: ['audit-public', 'subject-1'] }],
+    }))
+
+    const source = resolveRuntimeSubjectACLSource(defaultSource, overrideSource)
+    createRuntimeSubjectACL(source, output, 502)
+
+    assert.equal(source, overrideSource)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
+      version: 1,
+      grants: [{ identity: 'uid:502', subjects: ['audit-public', 'subject-1'] }],
+    })
+  } finally {
+    rmSync(parent, { recursive: true, force: true })
+  }
+})
+
+test('falls back to the repository JIT ACL when no override exists', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'giwa-host-backend-acl-source-test-'))
+  try {
+    const defaultSource = join(parent, 'default-subject-acl.json')
+    const overrideSource = join(parent, 'subject-acl.source.json')
+    writeFileSync(defaultSource, '{}')
+
+    assert.equal(
+      resolveRuntimeSubjectACLSource(defaultSource, overrideSource),
+      defaultSource,
+    )
+  } finally {
+    rmSync(parent, { recursive: true, force: true })
+  }
+})
+
+test('rejects relative JIT ACL source paths', () => {
+  assert.throws(
+    () => resolveRuntimeSubjectACLSource('subject-acl.json', '/tmp/override.json'),
+    /paths must be absolute/,
+  )
 })
 
 test('omits the private object key ID when PDF encryption is disabled', () => {
