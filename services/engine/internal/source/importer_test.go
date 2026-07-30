@@ -153,6 +153,9 @@ func TestDocumentImporterPublishesPartialEvidenceBeforeCompletingJob(t *testing.
 	if len(artifacts.puts) != 3 {
 		t.Fatalf("expected encrypted original, internal evidence, and root manifest; got %d", len(artifacts.puts))
 	}
+	if artifacts.puts[1].options.MediaType != privateParserEvidenceMediaType {
+		t.Fatalf("restricted parser evidence did not use the encrypted media boundary: %#v", artifacts.puts[1].options)
+	}
 	for _, put := range artifacts.puts {
 		if put.options.Privacy != artifactstore.PrivacySubjectPrivate || put.options.Retention != artifactstore.RetentionSubjectPrivate {
 			t.Fatalf("artifact escaped subject-private storage: %#v", put.options)

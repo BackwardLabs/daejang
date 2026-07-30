@@ -20,9 +20,9 @@ func TestClassifyCEXObservationRecords(t *testing.T) {
 	}{
 		{name: "buy", sourceCase: "BUY", kind: "FILL", eventType: "TRADE", flowShape: "EXCHANGE"},
 		{name: "sell", sourceCase: "SELL", kind: "FILL", eventType: "TRADE", flowShape: "EXCHANGE"},
-		{name: "deposit", sourceCase: "DEPOSIT", kind: "DEPOSIT", eventType: "TRANSFER", flowShape: "EXTERNAL_IN"},
-		{name: "withdrawal", sourceCase: "WITHDRAWAL", kind: "WITHDRAWAL", eventType: "TRANSFER", flowShape: "EXTERNAL_OUT"},
-		{name: "fallback deposit", kind: "DEPOSIT", eventType: "TRANSFER", flowShape: "EXTERNAL_IN"},
+		{name: "deposit", sourceCase: "DEPOSIT", kind: "DEPOSIT", eventType: "TRANSFER", flowShape: "UNKNOWN"},
+		{name: "withdrawal", sourceCase: "WITHDRAWAL", kind: "WITHDRAWAL", eventType: "TRANSFER", flowShape: "UNKNOWN"},
+		{name: "fallback deposit", kind: "DEPOSIT", eventType: "TRANSFER", flowShape: "UNKNOWN"},
 		{name: "unknown", kind: "FEE", eventType: "OTHER", flowShape: "UNKNOWN"},
 	}
 	for _, test := range tests {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   describeFlowShape,
+  describeLedgerAction,
   describeLedgerSource,
   describePostingDirection,
   describePostingRole,
+  describeTransferEndpoint,
   formatLedgerQuantity,
   parseLedgerAsset,
 } from './ledgerPresentation.ts'
@@ -49,6 +51,35 @@ describe('ledger posting presentation', () => {
     expect(describeFlowShape('EXCHANGE')).toBe('자산 교환')
   })
 
+  it('labels transfers as deposits or withdrawals from durable flow evidence', () => {
+    expect(describeLedgerAction('TRANSFER', 'EXTERNAL_IN', [{
+      direction: 'IN',
+      role: 'PRINCIPAL',
+    }])).toEqual({ label: '입금', description: '외부에서 들어온 자산' })
+    expect(describeLedgerAction('TRANSFER', 'EXTERNAL_OUT', [{
+      direction: 'OUT',
+      role: 'PRINCIPAL',
+    }])).toEqual({ label: '출금', description: '외부로 나간 자산' })
+    expect(describeLedgerAction('TRANSFER', 'SELF_TRANSFER', [
+      { direction: 'OUT', role: 'PRINCIPAL' },
+      { direction: 'IN', role: 'PRINCIPAL' },
+    ])).toEqual({ label: '내 계정 이동', description: '내 계정 간 이동' })
+  })
+
+  it('uses material posting direction when a transfer flow shape is incomplete', () => {
+    expect(describeLedgerAction('TRANSFER', 'UNKNOWN', [
+      { direction: 'IN', role: 'PRINCIPAL' },
+      { direction: 'OUT', role: 'FEE' },
+    ])).toEqual({ label: '입금', description: '흐름 확인 필요' })
+    expect(describeLedgerAction('TRANSFER', 'UNKNOWN', [
+      { direction: 'OUT', role: 'PRINCIPAL' },
+    ])).toEqual({ label: '출금', description: '흐름 확인 필요' })
+    expect(describeLedgerAction('TRADE', 'EXCHANGE', [])).toEqual({
+      label: '거래',
+      description: '자산 교환',
+    })
+  })
+
   it('derives a visible source only from durable posting identifiers', () => {
     expect(describeLedgerSource([{
       accountId: 'account-upbit',
@@ -58,5 +89,32 @@ describe('ledger posting presentation', () => {
       accountId: 'wallet-1',
       assetId: 'asset:eip155:10:native',
     }])).toEqual({ kind: 'WALLET', label: 'Optimism', detail: 'wallet-1' })
+  })
+
+  it('presents a registered transfer counterpart as an owned-wallet candidate', () => {
+    expect(describeTransferEndpoint([{ direction: 'IN', role: 'PRINCIPAL' }], {
+      resolution: 'OWNED_REGISTERED',
+      display: '0x123456…abcdef',
+      addressFamily: 'EVM',
+      chainCandidates: ['eip155:10'],
+      connectionStatus: 'WALLET_OBSERVATION_PENDING',
+      reviewRequired: true,
+    })).toEqual({
+      label: '보낸 곳',
+      title: '내 등록 지갑',
+      detail: '0x123456…abcdef · Optimism',
+      status: '반대편 지갑 장부 확인 대기',
+      tone: 'warning',
+    })
+  })
+
+  it('keeps an absent transfer counterpart in review instead of inventing an external wallet', () => {
+    expect(describeTransferEndpoint([{ direction: 'OUT', role: 'PRINCIPAL' }])).toEqual({
+      label: '받는 곳',
+      title: '확인 필요',
+      detail: '상대 지갑 정보가 자료에 없습니다',
+      status: '송신자·수신자 확인 필요',
+      tone: 'warning',
+    })
   })
 })

@@ -146,6 +146,111 @@ describe('LedgerPage', () => {
     expect(screen.getByText('거래소나 서비스에 지불한 처리 비용')).toBeInTheDocument()
   })
 
+  it('presents external transfers as deposits and withdrawals', async () => {
+    const depositEvent = {
+      ...ledgerEvent,
+      eventId: 'deposit-event',
+      revisionId: 'deposit-revision',
+      eventType: 'TRANSFER',
+      flowShape: 'EXTERNAL_IN',
+      postings: [{
+        legId: 'deposit-leg',
+        accountId: 'account-upbit',
+        assetId: 'cex-document-asset:upbit:decimal8:krw',
+        occurredAt: ledgerEvent.effectiveAt,
+        direction: 'IN',
+        quantity: '100000000',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: '',
+      }],
+      transferEndpoint: {
+        resolution: 'EXTERNAL_KNOWN',
+        kind: 'WALLET_ADDRESS',
+        display: '0x123456…abcdef',
+        addressFamily: 'EVM',
+        walletSourceId: '',
+        chainCandidates: ['eip155:10'],
+        connectionStatus: 'COUNTERPARTY_REVIEW_REQUIRED',
+        reviewRequired: true,
+      },
+    }
+    const withdrawalEvent = {
+      ...depositEvent,
+      eventId: 'withdrawal-event',
+      revisionId: 'withdrawal-revision',
+      flowShape: 'EXTERNAL_OUT',
+      postings: [{
+        ...depositEvent.postings[0],
+        legId: 'withdrawal-leg',
+        direction: 'OUT',
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [depositEvent, withdrawalEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect((await screen.findAllByText('입금')).length).toBeGreaterThan(0)
+    expect(screen.getByText('출금')).toBeInTheDocument()
+    expect(screen.queryByText('전송')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '입금 거래 상세 접기' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '출금 거래 상세 보기' })).toBeInTheDocument()
+    expect(screen.getByText('보낸 곳')).toBeInTheDocument()
+    expect(screen.getByText('외부 지갑')).toBeInTheDocument()
+    expect(screen.getByText('거래 목적 확인 필요')).toBeInTheDocument()
+  })
+
+  it('shows a registered counterpart as a pending owned-wallet movement', async () => {
+    const ownedTransfer = {
+      ...ledgerEvent,
+      eventId: 'owned-transfer-event',
+      revisionId: 'owned-transfer-revision',
+      eventType: 'TRANSFER',
+      flowShape: 'SELF_TRANSFER',
+      postings: [{
+        legId: 'owned-transfer-leg',
+        accountId: 'account-upbit',
+        assetId: 'cex-document-asset:upbit:decimal8:usdt',
+        occurredAt: ledgerEvent.effectiveAt,
+        direction: 'IN',
+        quantity: '100000000',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: '',
+      }],
+      transferEndpoint: {
+        resolution: 'OWNED_REGISTERED',
+        kind: 'WALLET_ADDRESS',
+        display: '0x123456…abcdef',
+        addressFamily: 'EVM',
+        walletSourceId: 'wallet-source-1',
+        chainCandidates: ['eip155:10'],
+        connectionStatus: 'WALLET_OBSERVATION_PENDING',
+        reviewRequired: true,
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [ownedTransfer] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect((await screen.findAllByText('내 계정 이동')).length).toBeGreaterThan(0)
+    expect(screen.getByText('보낸 곳')).toBeInTheDocument()
+    expect(screen.getByText('내 등록 지갑')).toBeInTheDocument()
+    expect(screen.getByText('반대편 지갑 장부 확인 대기')).toBeInTheDocument()
+  })
+
   it('shows the wallet-only ActionProof lineage without treating it as a CEX field', async () => {
     const walletEvent = {
       ...ledgerEvent,

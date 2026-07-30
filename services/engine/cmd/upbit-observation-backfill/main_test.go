@@ -1,10 +1,37 @@
 package main
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/BackwardLabs/daejang/services/engine/internal/upbitnormalizer"
 )
+
+func TestLoadPrivateArtifactKeysCombinesCurrentAndRotationKeys(t *testing.T) {
+	current := make([]byte, 32)
+	legacy := make([]byte, 32)
+	legacy[0] = 1
+	t.Setenv("PRIVATE_OBJECT_ENCRYPTION_KEY_ID", "current")
+	t.Setenv("PRIVATE_OBJECT_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(current))
+	t.Setenv("PRIVATE_OBJECT_DECRYPTION_KEYS", `{"legacy":"`+base64.StdEncoding.EncodeToString(legacy)+`"}`)
+
+	keys, err := loadPrivateArtifactKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 2 || len(keys["current"]) != 32 || keys["legacy"][0] != 1 {
+		t.Fatalf("unexpected private artifact keyring: %#v", keys)
+	}
+}
+
+func TestLoadPrivateArtifactKeysFailsClosedWithoutKeys(t *testing.T) {
+	t.Setenv("PRIVATE_OBJECT_ENCRYPTION_KEY_ID", "")
+	t.Setenv("PRIVATE_OBJECT_ENCRYPTION_KEY", "")
+	t.Setenv("PRIVATE_OBJECT_DECRYPTION_KEYS", "")
+	if _, err := loadPrivateArtifactKeys(); err == nil {
+		t.Fatal("missing backfill decryption keys were accepted")
+	}
+}
 
 func TestCoverageReportVersionChangesWhenAggregationContractChanges(t *testing.T) {
 	if coverageReportVersion != "v2" {

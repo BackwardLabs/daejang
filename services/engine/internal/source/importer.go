@@ -53,6 +53,10 @@ type DocumentImportEvidence interface {
 	PublishSourceEvidence(context.Context, evidencestore.PublishSourceEvidenceParams) (evidencestore.Fragment, error)
 }
 
+type DocumentImportWallets interface {
+	ListWallets(context.Context, string) ([]WalletSource, error)
+}
+
 type DocumentParser interface {
 	Parse(context.Context, pdfparser.Request) (pdfparser.Result, error)
 }
@@ -62,6 +66,7 @@ type DocumentImporter struct {
 	Artifacts     DocumentImportArtifacts
 	Evidence      DocumentImportEvidence
 	Parser        DocumentParser
+	Wallets       DocumentImportWallets
 	LeaseDuration time.Duration
 	Now           func() time.Time
 }
@@ -104,6 +109,10 @@ func (i *DocumentImporter) ImportUpbitDocument(ctx context.Context, params Upbit
 		}
 		return UpbitDocumentImportResult{}, &DocumentImportError{Code: code}
 	}
+	ownedWallets, err := i.loadOwnedWallets(ctx, params.SubjectID)
+	if err != nil {
+		return UpbitDocumentImportResult{}, &DocumentImportError{Code: "WALLET_SOURCE_LOOKUP_FAILED"}
+	}
 
 	claim, err := i.Jobs.RegisterAndClaimDocumentImport(ctx, sourcejobstore.RegisterDocumentImportParams{
 		Document: sourcejobstore.RegisterDocumentParams{
@@ -144,13 +153,14 @@ func (i *DocumentImporter) ImportUpbitDocument(ctx context.Context, params Upbit
 	if err != nil {
 		return UpbitDocumentImportResult{}, &DocumentImportError{Code: "ORIGINAL_ARTIFACT_STORE_FAILED"}
 	}
-	internalRef, err := i.Artifacts.Put(ctx, parsed.InternalEvidence, privateArtifact("application/json"))
+	internalRef, err := i.Artifacts.Put(ctx, parsed.InternalEvidence, privateArtifact(privateParserEvidenceMediaType))
 	if err != nil {
 		return UpbitDocumentImportResult{}, &DocumentImportError{Code: "INTERNAL_EVIDENCE_STORE_FAILED"}
 	}
 	normalized, err := upbitnormalizer.Prepare(upbitnormalizer.Input{
 		SubjectID: params.SubjectID, CoverageStart: params.CoverageStart, CoverageEnd: params.CoverageEnd,
 		OriginalArtifact: originalRef, InternalArtifact: internalRef, InternalEvidence: parsed.InternalEvidence,
+		ExpectedSubjectName: params.ExpectedSubjectName, OwnedWallets: ownedWallets,
 	})
 	if err != nil {
 		return fail("NORMALIZATION_FAILED", "UPBIT evidence normalization failed", errors.New("normalize parser evidence"))
@@ -204,6 +214,32 @@ func (i *DocumentImporter) ImportUpbitDocument(ctx context.Context, params Upbit
 		Document: claim.Document, Job: completedJob, EvidenceTerminalStatus: normalized.TerminalStatus,
 		SourceRecordCount: normalized.RecordCount, NormalizedRecordCount: normalized.NormalizedCount,
 	}, nil
+}
+
+func (i *DocumentImporter) loadOwnedWallets(ctx context.Context, subjectID string) ([]upbitnormalizer.OwnedWalletSnapshot, error) {
+	if i.Wallets == nil {
+		return nil, nil
+	}
+	values, err := i.Wallets.ListWallets(ctx, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]upbitnormalizer.OwnedWalletSnapshot, 0, len(values))
+	for _, value := range values {
+		if value.Status != "ACTIVE" {
+			continue
+		}
+		chains := make([]string, 0, len(value.ChainScopes))
+		for _, scope := range value.ChainScopes {
+			if scope.Status == "ACTIVE" {
+				chains = append(chains, scope.ChainID)
+			}
+		}
+		result = append(result, upbitnormalizer.OwnedWalletSnapshot{
+			SourceID: value.ID, Address: value.Address, Status: value.Status, ChainIDs: chains,
+		})
+	}
+	return result, nil
 }
 
 func (i *DocumentImporter) completedExactImport(

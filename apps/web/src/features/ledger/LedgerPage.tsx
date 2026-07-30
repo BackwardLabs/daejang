@@ -14,20 +14,17 @@ import {
 } from '../../api/productApi.ts'
 import {
   describeFlowShape,
+  describeLedgerAction,
   describeLedgerSource,
   describePostingDirection,
   describePostingRole,
+  describeTransferEndpoint,
   formatCanonicalQuantity,
   formatLedgerQuantity,
   parseLedgerAsset,
 } from './ledgerPresentation.ts'
 import './ledger.css'
 
-const eventLabels: Record<string, string> = {
-  TRADE: '거래', TRANSFER: '전송', SWAP: '스왑', BRIDGE: '브리지', REWARD: '보상',
-  BORROW: '대여', REPAY: '상환', STAKE: '스테이킹', LIQUIDITY: '유동성', WRAP: '래핑',
-  UNKNOWN: '미분류', OTHER: '기타',
-}
 const statusLabel = (value: string) => value === 'RESOLVED' ? '완료' : value === 'PARTIAL' ? '일부 확인' : '검토 필요'
 const feeRoles = new Set(['FEE', 'GAS'])
 const sourceKindLabels = { CEX: '거래소', WALLET: '개인지갑', UNKNOWN: '출처 미확인' } as const
@@ -98,35 +95,45 @@ function LedgerStatusBadges({ event }: { event: LedgerEventModel }) {
   const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
   const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
   return <span className="ledger-explorer__badges">
-    <b data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}>{statusLabel(event.resolution)}</b>
+    <b className="is-primary" data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}>{statusLabel(event.resolution)}</b>
     {event.postings.length
-      ? <b data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}>{event.resolution === 'RESOLVED' ? '장부 확정' : '장부 일부 반영'}</b>
-      : <b data-tone="neutral">장부 미반영</b>}
+      ? <b className="is-secondary" data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}>{event.resolution === 'RESOLVED' ? '장부 확정' : '장부 일부 반영'}</b>
+      : <b className="is-secondary" data-tone="neutral">장부 미반영</b>}
     {valued.length === material.length && material.length > 0
-      ? <b data-tone="success">평가 완료</b>
+      ? <b className="is-secondary" data-tone="success">평가 완료</b>
       : valued.length > 0
-        ? <b data-tone="warning">일부 평가</b>
-        : <b data-tone="neutral">평가 대기</b>}
+        ? <b className="is-secondary" data-tone="warning">일부 평가</b>
+        : <b className="is-secondary" data-tone="neutral">평가 대기</b>}
   </span>
 }
 
 function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
   const source = describeLedgerSource(event.postings)
+  const action = describeLedgerAction(event.eventType, event.flowShape, event.postings)
   const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
   const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
   const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
+  const transferEndpoint = event.eventType === 'TRANSFER'
+    ? describeTransferEndpoint(event.postings, event.transferEndpoint)
+    : undefined
   return <div className="ledger-explorer-detail">
     <div className="ledger-explorer-detail__summary">
       <section><span>입력 출처</span><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]} · {compactIdentifier(source.detail)}</small></section>
-      <section><span>확인된 액션</span><strong>{eventLabels[event.eventType] ?? event.eventType}</strong><small>{describeFlowShape(event.flowShape)}</small></section>
+      <section><span>확인된 액션</span><strong>{action.label}</strong><small>{action.description}</small></section>
       <section><span>장부 반영</span><strong>{material.length}건</strong><small>자산 변동 · 수수료 {fees.length}건</small></section>
       <section><span>세무 처리</span><strong>{valued.length ? `${valued.length}건 평가` : '평가 대기'}</strong><small>원가·Lot·세금 결과로 연결</small></section>
     </div>
 
+    {transferEndpoint ? <section className="ledger-explorer-endpoint" data-tone={transferEndpoint.tone}>
+      <span>{transferEndpoint.label}</span>
+      <div><strong>{transferEndpoint.title}</strong><small>{transferEndpoint.detail}</small></div>
+      <b>{transferEndpoint.status}</b>
+    </section> : null}
+
     <ol className="ledger-explorer-lineage" aria-label="거래 처리 계보">
       <li className="is-complete"><i>1</i><span><strong>Evidence</strong><small>{source.label} 관찰 근거</small></span></li>
       <li className={event.resolution === 'RESOLVED' ? 'is-complete' : 'is-pending'}><i>2</i><span><strong>{source.kind === 'WALLET' ? 'ActionProof' : source.kind === 'CEX' ? '결정적 CEX 해석' : '해석 입력'}</strong><small>{source.kind === 'WALLET' ? 'JIT가 봉인한 실행·effect 증명' : `${describeFlowShape(event.flowShape)} 입력`}</small></span></li>
-      <li className={event.postings.length ? 'is-complete' : 'is-pending'}><i>3</i><span><strong>Event · Posting</strong><small>{event.postings.length ? `${eventLabels[event.eventType] ?? event.eventType} · ${event.postings.length}개 장부 행` : '분류·장부 확정 대기'}</small></span></li>
+      <li className={event.postings.length ? 'is-complete' : 'is-pending'}><i>3</i><span><strong>Event · Posting</strong><small>{event.postings.length ? `${action.label} · ${event.postings.length}개 장부 행` : '분류·장부 확정 대기'}</small></span></li>
       <li className={valued.length ? 'is-complete' : 'is-pending'}><i>4</i><span><strong>KRW Valuation</strong><small>{valued.length ? `${valued.length}건 평가 연결` : 'Tax Engine 처리 대기'}</small></span></li>
       <li className="is-pending"><i>5</i><span><strong>Lot · Tax Report</strong><small>세금 리포트에서 최종 결과 확인</small></span></li>
     </ol>
@@ -435,15 +442,16 @@ export function LedgerPage() {
                     const source = describeLedgerSource(event.postings)
                     const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
                     const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
+                    const action = describeLedgerAction(event.eventType, event.flowShape, event.postings)
                     const isOpen = event.eventId === selectedId
                     return <Fragment key={event.eventId}>
                       <tr className={isOpen ? 'ledger-explorer__row is-open' : 'ledger-explorer__row'}>
                         <td className="ledger-explorer__time">
-                          <button type="button" aria-expanded={isOpen} aria-controls={`ledger-detail-${event.eventId}`} onClick={() => setSelectedId(isOpen ? undefined : event.eventId)}>{isOpen ? '닫기' : '상세'}</button>
+                          <button type="button" aria-label={`${action.label} 거래 상세 ${isOpen ? '접기' : '보기'}`} aria-expanded={isOpen} aria-controls={`ledger-detail-${event.eventId}`} onClick={() => setSelectedId(isOpen ? undefined : event.eventId)}>{isOpen ? '접기' : '보기'}</button>
                           <time dateTime={event.effectiveAt}>{formatLedgerDateTime(event.effectiveAt)}</time>
                         </td>
                         <td><span className="ledger-explorer__source"><strong>{source.label}</strong><small>{sourceKindLabels[source.kind]} · {compactIdentifier(source.detail)}</small></span></td>
-                        <td><span className="ledger-explorer__action"><strong>{eventLabels[event.eventType] ?? event.eventType}</strong><small>{describeFlowShape(event.flowShape)}</small></span></td>
+                        <td><span className="ledger-explorer__action" data-flow-shape={event.flowShape}><strong>{action.label}</strong><small>{action.description}</small></span></td>
                         <td><LedgerMovementList postings={material} /></td>
                         <td><LedgerMovementList postings={fees} /></td>
                         <td><LedgerStatusBadges event={event} /></td>

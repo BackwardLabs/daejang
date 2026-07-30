@@ -19,6 +19,19 @@ export type LedgerSourcePresentation = {
   detail: string
 }
 
+export type LedgerActionPresentation = {
+  label: string
+  description: string
+}
+
+export type LedgerTransferEndpointPresentation = {
+  label: '보낸 곳' | '받는 곳' | '상대 정보'
+  title: string
+  detail: string
+  status: string
+  tone: 'success' | 'warning' | 'neutral'
+}
+
 const postingRoles: Record<string, LedgerPostingRolePresentation> = {
   PRINCIPAL: {
     label: '주 거래',
@@ -63,9 +76,31 @@ const flowShapeLabels: Record<string, string> = {
   UNKNOWN: '흐름 확인 필요',
 }
 
+const eventTypeLabels: Record<string, string> = {
+  TRADE: '거래',
+  SWAP: '스왑',
+  BRIDGE: '브리지',
+  REWARD: '보상',
+  BORROW: '대여',
+  REPAY: '상환',
+  STAKE: '스테이킹',
+  LIQUIDITY: '유동성',
+  WRAP: '래핑',
+  UNKNOWN: '미분류',
+  OTHER: '기타',
+}
+
+const nonMaterialPostingRoles = new Set(['FEE', 'GAS'])
+
 const evmNetworkMetadata: Record<string, { label: string; nativeSymbol: string; decimals: number }> = {
   '1': { label: 'Ethereum', nativeSymbol: 'ETH', decimals: 18 },
   '10': { label: 'Optimism', nativeSymbol: 'ETH', decimals: 18 },
+}
+
+const describeChainCandidate = (value: string) => {
+  const match = value.match(/^eip155:(\d+)$/i)
+  if (!match?.[1]) return value
+  return evmNetworkMetadata[match[1]]?.label ?? `EVM ${match[1]}`
 }
 
 const formatVenue = (value: string) =>
@@ -152,6 +187,100 @@ export const describeLedgerSource = (
 
 export const describeFlowShape = (flowShape: string) =>
   flowShapeLabels[flowShape] ?? (flowShape || '흐름 확인 필요')
+
+export const describeLedgerAction = (
+  eventType: string,
+  flowShape: string,
+  postings: Array<{ direction: string; role?: string }>,
+): LedgerActionPresentation => {
+  const description = describeFlowShape(flowShape)
+  if (eventType !== 'TRANSFER') {
+    return {
+      label: eventTypeLabels[eventType] ?? (eventType || '미분류'),
+      description,
+    }
+  }
+
+  if (flowShape === 'EXTERNAL_IN') return { label: '입금', description }
+  if (flowShape === 'EXTERNAL_OUT') return { label: '출금', description }
+  if (flowShape === 'SELF_TRANSFER') return { label: '내 계정 이동', description }
+
+  const materialPostings = postings.filter((posting) =>
+    !posting.role || !nonMaterialPostingRoles.has(posting.role),
+  )
+  const hasIncoming = materialPostings.some((posting) => posting.direction === 'IN')
+  const hasOutgoing = materialPostings.some((posting) => posting.direction === 'OUT')
+
+  if (hasIncoming && !hasOutgoing) return { label: '입금', description }
+  if (hasOutgoing && !hasIncoming) return { label: '출금', description }
+  if (hasIncoming && hasOutgoing) return { label: '자산 이동', description }
+  return { label: '입출금 확인', description }
+}
+
+export const describeTransferEndpoint = (
+  postings: Array<{ direction: string; role?: string }>,
+  endpoint?: {
+    resolution: string
+    display: string
+    addressFamily?: string
+    chainCandidates?: string[]
+    connectionStatus: string
+    reviewRequired: boolean
+  },
+): LedgerTransferEndpointPresentation => {
+  const material = postings.filter((posting) =>
+    !posting.role || !nonMaterialPostingRoles.has(posting.role),
+  )
+  const hasIncoming = material.some((posting) => posting.direction === 'IN')
+  const hasOutgoing = material.some((posting) => posting.direction === 'OUT')
+  const label = hasIncoming && !hasOutgoing
+    ? '보낸 곳'
+    : hasOutgoing && !hasIncoming
+      ? '받는 곳'
+      : '상대 정보'
+
+  if (!endpoint || endpoint.resolution === 'UNKNOWN') {
+    return {
+      label,
+      title: '확인 필요',
+      detail: endpoint?.display || '상대 지갑 정보가 자료에 없습니다',
+      status: '송신자·수신자 확인 필요',
+      tone: 'warning',
+    }
+  }
+  if (endpoint.resolution === 'OWNED_REGISTERED') {
+    const network = endpoint.chainCandidates?.length
+      ? ` · ${endpoint.chainCandidates.map(describeChainCandidate).join(', ')}`
+      : endpoint.addressFamily
+        ? ` · ${endpoint.addressFamily}`
+        : ''
+    return {
+      label,
+      title: '내 등록 지갑',
+      detail: `${endpoint.display}${network}`,
+      status: endpoint.connectionStatus === 'WALLET_OBSERVATION_PENDING'
+        ? '반대편 지갑 장부 확인 대기'
+        : '내 지갑 정보와 연결됨',
+      tone: endpoint.reviewRequired ? 'warning' : 'success',
+    }
+  }
+  if (endpoint.resolution === 'OWNED_SUBJECT_NAME') {
+    return {
+      label,
+      title: '본인 명의',
+      detail: endpoint.display || '본인 명의 입출금',
+      status: endpoint.reviewRequired ? '본인 거래 여부 확인 필요' : '본인 정보와 일치',
+      tone: endpoint.reviewRequired ? 'warning' : 'success',
+    }
+  }
+  return {
+    label,
+    title: '외부 지갑',
+    detail: endpoint.display || '식별된 외부 주소',
+    status: endpoint.reviewRequired ? '거래 목적 확인 필요' : '외부 전송으로 확인',
+    tone: endpoint.reviewRequired ? 'warning' : 'neutral',
+  }
+}
 
 export const formatCanonicalQuantity = (
   quantity: string,

@@ -145,17 +145,17 @@ func classify(sourceCase, kind string) (string, string) {
 	case "BUY", "SELL":
 		return "TRADE", "EXCHANGE"
 	case "DEPOSIT":
-		return "TRANSFER", "EXTERNAL_IN"
+		return "TRANSFER", "UNKNOWN"
 	case "WITHDRAWAL":
-		return "TRANSFER", "EXTERNAL_OUT"
+		return "TRANSFER", "UNKNOWN"
 	}
 	switch kind {
 	case "FILL":
 		return "TRADE", "EXCHANGE"
 	case "DEPOSIT":
-		return "TRANSFER", "EXTERNAL_IN"
+		return "TRANSFER", "UNKNOWN"
 	case "WITHDRAWAL":
-		return "TRANSFER", "EXTERNAL_OUT"
+		return "TRANSFER", "UNKNOWN"
 	}
 	return "OTHER", "UNKNOWN"
 }
