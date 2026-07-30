@@ -1211,6 +1211,10 @@ export const finishSuperviseCommand = ({ shutdown, exitCode, exit }) => {
   if (shutdown) exit(exitCode ?? 0)
 }
 
+export const pauseForSignalShutdown = ({ supervising, pause }) => {
+  if (!supervising) pause()
+}
+
 for (const [signal, exitCode] of [
   ['SIGINT', 130],
   ['SIGTERM', 143],
@@ -1219,13 +1223,20 @@ for (const [signal, exitCode] of [
     if (handlingSignal) return
     handlingSignal = true
     shutdownRequested = true
+    const supervising = process.argv[2] === 'supervise'
     ensureRuntimeDirectories()
     try {
       await runSignalShutdown({
-        pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
+        pause: () => pauseForSignalShutdown({
+          supervising,
+          pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
+        }),
         activeOperation: activeOperationPromise,
         stop: () => withOperationLock(async () => {
-          writeFileSync(pauseFile, 'paused\n', { mode: 0o600 })
+          pauseForSignalShutdown({
+            supervising,
+            pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
+          })
           await stopServices()
         }, { allowDuringShutdown: true }),
       })
@@ -1233,7 +1244,7 @@ for (const [signal, exitCode] of [
       console.error(error)
     } finally {
       finishSignalShutdown({
-        supervising: process.argv[2] === 'supervise',
+        supervising,
         exitCode,
         exit: process.exit,
       })
