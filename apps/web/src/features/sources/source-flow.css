@@ -317,13 +317,113 @@ body:has(.source-page) {
   color: #c2410c;
 }
 
-.source-list__item .source-list__disconnect {
+.source-list__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-list__item .source-list__disconnect,
+.source-list__item .source-list__networks {
   padding: 9px 14px;
   border: 1px solid #d1d5db;
   border-radius: 9px;
   color: #374151;
   background: #fff;
   cursor: pointer;
+}
+
+.source-list__item .source-list__networks {
+  border-color: #ea580c;
+  color: #c2410c;
+}
+
+.source-network-editor,
+.source-network-message {
+  grid-column: 1 / -1;
+}
+
+.source-network-editor {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(360px, 2fr) auto;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.source-network-editor h3,
+.source-network-editor p {
+  margin: 0;
+}
+
+.source-network-editor h3 {
+  font-size: 14px;
+}
+
+.source-network-editor p {
+  margin-top: 5px;
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.source-network-editor fieldset {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.source-network-editor label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.source-network-editor input {
+  accent-color: #ea580c;
+}
+
+.source-network-editor__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.source-list__item .source-network-editor__actions button {
+  padding: 9px 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.source-list__item .source-network-editor__actions button:last-child {
+  border-color: #ea580c;
+  color: #fff;
+  background: #ea580c;
+}
+
+.source-network-message {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 12px;
+}
+
+.source-network-message--success {
+  color: #157347;
+}
+
+.source-network-message--error {
+  color: #b91c1c;
 }
 
 .source-list__item button:disabled {
@@ -501,6 +601,17 @@ body:has(.source-page) {
   .source-job-details__footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .source-list__actions,
+  .source-network-editor,
+  .source-network-editor fieldset {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-network-editor {
+    grid-template-columns: 1fr;
   }
 }
 

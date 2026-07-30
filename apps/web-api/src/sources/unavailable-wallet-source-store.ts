@@ -2,6 +2,7 @@ import { ApiError } from '../errors.js'
 import type {
   CompleteWalletRegistration,
   SourceRequestContext,
+  UpdateWalletChainScopes,
   WalletOwnershipChallenge,
   WalletSourceStore,
 } from './wallet-source-store.js'
@@ -22,6 +23,10 @@ export class UnavailableWalletSourceStore implements WalletSourceStore {
   }
 
   async listWallets(_context: SourceRequestContext): Promise<never> {
+    return this.#unavailable()
+  }
+
+  async updateChainScopes(_input: UpdateWalletChainScopes): Promise<never> {
     return this.#unavailable()
   }
 

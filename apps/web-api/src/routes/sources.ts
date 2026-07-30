@@ -31,8 +31,20 @@ type RegisterWalletBody = {
   label?: string
 }
 
+type UpdateWalletChainsBody = {
+  chainIds: string[]
+}
+
 const addressPattern = '^0x[0-9a-fA-F]{40}$'
 const chainIdPattern = '^eip155:[1-9][0-9]*$'
+const supportedEvmChainIds = [
+  'eip155:1',
+  'eip155:10',
+] as const
+const supportedChainIdSchema = {
+  type: 'string',
+  enum: supportedEvmChainIds,
+} as const
 
 const serializeWalletSource = (source: WalletSource) => ({
   id: source.id,
@@ -224,7 +236,7 @@ export const registerSourceRoutes = async (
           required: ['address', 'chainId'],
           properties: {
             address: { type: 'string', pattern: addressPattern },
-            chainId: { type: 'string', pattern: chainIdPattern },
+            chainId: supportedChainIdSchema,
           },
         },
         response: {
@@ -290,7 +302,7 @@ export const registerSourceRoutes = async (
               minItems: 1,
               maxItems: 20,
               uniqueItems: true,
-              items: { type: 'string', pattern: chainIdPattern },
+              items: supportedChainIdSchema,
             },
             label: { type: 'string', minLength: 1, maxLength: 120 },
           },
@@ -342,6 +354,58 @@ export const registerSourceRoutes = async (
         throw invalidWalletChallenge()
       }
       return reply.status(201).send(serializeWalletSource(source))
+    },
+  )
+
+  app.put<{
+    Body: UpdateWalletChainsBody
+    Params: { sourceId: string }
+  }>(
+    '/api/v1/sources/:sourceId/chains',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['sourceId'],
+          properties: { sourceId: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['chainIds'],
+          properties: {
+            chainIds: {
+              type: 'array',
+              minItems: 1,
+              maxItems: supportedEvmChainIds.length,
+              uniqueItems: true,
+              items: supportedChainIdSchema,
+            },
+          },
+        },
+        response: { 200: sourceResponseSchema },
+      },
+    },
+    async (request) => {
+      const session = request.authSession
+      if (!session) {
+        throw unauthorized()
+      }
+      const chainIds = [...request.body.chainIds].sort()
+      const source = await options.walletSourceStore.updateChainScopes({
+        requestId: request.id,
+        userId: session.user.id,
+        sessionId: session.id,
+        idempotencyKey: `chains:${request.params.sourceId}:${chainIds.join(',')}`,
+        sourceId: request.params.sourceId,
+        chainIds,
+        now: now(),
+      })
+      if (!source) {
+        throw resourceNotFound()
+      }
+      return serializeWalletSource(source)
     },
   )
 

@@ -212,6 +212,21 @@ export async function registerWalletSource(input: {
   })
 }
 
+export async function updateWalletSourceNetworks(input: {
+  chainIds: string[]
+  signal?: AbortSignal
+  sourceId: string
+}) {
+  return requestApi<WalletSourceApiModel>(
+    `/sources/${encodeURIComponent(input.sourceId)}/chains`,
+    {
+      method: 'PUT',
+      signal: input.signal,
+      body: JSON.stringify({ chainIds: input.chainIds }),
+    },
+  )
+}
+
 export async function disconnectWalletSource(sourceId: string) {
   return requestApi<WalletSourceApiModel>(`/sources/${sourceId}/disconnect`, {
     method: 'POST',

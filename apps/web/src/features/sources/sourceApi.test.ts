@@ -3,6 +3,7 @@ import {
   createSyncJob,
   getSourceCapabilities,
   retrySyncJob,
+  updateWalletSourceNetworks,
   watchSyncJob,
 } from './sourceApi.ts'
 
@@ -12,6 +13,30 @@ afterEach(() => {
 })
 
 describe('EVM sync API integration', () => {
+  it('replaces the collection networks for an existing wallet source', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      id: 'source-1',
+      type: 'EVM_WALLET',
+      chainScopes: [],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await updateWalletSourceNetworks({
+      chainIds: ['eip155:1', 'eip155:10'],
+      sourceId: 'source/with spaces',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/sources/source%2Fwith%20spaces/chains',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          chainIds: ['eip155:1', 'eip155:10'],
+        }),
+      }),
+    )
+  })
+
   it('sends the selected inclusive period to the real sync endpoint', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       job: { id: 'job-1', sourceId: 'source-1', sourceKind: 'EVM_WALLET', state: 'QUEUED', phase: 'VALIDATE_SOURCE', attempts: 0, processedRecords: 0, createdAt: '', updatedAt: '' },

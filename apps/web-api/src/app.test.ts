@@ -415,7 +415,7 @@ describe('web api authentication boundary', () => {
     const { token } = await createSession()
     const wallet = Wallet.createRandom()
     const request = async (
-      method: 'GET' | 'POST',
+      method: 'GET' | 'POST' | 'PUT',
       url: string,
       payload?: Record<string, unknown>,
     ) => {
@@ -424,7 +424,7 @@ describe('web api authentication boundary', () => {
         url,
         headers: {
           cookie: `${config.sessionCookieName}=${token}`,
-          ...(method === 'POST' ? { origin: config.publicOrigin } : {}),
+          ...(method !== 'GET' ? { origin: config.publicOrigin } : {}),
         },
       } as const
       return payload === undefined
@@ -447,7 +447,7 @@ describe('web api authentication boundary', () => {
     const registration = await request('POST', '/api/v1/sources/wallets', {
       challengeId: challenge.challengeId,
       signature,
-      chainIds: ['eip155:1', 'eip155:8453'],
+      chainIds: ['eip155:1'],
       label: '세무 지갑',
     })
     expect(registration.statusCode).toBe(201)
@@ -464,6 +464,21 @@ describe('web api authentication boundary', () => {
       error: { code: 'WALLET_CHALLENGE_INVALID' },
     })
 
+    const updated = await request(
+      'PUT',
+      `/api/v1/sources/${source.id}/chains`,
+      { chainIds: ['eip155:1', 'eip155:10'] },
+    )
+    expect(updated.statusCode).toBe(200)
+    expect(updated.json()).toMatchObject({
+      id: source.id,
+      address: wallet.address.toLowerCase(),
+      chainScopes: [
+        { chainId: 'eip155:1', status: 'ACTIVE' },
+        { chainId: 'eip155:10', status: 'ACTIVE' },
+      ],
+    })
+
     const list = await request('GET', '/api/v1/sources')
     expect(list.statusCode).toBe(200)
     expect(list.json()).toMatchObject({
@@ -474,7 +489,7 @@ describe('web api authentication boundary', () => {
           status: 'ACTIVE',
           chainScopes: [
             { chainId: 'eip155:1', status: 'ACTIVE' },
-            { chainId: 'eip155:8453', status: 'ACTIVE' },
+            { chainId: 'eip155:10', status: 'ACTIVE' },
           ],
         },
       ],
@@ -490,9 +505,25 @@ describe('web api authentication boundary', () => {
       status: 'DISCONNECTED',
       chainScopes: [
         { chainId: 'eip155:1', status: 'DISABLED' },
-        { chainId: 'eip155:8453', status: 'DISABLED' },
+        { chainId: 'eip155:10', status: 'DISABLED' },
       ],
     })
+  })
+
+  it('rejects unsupported wallet collection networks', async () => {
+    const { token } = await createSession()
+    const wallet = Wallet.createRandom()
+    const challengeResponse = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets/challenges',
+      headers: {
+        cookie: `${config.sessionCookieName}=${token}`,
+        origin: config.publicOrigin,
+      },
+      payload: { address: wallet.address, chainId: 'eip155:8453' },
+    })
+
+    expect(challengeResponse.statusCode).toBe(400)
   })
 
   it('rejects a signature from a different wallet', async () => {

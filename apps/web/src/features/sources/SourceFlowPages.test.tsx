@@ -186,6 +186,115 @@ describe('source flow pages', () => {
     )
   })
 
+  it('adds networks to the same wallet source and starts collection without another signature', async () => {
+    const source = {
+      id: '33333333-3333-4333-8333-333333333333',
+      type: 'EVM_WALLET',
+      address: '0x239000000000000000000000000000000000f2b2',
+      accountType: 'EOA',
+      verificationChainId: 'eip155:1',
+      verifiedAt: '2027-01-01T00:00:00.000Z',
+      label: '세무 지갑',
+      status: 'ACTIVE',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:00:00.000Z',
+      chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+    }
+    const existingJob = {
+      id: '55555555-5555-4555-8555-555555555555',
+      sourceId: source.id,
+      sourceKind: 'EVM_WALLET',
+      state: 'SUCCEEDED',
+      phase: 'COMPLETE',
+      attempts: 1,
+      processedRecords: 4,
+      requestedCoverageStart: '2026-07-28',
+      requestedCoverageEnd: '2026-07-28',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:05:00.000Z',
+    }
+    const updatedSource = {
+      ...source,
+      chainScopes: [
+        { chainId: 'eip155:1', status: 'ACTIVE' },
+        { chainId: 'eip155:10', status: 'ACTIVE' },
+      ],
+    }
+    const newJob = {
+      ...existingJob,
+      id: '66666666-6666-4666-8666-666666666666',
+      state: 'QUEUED',
+      phase: 'QUEUED',
+      attempts: 0,
+      processedRecords: 0,
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/sources') {
+        return new Response(JSON.stringify({ items: [source] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === '/api/v1/jobs') {
+        return new Response(JSON.stringify({ items: [existingJob] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === `/api/v1/sources/${source.id}/chains`) {
+        return new Response(JSON.stringify(updatedSource), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === '/api/v1/syncs') {
+        return new Response(JSON.stringify({ job: newJob }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === `/api/v1/jobs/${newJob.id}`) {
+        return new Response(JSON.stringify({
+          job: { ...newJob, state: 'SUCCEEDED', phase: 'COMPLETE' },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SourceManagementPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '수집 네트워크 관리' }))
+    expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Optimism' }))
+    fireEvent.click(screen.getByRole('button', { name: '저장하고 수집' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '수집 네트워크를 저장하고 같은 기간의 새 수집을 시작했습니다.',
+    )
+    expect(screen.getByText('Ethereum, Optimism')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/sources/${source.id}/chains`,
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          chainIds: ['eip155:1', 'eip155:10'],
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/syncs',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"sourceId":"33333333-3333-4333-8333-333333333333"'),
+      }),
+    )
+  })
+
   it('keeps Upbit PDF disabled when the safe import path is unavailable', () => {
     render(<SourceTypeSelectionPage />)
 

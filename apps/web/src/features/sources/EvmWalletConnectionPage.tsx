@@ -42,7 +42,10 @@ import {
   type WalletSyncJobSnapshot,
   type WatchWalletSyncJob,
 } from './evmWalletFlow.ts'
-import { evmWalletNetworkMetadata } from './evmNetworks.ts'
+import {
+  evmWalletNetworkMetadata,
+  getEvmWalletNetwork,
+} from './evmNetworks.ts'
 import './evm-wallet-flow.css'
 
 const walletProviders: ReadonlyArray<{
@@ -117,6 +120,10 @@ const completionErrorCopy: Record<
   BACKFILL_FAILED: {
     body: '지갑 연결 정보는 유지됩니다. 잠시 후 같은 수집 범위로 최초 backfill을 다시 시작해 주세요.',
     title: '최초 수집을 시작하지 못했어요',
+  },
+  CHAIN_SCOPE_INVALID: {
+    body: '거래를 수집할 네트워크를 하나 이상 선택해 주세요.',
+    title: '수집 네트워크를 확인해 주세요',
   },
   SOURCE_SAVE_FAILED: {
     body: '지갑과 선택 기간은 이 화면에 유지됩니다. 연결 정보를 저장하도록 다시 시도해 주세요.',
@@ -200,6 +207,7 @@ function FlowAlert({
           title: '수집 기간을 확인해 주세요',
         }
       : error.code === 'BACKFILL_FAILED' ||
+          error.code === 'CHAIN_SCOPE_INVALID' ||
           error.code === 'SOURCE_SAVE_FAILED'
         ? completionErrorCopy[error.code]
         : error.code === 'CONNECTION_FAILED' ||
@@ -574,9 +582,11 @@ function BackfillAside() {
 }
 
 function ScopeStep({
+  chainIds,
   error,
   isSubmitting,
   onBack,
+  onChainIdsChange,
   onPeriodChange,
   onSubmit,
   period,
@@ -584,9 +594,11 @@ function ScopeStep({
   taxYearRef,
   wallet,
 }: {
+  chainIds: string[]
   error: EvmWalletCompletionError | null
   isSubmitting: boolean
   onBack: () => void
+  onChainIdsChange: (chainIds: string[]) => void
   onPeriodChange: (period: EvmWalletPeriodDraft) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   period: EvmWalletPeriodDraft
@@ -630,7 +642,7 @@ function ScopeStep({
             <strong>{maskEvmAddress(wallet.address)}</strong>
           </div>
           <div>
-            <span>네트워크</span>
+            <span>서명 네트워크</span>
             <strong>{wallet.network}</strong>
           </div>
           <div>
@@ -638,6 +650,32 @@ function ScopeStep({
             <strong>{providerMeta[wallet.provider].name}</strong>
           </div>
         </div>
+
+        <fieldset className="wallet-network-panel">
+          <legend>수집 네트워크</legend>
+          <p>
+            지갑을 다시 연결하지 않아도 같은 주소의 공개 거래를 선택한
+            네트워크에서 함께 조회합니다.
+          </p>
+          <div className="wallet-network-options">
+            {evmWalletNetworkMetadata.map((network) => (
+              <label key={network.chainId}>
+                <input
+                  type="checkbox"
+                  checked={chainIds.includes(network.chainId)}
+                  disabled={isSubmitting}
+                  onChange={(event) => {
+                    const nextChainIds = event.currentTarget.checked
+                      ? [...chainIds, network.chainId]
+                      : chainIds.filter((chainId) => chainId !== network.chainId)
+                    onChainIdsChange(nextChainIds)
+                  }}
+                />
+                <span>{network.label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         <section className="wallet-period-panel" aria-labelledby="wallet-period-title">
           <header className="wallet-period-panel__heading">
@@ -866,18 +904,18 @@ function CompletionAside({
 
 function CompletionStep({
   addressPreview,
+  chainIds,
   jobId,
   jobSnapshot,
-  network,
   normalizedPeriod,
   onReset,
   syncStatus,
   watchError,
 }: {
   addressPreview: string
+  chainIds: string[]
   jobId?: string
   jobSnapshot: WalletSyncJobSnapshot | null
-  network: string
   normalizedPeriod: NormalizedEvmWalletPeriod
   onReset: () => void
   syncStatus: 'BACKFILLING' | 'REGISTERED'
@@ -946,8 +984,12 @@ function CompletionStep({
             <dd>{addressPreview}</dd>
           </div>
           <div>
-            <dt>네트워크</dt>
-            <dd>{network}</dd>
+            <dt>수집 네트워크</dt>
+            <dd>
+              {chainIds
+                .map((chainId) => getEvmWalletNetwork(chainId)?.label ?? chainId)
+                .join(', ')}
+            </dd>
           </div>
           <div>
             <dt>수집 기간</dt>
@@ -1252,6 +1294,7 @@ export function EvmWalletConnectionPage({
     }
 
     const request = {
+      chainIds: state.chainIds,
       intentKey,
       period: state.period,
       verificationId: state.verificationId,
@@ -1362,6 +1405,7 @@ export function EvmWalletConnectionPage({
 
         {state.view === 'scope' ? (
           <ScopeStep
+            chainIds={state.chainIds}
             error={state.status === 'EDITING' ? state.error : null}
             isSubmitting={state.status === 'SUBMITTING'}
             period={state.period}
@@ -1369,6 +1413,9 @@ export function EvmWalletConnectionPage({
             taxYearRef={taxYearRef}
             wallet={state.wallet}
             onBack={handleBack}
+            onChainIdsChange={(chainIds) =>
+              dispatch({ chainIds, type: 'CHAIN_SCOPES_CHANGED' })
+            }
             onPeriodChange={(period) =>
               dispatch({ period, type: 'PERIOD_CHANGED' })
             }
@@ -1379,9 +1426,9 @@ export function EvmWalletConnectionPage({
         {state.view === 'complete' ? (
           <CompletionStep
             addressPreview={state.addressPreview}
+            chainIds={state.chainIds}
             jobId={state.jobId}
             jobSnapshot={syncJob}
-            network={state.network}
             normalizedPeriod={state.normalizedPeriod}
             onReset={() => {
               if (autoConnectProvider) {

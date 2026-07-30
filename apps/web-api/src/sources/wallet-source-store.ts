@@ -51,6 +51,12 @@ export type CompleteWalletRegistration = {
   idempotencyKey: string
 }
 
+export type UpdateWalletChainScopes = SourceRequestContext & {
+  chainIds: string[]
+  now: Date
+  sourceId: string
+}
+
 export interface WalletSourceRegistry {
   readonly durable: boolean
   registerWallet(input: CompleteWalletRegistration): Promise<WalletSource>
@@ -71,6 +77,9 @@ export interface WalletSourceStore {
   ): Promise<WalletOwnershipChallenge | undefined>
   completeRegistration(
     input: CompleteWalletRegistration,
+  ): Promise<WalletSource | undefined>
+  updateChainScopes(
+    input: UpdateWalletChainScopes,
   ): Promise<WalletSource | undefined>
   listWallets(context: SourceRequestContext): Promise<WalletSource[]>
   disconnectWallet(
@@ -144,6 +153,40 @@ export class MemoryWalletSourceStore
       .filter((source) => source.userId === context.userId)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
       .map((source) => this.#withoutUserId(source))
+  }
+
+  async updateChainScopes(input: UpdateWalletChainScopes) {
+    const existing = this.#sources.get(input.sourceId)
+    if (
+      !existing ||
+      existing.userId !== input.userId ||
+      existing.status !== 'ACTIVE'
+    ) {
+      return undefined
+    }
+
+    const requestedChainIds = new Set(input.chainIds)
+    const scopesByChainId = new Map(
+      existing.chainScopes.map((scope) => [scope.chainId, scope]),
+    )
+    for (const chainId of requestedChainIds) {
+      scopesByChainId.set(chainId, { chainId, status: 'ACTIVE' })
+    }
+
+    const updated: WalletSource & { userId: string } = {
+      ...existing,
+      updatedAt: input.now,
+      chainScopes: [...scopesByChainId.values()]
+        .map((scope) => ({
+          ...scope,
+          status: requestedChainIds.has(scope.chainId)
+            ? 'ACTIVE' as const
+            : 'DISABLED' as const,
+        }))
+        .sort((left, right) => left.chainId.localeCompare(right.chainId)),
+    }
+    this.#sources.set(existing.id, updated)
+    return this.#withoutUserId(updated)
   }
 
   async disconnectWallet(
