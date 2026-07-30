@@ -285,12 +285,25 @@ export function LedgerPage() {
           </div>
         </section>
 
-        {view === 'ledger' && ledgerStatus === 'error' ? <p className="ledger-api-state" role="alert">장부를 불러오지 못했습니다. Engine과 데이터베이스 연결을 확인해 주세요.</p> : null}
-        {view === 'ledger' && ledgerStatus === 'loading' ? <p className="ledger-api-state" role="status">장부를 불러오는 중입니다.</p> : null}
+        {view === 'ledger' && ledgerStatus === 'error' ? (
+          <section className="ledger-state-card ledger-state-card--error" role="alert">
+            <h2>장부를 불러오지 못했습니다</h2>
+            <p>Engine과 데이터베이스 연결을 확인한 뒤 다시 시도해 주세요</p>
+          </section>
+        ) : null}
+        {view === 'ledger' && ledgerStatus === 'loading' ? (
+          <section className="ledger-state-card ledger-state-card--loading" role="status">
+            <p>장부를 불러오는 중입니다</p>
+          </section>
+        ) : null}
 
         {ledgerStatus === 'ready' && view === 'ledger' ? (
           events.length === 0 ? (
-            <section className="ledger-empty-state"><h2>아직 처리된 거래가 없습니다</h2><p>데이터 소스를 등록하고 Sync Job이 완료되면 실제 거래가 여기에 표시됩니다.</p><AppLink href="/sources">데이터 소스 관리</AppLink></section>
+            <section className="ledger-state-card ledger-state-card--empty">
+              <h2>아직 처리된 거래가 없습니다</h2>
+              <p>데이터 소스를 등록하고 Sync Job이 완료되면 실제 거래가 여기에 표시됩니다</p>
+              <AppLink href="/sources">데이터 소스 관리</AppLink>
+            </section>
           ) : (
             <section className="ledger-browser" aria-label="거래 장부">
               <div className="ledger-browser__list">
@@ -309,16 +322,21 @@ export function LedgerPage() {
           )
         ) : null}
 
-        {view === 'review' && reviewStatus === 'loading' ? <p className="ledger-api-state" role="status">검토 목록을 불러오는 중입니다.</p> : null}
+        {view === 'review' && reviewStatus === 'loading' ? (
+          <section className="ledger-state-card ledger-state-card--loading" role="status">
+            <p>검토 목록을 불러오는 중입니다</p>
+          </section>
+        ) : null}
         {view === 'review' && reviewStatus === 'error' ? (
-          <section className="ledger-api-state" role="alert">
-            <p>검토 목록을 불러오지 못했습니다. 장부는 계속 확인할 수 있습니다.</p>
+          <section className="ledger-state-card ledger-state-card--error" role="alert">
+            <h2>검토 목록을 불러오지 못했습니다</h2>
+            <p>장부는 계속 확인할 수 있습니다</p>
             <button type="button" onClick={() => setReviewReloadKey((current) => current + 1)}>검토 다시 불러오기</button>
           </section>
         ) : null}
 
         {reviewStatus === 'ready' && view === 'review' ? (
-          reviews.length === 0 ? <section className="ledger-empty-state"><h2>열린 검토가 없습니다</h2><p>Engine이 판단 보류 항목을 만들면 사유와 근거가 여기에 표시됩니다.</p></section> :
+          reviews.length === 0 ? <section className="ledger-state-card ledger-state-card--empty"><h2>열린 검토가 없습니다</h2><p>Engine이 판단 보류 항목을 만들면 사유와 근거가 여기에 표시됩니다</p></section> :
           <section className="ledger-review-browser" aria-label="열린 검토">
             <div className="ledger-review-browser__list">
               {reviews.map((review) => <button type="button" key={review.id} className={review.id === selectedReviewId ? 'is-selected' : undefined} onClick={() => selectReview(review.id)}>

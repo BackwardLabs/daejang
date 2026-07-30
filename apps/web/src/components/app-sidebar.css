@@ -231,12 +231,23 @@
 .app-sidebar__guide {
   display: grid;
   gap: 2px;
+  width: 100%;
   margin-top: 20px;
   padding: 12px 14px;
+  border: 0;
   border-radius: 12px;
   color: var(--app-sidebar-ink);
   background: var(--app-sidebar-subtle);
-  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.app-sidebar__guide:hover {
+  box-shadow: 0 8px 22px rgb(28 28 28 / 9%);
+  transform: translateY(-1px);
 }
 
 .app-sidebar__guide strong {
@@ -300,58 +311,8 @@
 .app-sidebar__user > i {
   margin-left: auto;
   color: #6e6a65;
-  font-size: 11px;
+  font-size: 20px;
   font-style: normal;
-  transition: transform 180ms ease;
-}
-
-.app-sidebar__user[aria-expanded="true"] > i {
-  transform: rotate(180deg);
-}
-
-.app-sidebar__user-menu {
-  position: absolute;
-  z-index: 100;
-  right: 0;
-  bottom: calc(100% + 10px);
-  left: 0;
-  overflow: hidden;
-  border: 1px solid var(--app-sidebar-border);
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgb(26 26 26 / 12%);
-}
-
-.app-sidebar__user-menu > div {
-  display: grid;
-  gap: 2px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--app-sidebar-border-soft);
-}
-
-.app-sidebar__user-menu > div strong {
-  font-size: 13px;
-}
-
-.app-sidebar__user-menu > div span {
-  color: #6e6a65;
-  font-size: 11px;
-}
-
-.app-sidebar__user-menu > button {
-  width: 100%;
-  min-height: 44px;
-  padding: 0 14px;
-  border: 0;
-  color: #b42318;
-  background: #fff;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-}
-
-.app-sidebar__user-menu > button:hover {
-  background: #fff3f1;
 }
 
 .app-sidebar__brand:focus-visible,
@@ -359,8 +320,7 @@
 .app-sidebar__navigation a:focus-visible,
 .app-sidebar__guide:focus-visible,
 .app-sidebar__secondary button:focus-visible,
-.app-sidebar__user:focus-visible,
-.app-sidebar__user-menu button:focus-visible {
+.app-sidebar__user:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--app-sidebar-accent) 60%, white);
   outline-offset: 2px;
 }
@@ -396,11 +356,6 @@
   .app-sidebar__user {
     justify-content: center;
     width: 44px;
-  }
-
-  .app-sidebar__user-menu {
-    right: auto;
-    width: 184px;
   }
 }
 

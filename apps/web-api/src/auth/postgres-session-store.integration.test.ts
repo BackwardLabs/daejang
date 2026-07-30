@@ -405,7 +405,12 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
       headers: { cookie: sessionCookie as string },
     })
     expect(me.statusCode).toBe(200)
-    expect(me.json()).toMatchObject({ user: { id: userId } })
+    expect(me.json()).toMatchObject({
+      user: {
+        id: userId,
+        email: 'postgres-oauth-e2e@example.com',
+      },
+    })
     await context.app.close()
   })
 
@@ -545,7 +550,11 @@ describeWithPostgres('PostgreSQL Web authentication persistence', () => {
     })
     expect(me.statusCode).toBe(200)
     expect(me.json()).toEqual({
-      user: { id: PROVISIONED_USER_ID, displayName: 'Provisioned User' },
+      user: {
+        id: PROVISIONED_USER_ID,
+        displayName: 'Provisioned User',
+        email: provisionedAccount.email,
+      },
     })
     await context.app.close()
   })

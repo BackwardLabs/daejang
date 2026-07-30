@@ -2003,3 +2003,73 @@
     min-width: 0;
   }
 }
+
+.ledger-state-card {
+  box-sizing: border-box;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  width: calc(100% - 80px);
+  min-height: 194px;
+  margin: 32px 40px 40px;
+  padding: 38px;
+  border: 1px solid var(--ledger-line-soft);
+  border-radius: 18px;
+  color: var(--ledger-ink);
+  background: #fff;
+  text-align: center;
+}
+
+.ledger-state-card h2,
+.ledger-state-card p {
+  margin: 0;
+}
+
+.ledger-state-card h2 {
+  font-size: 18px;
+  line-height: 28px;
+  letter-spacing: -0.02em;
+}
+
+.ledger-state-card p {
+  max-width: 620px;
+  color: var(--ledger-muted);
+  font-size: 13px;
+  line-height: 21px;
+}
+
+.ledger-state-card a,
+.ledger-state-card button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  margin-top: 8px;
+  padding: 0 18px;
+  border: 1px solid #f0c4b2;
+  border-radius: 10px;
+  color: #c7471a;
+  background: #fff8f4;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ledger-state-card--loading {
+  min-height: 120px;
+}
+
+.ledger-state-card--error {
+  background: #fff;
+}
+
+@media (max-width: 900px) {
+  .ledger-state-card {
+    width: calc(100% - 40px);
+    margin: 24px 20px 32px;
+    padding: 30px 22px;
+  }
+}

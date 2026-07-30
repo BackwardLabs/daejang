@@ -9,6 +9,7 @@ type SessionRow = {
   id: string
   user_id: string
   display_name: string
+  email: string | null
   subject_name_claim_id: string | null
   subject_name: string | null
   normalized_subject_name: string | null
@@ -62,6 +63,7 @@ const toSessionRecord = (row: SessionRow): SessionRecord => {
     user: {
       id: row.user_id,
       displayName: row.display_name,
+      ...(row.email ? { email: row.email } : {}),
     },
     ...(claim
       ? {
@@ -85,6 +87,7 @@ const loadSession = async (client: PoolClient, sessionId: string) => {
         s.id,
         s.user_id,
         u.display_name,
+        primary_email.normalized_email AS email,
         subject_claim.claim_id AS subject_name_claim_id,
         subject_claim.subject_name,
         subject_claim.normalized_name AS normalized_subject_name,
@@ -100,6 +103,14 @@ const loadSession = async (client: PoolClient, sessionId: string) => {
         AND u.session_epoch = s.session_epoch
       LEFT JOIN web_private.subject_name_claims subject_claim
         ON subject_claim.user_id = u.id
+      LEFT JOIN LATERAL (
+        SELECT user_email.normalized_email
+        FROM web_private.user_emails user_email
+        WHERE user_email.user_id = u.id
+          AND user_email.status = 'active'
+          AND user_email.is_primary = true
+        LIMIT 1
+      ) primary_email ON true
       WHERE s.id = $1
     `,
     [sessionId],

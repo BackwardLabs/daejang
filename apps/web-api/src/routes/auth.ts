@@ -35,6 +35,7 @@ export const registerAuthRoutes = async (
                 properties: {
                   id: { type: 'string', format: 'uuid' },
                   displayName: { type: 'string' },
+                  email: { type: 'string', format: 'email' },
                 },
               },
             },

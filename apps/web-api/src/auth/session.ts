@@ -5,6 +5,7 @@ export type SessionRecord = {
   user: {
     id: string
     displayName: string
+    email?: string
   }
   verifiedSubjectName?: {
     normalizedValue: string

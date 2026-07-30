@@ -88,7 +88,13 @@ describe('LedgerPage', () => {
   it('shows the real empty state when the API has no events', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
     render(<LedgerPage />)
-    expect(await screen.findByRole('heading', { name: '아직 처리된 거래가 없습니다' })).toBeInTheDocument()
+    const emptyHeading = await screen.findByRole('heading', {
+      name: '아직 처리된 거래가 없습니다',
+    })
+    expect(emptyHeading.closest('section')).toHaveClass(
+      'ledger-state-card',
+      'ledger-state-card--empty',
+    )
     expect(screen.getByRole('button', { name: '전체 거래 0건' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '검토 필요 0건' })).toBeInTheDocument()
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/ledger?taxYear=2027'), expect.anything())
@@ -141,7 +147,12 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    expect(await screen.findByRole('alert')).toHaveTextContent('장부를 불러오지 못했습니다')
+    const ledgerError = await screen.findByRole('alert')
+    expect(ledgerError).toHaveClass(
+      'ledger-state-card',
+      'ledger-state-card--error',
+    )
+    expect(ledgerError).toHaveTextContent('장부를 불러오지 못했습니다')
 
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     expect(await screen.findByRole('heading', { name: 'UNKNOWN_TRANSACTION' })).toBeInTheDocument()
