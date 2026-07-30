@@ -55,6 +55,9 @@ describe('localReportAttestationApi', () => {
         jsonResponse(wireStatus('PREPARED'), 201),
       )
       .mockResolvedValueOnce(
+        jsonResponse(wireStatus('PREPARED'), 201),
+      )
+      .mockResolvedValueOnce(
         jsonResponse(wireStatus('SUBMISSION_QUEUED'), 202),
       )
       .mockResolvedValueOnce(
@@ -83,6 +86,8 @@ describe('localReportAttestationApi', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
+    const preparedFromReport =
+      await localReportAttestationApi.prepare('report/mock 28')
     const prepared = await localReportAttestationApi.prepareFixture()
     const submitted = await localReportAttestationApi.submit(prepared.reportId)
     const reviewed = await localReportAttestationApi.review(prepared.reportId)
@@ -116,13 +121,15 @@ describe('localReportAttestationApi', () => {
     expect(verification.result).toBe('USABLE')
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/reports/report%2Fmock%2028/attestation-preparation',
       '/api/v1/dev/reports/attestation-fixture',
       '/api/v1/reports/report%2Fmock%2028/attestations',
       '/api/v1/dev/reports/report%2Fmock%2028/attestation-review',
       '/api/v1/reports/report%2Fmock%2028/attestation',
       '/api/v1/reports/report%2Fmock%2028/verification',
     ])
-    for (const call of fetchMock.mock.calls.slice(0, 3)) {
+    expect(preparedFromReport.reportId).toBe('report/mock 28')
+    for (const call of fetchMock.mock.calls.slice(0, 4)) {
       const init = call[1]
       expect(init?.method).toBe('POST')
       expect(init?.body).toBeUndefined()

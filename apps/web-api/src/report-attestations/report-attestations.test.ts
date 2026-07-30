@@ -11,6 +11,9 @@ import {
   getMockReportPublication,
   MOCK_REPORT_ID,
 } from './mock-publication-source.js'
+import type {
+  ReportAttestationPublicationSource,
+} from './publication-source.js'
 import {
   LOCAL_REPORT_ATTESTATION_RUNTIME_KIND,
   type Hex32,
@@ -126,6 +129,7 @@ const createFakeRuntime = (options?: {
 const createHarness = async (
   reviewOutcome: ReportReviewOutcome = 'APPROVE',
   fake = createFakeRuntime(),
+  publicationSource?: ReportAttestationPublicationSource,
 ) => {
   const context = await buildApp({
     config,
@@ -134,6 +138,7 @@ const createHarness = async (
       runtime: fake.runtime,
       reviewOutcome,
       identityKey: IDENTITY_KEY,
+      ...(publicationSource ? { publicationSource } : {}),
     },
   })
   const sessionA = await context.sessionService.create({
@@ -163,6 +168,82 @@ const createHarness = async (
 }
 
 describe('local report attestation fixture', () => {
+  it('prepares an injected report publication without changing the attestation lifecycle', async () => {
+    const reportId = 'report-engine-result-2027-v2'
+    const nextReportId = 'report-engine-result-2027-v3'
+    const safeArtifactBytes = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 'giwa.report.publication.v1',
+        reportId,
+        pointerVersion: 2,
+      }),
+    )
+    const publicationSource: ReportAttestationPublicationSource = {
+      getPublication: vi.fn(async (ownerId, requestedReportId) => {
+        if (
+          ownerId !== OWNER_A ||
+          (requestedReportId !== reportId &&
+            requestedReportId !== nextReportId)
+        ) {
+          return undefined
+        }
+        return {
+          reportId: requestedReportId,
+          revision: requestedReportId === reportId ? 2 : 3,
+          safeArtifactBytes,
+        }
+      }),
+    }
+    const fake = createFakeRuntime()
+    const harness = await createHarness(
+      'APPROVE',
+      fake,
+      publicationSource,
+    )
+    try {
+      const prepared = await harness.request('A', {
+        method: 'POST',
+        url:
+          `/api/v1/reports/${encodeURIComponent(reportId)}` +
+          '/attestation-preparation',
+      })
+      expect(prepared.statusCode).toBe(201)
+      expect(prepared.json()).toMatchObject({
+        reportId,
+        lifecycle: 'PREPARED',
+      })
+      expect(fake.prepareSyntheticEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          revision: 2,
+          safeArtifactBytes,
+        }),
+      )
+
+      const nextPrepared = await harness.request('A', {
+        method: 'POST',
+        url:
+          `/api/v1/reports/${encodeURIComponent(nextReportId)}` +
+          '/attestation-preparation',
+      })
+      expect(nextPrepared.statusCode).toBe(201)
+      const firstContractReportId =
+        fake.prepareSyntheticEvidence.mock.calls[0]?.[0].reportId
+      const secondContractReportId =
+        fake.prepareSyntheticEvidence.mock.calls[1]?.[0].reportId
+      expect(firstContractReportId).not.toBe(secondContractReportId)
+
+      const otherOwner = await harness.request('B', {
+        method: 'POST',
+        url:
+          `/api/v1/reports/${encodeURIComponent(reportId)}` +
+          '/attestation-preparation',
+      })
+      expect(otherOwner.statusCode).toBe(404)
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
   it('uses deterministic canonical JSON containing only the safe allowlist', () => {
     const first = getMockReportPublication()
     const second = getMockReportPublication()

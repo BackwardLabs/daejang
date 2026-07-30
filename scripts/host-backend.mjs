@@ -267,6 +267,27 @@ const serviceEnvironment = (exactNames, prefixes, overrides = {}) => ({
   ...overrides,
 })
 
+export const hostWebAPIForwardedEnvironmentPrefixes = Object.freeze([
+  'OAUTH_',
+  'GOOGLE_',
+  'KAKAO_',
+  'NAVER_',
+  'EMAIL_',
+  'RESEND_',
+  'X402_',
+])
+
+export const hostWebAPIForwardedEnvironmentNames = Object.freeze([
+  'GIWA_REPORT_ATTESTATIONS_ENABLED',
+  'GIWA_REPORT_RPC_URL',
+  'GIWA_REPORT_EAS_ADDRESS',
+  'GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS',
+  'GIWA_REPORT_REGISTRY_PROXY_ADDRESS',
+  'GIWA_REPORT_CONSUMER_ADDRESS',
+  'GIWA_REPORT_SCHEMA_UID',
+  'GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST',
+])
+
 export const privateObjectWriteEnvironment = (environment) =>
   environment.PRIVATE_OBJECT_ENCRYPTION_KEY
     ? {
@@ -930,8 +951,9 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         'SIGNUP_SESSION_TTL_SECONDS',
         'TRUST_PROXY_HOPS',
         'UPBIT_PDF_IMPORT_ENABLED',
+        ...hostWebAPIForwardedEnvironmentNames,
       ],
-      ['OAUTH_', 'GOOGLE_', 'KAKAO_', 'NAVER_', 'EMAIL_', 'RESEND_', 'X402_'],
+      hostWebAPIForwardedEnvironmentPrefixes,
       {
       NODE_ENV: 'production',
       HOST: '127.0.0.1',

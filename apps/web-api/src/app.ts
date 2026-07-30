@@ -44,6 +44,12 @@ import { registerReportPaymentRoutes } from './routes/report-payments.js'
 import { registerSecurityPolicy } from './security.js'
 import { registerReportAttestationRoutes } from './report-attestations/routes.js'
 import { ReportAttestationService } from './report-attestations/service.js'
+import {
+  MockReportAttestationPublicationSource,
+} from './report-attestations/mock-publication-source.js'
+import type {
+  ReportAttestationPublicationSource,
+} from './report-attestations/publication-source.js'
 import type {
   LocalReportAttestationRuntime,
   ReportReviewOutcome,
@@ -58,6 +64,8 @@ import type { ReportPaymentFacilitator } from './report-payment/facilitator.js'
 import type { ReportPaymentStore } from './report-payment/types.js'
 import type { ReportPaymentTaxReportReader } from './tax-report/types.js'
 import type { UploadStore } from './uploads/upload-store.js'
+import { registerReportAttestationDeploymentRoutes } from './routes/report-attestation-deployment.js'
+import type { ReportAttestationDeploymentReader } from './report-attestation-deployment/reader.js'
 
 type BuildAppOptions = {
   config?: AppConfig
@@ -79,7 +87,9 @@ type BuildAppOptions = {
     runtime: LocalReportAttestationRuntime
     reviewOutcome: ReportReviewOutcome
     identityKey?: Uint8Array
+    publicationSource?: ReportAttestationPublicationSource
   }
+  reportAttestationDeploymentReader?: ReportAttestationDeploymentReader
   now?: () => Date
   readinessCheck?: () => Promise<void>
 }
@@ -131,6 +141,14 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   ) {
     throw new Error(
       'ReportPaymentTaxReportReader, ReportPaymentStore and ReportPaymentFacilitator are required when report payments are enabled',
+    )
+  }
+  if (
+    config.reportAttestationDeployment &&
+    !options.reportAttestationDeploymentReader
+  ) {
+    throw new Error(
+      'A ReportAttestationDeploymentReader is required when GIWA report attestations are enabled',
     )
   }
   const signupMethodsMatchAuthConfiguration =
@@ -420,9 +438,20 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         : {}),
       ...(options.now ? { now: options.now } : {}),
     })
+    await registerReportAttestationDeploymentRoutes(protectedApp, {
+      ...(config.reportAttestationDeployment
+        ? { config: config.reportAttestationDeployment }
+        : {}),
+      ...(options.reportAttestationDeploymentReader
+        ? { reader: options.reportAttestationDeploymentReader }
+        : {}),
+    })
     if (reportAttestationService) {
       await registerReportAttestationRoutes(protectedApp, {
         service: reportAttestationService,
+        publicationSource:
+          options.reportAttestations?.publicationSource ??
+          new MockReportAttestationPublicationSource(),
       })
     }
   })

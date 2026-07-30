@@ -26,6 +26,7 @@ export type AppConfig = {
   privateObjectEncryptionKeyId?: string
   privateObjectLegacyKeyId?: string
   privateObjectDecryptionKeys?: ReadonlyMap<string, Buffer>
+  reportAttestationDeployment?: ReportAttestationDeploymentConfig
 }
 
 export type ReportPaymentConfig = {
@@ -37,6 +38,17 @@ export type ReportPaymentConfig = {
   maxTimeoutSeconds: number
   tokenName: string
   tokenVersion: string
+}
+
+export type ReportAttestationDeploymentConfig = {
+  network: 'eip155:91342'
+  rpcUrl: string
+  easAddress: string
+  schemaRegistryAddress: string
+  reportRegistryProxyAddress: string
+  reportConsumerAddress: string
+  schemaUID: string
+  evidenceSchemaDigest: string
 }
 
 export type SignupCapability = {
@@ -104,6 +116,153 @@ const parseOrigin = (value: string) => {
 }
 
 const evmAddressPattern = /^0x[0-9a-fA-F]{40}$/
+const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/
+const zeroAddress = `0x${'0'.repeat(40)}`
+const zeroBytes32 = `0x${'0'.repeat(64)}`
+const giwaSepoliaEasAddress =
+  '0x4200000000000000000000000000000000000021'
+const giwaSepoliaSchemaRegistryAddress =
+  '0x4200000000000000000000000000000000000020'
+
+const loadReportAttestationDeploymentConfig = (
+  environment: NodeJS.ProcessEnv,
+  production: boolean,
+): ReportAttestationDeploymentConfig | undefined => {
+  const enabled = parseBoolean(
+    environment.GIWA_REPORT_ATTESTATIONS_ENABLED,
+    false,
+    'GIWA_REPORT_ATTESTATIONS_ENABLED',
+  )
+  const entries = [
+    ['GIWA_REPORT_RPC_URL', environment.GIWA_REPORT_RPC_URL],
+    ['GIWA_REPORT_EAS_ADDRESS', environment.GIWA_REPORT_EAS_ADDRESS],
+    [
+      'GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS',
+      environment.GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS,
+    ],
+    [
+      'GIWA_REPORT_REGISTRY_PROXY_ADDRESS',
+      environment.GIWA_REPORT_REGISTRY_PROXY_ADDRESS,
+    ],
+    [
+      'GIWA_REPORT_CONSUMER_ADDRESS',
+      environment.GIWA_REPORT_CONSUMER_ADDRESS,
+    ],
+    ['GIWA_REPORT_SCHEMA_UID', environment.GIWA_REPORT_SCHEMA_UID],
+    [
+      'GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST',
+      environment.GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST,
+    ],
+  ] as const
+  const configuredEntries = entries.filter(
+    ([, value]) => value !== undefined && value !== '',
+  )
+
+  if (!enabled) {
+    if (configuredEntries.length > 0) {
+      throw new Error(
+        'GIWA report attestation deployment values require GIWA_REPORT_ATTESTATIONS_ENABLED=true',
+      )
+    }
+    return undefined
+  }
+
+  const missing = entries
+    .filter(([, value]) => !value)
+    .map(([name]) => name)
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.join(', ')} are required when GIWA report attestations are enabled`,
+    )
+  }
+
+  const rpcUrl = environment.GIWA_REPORT_RPC_URL as string
+  let rpc: URL
+  try {
+    rpc = new URL(rpcUrl)
+  } catch {
+    throw new Error('GIWA_REPORT_RPC_URL must be a valid URL')
+  }
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(rpc.hostname)
+  if (rpc.username || rpc.password || rpc.hash) {
+    throw new Error('GIWA_REPORT_RPC_URL must not contain credentials or a fragment')
+  }
+  if (production && rpc.protocol !== 'https:') {
+    throw new Error('GIWA_REPORT_RPC_URL must use https in production')
+  }
+  if (
+    !production &&
+    rpc.protocol !== 'https:' &&
+    !(rpc.protocol === 'http:' && loopback)
+  ) {
+    throw new Error('GIWA_REPORT_RPC_URL must use https or loopback http')
+  }
+
+  const easAddress = environment.GIWA_REPORT_EAS_ADDRESS as string
+  const schemaRegistryAddress =
+    environment.GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS as string
+  const reportRegistryProxyAddress =
+    environment.GIWA_REPORT_REGISTRY_PROXY_ADDRESS as string
+  const reportConsumerAddress =
+    environment.GIWA_REPORT_CONSUMER_ADDRESS as string
+  const addresses = [
+    easAddress,
+    schemaRegistryAddress,
+    reportRegistryProxyAddress,
+    reportConsumerAddress,
+  ]
+  if (
+    addresses.some(
+      (address) =>
+        !evmAddressPattern.test(address) ||
+        address.toLowerCase() === zeroAddress,
+    )
+  ) {
+    throw new Error(
+      'GIWA report attestation contract values must be nonzero EVM addresses',
+    )
+  }
+  if (
+    easAddress.toLowerCase() !== giwaSepoliaEasAddress ||
+    schemaRegistryAddress.toLowerCase() !==
+      giwaSepoliaSchemaRegistryAddress
+  ) {
+    throw new Error(
+      'GIWA EAS core addresses must match the pinned GIWA Sepolia deployment',
+    )
+  }
+  if (
+    new Set(addresses.map((address) => address.toLowerCase())).size !==
+    addresses.length
+  ) {
+    throw new Error('GIWA report attestation contract addresses must be distinct')
+  }
+
+  const schemaUID = environment.GIWA_REPORT_SCHEMA_UID as string
+  const evidenceSchemaDigest =
+    environment.GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST as string
+  if (
+    !bytes32Pattern.test(schemaUID) ||
+    schemaUID.toLowerCase() === zeroBytes32 ||
+    !bytes32Pattern.test(evidenceSchemaDigest) ||
+    evidenceSchemaDigest.toLowerCase() === zeroBytes32
+  ) {
+    throw new Error(
+      'GIWA_REPORT_SCHEMA_UID and GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST must be nonzero bytes32 values',
+    )
+  }
+
+  return {
+    network: 'eip155:91342',
+    rpcUrl,
+    easAddress,
+    schemaRegistryAddress,
+    reportRegistryProxyAddress,
+    reportConsumerAddress,
+    schemaUID,
+    evidenceSchemaDigest,
+  }
+}
 
 const loadReportPaymentConfig = (
   environment: NodeJS.ProcessEnv,
@@ -481,6 +640,8 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   const oauth = loadOAuthConfig(environment, production)
   const emailAuth = loadEmailAuthConfig(environment, production)
   const reportPayments = loadReportPaymentConfig(environment, production)
+  const reportAttestationDeployment =
+    loadReportAttestationDeploymentConfig(environment, production)
   const identityVerificationMode = parseIdentityVerificationMode(
     environment.IDENTITY_VERIFICATION_MODE,
   )
@@ -590,6 +751,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
       production && engineInsecureTarget === undefined,
     ),
     ...(reportPayments ? { reportPayments } : {}),
+    ...(reportAttestationDeployment ? { reportAttestationDeployment } : {}),
     ...(environment.PRIVATE_OBJECT_ROOT ? { privateObjectRoot: environment.PRIVATE_OBJECT_ROOT } : {}),
     ...(privateObjectEncryptionKey ? { privateObjectEncryptionKey } : {}),
     ...(privateObjectEncryptionKeyId ? { privateObjectEncryptionKeyId } : {}),

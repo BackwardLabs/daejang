@@ -14,6 +14,7 @@ import {
   type TaxAmountModel,
   type TaxReportModel,
 } from './taxReportApi.ts'
+import { GiwaReportAttestationPanel } from './GiwaReportAttestationPanel.tsx'
 import './report.css'
 
 const LocalReportAttestationDemo = import.meta.env.DEV
@@ -271,6 +272,8 @@ export function ReportPage() {
           title="보고서"
           tone="workspace"
         />
+
+        <GiwaReportAttestationPanel />
 
         {LocalReportAttestationDemo ? (
           <Suspense

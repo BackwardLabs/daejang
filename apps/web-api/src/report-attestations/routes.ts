@@ -4,7 +4,8 @@ import type {
 } from 'fastify'
 
 import { ApiError, resourceNotFound, unauthorized } from '../errors.js'
-import { getMockReportPublication } from './mock-publication-source.js'
+import { MOCK_REPORT_ID } from './mock-publication-source.js'
+import type { ReportAttestationPublicationSource } from './publication-source.js'
 import {
   ReportAttestationConflictError,
   LocalReportFixtureUnavailableError,
@@ -131,6 +132,9 @@ const assertEmptyBody = (body: unknown) => {
 }
 
 const mapServiceError = (error: unknown): never => {
+  if (error instanceof ApiError) {
+    throw error
+  }
   if (error instanceof ReportAttestationServiceClosedError) {
     throw new ApiError(
       503,
@@ -177,8 +181,23 @@ export const registerReportAttestationRoutes = async (
   app: FastifyInstance,
   options: {
     service: ReportAttestationService
+    publicationSource: ReportAttestationPublicationSource
   },
 ) => {
+  const preparePublication = async (
+    ownerId: string,
+    reportId: string,
+  ) => {
+    const publication = await options.publicationSource.getPublication(
+      ownerId,
+      reportId,
+    )
+    if (!publication || publication.reportId !== reportId) {
+      throw resourceNotFound()
+    }
+    return options.service.preparePublication(ownerId, publication)
+  }
+
   app.post<{ Body: unknown }>(
     '/api/v1/dev/reports/attestation-fixture',
     {
@@ -191,9 +210,33 @@ export const registerReportAttestationRoutes = async (
       assertEmptyBody(request.body)
       const ownerId = assertAuthenticatedOwner(request)
       try {
-        const status = await options.service.prepareFixture(
+        const status = await preparePublication(ownerId, MOCK_REPORT_ID)
+        return reply.status(201).send(status)
+      } catch (error) {
+        return mapServiceError(error)
+      }
+    },
+  )
+
+  app.post<{
+    Params: { reportId: string }
+    Body: unknown
+  }>(
+    '/api/v1/reports/:reportId/attestation-preparation',
+    {
+      schema: {
+        params: reportParamsSchema,
+        querystring: emptyQuerySchema,
+        response: { 201: statusResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      assertEmptyBody(request.body)
+      const ownerId = assertAuthenticatedOwner(request)
+      try {
+        const status = await preparePublication(
           ownerId,
-          getMockReportPublication(),
+          request.params.reportId,
         )
         return reply.status(201).send(status)
       } catch (error) {

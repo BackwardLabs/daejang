@@ -45,6 +45,10 @@ export type ReportVerification = Readonly<{
 }>
 
 export type LocalReportAttestationApi = Readonly<{
+  prepare(
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<ReportAttestationStatus>
   prepareFixture(signal?: AbortSignal): Promise<ReportAttestationStatus>
   submit(
     reportId: string,
@@ -452,6 +456,19 @@ const reportPath = (reportId: string) =>
   `/reports/${encodeURIComponent(reportId)}`
 
 export const localReportAttestationApi: LocalReportAttestationApi = {
+  async prepare(reportId, signal) {
+    return parseStatus(
+      await requestApi<unknown>(
+        `${reportPath(reportId)}/attestation-preparation`,
+        {
+          method: 'POST',
+          signal,
+        },
+      ),
+      reportId,
+    )
+  },
+
   async prepareFixture(signal) {
     return parseStatus(
       await requestApi<unknown>('/dev/reports/attestation-fixture', {
