@@ -21,6 +21,9 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { loadEnvFile } from 'node:process'
 import { fileURLToPath } from 'node:url'
+import pg from 'pg'
+
+const { Client } = pg
 
 const scriptRepositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryRoot = resolve(
@@ -50,6 +53,9 @@ export const resolvePostingRepository = (
 const postingRepository = resolvePostingRepository(
   projectRoot,
   process.env.GIWA_POSTING_REPOSITORY,
+)
+const taxRepository = resolve(
+  process.env.GIWA_TAX_REPOSITORY ?? join(projectRoot, 'daejang-tax-engine'),
 )
 const jitRepository = resolve(
   process.env.GIWA_JIT_REPOSITORY ?? join(projectRoot, 'daejang-jit-engine'),
@@ -98,6 +104,7 @@ const assertExternalRuntimeRoot = () => {
     repositoryRoot,
     databaseRepository,
     postingRepository,
+    taxRepository,
     jitRepository,
     jitRuntime,
   ]) {
@@ -123,6 +130,12 @@ const ensureRuntimeDirectories = () => {
     join(artifactRoot, 'source', 'tmp'),
     join(artifactRoot, 'review', 'root'),
     join(artifactRoot, 'review', 'tmp'),
+    join(artifactRoot, 'tax', 'root'),
+    join(artifactRoot, 'tax', 'tmp'),
+    join(runtimeRoot, 'quote-archive', 'upbit'),
+    join(stateRoot, 'tax-claim-control'),
+    join(stateRoot, 'tax-claim-control-state'),
+    join(stateRoot, 'tax-claim-receipts'),
     join(runtimeRoot, 'private-objects'),
     join(stateRoot, 'selections'),
   ]) {
@@ -185,7 +198,15 @@ const loadRuntimeEnvironment = () => {
   }
 }
 
-const serviceOrder = ['pdf-parser', 'jit', 'engine', 'worker', 'posting', 'web-api']
+const serviceOrder = [
+  'pdf-parser',
+  'jit',
+  'engine',
+  'worker',
+  'posting',
+  'taxd',
+  'web-api',
+]
 const pidFile = (name) => join(pidRoot, `${name}.pid`)
 const logFile = (name) => join(logRoot, `${name}.log`)
 
@@ -538,6 +559,14 @@ const webReady = async () => {
   }
 }
 
+const taxReady = async () => {
+  try {
+    return (await fetch('http://127.0.0.1:8981/readyz')).ok
+  } catch {
+    return false
+  }
+}
+
 const runtimeHealthy = async () => {
   if (!serviceOrder.every(isRunning)) return false
   const jitSocket = join(socketRoot, 'jit.sock')
@@ -547,6 +576,7 @@ const runtimeHealthy = async () => {
     await unixReady(jitSocket) &&
     engineReady() &&
     existsSync(join(stateRoot, 'worker.ready')) &&
+    await taxReady() &&
     await webReady()
   )
 }
@@ -589,6 +619,22 @@ const build = () => {
       GOPROXY: 'direct',
     },
   })
+  for (const [command, output] of [
+    ['./cmd/taxd', join(binaryRoot, 'taxd')],
+    ['./cmd/tax-backfill', join(binaryRoot, 'tax-backfill')],
+  ]) {
+    run('go', ['build', '-o', output, command], {
+      cwd: taxRepository,
+      env: {
+        ...baseEnvironment(),
+        GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
+        GOWORK: 'off',
+        GOPRIVATE: 'github.com/BackwardLabs',
+        GONOSUMDB: 'github.com/BackwardLabs',
+        GOPROXY: 'direct',
+      },
+    })
+  }
   const webAPIRuntime = join(runtimeRoot, 'app', 'web-api')
   rmSync(webAPIRuntime, { recursive: true, force: true })
   mkdirSync(dirname(webAPIRuntime), { recursive: true, mode: 0o700 })
@@ -767,6 +813,219 @@ export const ensureRuntimeIndexerView = (root, stores) => {
   return root
 }
 
+const canonicalJSON = (value) => {
+  const normalize = (item) => {
+    if (Array.isArray(item)) return item.map(normalize)
+    if (item && typeof item === 'object') {
+      return Object.fromEntries(
+        Object.keys(item).sort().map((key) => [key, normalize(item[key])]),
+      )
+    }
+    return item
+  }
+  return JSON.stringify(normalize(value))
+}
+
+const sha256 = (value) => createHash('sha256').update(value).digest('hex')
+
+const gitCommit = (repository) => {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repository,
+    encoding: 'utf8',
+  })
+  const commit = result.stdout?.trim()
+  if (result.status !== 0 || !/^[0-9a-f]{40}$/.test(commit)) {
+    throw new Error(`Unable to resolve Git commit for ${repository}`)
+  }
+  return commit
+}
+
+export const createTaxProfiles = (rows) => {
+  const subjects = new Map()
+  for (const row of rows) {
+    const subject = subjects.get(row.subject_id) ?? {
+      accounts: new Set(),
+      assets: new Set(),
+      hasDocumentAsset: false,
+    }
+    subject.accounts.add(row.account_id)
+    subject.assets.add(row.asset_id)
+    if (row.asset_id.startsWith('cex-document-asset:')) {
+      subject.hasDocumentAsset = true
+    }
+    subjects.set(row.subject_id, subject)
+  }
+  const profiles = []
+  for (const [subjectId, subject] of [...subjects].sort(([left], [right]) =>
+    left.localeCompare(right))) {
+    if (subject.hasDocumentAsset) continue
+    profiles.push({
+      subjectId,
+      residentId: subjectId,
+      taxYear: 2027,
+      denominationAssetId: 'asset-krw-upbit',
+      accountBindings: [...subject.accounts].sort().map((accountId) => ({
+        accountId,
+        taxAddressId: accountId,
+        kind: accountId.startsWith('cex-account:') ? 'VASP' : 'OTHER',
+        method: accountId.startsWith('cex-account:')
+          ? 'MOVING_AVERAGE'
+          : 'FIFO',
+      })),
+      assetBindings: [...subject.assets].sort().map((assetId) => ({
+        ledgerAssetId: assetId,
+        taxAssetId: `tax-${assetId}`,
+      })),
+    })
+  }
+  if (profiles.length === 0) {
+    throw new Error('No subjects have fully canonical ledger assets for taxd')
+  }
+  return { schemaVersion: 'tax.downstream-profile-set.v1', profiles }
+}
+
+const createTaxRuntime = async (queryURL) => {
+  const client = new Client({ connectionString: queryURL })
+  await client.connect()
+  let rows
+  try {
+    const result = await client.query(`
+      SELECT DISTINCT event.subject_id, posting.account_id, posting.asset_id
+      FROM ledger.interpreted_event AS event
+      JOIN ledger.asset_posting AS posting
+        ON posting.subject_id=event.subject_id
+       AND posting.event_id=event.event_id
+       AND posting.revision_id=event.current_revision_id
+      WHERE event.current_revision_id IS NOT NULL
+      ORDER BY event.subject_id,posting.account_id,posting.asset_id
+    `)
+    rows = result.rows
+  } finally {
+    await client.end()
+  }
+
+  const registryPin = {
+    bundleSchemaVersion: 'defi-label.action-registry.v1',
+    registrySourceRepository: 'BackwardLabs/DeFi-Label',
+    registrySourceCommit: '9ccbf885736117fd602ad61aa139ae6fc32d72c3',
+    exporterContractRepository: 'BackwardLabs/DeFi-Label',
+    exporterContractCommit: '9582907645de48ffd2049a6d4757b0933b6779ad',
+    bundleSha256: '18cf13e50ad20ad42db7fbf56ca42058efd050914284482fce1f9f7aa940ecda',
+    signatureKeyId: 'ac3bfd53c95e743e',
+    signaturePublicKeySha256: 'ac3bfd53c95e743eb76c104385968699a1f70c2a3cc64e6ba3c680364cf0029a',
+  }
+  const policy = canonicalJSON({
+    name: 'production-ledger-consumer-policy',
+    version: 'v1',
+    schemaDigest: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    protocols: [{
+      id: 'ledger-only-placeholder',
+      chainId: 'eip155:1',
+      addresses: ['0x2222222222222222222222222222222222222222'],
+      selectors: ['0x12345678'],
+    }],
+    v2ActionRegistry: {
+      schemaVersion: 'tax.action-registry-declaration.v1',
+      registryPin,
+      profileDeclarations: [
+        { profileId: 'weth9.unwrap' },
+        { profileId: 'weth9.wrap' },
+      ],
+    },
+  })
+  const activation = canonicalJSON({
+    schemaVersion: 'tax.activation-set.v1',
+    bundleSha256: registryPin.bundleSha256,
+    rawPolicySha256: sha256(policy),
+    registryPin,
+    emergencyDenyProfileIds: [],
+    profiles: ['weth9.unwrap', 'weth9.wrap'].map((profileId) => ({
+      schemaVersion: 'tax.profile-activation.v1',
+      profileId,
+      profileVersion: '1.0.0',
+      runtimeState: 'DISABLED',
+      activationIntentPath: null,
+      activationIntentSha256: null,
+      activationReceiptPath: null,
+      activationReceiptSha256: null,
+    })),
+  })
+  const profiles = canonicalJSON(createTaxProfiles(rows))
+  const upbitConfig = JSON.parse(readFileSync(
+    join(taxRepository, 'config', 'upbit-quote-provider.v1.json'),
+    'utf8',
+  ))
+  upbitConfig.firstTradeAfterMaxSeconds = 3600
+  upbitConfig.policyVersion = 'upbit-closed-minute-or-airdrop-first-trade-v2'
+
+  const files = {
+    policy: join(configRoot, 'tax-interpretation-policy.json'),
+    ownership: join(configRoot, 'tax-ownership.json'),
+    activation: join(configRoot, 'tax-activation-set.json'),
+    profiles: join(configRoot, 'tax-downstream-profiles.json'),
+    quotes: join(configRoot, 'tax-upbit-quotes.json'),
+  }
+  for (const [path, contents] of [
+    [files.policy, policy],
+    [files.ownership, canonicalJSON({ assertions: [] })],
+    [files.activation, activation],
+    [files.profiles, profiles],
+    [files.quotes, canonicalJSON(upbitConfig)],
+  ]) {
+    writeFileSync(path, contents, { mode: 0o600 })
+    chmodSync(path, 0o600)
+  }
+
+  const schemaRepository = join(projectRoot, 'schema')
+  const taxCommit = gitCommit(taxRepository)
+  const dbCommit = gitCommit(databaseRepository)
+  const catalog = readFileSync(
+    join(taxRepository, 'internal', 'registry', 'release', 'action-registry-v1.json'),
+  )
+  return {
+    files,
+    activationDigest: sha256(activation),
+    candidateDigest: sha256(`${taxCommit}:${dbCommit}:${sha256(profiles)}`),
+    schemaCommit: gitCommit(schemaRepository),
+    jitCommit: gitCommit(jitRepository),
+    dbCommit,
+    postingCommit: gitCommit(postingRepository),
+    taxCommit,
+    catalogDigest: sha256(catalog),
+  }
+}
+
+const taxEnvironment = (taxURL, runtime) => serviceEnvironment([], [], {
+  DAEJANG_DATABASE_URL: taxURL,
+  DAEJANG_ARTIFACT_ROOT: join(artifactRoot, 'tax', 'root'),
+  DAEJANG_ARTIFACT_TEMP: join(artifactRoot, 'tax', 'tmp'),
+  DAEJANG_TAXD_INPUT_MODE: 'LEDGER_PUBLICATION',
+  DAEJANG_TAXD_POLICY_FILE: runtime.files.policy,
+  DAEJANG_TAXD_OWNERSHIP_FILE: runtime.files.ownership,
+  DAEJANG_TAXD_ACTIVATION_SET_FILE: runtime.files.activation,
+  DAEJANG_TAXD_ACTIVATION_SET_SHA256: runtime.activationDigest,
+  DAEJANG_TAXD_DOWNSTREAM_PROFILE_FILE: runtime.files.profiles,
+  DAEJANG_TAXD_UPBIT_QUOTE_CONFIG_FILE: runtime.files.quotes,
+  DAEJANG_TAXD_QUOTE_ARCHIVE_ROOT: join(runtimeRoot, 'quote-archive', 'upbit'),
+  DAEJANG_TAXD_PUBLICATION_POLICY_TRUST_KEY:
+    process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY,
+  DAEJANG_TAXD_CANDIDATE_DIGEST: runtime.candidateDigest,
+  DAEJANG_TAXD_CLAIM_CONTROL_DIR: join(stateRoot, 'tax-claim-control'),
+  DAEJANG_TAXD_CLAIM_CONTROL_STATE_DIR:
+    join(stateRoot, 'tax-claim-control-state'),
+  DAEJANG_TAXD_CLAIM_RECEIPT_DIR: join(stateRoot, 'tax-claim-receipts'),
+  DAEJANG_TAXD_PRODUCER_VERSION: runtime.taxCommit,
+  DAEJANG_TAXD_SCHEMA_COMMIT: runtime.schemaCommit,
+  DAEJANG_TAXD_JIT_COMMIT: runtime.jitCommit,
+  DAEJANG_TAXD_DB_COMMIT: runtime.dbCommit,
+  DAEJANG_TAXD_POSTING_COMMIT: runtime.postingCommit,
+  DAEJANG_TAXD_DB_MIGRATION_VERSION: '52',
+  DAEJANG_TAXD_TAX_COMMIT: runtime.taxCommit,
+  DAEJANG_TAXD_CATALOG_SHA256: runtime.catalogDigest,
+  DAEJANG_TAXD_HEALTH_ADDRESS: '127.0.0.1:8981',
+  DAEJANG_TAXD_LOG_JSON: 'true',
+})
+
 const startServices = async ({ buildArtifacts = true } = {}) => {
   if (serviceOrder.some(isRunning))
     throw new Error('Backend services are already running; use backend:restart')
@@ -779,6 +1038,8 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     join(binaryRoot, 'engine-healthcheck'),
     join(binaryRoot, 'sync-worker'),
     join(binaryRoot, 'posting-worker'),
+    join(binaryRoot, 'taxd'),
+    join(binaryRoot, 'tax-backfill'),
     join(runtimeRoot, 'app', 'web-api', 'server.js'),
   ]) {
     if (!existsSync(requiredArtifact)) {
@@ -847,6 +1108,10 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     const webURL = databaseURL(
       'daejang_web_app',
       process.env.DAEJANG_WEB_APP_PASSWORD,
+    )
+    const taxURL = databaseURL(
+      'daejang_tax_app',
+      process.env.DAEJANG_TAX_APP_PASSWORD,
     )
     const ethereumRPC = process.env.ENV_RPC_URL_ETHEREUM_MAINNET
     const optimismRPC =
@@ -993,6 +1258,17 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       throw new Error('Posting worker exited during startup')
     }
 
+    const taxRuntime = await createTaxRuntime(queryURL)
+    const taxdEnvironment = taxEnvironment(taxURL, taxRuntime)
+    spawnService(
+      'taxd',
+      join(binaryRoot, 'taxd'),
+      [],
+      taxdEnvironment,
+      { cwd: taxRepository },
+    )
+    await waitFor('Tax Engine', taxReady, 30_000)
+
     const webAPIEnvironment = serviceEnvironment(
       [
         'BODY_LIMIT_BYTES',
@@ -1051,7 +1327,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     if (shutdownRequested) throw new Error('Backend shutdown was requested')
     rmSync(pauseFile, { force: true })
     console.log(
-      'Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, sync worker, Posting worker, Web API',
+      'Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, sync worker, Posting worker, Tax Engine, Web API',
     )
   } catch (error) {
     await stopServices()

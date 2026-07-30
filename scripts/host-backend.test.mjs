@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import {
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
+  createTaxProfiles,
   cronAutostartEntries,
   ensureRuntimeIndexerView,
   hostPostingWorkerArgs,
@@ -41,6 +42,37 @@ import {
   supervisorProcessSpec,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
+
+test('builds tax profiles only for subjects with canonical ledger assets', () => {
+  const profiles = createTaxProfiles([
+    {
+      subject_id: 'subject-canonical',
+      account_id: 'cex-account:upbit:1',
+      asset_id: 'asset-zbt-upbit',
+    },
+    {
+      subject_id: 'subject-canonical',
+      account_id: 'cex-account:upbit:1',
+      asset_id: 'asset-krw-upbit',
+    },
+    {
+      subject_id: 'subject-document',
+      account_id: 'cex-account:upbit:2',
+      asset_id: 'cex-document-asset:upbit:decimal8:btc',
+    },
+  ])
+
+  assert.equal(profiles.schemaVersion, 'tax.downstream-profile-set.v1')
+  assert.equal(profiles.profiles.length, 1)
+  assert.equal(profiles.profiles[0].subjectId, 'subject-canonical')
+  assert.equal(profiles.profiles[0].taxYear, 2027)
+  assert.deepEqual(
+    profiles.profiles[0].assetBindings.map((binding) => binding.ledgerAssetId),
+    ['asset-krw-upbit', 'asset-zbt-upbit'],
+  )
+  assert.equal(profiles.profiles[0].accountBindings[0].kind, 'VASP')
+  assert.equal(profiles.profiles[0].accountBindings[0].method, 'MOVING_AVERAGE')
+})
 
 test('pins same-period multichain coverage to one deterministic snapshot', () => {
   const input = {
