@@ -98,7 +98,7 @@ Evidence pack은 다음 연결을 보존한다.
 - KRW denomination과 유효 구간이 명확한 quote snapshot
 - 지갑·거래소 account의 실제 ownership assertion
 - JIT·Tax policy 및 Engine artifact pin
-- `daejang-db` migration 41
+- `daejang-db` migration 42
 - JIT와 SOURCE producer 각각의 서명된 publication claim 정책
 - private artifact 저장소와 PostgreSQL runtime role
 

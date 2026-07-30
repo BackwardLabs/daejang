@@ -38,10 +38,11 @@ flowchart TD
   parse -->|아니오| fail[명시적 실패 상태]
   observation --> activity[PARTIAL 장부 read projection]
   observation --> coverage[PARTIAL source coverage 보고서]
+  observation --> tax[DEX·CEX 통합 Lot·Tax 계산]
   activity --> review[Review read model]
   review --> resolution[Account-scoped Review resolution]
   resolution --> delivery[ReviewResolved V2 + durable delivery rows]
-  delivery --> tax[DEX·CEX 통합 Lot·Tax 계산]
+  delivery -. 후속 consumer 구현 전 .-> pending[재계산 대기]
   tax --> report[Immutable Report snapshot]
 ```
 
@@ -50,8 +51,10 @@ Upbit PDF의 매수·매도·입금·출금 행은 Source Evidence Observation�
 조회됩니다. 지원하는 매수·매도는 기존 ledger/review/lot 저장 계약으로 물질화되고,
 DEX와 CEX의 원본 generation member를 보존한 하나의 연간 Report를 구성합니다.
 열린 Review나 알 수 없는 가격이 있으면 Report는 `PARTIAL`과 `UNKNOWN`을 유지합니다.
-delivery row는 downstream handoff가 저장됐다는
-뜻일 뿐 recalculation, anchor 또는 report delivery 완료 신호가 아닙니다. parser가
+현재 Tax 계산은 `SubjectEvidencePublished` 처리 시 실행됩니다. delivery row는 downstream
+handoff가 저장됐다는 뜻일 뿐이며, `ReviewResolved`를 소비해 Tax를 다시 계산하는 consumer는
+아직 구현되지 않았습니다. 따라서 delivery는 recalculation, anchor 또는 report delivery 완료
+신호가 아닙니다. parser가
 없는 문서는 성공한 거래 0건으로 위장하지 않고 지원 불가 실패로 종료해야 합니다.
 
 세부 매핑과 재처리 불변조건은 [Upbit PDF Observation 정규화](upbit-observation-pipeline.md), 통합 계산과 증빙 연결은 [DEX·CEX 통합 세금 보고서 흐름](dex-cex-tax-report-flow.md)을 따릅니다.
