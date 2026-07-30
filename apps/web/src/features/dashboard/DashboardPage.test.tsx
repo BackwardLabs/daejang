@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultAppYear } from '../../components/AppSidebar.tsx'
 import { DashboardPage } from './DashboardPage.tsx'
 
 beforeEach(() => {
@@ -17,6 +18,10 @@ describe('DashboardPage', () => {
     expect(screen.getByText('2개')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '월별 거래 흐름' })).toBeInTheDocument()
     expect(screen.getByText('열린 검토가 없습니다')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining(`taxYear=${defaultAppYear()}`),
+      expect.anything(),
+    )
   })
 
   it('reloads when the tax year changes', async () => {

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { defaultAppYear } from '../../components/AppSidebar.tsx'
 import { formatReviewQuantity, LedgerPage } from './LedgerPage.tsx'
 
 const jsonResponse = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
@@ -79,6 +80,14 @@ afterEach(() => {
 })
 
 describe('LedgerPage', () => {
+  it('starts from the current supported calendar year', () => {
+    expect(defaultAppYear(new Date('2025-07-30T00:00:00Z'))).toBe('2025')
+    expect(defaultAppYear(new Date('2026-07-30T00:00:00Z'))).toBe('2026')
+    expect(defaultAppYear(new Date('2027-07-30T00:00:00Z'))).toBe('2027')
+    expect(defaultAppYear(new Date('2024-07-30T00:00:00Z'))).toBe('2025')
+    expect(defaultAppYear(new Date('2028-07-30T00:00:00Z'))).toBe('2027')
+  })
+
   it('formats canonical integer quantities without losing precision', () => {
     expect(formatReviewQuantity('1250000000000000000', 18)).toBe('1.25')
     expect(formatReviewQuantity('9007199254740993')).toBe('9007199254740993 raw units')
@@ -97,7 +106,10 @@ describe('LedgerPage', () => {
     )
     expect(screen.getByRole('button', { name: '전체 거래 0건' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '검토 필요 0건' })).toBeInTheDocument()
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/ledger?taxYear=2027'), expect.anything())
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining(`/ledger?taxYear=${defaultAppYear()}`),
+      expect.anything(),
+    )
   })
 
   it('does not present unknown counts as zero while data is loading', () => {
@@ -165,17 +177,19 @@ describe('LedgerPage', () => {
     let reviewListReads = 0
     const oldLedger = new Promise<Response>((resolve) => { resolveOldLedger = resolve })
     const oldReviews = new Promise<Response>((resolve) => { resolveOldReviews = resolve })
-    const event2026 = {
+    const initialYear = defaultAppYear()
+    const nextYear = initialYear === '2025' ? '2026' : '2025'
+    const nextEvent = {
       ...ledgerEvent,
-      eventId: 'event-2026',
-      revisionId: 'ledger-revision-2026',
-      effectiveAt: '2026-01-01T00:00:00.000Z',
+      eventId: `event-${nextYear}`,
+      revisionId: `ledger-revision-${nextYear}`,
+      effectiveAt: `${nextYear}-01-01T00:00:00.000Z`,
     }
 
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url.includes('/ledger?taxYear=2027')) return oldLedger
-      if (url.includes('/ledger?taxYear=2026')) return jsonResponse({ items: [event2026] })
+      if (url.includes(`/ledger?taxYear=${initialYear}`)) return oldLedger
+      if (url.includes(`/ledger?taxYear=${nextYear}`)) return jsonResponse({ items: [nextEvent] })
       if (url.endsWith('/reviews') && !init?.method) {
         reviewListReads++
         return reviewListReads === 1 ? oldReviews : jsonResponse({ items: [secondReviewSummary] })
@@ -190,9 +204,9 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    fireEvent.change(screen.getByLabelText('조회 기간'), { target: { value: '2026' } })
+    fireEvent.change(screen.getByLabelText('조회 기간'), { target: { value: nextYear } })
 
-    expect(await screen.findByText('event-2026')).toBeInTheDocument()
+    expect(await screen.findByText(`event-${nextYear}`)).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
     expect(await screen.findByRole('button', { name: /NEEDS_CONTEXT/ })).toBeInTheDocument()
 
@@ -202,7 +216,7 @@ describe('LedgerPage', () => {
       expect(screen.queryByRole('button', { name: /UNKNOWN_TRANSACTION/ })).not.toBeInTheDocument()
     })
     fireEvent.click(screen.getByRole('button', { name: '전체 거래 1건' }))
-    expect(screen.getByText('event-2026')).toBeInTheDocument()
+    expect(screen.getByText(`event-${nextYear}`)).toBeInTheDocument()
     expect(screen.queryByText('event-2027')).not.toBeInTheDocument()
   })
 

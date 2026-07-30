@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { AppSidebar, type AppYear } from '../../components/AppSidebar.tsx'
+import { AppSidebar, defaultAppYear, type AppYear } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import { ApiClientError } from '../../api/client.ts'
 import {
@@ -33,7 +33,7 @@ export const formatReviewQuantity = (quantity: string, assetDecimals?: number) =
 }
 
 export function LedgerPage() {
-  const [year, setYear] = useState<AppYear>('2027')
+  const [year, setYear] = useState<AppYear>(defaultAppYear)
   const [events, setEvents] = useState<LedgerEventModel[]>([])
   const ledgerGenerationRef = useRef(0)
   const [reviews, setReviews] = useState<ReviewModel[]>([])
