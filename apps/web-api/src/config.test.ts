@@ -44,8 +44,21 @@ describe('web api configuration', () => {
         'GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS',
         'GIWA_REPORT_REGISTRY_PROXY_ADDRESS',
         'GIWA_REPORT_CONSUMER_ADDRESS',
+        'GIWA_REPORT_GOVERNANCE_SAFE_ADDRESS',
         'GIWA_REPORT_SCHEMA_UID',
         'GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST',
+        'GIWA_REPORT_SYNTHETIC_TESTNET_ENABLED',
+        'GIWA_REPORT_IDENTITY_HMAC_KEY',
+        'GIWA_REPORT_ISSUER_ADDRESS',
+        'GIWA_REPORT_ISSUER_KEYSTORE_PATH',
+        'GIWA_REPORT_ISSUER_PASSWORD_FILE',
+        'GIWA_REPORT_REVIEWER_ADDRESS',
+        'GIWA_REPORT_REVIEWER_KEYSTORE_PATH',
+        'GIWA_REPORT_REVIEWER_PASSWORD_FILE',
+        'GIWA_REPORT_MIN_CONFIRMATIONS',
+        'GIWA_REPORT_DAILY_USER_WRITE_LIMIT',
+        'GIWA_REPORT_DAILY_IP_WRITE_LIMIT',
+        'GIWA_REPORT_DAILY_GLOBAL_WRITE_LIMIT',
         'PRIVATE_OBJECT_ENCRYPTION_KEY',
         'PRIVATE_OBJECT_ENCRYPTION_KEY_ID',
         'PRIVATE_OBJECT_LEGACY_KEY_ID',
@@ -91,6 +104,8 @@ describe('web api configuration', () => {
         '0x1111111111111111111111111111111111111111',
       GIWA_REPORT_CONSUMER_ADDRESS:
         '0x2222222222222222222222222222222222222222',
+      GIWA_REPORT_GOVERNANCE_SAFE_ADDRESS:
+        '0x3333333333333333333333333333333333333333',
       GIWA_REPORT_SCHEMA_UID: `0x${'a'.repeat(64)}`,
       GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST: `0x${'b'.repeat(64)}`,
     }
@@ -105,6 +120,8 @@ describe('web api configuration', () => {
         '0x1111111111111111111111111111111111111111',
       reportConsumerAddress:
         '0x2222222222222222222222222222222222222222',
+      governanceSafeAddress:
+        '0x3333333333333333333333333333333333333333',
       schemaUID: `0x${'a'.repeat(64)}`,
       evidenceSchemaDigest: `0x${'b'.repeat(64)}`,
     })
@@ -135,6 +152,8 @@ describe('web api configuration', () => {
         '0x1111111111111111111111111111111111111111',
       GIWA_REPORT_CONSUMER_ADDRESS:
         '0x2222222222222222222222222222222222222222',
+      GIWA_REPORT_GOVERNANCE_SAFE_ADDRESS:
+        '0x3333333333333333333333333333333333333333',
       GIWA_REPORT_SCHEMA_UID: `0x${'a'.repeat(64)}`,
       GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST: `0x${'b'.repeat(64)}`,
     }
@@ -159,6 +178,97 @@ describe('web api configuration', () => {
           environment.GIWA_REPORT_REGISTRY_PROXY_ADDRESS,
       }),
     ).toThrow('must be distinct')
+  })
+
+  it('loads the synthetic GIWA writer only with complete server-side secrets', () => {
+    const deployment = {
+      GIWA_REPORT_ATTESTATIONS_ENABLED: 'true',
+      GIWA_REPORT_RPC_URL: 'https://sepolia-rpc.giwa.io',
+      GIWA_REPORT_EAS_ADDRESS:
+        '0x4200000000000000000000000000000000000021',
+      GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS:
+        '0x4200000000000000000000000000000000000020',
+      GIWA_REPORT_REGISTRY_PROXY_ADDRESS:
+        '0x1111111111111111111111111111111111111111',
+      GIWA_REPORT_CONSUMER_ADDRESS:
+        '0x2222222222222222222222222222222222222222',
+      GIWA_REPORT_GOVERNANCE_SAFE_ADDRESS:
+        '0x3333333333333333333333333333333333333333',
+      GIWA_REPORT_SCHEMA_UID: `0x${'a'.repeat(64)}`,
+      GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST: `0x${'b'.repeat(64)}`,
+    }
+    const writer = {
+      GIWA_REPORT_SYNTHETIC_TESTNET_ENABLED: 'true',
+      GIWA_REPORT_IDENTITY_HMAC_KEY:
+        Buffer.alloc(32, 28).toString('base64'),
+      GIWA_REPORT_ISSUER_ADDRESS:
+        '0x4444444444444444444444444444444444444444',
+      GIWA_REPORT_ISSUER_KEYSTORE_PATH: '/run/secrets/issuer.json',
+      GIWA_REPORT_ISSUER_PASSWORD_FILE:
+        '/run/secrets/issuer.password',
+      GIWA_REPORT_REVIEWER_ADDRESS:
+        '0x5555555555555555555555555555555555555555',
+      GIWA_REPORT_REVIEWER_KEYSTORE_PATH:
+        '/run/secrets/reviewer.json',
+      GIWA_REPORT_REVIEWER_PASSWORD_FILE:
+        '/run/secrets/reviewer.password',
+    }
+    expect(
+      loadConfig({
+        ...deployment,
+        ...writer,
+      }).reportAttestationSyntheticTestnet,
+    ).toMatchObject({
+      issuerAddress:
+        '0x4444444444444444444444444444444444444444',
+      issuerKeystorePath: '/run/secrets/issuer.json',
+      reviewerAddress:
+        '0x5555555555555555555555555555555555555555',
+      reviewerKeystorePath: '/run/secrets/reviewer.json',
+      minimumConfirmations: 1,
+      dailyWriteLimits: {
+        user: 4,
+        ip: 20,
+        global: 100,
+      },
+      reviewOutcome: 'APPROVE',
+    })
+    expect(() =>
+      loadConfig({
+        ...writer,
+        GIWA_REPORT_ATTESTATIONS_ENABLED: 'false',
+      }),
+    ).toThrow('requires GIWA report attestation deployment')
+    expect(() =>
+      loadConfig({
+        ...deployment,
+        ...writer,
+        GIWA_REPORT_IDENTITY_HMAC_KEY: 'not-a-key',
+      }),
+    ).toThrow('base64-encoded 32-byte key')
+    expect(() =>
+      loadConfig({
+        ...deployment,
+        ...writer,
+        GIWA_REPORT_REVIEWER_KEYSTORE_PATH:
+          writer.GIWA_REPORT_ISSUER_KEYSTORE_PATH,
+      }),
+    ).toThrow('must be distinct')
+    expect(() =>
+      loadConfig({
+        ...deployment,
+        ...writer,
+        GIWA_REPORT_REVIEWER_ADDRESS:
+          writer.GIWA_REPORT_ISSUER_ADDRESS,
+      }),
+    ).toThrow('addresses must be distinct')
+    expect(() =>
+      loadConfig({
+        GIWA_REPORT_SYNTHETIC_TESTNET_ENABLED: 'false',
+        GIWA_REPORT_ISSUER_KEYSTORE_PATH:
+          writer.GIWA_REPORT_ISSUER_KEYSTORE_PATH,
+      }),
+    ).toThrow('require GIWA_REPORT_SYNTHETIC_TESTNET_ENABLED=true')
   })
 
   it('uses a host-only secure cookie name in production', () => {

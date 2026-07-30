@@ -15,6 +15,8 @@ const reportRegistryProxyAddress =
   '0x1111111111111111111111111111111111111111'
 const reportConsumerAddress =
   '0x2222222222222222222222222222222222222222'
+const governanceSafeAddress =
+  '0x3333333333333333333333333333333333333333'
 const schemaUID = `0x${'a'.repeat(64)}`
 const evidenceSchemaDigest = `0x${'b'.repeat(64)}`
 
@@ -27,6 +29,7 @@ const enabledConfig = () =>
     GIWA_REPORT_SCHEMA_REGISTRY_ADDRESS: schemaRegistryAddress,
     GIWA_REPORT_REGISTRY_PROXY_ADDRESS: reportRegistryProxyAddress,
     GIWA_REPORT_CONSUMER_ADDRESS: reportConsumerAddress,
+    GIWA_REPORT_GOVERNANCE_SAFE_ADDRESS: governanceSafeAddress,
     GIWA_REPORT_SCHEMA_UID: schemaUID,
     GIWA_REPORT_EVIDENCE_SCHEMA_DIGEST: evidenceSchemaDigest,
   })

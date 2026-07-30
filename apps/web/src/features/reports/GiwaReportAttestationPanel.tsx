@@ -133,46 +133,54 @@ export function GiwaReportAttestationPanel() {
   }, [])
 
   return (
-    <section
+    <details
       className="report-attestation-deployment"
-      aria-labelledby="report-attestation-deployment-title"
     >
-      <header>
-        <div>
-          <span>GIWA SEPOLIA · READ ONLY</span>
-          <h2 id="report-attestation-deployment-title">
-            GIWA Sepolia 장부 증명
-          </h2>
-        </div>
-        <p>서버가 고정한 GIWA-28 배포 경계만 조회합니다.</p>
-      </header>
+      <summary>
+        <span>
+          <b>기술 연결 정보</b>
+          <small>GIWA Sepolia 컨트랙트·스키마 배포값</small>
+        </span>
+        <strong>펼쳐보기</strong>
+      </summary>
+      <div className="report-attestation-deployment__body">
+        <header>
+          <div>
+            <span>GIWA SEPOLIA · READ ONLY</span>
+            <h2 id="report-attestation-deployment-title">
+              GIWA Sepolia 장부 증명
+            </h2>
+          </div>
+          <p>서버가 고정한 GIWA-28 배포 경계만 조회합니다.</p>
+        </header>
 
-      {state.kind === 'loading' ? (
-        <p className="report-api-state" role="status">
-          GIWA Sepolia 배포 상태를 확인하는 중입니다.
-        </p>
-      ) : null}
-      {state.kind === 'error' ? (
-        <div className="report-attestation-deployment__empty" role="alert">
-          <b>배포 상태를 확인하지 못했습니다</b>
-          <p>
-            주소나 온체인 결과를 추정해서 표시하지 않습니다. 현재는 준비
-            상태 조회만 가능합니다.
+        {state.kind === 'loading' ? (
+          <p className="report-api-state" role="status">
+            GIWA Sepolia 배포 상태를 확인하는 중입니다.
           </p>
-        </div>
-      ) : null}
-      {state.kind === 'ready' && !state.deployment.enabled ? (
-        <div className="report-attestation-deployment__empty" role="status">
-          <b>GIWA Sepolia 배포 정보가 아직 연결되지 않았습니다</b>
-          <p>
-            서버에는 조회 전용 영역만 열려 있습니다. 실제 배포 주소를
-            등록하기 전까지 SUBMIT·APPROVE·USABLE 결과를 표시하지 않습니다.
-          </p>
-        </div>
-      ) : null}
-      {state.kind === 'ready' && state.deployment.enabled ? (
-        <DeploymentDetails deployment={state.deployment} />
-      ) : null}
-    </section>
+        ) : null}
+        {state.kind === 'error' ? (
+          <div className="report-attestation-deployment__empty" role="alert">
+            <b>배포 상태를 확인하지 못했습니다</b>
+            <p>
+              주소나 온체인 결과를 추정해서 표시하지 않습니다. 현재는 준비
+              상태 조회만 가능합니다.
+            </p>
+          </div>
+        ) : null}
+        {state.kind === 'ready' && !state.deployment.enabled ? (
+          <div className="report-attestation-deployment__empty" role="status">
+            <b>GIWA Sepolia 배포 정보가 아직 연결되지 않았습니다</b>
+            <p>
+              서버에는 조회 전용 영역만 열려 있습니다. 실제 배포 주소를
+              등록하기 전까지 SUBMIT·APPROVE·USABLE 결과를 표시하지 않습니다.
+            </p>
+          </div>
+        ) : null}
+        {state.kind === 'ready' && state.deployment.enabled ? (
+          <DeploymentDetails deployment={state.deployment} />
+        ) : null}
+      </div>
+    </details>
   )
 }

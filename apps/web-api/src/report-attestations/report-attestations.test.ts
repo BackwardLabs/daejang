@@ -6,6 +6,7 @@ import {
   loadLocalReportAttestationRuntime,
   LocalContractsRuntimeError,
 } from './local-runtime-adapter.js'
+import { MemoryReportAttestationStore } from './memory-store.js'
 import {
   getMockPublicationCanonicalJson,
   getMockReportPublication,
@@ -14,6 +15,10 @@ import {
 import type {
   ReportAttestationPublicationSource,
 } from './publication-source.js'
+import {
+  ReportAttestationPreparationError,
+  ReportAttestationService,
+} from './service.js'
 import {
   LOCAL_REPORT_ATTESTATION_RUNTIME_KIND,
   type Hex32,
@@ -189,7 +194,9 @@ describe('local report attestation fixture', () => {
         }
         return {
           reportId: requestedReportId,
-          revision: requestedReportId === reportId ? 2 : 3,
+          revision: 1,
+          previousSubmissionUID:
+            `0x${'0'.repeat(64)}` as Hex32,
           safeArtifactBytes,
         }
       }),
@@ -214,7 +221,9 @@ describe('local report attestation fixture', () => {
       })
       expect(fake.prepareSyntheticEvidence).toHaveBeenCalledWith(
         expect.objectContaining({
-          revision: 2,
+          revision: 1,
+          previousSubmissionUID:
+            `0x${'0'.repeat(64)}`,
           safeArtifactBytes,
         }),
       )
@@ -241,6 +250,288 @@ describe('local report attestation fixture', () => {
       expect(otherOwner.statusCode).toBe(404)
     } finally {
       await harness.context.app.close()
+    }
+  })
+
+  it('keeps one contract report ID while creating a distinct prepared record for the next revision', async () => {
+    const reportId = 'report-engine-result-2027'
+    let revision = 1
+    const publicationSource: ReportAttestationPublicationSource = {
+      getPublication: vi.fn(
+        async (ownerId, requestedReportId, requestedRevision) => {
+          if (
+            ownerId !== OWNER_A ||
+            requestedReportId !== reportId ||
+            (requestedRevision !== undefined &&
+              requestedRevision !== revision)
+          ) {
+            return undefined
+          }
+          return {
+            reportId,
+            sourceVersion: 'report-engine-publication-v1',
+            revision,
+            previousSubmissionUID:
+              revision === 1
+                ? (`0x${'0'.repeat(64)}` as Hex32)
+                : SUBMISSION_UID,
+            safeArtifactBytes: new TextEncoder().encode(
+              JSON.stringify({ reportId, revision }),
+            ),
+          }
+        },
+      ),
+    }
+    const fake = createFakeRuntime()
+    const harness = await createHarness(
+      'APPROVE',
+      fake,
+      publicationSource,
+    )
+    try {
+      const first = await harness.request('A', {
+        method: 'POST',
+        url:
+          `/api/v1/reports/${encodeURIComponent(reportId)}` +
+          '/attestation-preparation',
+      })
+      expect(first.statusCode).toBe(201)
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${encodeURIComponent(reportId)}/attestations`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      revision = 2
+      const second = await harness.request('A', {
+        method: 'POST',
+        url:
+          `/api/v1/reports/${encodeURIComponent(reportId)}` +
+          '/attestation-preparation',
+      })
+      expect(second.statusCode).toBe(201)
+
+      const firstInput =
+        fake.prepareSyntheticEvidence.mock.calls[0]?.[0]
+      const secondInput =
+        fake.prepareSyntheticEvidence.mock.calls[1]?.[0]
+      expect(firstInput?.reportId).toBe(secondInput?.reportId)
+      expect(firstInput?.preparedRecordId).not.toBe(
+        secondInput?.preparedRecordId,
+      )
+      expect(secondInput).toMatchObject({
+        revision: 2,
+        previousSubmissionUID: SUBMISSION_UID,
+      })
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('rejects a different contract report ID for a later revision of the same logical report', async () => {
+    const reportId = 'report-engine-contract-binding'
+    const store = new MemoryReportAttestationStore()
+    const fake = createFakeRuntime()
+    const service = new ReportAttestationService({
+      runtime: fake.runtime,
+      reviewOutcome: 'APPROVE',
+      store,
+      identityKey: IDENTITY_KEY,
+    })
+    try {
+      await service.preparePublication(OWNER_A, {
+        reportId,
+        revision: 1,
+        previousSubmissionUID: `0x${'0'.repeat(64)}`,
+        safeArtifactBytes: new TextEncoder().encode('revision-1'),
+      })
+      const first = await store.get(OWNER_A, reportId, 1)
+      if (!first) throw new Error('expected revision 1')
+
+      const claim = await store.create({
+        ...first,
+        preparedRecordId: `ep_${'9'.repeat(64)}`,
+        contractReportId: `0x${'a'.repeat(64)}`,
+        revision: 2,
+        previousSubmissionUID: SUBMISSION_UID,
+        createdAt: new Date(first.createdAt.getTime() + 1),
+        updatedAt: new Date(first.updatedAt.getTime() + 1),
+      })
+
+      expect(claim).toEqual({ result: 'IDENTITY_CLAIMED' })
+      expect(await store.get(OWNER_A, reportId)).toMatchObject({
+        revision: 1,
+        contractReportId: first.contractReportId,
+      })
+    } finally {
+      await service.close()
+    }
+  })
+
+  it('fails closed when an identity-key rotation changes the contract report ID for a later revision', async () => {
+    const reportId = 'report-engine-key-rotation'
+    const store = new MemoryReportAttestationStore()
+    const firstFake = createFakeRuntime()
+    const firstService = new ReportAttestationService({
+      runtime: firstFake.runtime,
+      reviewOutcome: 'APPROVE',
+      store,
+      identityKey: IDENTITY_KEY,
+    })
+    await firstService.preparePublication(OWNER_A, {
+      reportId,
+      revision: 1,
+      previousSubmissionUID: `0x${'0'.repeat(64)}`,
+      safeArtifactBytes: new TextEncoder().encode('revision-1'),
+    })
+    await firstService.queueSubmission(OWNER_A, reportId)
+    await firstService.waitForIdle()
+    await firstService.close()
+
+    const rotatedFake = createFakeRuntime()
+    const rotatedService = new ReportAttestationService({
+      runtime: rotatedFake.runtime,
+      reviewOutcome: 'APPROVE',
+      store,
+      identityKey: new Uint8Array(32).fill(29),
+    })
+    try {
+      await expect(
+        rotatedService.preparePublication(OWNER_A, {
+          reportId,
+          revision: 2,
+          previousSubmissionUID: SUBMISSION_UID,
+          safeArtifactBytes: new TextEncoder().encode('revision-2'),
+        }),
+      ).rejects.toBeInstanceOf(ReportAttestationPreparationError)
+      expect(rotatedFake.prepareSyntheticEvidence).not.toHaveBeenCalled()
+      expect(await store.get(OWNER_A, reportId)).toMatchObject({
+        revision: 1,
+        lifecycle: 'SUBMITTED',
+      })
+    } finally {
+      await rotatedService.close()
+    }
+  })
+
+  it('applies a delayed issuer result only to the queued revision', async () => {
+    const reportId = 'report-engine-delayed-issuer'
+    const store = new MemoryReportAttestationStore()
+    const fake = createFakeRuntime()
+    let resolveIssuer:
+      | ((value: RedactedExecutionResult) => void)
+      | undefined
+    const pendingIssuer = new Promise<RedactedExecutionResult>((resolve) => {
+      resolveIssuer = resolve
+    })
+    fake.executeIssuer.mockImplementation(async () => pendingIssuer)
+    const service = new ReportAttestationService({
+      runtime: fake.runtime,
+      reviewOutcome: 'APPROVE',
+      store,
+      identityKey: IDENTITY_KEY,
+    })
+    try {
+      await service.preparePublication(OWNER_A, {
+        reportId,
+        revision: 1,
+        previousSubmissionUID: `0x${'0'.repeat(64)}`,
+        safeArtifactBytes: new TextEncoder().encode('revision-1'),
+      })
+      await service.queueSubmission(OWNER_A, reportId)
+      await vi.waitFor(() =>
+        expect(fake.executeIssuer).toHaveBeenCalledTimes(1),
+      )
+      const first = await store.get(OWNER_A, reportId, 1)
+      if (!first) throw new Error('expected revision 1')
+
+      expect(
+        await store.create({
+          ...first,
+          preparedRecordId: `ep_${'9'.repeat(64)}`,
+          revision: 2,
+          previousSubmissionUID: SUBMISSION_UID,
+          lifecycle: 'PREPARED',
+          submission: undefined,
+          review: undefined,
+          failureCode: undefined,
+          createdAt: new Date(first.createdAt.getTime() + 1),
+          updatedAt: new Date(first.updatedAt.getTime() + 1),
+        }),
+      ).toMatchObject({ result: 'CREATED' })
+
+      resolveIssuer?.(confirmed(SUBMISSION_UID))
+      await service.waitForIdle()
+
+      expect(await store.get(OWNER_A, reportId, 1)).toMatchObject({
+        revision: 1,
+        lifecycle: 'SUBMITTED',
+        submission: { attestationUID: SUBMISSION_UID },
+      })
+      expect(await store.get(OWNER_A, reportId, 2)).toMatchObject({
+        revision: 2,
+        lifecycle: 'PREPARED',
+        submission: undefined,
+      })
+    } finally {
+      resolveIssuer?.(confirmed(SUBMISSION_UID))
+      await service.close()
+    }
+  })
+
+  it('applies a delayed reviewer result only to the queued revision', async () => {
+    const reportId = 'report-engine-delayed-reviewer'
+    const store = new MemoryReportAttestationStore()
+    const fake = createFakeRuntime()
+    let resolveReviewer:
+      | ((value: RedactedExecutionResult) => void)
+      | undefined
+    const pendingReviewer = new Promise<RedactedExecutionResult>((resolve) => {
+      resolveReviewer = resolve
+    })
+    fake.executeReviewer.mockImplementation(async () => pendingReviewer)
+    const service = new ReportAttestationService({
+      runtime: fake.runtime,
+      reviewOutcome: 'APPROVE',
+      store,
+      identityKey: IDENTITY_KEY,
+    })
+    try {
+      await service.preparePublication(OWNER_A, {
+        reportId,
+        revision: 1,
+        previousSubmissionUID: `0x${'0'.repeat(64)}`,
+        safeArtifactBytes: new TextEncoder().encode('revision-1'),
+      })
+      await service.queueSubmission(OWNER_A, reportId)
+      await service.waitForIdle()
+      await service.queueReview(OWNER_A, reportId)
+      await vi.waitFor(() =>
+        expect(fake.executeReviewer).toHaveBeenCalledTimes(1),
+      )
+
+      await service.preparePublication(OWNER_A, {
+        reportId,
+        revision: 2,
+        previousSubmissionUID: SUBMISSION_UID,
+        safeArtifactBytes: new TextEncoder().encode('revision-2'),
+      })
+      resolveReviewer?.(confirmed(REVIEW_UID))
+      await service.waitForIdle()
+
+      expect(await store.get(OWNER_A, reportId, 1)).toMatchObject({
+        revision: 1,
+        lifecycle: 'APPROVED',
+        review: { attestationUID: REVIEW_UID },
+      })
+      expect(await store.get(OWNER_A, reportId, 2)).toMatchObject({
+        revision: 2,
+        lifecycle: 'PREPARED',
+        review: undefined,
+      })
+    } finally {
+      resolveReviewer?.(confirmed(REVIEW_UID))
+      await service.close()
     }
   })
 
@@ -633,7 +924,6 @@ describe('local report attestation fixture', () => {
   it.each([
     ['PENDING', 'PENDING'],
     ['RETRY_REQUIRED', 'RETRY_REQUIRED'],
-    ['RECONCILIATION_REQUIRED', 'RECONCILIATION_REQUIRED'],
   ] as const)(
     'keeps issuer %s non-terminal and resumes the same prepared operation',
     async (runtimeStatus, lifecycle) => {
@@ -691,6 +981,57 @@ describe('local report attestation fixture', () => {
       }
     },
   )
+
+  it('does not resend an issuer operation that requires reconciliation', async () => {
+    const fake = createFakeRuntime({
+      issuerResults: [
+        {
+          status: 'RECONCILIATION_REQUIRED',
+          transactionHash: TRANSACTION_HASH,
+          attestationUID: null,
+          reasonCode: 'BROADCAST_OUTCOME_UNKNOWN',
+        },
+        confirmed(SUBMISSION_UID),
+      ],
+    })
+    const harness = await createHarness('APPROVE', fake)
+    try {
+      await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${MOCK_REPORT_ID}/attestations`,
+      })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      expect(fake.executeIssuer).toHaveBeenCalledTimes(1)
+      expect(
+        await harness.context.reportAttestationService?.getStatus(
+          OWNER_A,
+          MOCK_REPORT_ID,
+        ),
+      ).toMatchObject({
+        lifecycle: 'RECONCILIATION_REQUIRED',
+        submission: {
+          status: 'RECONCILIATION_REQUIRED',
+          transactionHash: TRANSACTION_HASH,
+          attestationUID: null,
+          reasonCode: 'BROADCAST_OUTCOME_UNKNOWN',
+        },
+        failureCode: null,
+      })
+    } finally {
+      await harness.context.app.close()
+    }
+  })
 
   it.each([
     [

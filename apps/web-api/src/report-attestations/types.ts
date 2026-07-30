@@ -1,5 +1,7 @@
 export const LOCAL_REPORT_ATTESTATION_RUNTIME_KIND =
   'LOCAL_ONLY_IN_MEMORY_ANVIL_V1' as const
+export const GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND =
+  'GIWA_SEPOLIA_REPORT_ATTESTATION_V1' as const
 
 export type Hex32 = `0x${string}`
 
@@ -42,6 +44,7 @@ export type ReportAttestationFailureCode =
   | 'REVIEWER_RESULT_REJECTED'
   | 'REVIEW_RECONCILIATION_FAILED'
   | 'REVIEW_OUTCOME_MISMATCH'
+  | 'INTERRUPTED_WRITE_REQUIRES_RECONCILIATION'
   | 'RUNTIME_CLOSED'
 
 export type ReportReviewOutcome = 'APPROVE' | 'REJECT' | 'MANUAL_REVIEW'
@@ -51,6 +54,10 @@ export type PreparedSyntheticEvidence = Readonly<{
   reportId: Hex32
   revision: number
   commitment: Hex32
+  safeArtifactDigest?: Hex32
+  safeManifestDigest?: Hex32
+  derivationRuleDigest?: Hex32
+  commitmentNonce?: Hex32
 }>
 
 export type PreparedReportInput = Readonly<{
@@ -59,6 +66,7 @@ export type PreparedReportInput = Readonly<{
   revision: number
   safeArtifactBytes: Uint8Array
   previousSubmissionUID?: Hex32
+  derivationRuleDigest?: Hex32
 }>
 
 export interface ReportAttestationIssuerExecutor {
@@ -79,8 +87,8 @@ export interface ReportAttestationReviewerExecutor {
  * in the web API means ordinary lint/typecheck/test/build never import the
  * separately packaged contracts implementation.
  */
-export interface LocalReportAttestationRuntime {
-  readonly kind: typeof LOCAL_REPORT_ATTESTATION_RUNTIME_KIND
+export interface ReportAttestationRuntime {
+  readonly kind: string
   readonly issuerExecutor: ReportAttestationIssuerExecutor
   readonly reviewerExecutor: ReportAttestationReviewerExecutor
   prepareSyntheticEvidence(
@@ -98,14 +106,31 @@ export interface LocalReportAttestationRuntime {
   close(): Promise<void>
 }
 
+export interface LocalReportAttestationRuntime
+  extends ReportAttestationRuntime {
+  readonly kind: typeof LOCAL_REPORT_ATTESTATION_RUNTIME_KIND
+}
+
+export interface GiwaSepoliaReportAttestationRuntime
+  extends ReportAttestationRuntime {
+  readonly kind: typeof GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND
+}
+
 export type ReportAttestationRecord = {
   ownerId: string
   reportId: string
+  publicationSourceVersion: string
   preparedRecordId: string
   contractReportId: Hex32
   revision: number
+  previousSubmissionUID: Hex32
   safeArtifactBytes: Uint8Array
   commitment: Hex32 | undefined
+  safeArtifactDigest: Hex32 | undefined
+  safeManifestDigest: Hex32 | undefined
+  derivationRuleDigest: Hex32 | undefined
+  commitmentNonce: Hex32 | undefined
+  desiredReviewOutcome: ReportReviewOutcome
   lifecycle: ReportAttestationLifecycle
   submission: RedactedExecutionResult | undefined
   review: RedactedExecutionResult | undefined

@@ -22,6 +22,8 @@ const config: ReportAttestationDeploymentConfig = {
   schemaRegistryAddress,
   reportRegistryProxyAddress,
   reportConsumerAddress,
+  governanceSafeAddress:
+    '0x3333333333333333333333333333333333333333',
   schemaUID,
   evidenceSchemaDigest,
 }

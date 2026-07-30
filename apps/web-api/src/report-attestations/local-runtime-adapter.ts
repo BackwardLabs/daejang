@@ -240,7 +240,20 @@ const createValidatedRuntime = async (
     prepareSyntheticEvidence: async (
       input: PreparedReportInput,
     ): Promise<PreparedSyntheticEvidence> =>
-      validatePreparedEvidence(await prepare.call(rawRuntime, input)),
+      validatePreparedEvidence(
+        await prepare.call(rawRuntime, {
+          preparedRecordId: input.preparedRecordId,
+          reportId: input.reportId,
+          revision: input.revision,
+          safeArtifactBytes: input.safeArtifactBytes,
+          ...(input.previousSubmissionUID
+            ? {
+                previousSubmissionUID:
+                  input.previousSubmissionUID,
+              }
+            : {}),
+        }),
+      ),
     isUsable: async (reportId, approvalUID) => {
       const result = await usable.call(rawRuntime, reportId, approvalUID)
       if (typeof result !== 'boolean') {

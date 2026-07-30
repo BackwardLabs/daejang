@@ -2,17 +2,18 @@ import { createHmac, randomBytes } from 'node:crypto'
 
 import type {
   Hex32,
-  LocalReportAttestationRuntime,
   PreparedSyntheticEvidence,
   RedactedExecutionResult,
   ReportAttestationFailureCode,
   ReportAttestationRecord,
+  ReportAttestationRuntime,
   ReportAttestationStatus,
   ReportReviewOutcome,
   ReportVerification,
 } from './types.js'
 import { MemoryReportAttestationStore } from './memory-store.js'
 import type { ReportAttestationPublication } from './publication-source.js'
+import type { ReportAttestationStore } from './store.js'
 
 const EMPTY_RESULT: RedactedExecutionResult = Object.freeze({
   status: 'FAILED',
@@ -22,7 +23,8 @@ const EMPTY_RESULT: RedactedExecutionResult = Object.freeze({
 })
 
 const IDENTITY_KEY_BYTES = 32
-const IDENTITY_DOMAIN = 'giwa.local-report-attestation.identity.v1'
+const IDENTITY_DOMAIN = 'giwa.report-attestation.identity.v1'
+const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as Hex32
 
 const isHex32 = (value: unknown): value is Hex32 =>
   typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value)
@@ -102,8 +104,8 @@ export class ReportAttestationPreparationError extends Error {
 }
 
 export class ReportAttestationService {
-  readonly #store: MemoryReportAttestationStore
-  readonly #runtime: LocalReportAttestationRuntime
+  readonly #store: ReportAttestationStore
+  readonly #runtime: ReportAttestationRuntime
   readonly #reviewOutcome: ReportReviewOutcome
   readonly #now: () => Date
   readonly #identityKey: Buffer
@@ -112,9 +114,9 @@ export class ReportAttestationService {
   #acceptingJobs = true
 
   constructor(options: {
-    runtime: LocalReportAttestationRuntime
+    runtime: ReportAttestationRuntime
     reviewOutcome: ReportReviewOutcome
-    store?: MemoryReportAttestationStore
+    store?: ReportAttestationStore
     now?: () => Date
     identityKey?: Uint8Array
   }) {
@@ -138,16 +140,35 @@ export class ReportAttestationService {
       typeof publication.reportId !== 'string' ||
       publication.reportId.length === 0 ||
       publication.reportId.length > 120 ||
+      (publication.sourceVersion !== undefined &&
+        !/^[A-Za-z0-9._-]{1,80}$/.test(publication.sourceVersion)) ||
       !Number.isInteger(publication.revision) ||
       publication.revision < 1 ||
       publication.revision > 0xffff_ffff ||
       !(publication.safeArtifactBytes instanceof Uint8Array) ||
-      publication.safeArtifactBytes.byteLength === 0
+      publication.safeArtifactBytes.byteLength === 0 ||
+      (publication.previousSubmissionUID !== undefined &&
+        !isHex32(publication.previousSubmissionUID)) ||
+      (publication.derivationRuleDigest !== undefined &&
+        !isHex32(publication.derivationRuleDigest)) ||
+      (publication.revision === 1 &&
+        publication.previousSubmissionUID !== undefined &&
+        publication.previousSubmissionUID.toLowerCase() !==
+          ZERO_BYTES32) ||
+      (publication.revision > 1 &&
+        !isHex32(publication.previousSubmissionUID))
     ) {
       throw new ReportAttestationPreparationError()
     }
-    const existing = await this.#store.get(ownerId, publication.reportId)
-    if (existing) {
+    const existing = await this.#store.get(
+      ownerId,
+      publication.reportId,
+      publication.revision,
+    )
+    if (
+      existing &&
+      existing.lifecycle !== 'PREPARATION_FAILED'
+    ) {
       return serializeStatus(existing)
     }
 
@@ -155,27 +176,93 @@ export class ReportAttestationService {
     const identity = this.#deriveOwnerIdentity(
       ownerId,
       publication.reportId,
+      publication.revision,
     )
-    const claim = await this.#store.create({
-      ownerId,
-      reportId: publication.reportId,
-      preparedRecordId: identity.preparedRecordId,
-      contractReportId: identity.contractReportId,
-      revision: publication.revision,
-      safeArtifactBytes: publication.safeArtifactBytes.slice(),
-      commitment: undefined,
-      lifecycle: 'PREPARING',
-      submission: undefined,
-      review: undefined,
-      failureCode: undefined,
-      createdAt: now,
-      updatedAt: now,
-    })
-    if (claim.result === 'EXISTS') {
-      return serializeStatus(claim.record)
+    if (
+      existing &&
+      (existing.preparedRecordId !== identity.preparedRecordId ||
+        existing.contractReportId.toLowerCase() !==
+          identity.contractReportId.toLowerCase())
+    ) {
+      throw new ReportAttestationPreparationError()
     }
-    if (claim.result === 'IDENTITY_CLAIMED') {
-      throw new LocalReportFixtureUnavailableError()
+    if (existing) {
+      const reset = await this.#store.update(
+        ownerId,
+        publication.reportId,
+        publication.revision,
+        (record) =>
+          record.lifecycle === 'PREPARATION_FAILED'
+            ? {
+                ...record,
+                lifecycle: 'PREPARING',
+                failureCode: undefined,
+                updatedAt: now,
+              }
+            : undefined,
+      )
+      if (!reset) {
+        return serializeStatus(
+          (await this.#store.get(
+            ownerId,
+            publication.reportId,
+            publication.revision,
+          )) ??
+            existing,
+        )
+      }
+    } else {
+      const latest = await this.#store.get(
+        ownerId,
+        publication.reportId,
+      )
+      const expectedPreviousSubmissionUID =
+        latest?.submission &&
+        isConfirmedExecutionResult(latest.submission)
+          ? latest.submission.attestationUID
+          : null
+      if (
+        (latest === undefined && publication.revision !== 1) ||
+        (latest !== undefined &&
+          (identity.contractReportId.toLowerCase() !==
+              latest.contractReportId.toLowerCase() ||
+            publication.revision !== latest.revision + 1 ||
+            !isHex32(expectedPreviousSubmissionUID) ||
+            publication.previousSubmissionUID?.toLowerCase() !==
+              expectedPreviousSubmissionUID.toLowerCase()))
+      ) {
+        throw new ReportAttestationPreparationError()
+      }
+      const claim = await this.#store.create({
+        ownerId,
+        reportId: publication.reportId,
+        publicationSourceVersion:
+          publication.sourceVersion ?? 'legacy-report-publication-v1',
+        preparedRecordId: identity.preparedRecordId,
+        contractReportId: identity.contractReportId,
+        revision: publication.revision,
+        previousSubmissionUID:
+          publication.previousSubmissionUID ?? ZERO_BYTES32,
+        safeArtifactBytes: publication.safeArtifactBytes.slice(),
+        commitment: undefined,
+        safeArtifactDigest: undefined,
+        safeManifestDigest: undefined,
+        derivationRuleDigest: undefined,
+        commitmentNonce: undefined,
+        desiredReviewOutcome: this.#reviewOutcome,
+        lifecycle: 'PREPARING',
+        submission: undefined,
+        review: undefined,
+        failureCode: undefined,
+        createdAt: now,
+        updatedAt: now,
+      })
+      if (claim.result === 'EXISTS') {
+        return serializeStatus(claim.record)
+      }
+      if (claim.result === 'IDENTITY_CLAIMED') {
+        throw new LocalReportFixtureUnavailableError()
+      }
     }
 
     let prepared: PreparedSyntheticEvidence
@@ -185,11 +272,20 @@ export class ReportAttestationService {
         reportId: identity.contractReportId,
         revision: publication.revision,
         safeArtifactBytes: publication.safeArtifactBytes.slice(),
+        previousSubmissionUID:
+          publication.previousSubmissionUID ?? ZERO_BYTES32,
+        ...(publication.derivationRuleDigest
+          ? {
+              derivationRuleDigest:
+                publication.derivationRuleDigest,
+            }
+          : {}),
       })
     } catch {
       await this.#markPreparationFailed(
         ownerId,
         publication.reportId,
+        publication.revision,
         'PREPARATION_EXECUTION_FAILED',
       )
       throw new ReportAttestationPreparationError()
@@ -201,11 +297,13 @@ export class ReportAttestationService {
       !isHex32(prepared.reportId) ||
       prepared.reportId.toLowerCase() !== identity.contractReportId.toLowerCase() ||
       prepared.revision !== publication.revision ||
-      !isHex32(prepared.commitment)
+      !isHex32(prepared.commitment) ||
+      !this.#validPreparedMetadata(prepared)
     ) {
       await this.#markPreparationFailed(
         ownerId,
         publication.reportId,
+        publication.revision,
         'PREPARATION_RESULT_REJECTED',
       )
       throw new ReportAttestationPreparationError()
@@ -213,9 +311,14 @@ export class ReportAttestationService {
     const completed = await this.#store.update(
       ownerId,
       publication.reportId,
+      publication.revision,
       (record) => ({
         ...record,
         commitment: prepared.commitment,
+        safeArtifactDigest: prepared.safeArtifactDigest,
+        safeManifestDigest: prepared.safeManifestDigest,
+        derivationRuleDigest: prepared.derivationRuleDigest,
+        commitmentNonce: prepared.commitmentNonce,
         lifecycle: 'PREPARED',
         failureCode: undefined,
         updatedAt: this.#now(),
@@ -234,64 +337,104 @@ export class ReportAttestationService {
 
   async queueSubmission(ownerId: string, reportId: string) {
     this.#assertOpen()
-    const queued = await this.#store.update(ownerId, reportId, (record) => {
-      const retryableIssuer =
-        (record.lifecycle === 'PENDING' ||
-          record.lifecycle === 'RETRY_REQUIRED' ||
-          record.lifecycle === 'RECONCILIATION_REQUIRED') &&
-        !(
-          record.submission?.status === 'CONFIRMED' &&
-          isHex32(record.submission.attestationUID)
-        )
-      if (
-        (record.lifecycle !== 'PREPARED' && !retryableIssuer) ||
-        !isHex32(record.commitment ?? null)
-      ) {
-        return undefined
-      }
-      return {
-        ...record,
-        lifecycle: 'SUBMISSION_QUEUED',
-        failureCode: undefined,
-        updatedAt: this.#now(),
-      }
-    })
+    const target = await this.#store.get(ownerId, reportId)
+    if (!target) {
+      throw new ReportAttestationConflictError('NOT_PREPARED')
+    }
+    const queued = await this.#store.update(
+      ownerId,
+      reportId,
+      target.revision,
+      (record) => {
+        const retryableIssuer =
+          (record.lifecycle === 'PENDING' ||
+            record.lifecycle === 'RETRY_REQUIRED') &&
+          !(
+            record.submission?.status === 'CONFIRMED' &&
+            isHex32(record.submission.attestationUID)
+          )
+        if (
+          (record.lifecycle !== 'PREPARED' && !retryableIssuer) ||
+          !isHex32(record.commitment ?? null)
+        ) {
+          return undefined
+        }
+        return {
+          ...record,
+          lifecycle: 'SUBMISSION_QUEUED',
+          failureCode: undefined,
+          updatedAt: this.#now(),
+        }
+      },
+    )
     if (!queued) {
-      const current = await this.#store.get(ownerId, reportId)
+      const current = await this.#store.get(
+        ownerId,
+        reportId,
+        target.revision,
+      )
       if (!current) {
         throw new ReportAttestationConflictError('NOT_PREPARED')
       }
       return serializeStatus(current)
     }
 
-    this.#enqueue(async () => this.#runIssuer(ownerId, reportId))
+    this.#enqueue(async () =>
+      this.#runIssuer(ownerId, reportId, queued.revision),
+    )
     return serializeStatus(queued)
   }
 
   async queueReview(ownerId: string, reportId: string) {
     this.#assertOpen()
-    const queued = await this.#store.update(ownerId, reportId, (record) => {
-      if (
-        (record.lifecycle !== 'SUBMITTED' &&
+    const target = await this.#store.get(ownerId, reportId)
+    if (!target) {
+      throw new ReportAttestationConflictError('NOT_PREPARED')
+    }
+    const queued = await this.#store.update(
+      ownerId,
+      reportId,
+      target.revision,
+      (record) => {
+        const confirmedSubmission =
+          record.submission !== undefined &&
+          isConfirmedExecutionResult(record.submission)
+        const confirmedReview =
+          record.review !== undefined &&
+          isConfirmedExecutionResult(record.review)
+        const retryableWrite =
+          (record.lifecycle === 'PENDING' ||
+            record.lifecycle === 'RETRY_REQUIRED') &&
+          confirmedSubmission
+        const retryableReadOnlyReconciliation =
+          record.lifecycle === 'RECONCILIATION_REQUIRED' &&
+          record.failureCode === 'REVIEW_RECONCILIATION_FAILED' &&
+          confirmedSubmission &&
+          confirmedReview
+        if (
           !(
-            (record.lifecycle === 'PENDING' ||
-              record.lifecycle === 'RETRY_REQUIRED' ||
-              record.lifecycle === 'RECONCILIATION_REQUIRED') &&
-            record.submission?.status === 'CONFIRMED'
-          )) ||
-        !isHex32(record.submission?.attestationUID ?? null)
-      ) {
-        return undefined
-      }
-      return {
-        ...record,
-        lifecycle: 'REVIEW_QUEUED',
-        failureCode: undefined,
-        updatedAt: this.#now(),
-      }
-    })
+            (record.lifecycle === 'SUBMITTED' &&
+              confirmedSubmission) ||
+            retryableWrite ||
+            retryableReadOnlyReconciliation
+          )
+        ) {
+          return undefined
+        }
+        return {
+          ...record,
+          lifecycle: 'REVIEW_QUEUED',
+          failureCode: undefined,
+          updatedAt: this.#now(),
+        }
+      },
+    )
     if (!queued) {
-      const current = await this.#store.get(ownerId, reportId)
+      const current = await this.#store.get(
+        ownerId,
+        reportId,
+        target.revision,
+      )
       if (!current) {
         throw new ReportAttestationConflictError('NOT_PREPARED')
       }
@@ -304,7 +447,9 @@ export class ReportAttestationService {
       return serializeStatus(current)
     }
 
-    this.#enqueue(async () => this.#runReviewer(ownerId, reportId))
+    this.#enqueue(async () =>
+      this.#runReviewer(ownerId, reportId, queued.revision),
+    )
     return serializeStatus(queued)
   }
 
@@ -377,11 +522,18 @@ export class ReportAttestationService {
     reportId: string,
     mutation: (bytes: Uint8Array) => Uint8Array,
   ) {
-    const updated = await this.#store.update(ownerId, reportId, (record) => ({
-      ...record,
-      safeArtifactBytes: mutation(record.safeArtifactBytes.slice()).slice(),
-      updatedAt: this.#now(),
-    }))
+    const target = await this.#store.get(ownerId, reportId)
+    if (!target) return undefined
+    const updated = await this.#store.update(
+      ownerId,
+      reportId,
+      target.revision,
+      (record) => ({
+        ...record,
+        safeArtifactBytes: mutation(record.safeArtifactBytes.slice()).slice(),
+        updatedAt: this.#now(),
+      }),
+    )
     return updated ? serializeStatus(updated) : undefined
   }
 
@@ -404,15 +556,23 @@ export class ReportAttestationService {
     this.#tail = run.catch(() => undefined)
   }
 
-  async #runIssuer(ownerId: string, reportId: string) {
-    const submitting = await this.#store.update(ownerId, reportId, (record) =>
-      record.lifecycle === 'SUBMISSION_QUEUED'
-        ? {
-            ...record,
-            lifecycle: 'SUBMITTING',
-            updatedAt: this.#now(),
-          }
-        : undefined,
+  async #runIssuer(
+    ownerId: string,
+    reportId: string,
+    revision: number,
+  ) {
+    const submitting = await this.#store.update(
+      ownerId,
+      reportId,
+      revision,
+      (record) =>
+        record.lifecycle === 'SUBMISSION_QUEUED'
+          ? {
+              ...record,
+              lifecycle: 'SUBMITTING',
+              updatedAt: this.#now(),
+            }
+          : undefined,
     )
     if (!submitting) {
       return
@@ -443,32 +603,46 @@ export class ReportAttestationService {
       result = EMPTY_RESULT
       failureCode = 'ISSUER_EXECUTION_FAILED'
     }
-    await this.#store.update(ownerId, reportId, (record) => ({
-      ...record,
-      lifecycle: failureCode
-        ? 'SUBMISSION_FAILED'
-        : this.#mapExecutionLifecycle(result.status, 'SUBMITTED'),
-      submission: result,
-      failureCode,
-      updatedAt: this.#now(),
-    }))
+    await this.#store.update(
+      ownerId,
+      reportId,
+      revision,
+      (record) => ({
+        ...record,
+        lifecycle: failureCode
+          ? 'SUBMISSION_FAILED'
+          : this.#mapExecutionLifecycle(result.status, 'SUBMITTED'),
+        submission: result,
+        failureCode,
+        updatedAt: this.#now(),
+      }),
+    )
   }
 
-  async #runReviewer(ownerId: string, reportId: string) {
-    const reviewing = await this.#store.update(ownerId, reportId, (record) =>
-      record.lifecycle === 'REVIEW_QUEUED' &&
-      isHex32(record.submission?.attestationUID ?? null)
-        ? {
-            ...record,
-            lifecycle: 'REVIEWING',
-            updatedAt: this.#now(),
-          }
-        : undefined,
+  async #runReviewer(
+    ownerId: string,
+    reportId: string,
+    revision: number,
+  ) {
+    const reviewing = await this.#store.update(
+      ownerId,
+      reportId,
+      revision,
+      (record) =>
+        record.lifecycle === 'REVIEW_QUEUED' &&
+        isHex32(record.submission?.attestationUID ?? null)
+          ? {
+              ...record,
+              lifecycle: 'REVIEWING',
+              updatedAt: this.#now(),
+            }
+          : undefined,
     )
     const submissionUID = reviewing?.submission?.attestationUID ?? null
     if (!reviewing || !isHex32(submissionUID)) {
       return
     }
+    const desiredReviewOutcome = reviewing.desiredReviewOutcome
 
     let result: RedactedExecutionResult
     let failureCode: ReportAttestationFailureCode | undefined
@@ -496,7 +670,7 @@ export class ReportAttestationService {
           if (
             rawResult.attestationUID !== null ||
             rawResult.transactionHash !== null ||
-            this.#reviewOutcome !== 'MANUAL_REVIEW'
+            desiredReviewOutcome !== 'MANUAL_REVIEW'
           ) {
             failureCode = 'REVIEW_OUTCOME_MISMATCH'
           }
@@ -515,7 +689,7 @@ export class ReportAttestationService {
     if (
       !failureCode &&
       result.status === 'CONFIRMED' &&
-      this.#reviewOutcome === 'MANUAL_REVIEW'
+      desiredReviewOutcome === 'MANUAL_REVIEW'
     ) {
       failureCode = 'REVIEW_OUTCOME_MISMATCH'
     }
@@ -530,31 +704,43 @@ export class ReportAttestationService {
           result.attestationUID as Hex32,
         )
       } catch {
-        await this.#store.update(ownerId, reportId, (record) => ({
-          ...record,
-          lifecycle: 'RECONCILIATION_REQUIRED',
-          review: result,
-          failureCode: 'REVIEW_RECONCILIATION_FAILED',
-          updatedAt: this.#now(),
-        }))
+        await this.#store.update(
+          ownerId,
+          reportId,
+          revision,
+          (record) => ({
+            ...record,
+            lifecycle: 'RECONCILIATION_REQUIRED',
+            review: result,
+            failureCode: 'REVIEW_RECONCILIATION_FAILED',
+            updatedAt: this.#now(),
+          }),
+        )
         return
       }
-      if (runtimeApproved !== (this.#reviewOutcome === 'APPROVE')) {
+      if (runtimeApproved !== (desiredReviewOutcome === 'APPROVE')) {
         failureCode = 'REVIEW_OUTCOME_MISMATCH'
       }
     }
-    await this.#store.update(ownerId, reportId, (record) => ({
-      ...record,
-      lifecycle: failureCode
-        ? 'REVIEW_FAILED'
-        : this.#mapExecutionLifecycle(
-            result.status,
-            this.#reviewOutcome === 'APPROVE' ? 'APPROVED' : 'REJECTED',
-          ),
-      review: result,
-      failureCode,
-      updatedAt: this.#now(),
-    }))
+    await this.#store.update(
+      ownerId,
+      reportId,
+      revision,
+      (record) => ({
+        ...record,
+        lifecycle: failureCode
+          ? 'REVIEW_FAILED'
+          : this.#mapExecutionLifecycle(
+              result.status,
+              desiredReviewOutcome === 'APPROVE'
+                ? 'APPROVED'
+                : 'REJECTED',
+            ),
+        review: result,
+        failureCode,
+        updatedAt: this.#now(),
+      }),
+    )
   }
 
   #assertOpen() {
@@ -563,12 +749,16 @@ export class ReportAttestationService {
     }
   }
 
-  #deriveOwnerIdentity(ownerId: string, reportId: string): {
+  #deriveOwnerIdentity(
+    ownerId: string,
+    reportId: string,
+    revision: number,
+  ): {
     preparedRecordId: string
     contractReportId: Hex32
   } {
-    const derive = (purpose: 'prepared-record' | 'contract-report') =>
-      createHmac('sha256', this.#identityKey)
+    const derive = (purpose: 'prepared-record' | 'contract-report') => {
+      const hmac = createHmac('sha256', this.#identityKey)
         .update(IDENTITY_DOMAIN)
         .update('\u0000')
         .update(purpose)
@@ -576,7 +766,11 @@ export class ReportAttestationService {
         .update(ownerId)
         .update('\u0000')
         .update(reportId)
-        .digest('hex')
+      if (purpose === 'prepared-record') {
+        hmac.update('\u0000').update(String(revision))
+      }
+      return hmac.digest('hex')
+    }
 
     return {
       preparedRecordId: `ep_${derive('prepared-record')}`,
@@ -587,22 +781,45 @@ export class ReportAttestationService {
   async #markPreparationFailed(
     ownerId: string,
     reportId: string,
+    revision: number,
     failureCode:
       | 'PREPARATION_EXECUTION_FAILED'
       | 'PREPARATION_RESULT_REJECTED',
   ) {
-    await this.#store.update(ownerId, reportId, (record) => ({
-      ...record,
-      lifecycle: 'PREPARATION_FAILED',
-      failureCode,
-      updatedAt: this.#now(),
-    }))
+    await this.#store.update(
+      ownerId,
+      reportId,
+      revision,
+      (record) => ({
+        ...record,
+        lifecycle: 'PREPARATION_FAILED',
+        failureCode,
+        updatedAt: this.#now(),
+      }),
+    )
   }
 
   #sanitizeVerificationReason(reason: string | null) {
     return reason && /^[A-Z][A-Z0-9_]{0,63}$/.test(reason)
       ? reason
       : 'PREPARED_REPORT_MISMATCH'
+  }
+
+  #validPreparedMetadata(prepared: PreparedSyntheticEvidence) {
+    const metadata = [
+      prepared.safeArtifactDigest,
+      prepared.safeManifestDigest,
+      prepared.derivationRuleDigest,
+      prepared.commitmentNonce,
+    ]
+    const present = metadata.filter(
+      (value) => value !== undefined,
+    )
+    return (
+      present.length === 0 ||
+      (present.length === metadata.length &&
+        present.every((value) => isHex32(value)))
+    )
   }
 
   #mapExecutionLifecycle(

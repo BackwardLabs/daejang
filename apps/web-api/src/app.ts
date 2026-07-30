@@ -43,17 +43,31 @@ import { registerTaxReportRoutes } from './routes/tax-reports.js'
 import { registerReportPaymentRoutes } from './routes/report-payments.js'
 import { registerSecurityPolicy } from './security.js'
 import { registerReportAttestationRoutes } from './report-attestations/routes.js'
+import { registerSyntheticReportAttestationRoutes } from './report-attestations/synthetic-routes.js'
 import { ReportAttestationService } from './report-attestations/service.js'
 import {
   MockReportAttestationPublicationSource,
 } from './report-attestations/mock-publication-source.js'
+import {
+  SyntheticTestnetReportAttestationPublicationSource,
+} from './report-attestations/synthetic-testnet-publication-source.js'
 import type {
   ReportAttestationPublicationSource,
 } from './report-attestations/publication-source.js'
 import type {
-  LocalReportAttestationRuntime,
+  ReportAttestationRuntime,
   ReportReviewOutcome,
 } from './report-attestations/types.js'
+import {
+  GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND,
+  LOCAL_REPORT_ATTESTATION_RUNTIME_KIND,
+} from './report-attestations/types.js'
+import type {
+  ReportAttestationStore,
+} from './report-attestations/store.js'
+import {
+  ReportAttestationWriteRateLimiter,
+} from './report-attestations/write-rate-limit.js'
 import {
   MemoryWalletSourceStore,
   type WalletSourceStore,
@@ -84,10 +98,12 @@ type BuildAppOptions = {
   reportPaymentStore?: ReportPaymentStore
   reportPaymentFacilitator?: ReportPaymentFacilitator
   reportAttestations?: {
-    runtime: LocalReportAttestationRuntime
+    runtime: ReportAttestationRuntime
     reviewOutcome: ReportReviewOutcome
+    store?: ReportAttestationStore
     identityKey?: Uint8Array
     publicationSource?: ReportAttestationPublicationSource
+    localSyntheticFixture?: boolean
   }
   reportAttestationDeploymentReader?: ReportAttestationDeploymentReader
   now?: () => Date
@@ -105,8 +121,64 @@ const hasStatusCode = (error: unknown): error is { statusCode: number } =>
 
 export const buildApp = async (options: BuildAppOptions = {}) => {
   const config = options.config ?? loadConfig()
-  if (config.runtimeMode === 'production' && options.reportAttestations) {
-    throw new Error('Local report attestations are not allowed in production')
+  const localSyntheticFixture =
+    options.reportAttestations?.localSyntheticFixture === true
+  if (
+    config.runtimeMode === 'production' &&
+    options.reportAttestations?.runtime.kind ===
+      LOCAL_REPORT_ATTESTATION_RUNTIME_KIND
+  ) {
+    throw new Error(
+      'Local report attestations are not allowed in production',
+    )
+  }
+  if (localSyntheticFixture) {
+    const publicOriginHost = new URL(
+      config.publicOrigin,
+    ).hostname.toLowerCase()
+    const loopbackHosts = new Set([
+      '127.0.0.1',
+      'localhost',
+      '::1',
+      '[::1]',
+    ])
+    if (
+      config.runtimeMode !== 'development' ||
+      !loopbackHosts.has(config.host.toLowerCase()) ||
+      !loopbackHosts.has(publicOriginHost) ||
+      options.reportAttestations?.runtime.kind !==
+        LOCAL_REPORT_ATTESTATION_RUNTIME_KIND
+    ) {
+      throw new Error(
+        'The local synthetic report fixture requires a loopback development server and the local Anvil runtime',
+      )
+    }
+  }
+  if (
+    config.runtimeMode === 'production' &&
+    options.reportAttestations &&
+    options.reportAttestations.store?.durable !== true
+  ) {
+    throw new Error(
+      'A durable ReportAttestationStore is required in production',
+    )
+  }
+  if (
+    config.reportAttestationSyntheticTestnet &&
+    !options.reportAttestations
+  ) {
+    throw new Error(
+      'A GIWA Sepolia report attestation runtime is required when the synthetic testnet pilot is enabled',
+    )
+  }
+  if (
+    config.reportAttestationSyntheticTestnet &&
+    options.reportAttestations?.runtime.kind !==
+      GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND
+  ) {
+    throw new Error(
+      'The synthetic testnet pilot requires the GIWA Sepolia report attestation runtime',
+    )
   }
   if (config.runtimeMode === 'production' && options.sessionStore?.durable !== true) {
     throw new Error('A durable SessionStore is required in production')
@@ -205,6 +277,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     config.rateLimitHmacSecret,
     options.now,
   )
+  const reportAttestationWriteRateLimiter =
+    config.reportAttestationSyntheticTestnet
+      ? new ReportAttestationWriteRateLimiter(
+          rateLimitStore,
+          config.rateLimitHmacSecret,
+          config.reportAttestationSyntheticTestnet.dailyWriteLimits,
+          options.now,
+        )
+      : undefined
   const loginCompletionService = new LoginCompletionService(authRateLimiter, sessionService)
   const accountAuthStore = options.accountAuthStore ?? new MemoryAccountAuthStore()
   const signupSessionService = new SignupSessionService(
@@ -255,10 +336,16 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       ? new UnavailableWalletSourceStore()
       : new MemoryWalletSourceStore()
   )
+  if (options.reportAttestations?.store?.recoverInterrupted) {
+    await options.reportAttestations.store.recoverInterrupted()
+  }
   const reportAttestationService = options.reportAttestations
     ? new ReportAttestationService({
         runtime: options.reportAttestations.runtime,
         reviewOutcome: options.reportAttestations.reviewOutcome,
+        ...(options.reportAttestations.store
+          ? { store: options.reportAttestations.store }
+          : {}),
         ...(options.reportAttestations.identityKey
           ? { identityKey: options.reportAttestations.identityKey }
           : {}),
@@ -446,7 +533,50 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         ? { reader: options.reportAttestationDeploymentReader }
         : {}),
     })
-    if (reportAttestationService) {
+    await registerSyntheticReportAttestationRoutes(protectedApp, {
+      enabled: Boolean(
+        (config.reportAttestationSyntheticTestnet ||
+          localSyntheticFixture) &&
+          reportAttestationService,
+      ),
+      disabledReasonCode: config.reportAttestationDeployment
+        ? 'WRITER_NOT_CONFIGURED'
+        : 'DEPLOYMENT_NOT_CONFIGURED',
+      capability: localSyntheticFixture
+        ? {
+            network: 'eip155:31337',
+            mode: 'LOCAL_ANVIL',
+            explorerBaseUrl: null,
+          }
+        : {
+            network: 'eip155:91342',
+            mode: 'SYNTHETIC_TESTNET',
+            explorerBaseUrl:
+              config.reportAttestationSyntheticTestnet?.explorerBaseUrl ??
+              'https://sepolia-explorer.giwa.io',
+          },
+      ...(reportAttestationService
+        ? { service: reportAttestationService }
+        : {}),
+      ...(config.reportAttestationSyntheticTestnet ||
+      localSyntheticFixture
+        ? {
+            publicationSource:
+              options.reportAttestations?.publicationSource ??
+              (localSyntheticFixture
+                ? new MockReportAttestationPublicationSource()
+                : new SyntheticTestnetReportAttestationPublicationSource()),
+          }
+        : {}),
+      ...(reportAttestationWriteRateLimiter
+        ? { writeRateLimiter: reportAttestationWriteRateLimiter }
+        : {}),
+    })
+    if (
+      reportAttestationService &&
+      options.reportAttestations?.runtime.kind ===
+        LOCAL_REPORT_ATTESTATION_RUNTIME_KIND
+    ) {
       await registerReportAttestationRoutes(protectedApp, {
         service: reportAttestationService,
         publicationSource:
