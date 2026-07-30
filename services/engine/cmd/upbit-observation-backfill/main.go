@@ -39,13 +39,14 @@ type sourceRevision struct {
 
 func main() {
 	databaseURL := os.Getenv("DAEJANG_SOURCE_DATABASE_URL")
+	reportDatabaseURL := os.Getenv("DAEJANG_REPORT_DATABASE_URL")
 	artifactRoot := os.Getenv("DAEJANG_PRIVATE_OBJECT_ROOT")
 	artifactTemp := os.Getenv("DAEJANG_PRIVATE_OBJECT_TEMP")
 	subjectID := os.Getenv("DAEJANG_BACKFILL_SUBJECT_ID")
 	fragmentID := os.Getenv("DAEJANG_BACKFILL_FRAGMENT_ID")
 	expectedSubjectName := os.Getenv("DAEJANG_BACKFILL_EXPECTED_SUBJECT_NAME")
-	if databaseURL == "" || artifactRoot == "" || artifactTemp == "" || subjectID == "" || fragmentID == "" {
-		log.Fatal("DAEJANG_SOURCE_DATABASE_URL, DAEJANG_PRIVATE_OBJECT_ROOT, DAEJANG_PRIVATE_OBJECT_TEMP, DAEJANG_BACKFILL_SUBJECT_ID, and DAEJANG_BACKFILL_FRAGMENT_ID are required")
+	if databaseURL == "" || reportDatabaseURL == "" || artifactRoot == "" || artifactTemp == "" || subjectID == "" || fragmentID == "" {
+		log.Fatal("DAEJANG_SOURCE_DATABASE_URL, DAEJANG_REPORT_DATABASE_URL, DAEJANG_PRIVATE_OBJECT_ROOT, DAEJANG_PRIVATE_OBJECT_TEMP, DAEJANG_BACKFILL_SUBJECT_ID, and DAEJANG_BACKFILL_FRAGMENT_ID are required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -125,7 +126,7 @@ func main() {
 	} else if revision.ArtifactDigest != prepared.ResultDigest {
 		log.Fatal("existing normalized fragment digest does not match deterministic result")
 	}
-	if err := publishCoverageReports(ctx, databaseURL, artifacts.Store, subjectID, newFragmentID, prepared); err != nil {
+	if err := publishCoverageReports(ctx, reportDatabaseURL, artifacts.Store, subjectID, newFragmentID, prepared); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("Upbit observation backfill published: records=%d normalized=%d observations=%d status=%s", prepared.RecordCount, prepared.NormalizedCount, len(prepared.Evidence.Observations), prepared.TerminalStatus)
