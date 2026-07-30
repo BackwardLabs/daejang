@@ -11,6 +11,7 @@ PostgreSQL만 기존 `daejang-db` Compose 서비스를 사용한다.
 - `daejang/deploy/production.env`
 - `daejang-jit-engine/.envrc`
 - `daejang-posting-service` checkout (기존 호스트의 `evm-posting-service` 이름도 지원)
+- runtime `supervisor/config/source-publication-claim-policy.json`
 - Ethereum/Optimism을 모두 포함한 JIT bridge JSON
 - 빌드된 `daejang-jit-runtime/bin/jitd`, `daejang-jit-runtime/bin/cue`
 - PDF parser Python 가상환경
@@ -77,7 +78,10 @@ artifact로 재시작한다. 이 호스트처럼 LaunchAgent domain이 비활성
 복구 loop는 runtime root의 prebuilt Go binaries, Web API dist, proto를 재사용한다.
 
 Posting worker는 `SOURCE` publication을 소비해 CEX Event·Posting·Relation을
-원자적으로 저장한다. JIT/EVM canonical writer는 별도의 단일-writer 전환 대상이므로
+원자적으로 저장한다. 시작 시 signed `normal-single-writer` policy로 한 번의 bounded
+claim을 실행해 policy·trust key·DB 권한·materialization을 검증한 뒤 continuous worker를
+올린다. `DAEJANG_PUBLICATION_POLICY_TRUST_KEY`는 policy를 서명한 Ed25519 key의
+raw-base64url public key여야 한다. JIT/EVM canonical writer는 별도의 단일-writer 전환 대상이므로
 이 supervisor가 자동으로 활성화하지 않는다. shadow parity, 기존 Tax Engine writer
 stop/drain, 서명된 publication claim policy 검증이 끝난 뒤에만 전환한다.
 

@@ -19,6 +19,8 @@ import {
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
   ensureRuntimeIndexerView,
+  hostPostingWorkerArgs,
+  hostPostingWorkerEnvironment,
   hostWebAPIEngineEnvironment,
   privateObjectWriteEnvironment,
   finishSignalShutdown,
@@ -249,6 +251,30 @@ test('pins both host Web API Engine targets to the runtime Unix socket', () => {
       ENGINE_GRPC_INSECURE_TARGET: 'unix:/private/tmp/giwa/engine.sock',
       GIWA_HOST_ENGINE_TARGET: 'unix:/private/tmp/giwa/engine.sock',
     },
+  )
+})
+
+test('requires a signed SOURCE claim policy for the host Posting worker', () => {
+  assert.deepEqual(
+    hostPostingWorkerArgs('/runtime/artifacts', '/srv/posting', '/runtime/policy.json'),
+    [
+      '--artifact-root', '/runtime/artifacts/source/root',
+      '--artifact-temp', '/runtime/artifacts/source/tmp',
+      '--service-root', '/srv/posting',
+      '--claim-policy', '/runtime/policy.json',
+    ],
+  )
+  assert.deepEqual(
+    hostPostingWorkerEnvironment('public-key', 'event-url', 'source-url'),
+    {
+      DAEJANG_PUBLICATION_POLICY_TRUST_KEY: 'public-key',
+      DAEJANG_POSTING_DATABASE_URL: 'event-url',
+      DAEJANG_POSTING_ARTIFACT_DATABASE_URL: 'source-url',
+    },
+  )
+  assert.throws(
+    () => hostPostingWorkerEnvironment('', 'event-url', 'source-url'),
+    /TRUST_KEY is missing/,
   )
 })
 
