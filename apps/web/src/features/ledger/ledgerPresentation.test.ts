@@ -17,6 +17,11 @@ describe('ledger posting presentation', () => {
       decimals: 8,
       metadata: 'Upbit · 소수점 8자리',
     })
+    expect(parseLedgerAsset('asset-krw-upbit')).toEqual({
+      symbol: 'KRW',
+      decimals: 8,
+      metadata: 'Upbit · 소수점 8자리',
+    })
     expect(parseLedgerAsset('asset:unmapped')).toEqual({ symbol: 'asset:unmapped' })
   })
 
@@ -85,6 +90,10 @@ describe('ledger posting presentation', () => {
       accountId: 'account-upbit',
       assetId: 'cex-document-asset:upbit:decimal8:krw',
     }])).toEqual({ kind: 'CEX', label: 'Upbit', detail: 'account-upbit' })
+    expect(describeLedgerSource([{
+      accountId: 'cex-account:upbit:acb59c011f',
+      assetId: 'asset-krw-upbit',
+    }])).toEqual({ kind: 'CEX', label: 'Upbit', detail: 'cex-account:upbit:acb59c011f' })
     expect(describeLedgerSource([{
       accountId: 'wallet-1',
       assetId: 'asset:eip155:10:native',

@@ -126,6 +126,14 @@ export const parseLedgerAsset = (assetId: string): LedgerAssetPresentation => {
       metadata: `${formatVenue(venue)} · 소수점 ${decimals}자리`,
     }
   }
+  const canonicalCexMatch = assetId.match(/^asset-([a-z0-9]+)-upbit$/i)
+  if (canonicalCexMatch?.[1]) {
+    return {
+      symbol: canonicalCexMatch[1].toUpperCase(),
+      decimals: 8,
+      metadata: 'Upbit · 소수점 8자리',
+    }
+  }
   const evmMatch = assetId.match(/^asset:eip155:(\d+):(native|erc20)(?::(.+))?$/i)
   if (evmMatch) {
     const [, chainId = '', assetKind = '', locator] = evmMatch
@@ -158,6 +166,16 @@ export const parseLedgerAsset = (assetId: string): LedgerAssetPresentation => {
 export const describeLedgerSource = (
   postings: Array<{ accountId: string; assetId: string }>,
 ): LedgerSourcePresentation => {
+  for (const posting of postings) {
+    const cexAccountMatch = posting.accountId.match(/^cex-account:([^:]+):/i)
+    if (cexAccountMatch?.[1]) {
+      return {
+        kind: 'CEX',
+        label: formatVenue(cexAccountMatch[1]),
+        detail: posting.accountId,
+      }
+    }
+  }
   for (const posting of postings) {
     const cexMatch = posting.assetId.match(/^cex-document-asset:([^:]+):/i)
     if (cexMatch?.[1]) {

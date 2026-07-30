@@ -2090,20 +2090,20 @@
   box-shadow: inset 3px 0 var(--ledger-accent);
 }
 
-.ledger-explorer__time,
 .ledger-explorer__source,
 .ledger-explorer__action {
   display: grid;
   gap: 4px;
 }
 
-.ledger-explorer__time {
+.ledger-explorer__time-content {
+  display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 9px;
 }
 
-.ledger-explorer__time button {
+.ledger-explorer__time-content button {
   min-width: 44px;
   height: 28px;
   padding: 0 9px;
@@ -2117,17 +2117,17 @@
   cursor: pointer;
 }
 
-.ledger-explorer__time button:hover {
+.ledger-explorer__time-content button:hover {
   border-color: var(--ledger-ui-border-strong);
   background: var(--ledger-ui-surface-muted);
 }
 
-.ledger-explorer__time button:focus-visible {
+.ledger-explorer__time-content button:focus-visible {
   outline: 2px solid var(--ledger-ui-border-strong);
   outline-offset: 2px;
 }
 
-.ledger-explorer__time time {
+.ledger-explorer__time-content time {
   color: var(--ledger-ui-foreground-subtle);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -2166,16 +2166,29 @@
   content: '';
 }
 
-.ledger-explorer__action[data-flow-shape='EXTERNAL_IN'] strong::before {
+.ledger-explorer__action[data-action='입금'] strong {
+  color: #15803d;
+}
+
+.ledger-explorer__action[data-action='입금'] strong::before {
   background: #16a34a;
 }
 
-.ledger-explorer__action[data-flow-shape='EXTERNAL_OUT'] strong::before {
+.ledger-explorer__action[data-action='출금'] strong {
+  color: #b45309;
+}
+
+.ledger-explorer__action[data-action='출금'] strong::before {
   background: #d97706;
 }
 
-.ledger-explorer__action[data-flow-shape='EXCHANGE'] strong::before,
-.ledger-explorer__action[data-flow-shape='INFLOW_OUTFLOW'] strong::before {
+.ledger-explorer__action[data-action='거래'] strong,
+.ledger-explorer__action[data-action='스왑'] strong {
+  color: #1d4ed8;
+}
+
+.ledger-explorer__action[data-action='거래'] strong::before,
+.ledger-explorer__action[data-action='스왑'] strong::before {
   background: #2563eb;
 }
 
