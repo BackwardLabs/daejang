@@ -50,6 +50,24 @@ func TestClientUsesBoundedOneRequestUnixProtocol(t *testing.T) {
 	}
 }
 
+func TestClientAcceptsRestrictedInternalEvidenceV3(t *testing.T) {
+	request := validRequest()
+	socketPath := serveOnce(t, func(connection net.Conn) {
+		readRequest(t, connection)
+		envelope := strings.Replace(validInternalEvidenceEnvelope(request),
+			"internal-document-evidence-input/v2", "internal-document-evidence-input/v3", 1)
+		writeResponse(t, connection, responseStatusOK, "", envelope)
+	})
+
+	result, err := (Client{SocketPath: socketPath}).Parse(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(result.InternalEvidence, []byte("internal-document-evidence-input/v3")) {
+		t.Fatalf("v3 evidence was not retained: %s", result.InternalEvidence)
+	}
+}
+
 func TestClientAcceptsExplicitMVPSubjectComparisonSkip(t *testing.T) {
 	request := validRequest()
 	request.ExpectedSubjectName = ""

@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +15,8 @@ import (
 	"github.com/BackwardLabs/daejang-db/pkg/artifactstore"
 	"github.com/BackwardLabs/daejang-db/pkg/evidencestore"
 	"github.com/BackwardLabs/daejang-db/pkg/reportstore"
+	"github.com/BackwardLabs/daejang-db/pkg/sourcestore"
+	"github.com/BackwardLabs/daejang/services/engine/internal/source"
 	"github.com/BackwardLabs/daejang/services/engine/internal/upbitnormalizer"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -39,6 +43,7 @@ func main() {
 	artifactTemp := os.Getenv("DAEJANG_PRIVATE_OBJECT_TEMP")
 	subjectID := os.Getenv("DAEJANG_BACKFILL_SUBJECT_ID")
 	fragmentID := os.Getenv("DAEJANG_BACKFILL_FRAGMENT_ID")
+	expectedSubjectName := os.Getenv("DAEJANG_BACKFILL_EXPECTED_SUBJECT_NAME")
 	if databaseURL == "" || artifactRoot == "" || artifactTemp == "" || subjectID == "" || fragmentID == "" {
 		log.Fatal("DAEJANG_SOURCE_DATABASE_URL, DAEJANG_PRIVATE_OBJECT_ROOT, DAEJANG_PRIVATE_OBJECT_TEMP, DAEJANG_BACKFILL_SUBJECT_ID, and DAEJANG_BACKFILL_FRAGMENT_ID are required")
 	}
@@ -70,11 +75,27 @@ func main() {
 	if !found {
 		log.Fatal("published internal evidence artifact was not found")
 	}
+	internalEvidence := internalObject.Bytes
+	if internalObject.MediaType == "application/vnd.giwa.private-object" {
+		keys, keyErr := loadPrivateArtifactKeys()
+		if keyErr != nil {
+			log.Fatal(keyErr)
+		}
+		internalEvidence, err = source.DecryptPrivateArtifactEnvelope(internalObject.Bytes, keys)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer clear(internalEvidence)
+	}
+	ownedWallets, err := loadOwnedWallets(ctx, databaseURL, subjectID)
+	if err != nil {
+		log.Fatal(err)
+	}
 	prepared, err := upbitnormalizer.Prepare(upbitnormalizer.Input{
 		SubjectID: subjectID, CoverageStart: revision.CoverageStart, CoverageEnd: revision.CoverageEnd,
 		OriginalArtifact: artifactstore.Ref{Algorithm: "sha256", Digest: revision.OriginalDigest, Locator: revision.OriginalLocator},
 		InternalArtifact: artifactstore.Ref{Algorithm: "sha256", Digest: revision.InternalDigest, Locator: revision.InternalLocator},
-		InternalEvidence: internalObject.Bytes,
+		InternalEvidence: internalEvidence, ExpectedSubjectName: expectedSubjectName, OwnedWallets: ownedWallets,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -108,6 +129,63 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("Upbit observation backfill published: records=%d normalized=%d observations=%d status=%s", prepared.RecordCount, prepared.NormalizedCount, len(prepared.Evidence.Observations), prepared.TerminalStatus)
+}
+
+func loadPrivateArtifactKeys() (map[string][]byte, error) {
+	keys := map[string][]byte{}
+	if encodedKeys := os.Getenv("PRIVATE_OBJECT_DECRYPTION_KEYS"); encodedKeys != "" {
+		var values map[string]string
+		if err := json.Unmarshal([]byte(encodedKeys), &values); err != nil {
+			return nil, errors.New("PRIVATE_OBJECT_DECRYPTION_KEYS must be a JSON object")
+		}
+		for keyID, encodedKey := range values {
+			decoded, err := base64.StdEncoding.DecodeString(encodedKey)
+			if err != nil || keyID == "" || len(decoded) != 32 {
+				return nil, errors.New("PRIVATE_OBJECT_DECRYPTION_KEYS contains an invalid entry")
+			}
+			keys[keyID] = decoded
+		}
+	}
+	if encodedKey := os.Getenv("PRIVATE_OBJECT_ENCRYPTION_KEY"); encodedKey != "" {
+		keyID := os.Getenv("PRIVATE_OBJECT_ENCRYPTION_KEY_ID")
+		decoded, err := base64.StdEncoding.DecodeString(encodedKey)
+		if err != nil || keyID == "" || len(decoded) != 32 {
+			return nil, errors.New("PRIVATE_OBJECT_ENCRYPTION_KEY and PRIVATE_OBJECT_ENCRYPTION_KEY_ID are invalid")
+		}
+		keys[keyID] = decoded
+	}
+	if len(keys) == 0 {
+		return nil, errors.New("private artifact decryption keys are required")
+	}
+	return keys, nil
+}
+
+func loadOwnedWallets(ctx context.Context, databaseURL, subjectID string) ([]upbitnormalizer.OwnedWalletSnapshot, error) {
+	runtime, err := sourcestore.Open(ctx, sourcestore.Options{DatabaseURL: databaseURL, ApplicationName: "daejang-upbit-observation-backfill-wallets"})
+	if err != nil {
+		return nil, err
+	}
+	defer runtime.Close()
+	values, err := runtime.Store.ListWallets(ctx, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]upbitnormalizer.OwnedWalletSnapshot, 0, len(values))
+	for _, value := range values {
+		if value.Status != "ACTIVE" {
+			continue
+		}
+		chains := make([]string, 0, len(value.ChainScopes))
+		for _, scope := range value.ChainScopes {
+			if scope.Status == "ACTIVE" {
+				chains = append(chains, scope.ChainID)
+			}
+		}
+		result = append(result, upbitnormalizer.OwnedWalletSnapshot{
+			SourceID: value.ID, Address: value.Address, Status: value.Status, ChainIDs: chains,
+		})
+	}
+	return result, nil
 }
 
 type coverageManifest struct {

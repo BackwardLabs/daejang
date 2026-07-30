@@ -31,6 +31,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SourceServiceClient interface {
 	RegisterWallet(ctx context.Context, in *RegisterWalletRequest, opts ...grpc.CallOption) (*RegisterWalletResponse, error)
+	// Reserved for wire compatibility. The server always fails closed; document
+	// creation is only available through ImportUpbitDocument after parsing and
+	// verified-subject matching.
 	RegisterDocument(ctx context.Context, in *RegisterDocumentRequest, opts ...grpc.CallOption) (*RegisterDocumentResponse, error)
 	ImportUpbitDocument(ctx context.Context, in *ImportUpbitDocumentRequest, opts ...grpc.CallOption) (*ImportUpbitDocumentResponse, error)
 	ListSources(ctx context.Context, in *ListSourcesRequest, opts ...grpc.CallOption) (*ListSourcesResponse, error)
@@ -100,6 +103,9 @@ func (c *sourceServiceClient) DisconnectSource(ctx context.Context, in *Disconne
 // for forward compatibility.
 type SourceServiceServer interface {
 	RegisterWallet(context.Context, *RegisterWalletRequest) (*RegisterWalletResponse, error)
+	// Reserved for wire compatibility. The server always fails closed; document
+	// creation is only available through ImportUpbitDocument after parsing and
+	// verified-subject matching.
 	RegisterDocument(context.Context, *RegisterDocumentRequest) (*RegisterDocumentResponse, error)
 	ImportUpbitDocument(context.Context, *ImportUpbitDocumentRequest) (*ImportUpbitDocumentResponse, error)
 	ListSources(context.Context, *ListSourcesRequest) (*ListSourcesResponse, error)

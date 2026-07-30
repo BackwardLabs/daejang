@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/big"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,11 +20,11 @@ import (
 
 const (
 	ProducerName    = "daejang-upbit-normalizer"
-	ProducerVersion = "observation/v3"
+	ProducerVersion = "observation/v4"
 	// Pinned from BackwardLabs/schema commit 310e9ae51d4d833c0a309cbea7b0532f17c3b340.
 	SchemaDigest              = "13415ef66497cc99e0f09e8ac0cad5aa094144bbc85d6b9ce88188f406466ab2"
 	normalizationReason       = "UPBIT_TRANSACTION_NORMALIZATION_UNSUPPORTED"
-	cexDetailSchema           = "tax.cex-interpretation-input.v1"
+	cexDetailSchema           = "tax.cex-interpretation-input.v2"
 	cexScalePolicy            = "upbit-document-decimal8/v1"
 	cexAssetNamespace         = "cex-document-asset:upbit:decimal8:"
 	cexDocumentDecimals uint8 = 8
@@ -31,14 +32,26 @@ const (
 
 var amountPattern = regexp.MustCompile(`^((?:0|[1-9][0-9]*|[1-9][0-9]{0,2}(?:,[0-9]{3})+)(?:\.[0-9]+)?) ([A-Z0-9]+)$`)
 var assetPattern = regexp.MustCompile(`^[A-Z0-9]+$`)
+var evmAddressPattern = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
+var suiAddressPattern = regexp.MustCompile(`^0x[0-9a-fA-F]{64}$`)
+var tronAddressPattern = regexp.MustCompile(`^T[1-9A-HJ-NP-Za-km-z]{33}$`)
+
+type OwnedWalletSnapshot struct {
+	SourceID string
+	Address  string
+	Status   string
+	ChainIDs []string
+}
 
 type Input struct {
-	SubjectID        string
-	CoverageStart    time.Time
-	CoverageEnd      time.Time
-	OriginalArtifact artifactstore.Ref
-	InternalArtifact artifactstore.Ref
-	InternalEvidence []byte
+	SubjectID           string
+	CoverageStart       time.Time
+	CoverageEnd         time.Time
+	OriginalArtifact    artifactstore.Ref
+	InternalArtifact    artifactstore.Ref
+	InternalEvidence    []byte
+	ExpectedSubjectName string
+	OwnedWallets        []OwnedWalletSnapshot
 }
 
 type Result struct {
@@ -106,6 +119,28 @@ type exchangePayload struct {
 	GrossAmount      sourceValue `json:"grossAmount"`
 	Fee              sourceValue `json:"fee"`
 	SettlementAmount sourceValue `json:"settlementAmount"`
+	Counterparty     sourceValue `json:"counterparty"`
+	WalletAddress    sourceValue `json:"walletAddress"`
+	TravelRuleInfo   sourceValue `json:"travelRuleInfo"`
+}
+
+type observationDetail struct {
+	AssetScalePolicy string                  `json:"assetScalePolicy"`
+	SchemaVersion    string                  `json:"schemaVersion"`
+	Semantic         string                  `json:"semantic"`
+	SourceCase       string                  `json:"sourceCase"`
+	TransferEndpoint *transferEndpointDetail `json:"transferEndpoint,omitempty"`
+}
+
+type transferEndpointDetail struct {
+	Resolution       string   `json:"resolution"`
+	Kind             string   `json:"kind"`
+	Display          string   `json:"display"`
+	AddressFamily    string   `json:"addressFamily,omitempty"`
+	WalletSourceID   string   `json:"walletSourceId,omitempty"`
+	ChainCandidates  []string `json:"chainCandidates,omitempty"`
+	ConnectionStatus string   `json:"connectionStatus"`
+	ReviewRequired   bool     `json:"reviewRequired"`
 }
 
 type internalRecord struct {
@@ -164,7 +199,7 @@ func Prepare(input Input) (Result, error) {
 	}
 	subjectMatchAccepted := parsed.SubjectMatch.Status == "MATCH" || (parsed.SubjectMatch.Status == "INCONCLUSIVE" && parsed.SubjectMatch.PolicyRef == "mvp-subject-comparison-skipped:v1" && parsed.SubjectMatch.RawValuesRetained != nil && !*parsed.SubjectMatch.RawValuesRetained)
 	runAccepted := parsed.Run.Status == "COMPLETE" || parsed.Run.Status == "PARTIAL"
-	if parsed.ContractVersion != "internal-document-evidence-input/v2" || parsed.ProviderID != "UPBIT" || parsed.Artifact.SourceSystem != parsed.ProviderID || !subjectMatchAccepted || parsed.Document.DocumentType != "TRADE_STATEMENT" || parsed.Artifact.ArtifactID == "" || parsed.Artifact.ImportID == "" || parsed.Artifact.SubjectRef == "" || parsed.Artifact.ContentHash.Algorithm != "sha256" || len(parsed.Artifact.ContentHash.Value) != 64 || parsed.Producer.Name == "" || parsed.Producer.Version == "" || !runAccepted || int64(len(parsed.Records)) != parsed.Run.Summary.SourceRecordCount {
+	if (parsed.ContractVersion != "internal-document-evidence-input/v2" && parsed.ContractVersion != "internal-document-evidence-input/v3") || parsed.ProviderID != "UPBIT" || parsed.Artifact.SourceSystem != parsed.ProviderID || !subjectMatchAccepted || parsed.Document.DocumentType != "TRADE_STATEMENT" || parsed.Artifact.ArtifactID == "" || parsed.Artifact.ImportID == "" || parsed.Artifact.SubjectRef == "" || parsed.Artifact.ContentHash.Algorithm != "sha256" || len(parsed.Artifact.ContentHash.Value) != 64 || parsed.Producer.Name == "" || parsed.Producer.Version == "" || !runAccepted || int64(len(parsed.Records)) != parsed.Run.Summary.SourceRecordCount {
 		return Result{}, errors.New("internal evidence contract is invalid")
 	}
 
@@ -199,7 +234,7 @@ func Prepare(input Input) (Result, error) {
 		outcome := evidencestore.SourceOutcome{ExtractionRunID: parsed.Artifact.ImportID, SourceRecordID: record.SourceRecordID, SourceArtifactID: parsed.Artifact.ArtifactID}
 		switch record.MappingStatus {
 		case "MAPPED":
-			normalized, reason := normalizeExchange(record, accountID, parsed.Artifact.ImportID)
+			normalized, reason := normalizeExchange(record, accountID, parsed.Artifact.ImportID, input)
 			if reason != "" {
 				outcome.Status, outcome.ReasonCode = "UNSUPPORTED", normalizationReason
 				outcome.Reason = reason
@@ -271,7 +306,7 @@ func Prepare(input Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	manifest := rootManifest{SchemaVersion: "daejang.upbit-observation-evidence.v2", ProviderID: "UPBIT", DocumentType: parsed.Document.DocumentType, SourceArtifactDigest: input.OriginalArtifact.Digest, SourceDocumentHash: parsed.Artifact.ContentHash.Value, InternalEvidenceDigest: input.InternalArtifact.Digest, ProjectionDigest: digest(projection), RecordCount: int64(len(records)), NormalizedCount: normalizedCount, TerminalStatus: terminalStatus, ReasonCode: reasonCode, AssetScalePolicy: cexScalePolicy}
+	manifest := rootManifest{SchemaVersion: "daejang.upbit-observation-evidence.v3", ProviderID: "UPBIT", DocumentType: parsed.Document.DocumentType, SourceArtifactDigest: input.OriginalArtifact.Digest, SourceDocumentHash: parsed.Artifact.ContentHash.Value, InternalEvidenceDigest: input.InternalArtifact.Digest, ProjectionDigest: digest(projection), RecordCount: int64(len(records)), NormalizedCount: normalizedCount, TerminalStatus: terminalStatus, ReasonCode: reasonCode, AssetScalePolicy: cexScalePolicy}
 	root, err := json.Marshal(manifest)
 	if err != nil {
 		return Result{}, err
@@ -279,7 +314,7 @@ func Prepare(input Input) (Result, error) {
 	return Result{Evidence: evidence, RootArtifact: root, ResultDigest: digest(root), RecordCount: int64(len(records)), NormalizedCount: normalizedCount, TerminalStatus: terminalStatus, CoverageRecords: coverageRecords}, nil
 }
 
-func normalizeExchange(record internalRecord, accountID, runID string) (normalization, string) {
+func normalizeExchange(record internalRecord, accountID, runID string, input Input) (normalization, string) {
 	p := record.Payload
 	if p.RecordType != "EXCHANGE" {
 		return normalization{}, "현재 지원하지 않는 Upbit 섹션입니다."
@@ -312,15 +347,15 @@ func normalizeExchange(record internalRecord, accountID, runID string) (normaliz
 	baseDecimals := cexDocumentDecimals
 	baseID := assetID(baseSymbol)
 	assets := []evidencestore.SubjectAsset{assetDefinition(baseID, baseSymbol, baseDecimals)}
-	makeObservation := func(local uint64, kind, symbol, quantity, semantic string) evidencestore.Observation {
-		detail, _ := json.Marshal(map[string]string{"assetScalePolicy": cexScalePolicy, "schemaVersion": cexDetailSchema, "sourceCase": sourceCase(eventType), "semantic": semantic})
+	makeObservation := func(local uint64, kind, symbol, quantity, semantic string, transfer *transferEndpointDetail) evidencestore.Observation {
+		detail, _ := json.Marshal(observationDetail{AssetScalePolicy: cexScalePolicy, SchemaVersion: cexDetailSchema, Semantic: semantic, SourceCase: sourceCase(eventType), TransferEndpoint: transfer})
 		id := "cex-observation:" + digest([]byte(runID + "\x00" + record.SourceRecordID + fmt.Sprintf("\x00%d", local)))[:32]
 		at := occurredAt
 		return evidencestore.Observation{ID: id, Domain: "CEX", Kind: kind, NativeID: record.SourceRecordID + ":" + strings.ToLower(semantic), AccountID: accountID, AssetID: assetID(symbol), Quantity: quantity, OccurredAt: &at, OriginKind: "SOURCE_RECORD", OriginLinkID: record.SourceRecordID, OriginRunID: runID, CoordinateJSON: json.RawMessage(fmt.Sprintf(`{"page":%d,"itemIndex":%d}`, record.Source.SourcePage, record.Source.SourceItemIndex)), LocalIndex: local, DetailJSON: detail}
 	}
 	observations := []evidencestore.Observation{}
-	add := func(kind, symbol, quantity, semantic string) {
-		observations = append(observations, makeObservation(uint64(len(observations)), kind, symbol, quantity, semantic))
+	add := func(kind, symbol, quantity, semantic string, transfer *transferEndpointDetail) {
+		observations = append(observations, makeObservation(uint64(len(observations)), kind, symbol, quantity, semantic, transfer))
 	}
 	switch eventType {
 	case "매수", "매도":
@@ -349,14 +384,14 @@ func normalizeExchange(record internalRecord, accountID, runID string) (normaliz
 		grossQuantity, _ := parseAmount(p.GrossAmount.Raw, quoteSymbol, cexDocumentDecimals)
 		feeQuantity, _ := parseAmount(p.Fee.Raw, quoteSymbol, cexDocumentDecimals)
 		if eventType == "매수" {
-			add("FILL", baseSymbol, baseQuantity, "BASE")
-			add("FILL", quoteSymbol, negate(grossQuantity), "QUOTE")
+			add("FILL", baseSymbol, baseQuantity, "BASE", nil)
+			add("FILL", quoteSymbol, negate(grossQuantity), "QUOTE", nil)
 		} else {
-			add("FILL", baseSymbol, negate(baseQuantity), "BASE")
-			add("FILL", quoteSymbol, grossQuantity, "QUOTE")
+			add("FILL", baseSymbol, negate(baseQuantity), "BASE", nil)
+			add("FILL", quoteSymbol, grossQuantity, "QUOTE", nil)
 		}
 		if feeQuantity != "0" {
-			add("FEE", quoteSymbol, negate(feeQuantity), "FEE")
+			add("FEE", quoteSymbol, negate(feeQuantity), "FEE", nil)
 		}
 	case "입금":
 		quantity, ok := parseAmount(p.Quantity.Raw, baseSymbol, baseDecimals)
@@ -369,7 +404,8 @@ func normalizeExchange(record internalRecord, accountID, runID string) (normaliz
 		if !grossOK || !feeOK || !settlementOK || gross != quantity || fee != "0" || settlement != quantity {
 			return normalization{}, "입금 수량·수수료·정산수량이 일치하지 않습니다."
 		}
-		add("DEPOSIT", baseSymbol, quantity, "PRINCIPAL")
+		endpoint := resolveTransferEndpoint(p, input)
+		add("DEPOSIT", baseSymbol, quantity, "PRINCIPAL", &endpoint)
 	case "출금":
 		quantity, ok := parseAmount(p.Quantity.Raw, baseSymbol, baseDecimals)
 		if !ok || quantity == "0" {
@@ -385,9 +421,10 @@ func normalizeExchange(record internalRecord, accountID, runID string) (normaliz
 		if !grossOK || !settlementOK || !sumOK || gross != quantity || settlement != expectedSettlement {
 			return normalization{}, "출금 수량·수수료·정산수량이 일치하지 않습니다."
 		}
-		add("WITHDRAWAL", baseSymbol, negate(quantity), "PRINCIPAL")
+		endpoint := resolveTransferEndpoint(p, input)
+		add("WITHDRAWAL", baseSymbol, negate(quantity), "PRINCIPAL", &endpoint)
 		if fee != "0" {
-			add("FEE", baseSymbol, negate(fee), "FEE")
+			add("FEE", baseSymbol, negate(fee), "FEE", nil)
 		}
 	}
 	links := make([]evidencestore.SourceOutcomeObservation, len(observations))
@@ -395,6 +432,108 @@ func normalizeExchange(record internalRecord, accountID, runID string) (normaliz
 		links[i] = evidencestore.SourceOutcomeObservation{ExtractionRunID: runID, SourceRecordID: record.SourceRecordID, ObservationID: observation.ID, Ordinal: uint32(i)}
 	}
 	return normalization{assets: assets, observations: observations, links: links}, ""
+}
+
+func resolveTransferEndpoint(payload exchangePayload, input Input) transferEndpointDetail {
+	if payload.WalletAddress.State == "PRESENT" && strings.TrimSpace(payload.WalletAddress.Raw) != "" {
+		address := strings.TrimSpace(payload.WalletAddress.Raw)
+		family, canonical := addressFamily(address)
+		for _, wallet := range input.OwnedWallets {
+			if wallet.Status != "ACTIVE" {
+				continue
+			}
+			_, ownedCanonical := addressFamily(strings.TrimSpace(wallet.Address))
+			if canonical == "" || ownedCanonical == "" || canonical != ownedCanonical {
+				continue
+			}
+			chains := sortedUniqueStrings(wallet.ChainIDs)
+			return transferEndpointDetail{
+				Resolution:       "OWNED_REGISTERED",
+				Kind:             "WALLET_ADDRESS",
+				Display:          maskAddress(address),
+				AddressFamily:    family,
+				WalletSourceID:   wallet.SourceID,
+				ChainCandidates:  chains,
+				ConnectionStatus: "WALLET_OBSERVATION_PENDING",
+				ReviewRequired:   true,
+			}
+		}
+		return transferEndpointDetail{
+			Resolution:       "EXTERNAL_KNOWN",
+			Kind:             "WALLET_ADDRESS",
+			Display:          maskAddress(address),
+			AddressFamily:    family,
+			ConnectionStatus: "EXTERNAL_COUNTERPARTY_REVIEW",
+			ReviewRequired:   true,
+		}
+	}
+	if payload.Counterparty.State == "PRESENT" && strings.TrimSpace(payload.Counterparty.Raw) != "" {
+		if normalizedIdentity(payload.Counterparty.Raw) != "" &&
+			normalizedIdentity(payload.Counterparty.Raw) == normalizedIdentity(input.ExpectedSubjectName) {
+			return transferEndpointDetail{
+				Resolution:       "OWNED_SUBJECT_NAME",
+				Kind:             "PERSON_NAME",
+				Display:          "본인",
+				ConnectionStatus: "OWNERSHIP_MATCHED",
+				ReviewRequired:   false,
+			}
+		}
+		return transferEndpointDetail{
+			Resolution:       "EXTERNAL_KNOWN",
+			Kind:             "PERSON_NAME",
+			Display:          "외부 상대방 정보 있음",
+			ConnectionStatus: "EXTERNAL_COUNTERPARTY_REVIEW",
+			ReviewRequired:   true,
+		}
+	}
+	return transferEndpointDetail{
+		Resolution:       "UNKNOWN",
+		Kind:             "NONE",
+		Display:          "확인 불가",
+		ConnectionStatus: "COUNTERPARTY_REQUIRED",
+		ReviewRequired:   true,
+	}
+}
+
+func addressFamily(address string) (string, string) {
+	switch {
+	case evmAddressPattern.MatchString(address):
+		return "EVM", strings.ToLower(address)
+	case suiAddressPattern.MatchString(address):
+		return "SUI", strings.ToLower(address)
+	case tronAddressPattern.MatchString(address):
+		return "TRON", address
+	default:
+		return "UNKNOWN", address
+	}
+}
+
+func maskAddress(address string) string {
+	if len(address) <= 8 {
+		return "주소 확인됨"
+	}
+	if len(address) <= 14 {
+		return address[:4] + "…" + address[len(address)-3:]
+	}
+	return address[:8] + "…" + address[len(address)-6:]
+}
+
+func normalizedIdentity(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), ""))
+}
+
+func sortedUniqueStrings(values []string) []string {
+	result := append([]string(nil), values...)
+	sort.Strings(result)
+	position := 0
+	for _, value := range result {
+		if position > 0 && result[position-1] == value {
+			continue
+		}
+		result[position] = value
+		position++
+	}
+	return result[:position]
 }
 
 func parseUpbitTime(value string) (time.Time, error) {

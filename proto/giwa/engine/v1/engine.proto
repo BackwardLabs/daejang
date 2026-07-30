@@ -221,6 +221,16 @@ message LedgerPosting {
   string cost_basis = 9;
   string denomination = 10;
 }
+message LedgerTransferEndpoint {
+  string resolution = 1;
+  string kind = 2;
+  string display = 3;
+  string address_family = 4;
+  string wallet_source_id = 5;
+  repeated string chain_candidates = 6;
+  string connection_status = 7;
+  bool review_required = 8;
+}
 message LedgerEvent {
   string event_id = 1;
   string revision_id = 2;
@@ -231,6 +241,7 @@ message LedgerEvent {
   string interpretation_support = 7;
   google.protobuf.Timestamp effective_at = 8;
   repeated LedgerPosting postings = 9;
+  LedgerTransferEndpoint transfer_endpoint = 10;
 }
 message ListLedgerEventsResponse { repeated LedgerEvent items = 1; }
 

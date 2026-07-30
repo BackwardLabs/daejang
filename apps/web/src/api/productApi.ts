@@ -23,6 +23,17 @@ export type LedgerPostingModel = {
   denomination: string
 }
 
+export type LedgerTransferEndpointModel = {
+  resolution: string
+  kind: string
+  display: string
+  addressFamily: string
+  walletSourceId: string
+  chainCandidates: string[]
+  connectionStatus: string
+  reviewRequired: boolean
+}
+
 export type LedgerEventModel = {
   eventId: string
   revisionId: string
@@ -33,6 +44,7 @@ export type LedgerEventModel = {
   interpretationSupport: string
   effectiveAt: string
   postings: LedgerPostingModel[]
+  transferEndpoint?: LedgerTransferEndpointModel
 }
 
 export type ReviewModel = {

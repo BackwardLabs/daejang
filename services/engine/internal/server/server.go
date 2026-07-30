@@ -148,8 +148,9 @@ func Run(ctx context.Context, config Config) error {
 		SocketPath: config.PDFParserSocketPath,
 		Timeout:    config.PDFParserTimeout,
 	}
+	sourceStore := source.PostgresStore{Store: sourceRuntime.Store, DocumentStore: jobRuntime.Store}
 	enginev1.RegisterSourceServiceServer(grpcServer, &source.Service{
-		Store: source.PostgresStore{Store: sourceRuntime.Store, DocumentStore: jobRuntime.Store},
+		Store: sourceStore,
 		Importer: &source.DocumentImporter{
 			Jobs: jobRuntime.Store,
 			Artifacts: source.EncryptingArtifactStore{
@@ -159,6 +160,7 @@ func Run(ctx context.Context, config Config) error {
 			},
 			Evidence:      sourceEvidenceRuntime.Store,
 			Parser:        parserClient,
+			Wallets:       sourceStore,
 			LeaseDuration: config.PDFImportLeaseDuration,
 		},
 	})

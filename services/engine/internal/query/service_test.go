@@ -62,6 +62,31 @@ func TestObservationReadProjectionMergesBeforeApplyingLedgerLimit(t *testing.T) 
 	}
 }
 
+func TestLedgerProjectionIncludesSafeTransferEndpointSummary(t *testing.T) {
+	at := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	reads := &fakeReadStore{ledger: []readmodelstore.LedgerEvent{{
+		EventID: "transfer", EventType: "TRANSFER", FlowShape: "SELF_TRANSFER", EffectiveAt: at,
+		TransferEndpoint: &readmodelstore.TransferEndpoint{
+			Resolution: "OWNED_REGISTERED", Kind: "WALLET_ADDRESS", Display: "0x123456…abcdef",
+			AddressFamily: "EVM", WalletSourceID: "wallet-source-1",
+			ChainCandidates: []string{"eip155:10"}, ConnectionStatus: "WALLET_OBSERVATION_PENDING",
+			ReviewRequired: true,
+		},
+	}}}
+	service := &Service{Reads: reads}
+
+	ledger, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{Context: queryTestContext(), TaxYear: 2026, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := ledger.GetItems()[0].GetTransferEndpoint()
+	if endpoint.GetResolution() != "OWNED_REGISTERED" || endpoint.GetDisplay() != "0x123456…abcdef" ||
+		endpoint.GetWalletSourceId() != "wallet-source-1" || !endpoint.GetReviewRequired() ||
+		len(endpoint.GetChainCandidates()) != 1 || endpoint.GetChainCandidates()[0] != "eip155:10" {
+		t.Fatalf("unsafe or incomplete transfer endpoint projection: %#v", endpoint)
+	}
+}
+
 func (f *fakeTaxReportStore) GetCurrentReportForYear(_ context.Context, subject string, taxYear int) (taxreportstore.CurrentReportDetail, bool, error) {
 	f.lastSubject, f.lastTaxYear = subject, taxYear
 	return f.current, f.found, f.err

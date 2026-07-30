@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AppSidebar, defaultAppYear, type AppYear } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import { loadDashboard, loadLedger, loadReviews, type DashboardModel, type LedgerEventModel, type ReviewModel } from '../../api/productApi.ts'
+import { describeLedgerAction } from '../ledger/ledgerPresentation.ts'
 import './dashboard.css'
 
 const monthLabels = [
@@ -20,7 +21,6 @@ const monthLabels = [
 ]
 
 const count = (value: string | number | undefined) => Number(value ?? 0)
-const eventTypeLabel: Record<string, string> = { TRADE: '거래', TRANSFER: '전송', SWAP: '스왑', REWARD: '보상', OTHER: '기타', UNKNOWN: '미분류' }
 
 export function DashboardPage() {
   const [selectedYear, setSelectedYear] = useState<AppYear>(defaultAppYear)
@@ -230,9 +230,14 @@ export function DashboardPage() {
                 <tbody>
                   {recentTransactions.map((transaction) => {
                     const posting = transaction.postings[0]
+                    const action = describeLedgerAction(
+                      transaction.eventType,
+                      transaction.flowShape,
+                      transaction.postings,
+                    )
                     return <tr key={transaction.eventId}>
                       <td>{new Date(transaction.effectiveAt).toLocaleString('ko-KR')}</td>
-                      <td>{eventTypeLabel[transaction.eventType] ?? transaction.eventType}</td>
+                      <td>{action.label}</td>
                       <td>{posting?.assetId ?? '—'}</td>
                       <td><strong>{posting?.quantity ?? '—'}</strong></td>
                       <td><strong>{posting?.fairValue ? `${posting.fairValue} ${posting.denomination}` : '—'}</strong></td>

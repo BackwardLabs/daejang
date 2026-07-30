@@ -337,7 +337,8 @@ func decodeInternalEvidence(value []byte, request Request) (Result, error) {
 				envelope.SubjectMatch.PolicyRef == "mvp-subject-comparison-skipped:v1" &&
 				envelope.SubjectMatch.RawValuesRetained != nil &&
 				!*envelope.SubjectMatch.RawValuesRetained)
-	if envelope.ContractVersion != "internal-document-evidence-input/v2" ||
+	if (envelope.ContractVersion != "internal-document-evidence-input/v2" &&
+		envelope.ContractVersion != "internal-document-evidence-input/v3") ||
 		!subjectMatchAccepted || envelope.ProviderID != "UPBIT" ||
 		envelope.Artifact.SourceSystem != envelope.ProviderID ||
 		envelope.Artifact.ArtifactID != request.ArtifactID ||

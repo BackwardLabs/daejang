@@ -68,8 +68,8 @@ flowchart TB
 
 | 영역 | 필수 구조 |
 | --- | --- |
-| 문서 | `contractVersion=internal-document-evidence-input/v2`, `providerId=UPBIT`, `documentType=TRADE_STATEMENT` |
-| 행 payload | `eventAt`, `eventType`, `asset`, `quantity`, `grossAmount`, `fee`, `settlementAmount`의 `state`와 `raw` |
+| 문서 | `contractVersion=internal-document-evidence-input/v2` 또는 `v3`, `providerId=UPBIT`, `documentType=TRADE_STATEMENT` |
+| 행 payload | `eventAt`, `eventType`, `asset`, `quantity`, `grossAmount`, `fee`, `settlementAmount`의 `state`와 `raw`. v3는 입·출금의 `counterparty`, `walletAddress`, `travelRuleInfo`도 restricted evidence로 보존 |
 | 행 provenance | `sourceArtifactId`, 1부터 시작하는 page, item index, SHA-256 record hash |
 | 실행 | `status=COMPLETE` 또는 `PARTIAL`, 완료 시각, source record count |
 | 사용자 대응 | `MATCH` 또는 raw 값을 보존하지 않은 명시적 MVP 비교 생략 정책 |
@@ -78,7 +78,9 @@ flowchart TB
 
 ## 장부와 보고서 노출
 
-실제 세금 Engine이 아직 posting으로 물질화하지 않은 CEX Observation은 Query Service가 읽기 전용 장부 event로 투영한다. 이 event는 `resolution=PARTIAL`, `interpretationSupport=OBSERVATION_ONLY`로 표시한다. 이후 동일 Observation을 참조한 실제 posting이 생성되면 임시 투영은 자동으로 제외되어 중복 표시되지 않는다.
+실제 세금 Engine이 아직 posting으로 물질화하지 않은 CEX Observation은 Query Service가 읽기 전용 장부 event로 투영한다. 이 event는 `resolution=PARTIAL`, `interpretationSupport=OBSERVATION_ONLY`로 표시하며, 입·출금 상대를 아직 읽지 못한 단계에서는 외부 전송으로 단정하지 않고 `flowShape=UNKNOWN`을 사용한다. 이후 동일 Observation을 참조한 실제 posting이 생성되면 임시 투영은 자동으로 제외되어 중복 표시되지 않는다.
+
+Parser v3의 상대 이름·주소 원문은 `GIWAOBJ3` restricted artifact에만 암호화 저장한다. Observation과 canonical ledger에는 원문 대신 마스킹 표시, 주소 계열, 등록 wallet source ID, chain 후보와 검토 상태만 전달한다. 등록 지갑과 주소가 일치하면 `SELF_TRANSFER` 후보가 되지만 반대편 지갑 Observation이 확인되기 전까지 `taxReady=false`, continuity `CANDIDATE`를 유지한다. 이름·주소가 없으면 `UNKNOWN`, 외부 주소만 확인되면 `EXTERNAL_IN` 또는 `EXTERNAL_OUT`으로 기록하되 거래 목적 검토 상태를 유지한다.
 
 백필은 연도별 source coverage snapshot도 함께 만든다. snapshot은 다음 값만 보장한다.
 
@@ -90,7 +92,7 @@ flowchart TB
 
 ## 불변성과 재처리
 
-기존에 발행한 Source Fragment는 수정하지 않는다. 동일 원본을 새 normalizer 버전으로 다시 처리할 때는 같은 fragment series의 다음 revision을 발행하고 `supersedes_fragment_id`로 이전 revision을 연결한다. 현재 정규화 계약은 `observation/v3`이며 root digest가 전체 Observation projection digest를 포함한다. ID와 digest는 원본 fragment, subject, producer version으로 결정되므로 같은 입력의 재실행이 중복 revision이나 Observation을 만들지 않는다.
+기존에 발행한 Source Fragment는 수정하지 않는다. 동일 원본을 새 normalizer 버전으로 다시 처리할 때는 같은 fragment series의 다음 revision을 발행하고 `supersedes_fragment_id`로 이전 revision을 연결한다. 현재 정규화 계약은 `observation/v4`이며 root digest가 전체 Observation projection digest를 포함한다. ID와 digest는 원본 fragment, subject, producer version으로 결정되므로 같은 입력의 재실행이 중복 revision이나 Observation을 만들지 않는다.
 
 일회성 백필 명령은 다음 입력을 외부 환경에서 받는다.
 
@@ -100,11 +102,15 @@ DAEJANG_PRIVATE_OBJECT_ROOT
 DAEJANG_PRIVATE_OBJECT_TEMP
 DAEJANG_BACKFILL_SUBJECT_ID
 DAEJANG_BACKFILL_FRAGMENT_ID
+DAEJANG_BACKFILL_EXPECTED_SUBJECT_NAME  # 이름 기반 본인 판정이 필요한 경우에만
+PRIVATE_OBJECT_ENCRYPTION_KEY
+PRIVATE_OBJECT_ENCRYPTION_KEY_ID
+PRIVATE_OBJECT_DECRYPTION_KEYS          # key rotation 중인 경우
 ```
 
 명령은 private artifact를 읽으므로 운영 secret과 subject ID를 코드·로그·문서에 기록하지 않는다. 성공 로그에는 원본 거래 내용이나 금액 대신 전체 행 수, 정규화 행 수, Observation 수와 종료 상태만 남긴다.
 
-Query Service를 배포하기 전에 `daejang-db` migration 36을 먼저 적용한다. 이 migration은 query role에 source revision과 Observation 순서를 읽는 데 필요한 최소 컬럼만 허용하며, 원문 `detail_json`과 private artifact에는 접근 권한을 주지 않는다.
+Query Service를 배포하기 전에 `daejang-db` migration 46까지 먼저 적용한다. Migration 36은 query role에 source revision과 Observation 순서를 읽는 데 필요한 최소 컬럼만 허용하고, migration 46은 restricted 원문 없이 안전한 transfer endpoint assertion만 장부 read model에 연결한다. Query role은 원문 `detail_json`과 private artifact에 접근하지 않는다.
 
 ## 현재 경계
 

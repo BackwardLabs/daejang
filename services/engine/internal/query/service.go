@@ -101,6 +101,18 @@ func (s *Service) ListLedgerEvents(ctx context.Context, req *enginev1.ListLedger
 	items := make([]*enginev1.LedgerEvent, 0, len(values))
 	for _, v := range values {
 		event := &enginev1.LedgerEvent{EventId: v.EventID, RevisionId: v.RevisionID, RevisionNumber: v.RevisionNumber, EventType: v.EventType, FlowShape: v.FlowShape, Resolution: v.Resolution, InterpretationSupport: v.InterpretationSupport, EffectiveAt: timestamppb.New(v.EffectiveAt)}
+		if v.TransferEndpoint != nil {
+			event.TransferEndpoint = &enginev1.LedgerTransferEndpoint{
+				Resolution:       v.TransferEndpoint.Resolution,
+				Kind:             v.TransferEndpoint.Kind,
+				Display:          v.TransferEndpoint.Display,
+				AddressFamily:    v.TransferEndpoint.AddressFamily,
+				WalletSourceId:   v.TransferEndpoint.WalletSourceID,
+				ChainCandidates:  append([]string(nil), v.TransferEndpoint.ChainCandidates...),
+				ConnectionStatus: v.TransferEndpoint.ConnectionStatus,
+				ReviewRequired:   v.TransferEndpoint.ReviewRequired,
+			}
+		}
 		for _, p := range v.Postings {
 			event.Postings = append(event.Postings, &enginev1.LedgerPosting{LegId: p.LegID, AccountId: p.AccountID, AssetId: p.AssetID, OccurredAt: timestamppb.New(p.OccurredAt), Direction: p.Direction, Quantity: p.Quantity, Role: p.Role, FairValue: p.FairValue, CostBasis: p.CostBasis, Denomination: p.Denomination})
 		}
