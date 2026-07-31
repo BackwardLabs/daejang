@@ -4,6 +4,7 @@ import type {
   TaxReportDetailModel,
   TaxReportModel,
 } from './taxReportApi.ts'
+import { formatLedgerQuantity } from '../ledger/ledgerPresentation.ts'
 
 type ReportTab =
   | 'summary'
@@ -19,6 +20,13 @@ const tabs: Array<{ id: ReportTab; label: string }> = [
   { id: 'limitations', label: '검토 필요' },
   { id: 'trace', label: '계산 근거' },
 ]
+
+const reportDenominations: Record<
+  string,
+  { symbol: string; decimals: number }
+> = {
+  'asset-krw-upbit': { symbol: 'KRW', decimals: 8 },
+}
 
 const finalityLabel = (value: TaxReportModel['finality']) =>
   value === 'FINAL' ? '입력 확정' : '잠정 입력'
@@ -59,6 +67,13 @@ function amountLabel(amount: TaxAmountModel, denomination: string) {
     amount.amount === undefined
   ) {
     return '미확정'
+  }
+  const presentation = reportDenominations[denomination]
+  if (presentation) {
+    return `${formatLedgerQuantity(
+      amount.amount,
+      presentation.decimals,
+    )} ${presentation.symbol}`
   }
   return `${decimal(amount.amount)} ${denomination}`
 }

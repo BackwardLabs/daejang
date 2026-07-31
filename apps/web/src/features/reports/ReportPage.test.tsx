@@ -347,6 +347,28 @@ describe('ReportPage', () => {
     ).toBe(false)
   })
 
+  it('formats canonical Upbit KRW atomic amounts as KRW', async () => {
+    stubReportRequests({
+      detail: {
+        ...detailReport,
+        denominationAssetId: 'asset-krw-upbit',
+        totals: {
+          ...detailReport.totals,
+          grossProceeds: knownAmount('368786100000000'),
+          ancillaryExpense: knownAmount('1'),
+        },
+      },
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(await screen.findByText('3,687,861 KRW')).toBeInTheDocument()
+    expect(screen.getByText('0.00000001 KRW')).toBeInTheDocument()
+    expect(
+      screen.queryByText('368,786,100,000,000 asset-krw-upbit'),
+    ).not.toBeInTheDocument()
+  })
+
   it('renders a large disposal ledger inside the exact report detail', async () => {
     const largeDetail = {
       ...detailReport,
