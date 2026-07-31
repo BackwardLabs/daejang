@@ -1118,19 +1118,17 @@ export const createTaxProfiles = (rows) => {
     const subject = subjects.get(row.subject_id) ?? {
       accounts: new Set(),
       assets: new Set(),
-      hasDocumentAsset: false,
     }
     subject.accounts.add(row.account_id)
-    subject.assets.add(row.asset_id)
-    if (row.asset_id.startsWith('cex-document-asset:')) {
-      subject.hasDocumentAsset = true
+    if (!row.asset_id.startsWith('cex-document-asset:')) {
+      subject.assets.add(row.asset_id)
     }
     subjects.set(row.subject_id, subject)
   }
   const profiles = []
   for (const [subjectId, subject] of [...subjects].sort(([left], [right]) =>
     left.localeCompare(right))) {
-    if (subject.hasDocumentAsset) continue
+    if (subject.assets.size === 0) continue
     const accountBindings = [...subject.accounts].sort().map((accountId) => ({
       accountId,
       taxAddressId: accountId,
