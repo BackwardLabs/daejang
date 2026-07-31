@@ -16,6 +16,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
+  configureTaxUpbitQuoteRuntime,
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
   createTaxProfiles,
@@ -42,6 +43,21 @@ import {
   supervisorProcessSpec,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
+
+test('bounds archived Upbit quote staleness at ten minutes', () => {
+  const configured = configureTaxUpbitQuoteRuntime({
+    schemaVersion: 'daejang.upbit-quote-provider.v1',
+    policyVersion: 'upbit-closed-minute-v1',
+    maxCandleAgeSeconds: 300,
+  })
+
+  assert.equal(configured.maxCandleAgeSeconds, 600)
+  assert.equal(configured.firstTradeAfterMaxSeconds, 3600)
+  assert.equal(
+    configured.policyVersion,
+    'upbit-closed-minute-10m-or-airdrop-first-trade-v3',
+  )
+})
 
 test('builds tax profiles only for subjects with canonical ledger assets', () => {
   const profiles = createTaxProfiles([

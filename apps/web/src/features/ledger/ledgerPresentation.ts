@@ -41,7 +41,12 @@ export type LedgerValuePosting = {
   direction: string
   quantity: string
   role: string
+  fairValue?: string
   denomination: string
+}
+
+const canonicalDenominations: Record<string, LedgerAssetPresentation> = {
+  'asset-krw-upbit': { symbol: 'KRW', decimals: 8 },
 }
 
 const postingRoles: Record<string, LedgerPostingRolePresentation> = {
@@ -386,17 +391,26 @@ const postingAsset = (posting: LedgerValuePosting) => parseLedgerAsset(
   posting.assetVenue,
 )
 
+const denominationAsset = (
+  denomination: string,
+  postings: LedgerValuePosting[],
+) => {
+  const denominationPosting = postings.find((posting) =>
+    posting.assetId === denomination || posting.assetSymbol === denomination,
+  )
+  return denominationPosting
+    ? postingAsset(denominationPosting)
+    : canonicalDenominations[denomination]
+}
+
 export const formatLedgerMoney = (
   amount: string,
   denomination: string,
   postings: LedgerValuePosting[],
 ) => {
   if (!amount) return '—'
-  const denominationPosting = postings.find((posting) =>
-    posting.assetId === denomination || posting.assetSymbol === denomination,
-  )
-  if (!denominationPosting) return `${amount}${denomination ? ` ${denomination}` : ''}`
-  const asset = postingAsset(denominationPosting)
+  const asset = denominationAsset(denomination, postings)
+  if (!asset) return `${amount}${denomination ? ` ${denomination}` : ''}`
   return `${formatLedgerQuantity(amount, asset.decimals)} ${asset.symbol}`
 }
 
@@ -407,7 +421,7 @@ export const formatLedgerUnitPrice = (
   if (posting.role !== 'PRINCIPAL') return '—'
   const asset = postingAsset(posting)
   if (asset.symbol === 'KRW' || asset.decimals === undefined || !integerQuantityPattern.test(posting.quantity)) return '—'
-  const quote = postings.find((candidate) => {
+  const tradeQuote = postings.find((candidate) => {
     const candidateAsset = postingAsset(candidate)
     return candidate.role === 'PRINCIPAL' &&
       candidate.direction !== posting.direction &&
@@ -415,11 +429,15 @@ export const formatLedgerUnitPrice = (
       candidateAsset.decimals !== undefined &&
       integerQuantityPattern.test(candidate.quantity)
   })
-  if (!quote) return '—'
-  const quoteAsset = postingAsset(quote)
+  const fairValueAsset = !tradeQuote && posting.fairValue
+    ? denominationAsset(posting.denomination, postings)
+    : undefined
+  const quoteAsset = fairValueAsset ?? (tradeQuote ? postingAsset(tradeQuote) : undefined)
+  const quoteQuantity = fairValueAsset ? posting.fairValue : tradeQuote?.quantity
+  if (!quoteAsset || quoteAsset.decimals === undefined || !quoteQuantity || !integerQuantityPattern.test(quoteQuantity)) return '—'
   const baseUnits = BigInt(posting.quantity.replace(/^-/, ''))
-  const quoteUnits = BigInt(quote.quantity.replace(/^-/, ''))
-  if (baseUnits === 0n || quoteUnits === 0n || quoteAsset.decimals === undefined) return '—'
+  const quoteUnits = BigInt(quoteQuantity.replace(/^-/, ''))
+  if (baseUnits === 0n || quoteUnits === 0n) return '—'
   const unscaledNumerator = quoteUnits * 10n ** BigInt(asset.decimals)
   const unscaledDenominator = baseUnits * 10n ** BigInt(quoteAsset.decimals)
   const integerPrice = unscaledNumerator / unscaledDenominator

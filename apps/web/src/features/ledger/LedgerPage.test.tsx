@@ -180,6 +180,47 @@ describe('LedgerPage', () => {
     expect(rawQuantity.closest('details')).not.toHaveAttribute('open')
   })
 
+  it('explains pending tax basis for a pre-2027 digital-asset acquisition', async () => {
+    const airdropEvent = {
+      ...ledgerEvent,
+      eventId: 'airdrop-event',
+      revisionId: 'airdrop-revision',
+      eventType: 'REWARD',
+      flowShape: 'INCOME',
+      effectiveAt: '2025-11-05T13:23:07.000Z',
+      postings: [{
+        legId: 'airdrop-leg',
+        accountId: 'account-upbit',
+        assetId: 'asset-trust-upbit',
+        occurredAt: '2025-11-05T13:23:07.000Z',
+        direction: 'IN',
+        quantity: '2500000000',
+        role: 'PRINCIPAL',
+        fairValue: '1397500000000',
+        costBasis: '',
+        denomination: 'asset-krw-upbit',
+        assetSymbol: 'TRUST',
+        assetDecimals: 8,
+        hasAssetDecimals: true,
+        assetVenue: 'upbit',
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [airdropEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /거래 상세 보기/ }))
+
+    expect(screen.getByText('13,975 KRW')).toBeInTheDocument()
+    expect(screen.getByText('559 KRW / TRUST')).toBeInTheDocument()
+    expect(screen.getByText('산정 대기')).toBeInTheDocument()
+    expect(screen.getByText('2026.12.31 기준 적용 예정')).toBeInTheDocument()
+  })
+
   it('presents external transfers as deposits and withdrawals', async () => {
     const depositEvent = {
       ...ledgerEvent,
