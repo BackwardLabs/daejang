@@ -439,7 +439,7 @@ export const assertReportAttestationSchema = async (pool: Pool) => {
     operations_table: string | null
     contract_version: number | null
     contract_digest: string | null
-    meta_contract_version: number | null
+    meta_contract_version: string | null
     migration_version: string | null
     record_guard: boolean
     operation_guard: boolean
@@ -469,7 +469,7 @@ export const assertReportAttestationSchema = async (pool: Pool) => {
         WHERE component = 'report-attestation-persistence'
       ) AS contract_digest,
       (
-        SELECT contract_version
+        SELECT contract_version::text
         FROM daejang_meta.schema_contract
         WHERE component = 'report-attestation-persistence'
       ) AS meta_contract_version,
@@ -551,12 +551,12 @@ export const assertReportAttestationSchema = async (pool: Pool) => {
     (row?.contract_version === 1 &&
       row.contract_digest ===
         reportAttestationContractDigestV1 &&
-      row.meta_contract_version === 1 &&
+      row.meta_contract_version === '1' &&
       row.migration_version === '53') ||
     (row?.contract_version === 2 &&
       row.contract_digest ===
         reportAttestationContractDigestV2 &&
-      row.meta_contract_version === 2 &&
+      row.meta_contract_version === '2' &&
       row.migration_version === '61')
   if (
     row?.records_table !==

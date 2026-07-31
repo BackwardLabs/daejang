@@ -106,7 +106,7 @@ const validReportAttestationContract = {
   contract_version: 2,
   contract_digest:
     '75a290d93496fee07431e35bf0b7b2db6930b9571884e08140ab2fedef30ee40',
-  meta_contract_version: 2,
+  meta_contract_version: '2',
   migration_version: '61',
   record_guard: true,
   operation_guard: true,
@@ -223,7 +223,7 @@ describe('report payment schema preflight', () => {
 })
 
 describe('report attestation schema preflight', () => {
-  it('accepts the guarded DB53 and DB54 report attestation contracts', async () => {
+  it('accepts bigint contract versions returned as strings by node-postgres', async () => {
     await expect(
       assertReportAttestationSchema(
         poolReturning({
@@ -231,7 +231,7 @@ describe('report attestation schema preflight', () => {
           contract_version: 1,
           contract_digest:
             'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561',
-          meta_contract_version: 1,
+          meta_contract_version: '1',
           migration_version: '53',
         }),
       ),
@@ -280,7 +280,7 @@ describe('report attestation schema preflight', () => {
           contract_version: 1,
           contract_digest:
             'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561',
-          meta_contract_version: 2,
+          meta_contract_version: '2',
           migration_version: '54',
         }),
       ),
@@ -291,7 +291,7 @@ describe('report attestation schema preflight', () => {
       assertReportAttestationSchema(
         poolReturning({
           ...validReportAttestationContract,
-          meta_contract_version: 1,
+          meta_contract_version: '1',
           migration_version: '53',
         }),
       ),
