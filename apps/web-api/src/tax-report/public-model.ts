@@ -146,6 +146,21 @@ export type PublicTaxReportDetail = {
     localTax: PublicAmount
     totalTax: PublicAmount
   }
+  totals: {
+    grossProceeds: PublicAmount
+    acquisitionCost: PublicAmount
+    ancillaryExpense: PublicAmount
+    gainLoss: PublicAmount
+  }
+  assetSummaries: Array<{
+    taxAssetId: string
+    disposalCount: number
+    quantity: string
+    grossProceeds: PublicAmount
+    acquisitionCost: PublicAmount
+    ancillaryExpense: PublicAmount
+    gainLoss: PublicAmount
+  }>
   disposals: Array<{
     movementId: string
     eventId: string
@@ -867,29 +882,51 @@ const publicAmount = (value: CanonicalAmountV1): PublicAmount =>
     ? { status: value.status, amount: value.amount, hasAmount: true }
     : { status: value.status, amount: null, hasAmount: false }
 
+const sumAmounts = (
+  values: readonly CanonicalAmountV1[],
+): PublicAmount => {
+  if (values.some((value) => value.status === 'UNKNOWN')) {
+    return { status: 'UNKNOWN', amount: null, hasAmount: false }
+  }
+  const amount = values.reduce(
+    (total, value) =>
+      total + BigInt(value.status === 'KNOWN' ? value.amount : '0'),
+    0n,
+  )
+  return { status: 'KNOWN', amount: amount.toString(), hasAmount: true }
+}
+
+const assetSummaries = (
+  disposals: readonly CanonicalDisposalRowV1[],
+): PublicTaxReportDetail['assetSummaries'] => {
+  const groups = new Map<string, CanonicalDisposalRowV1[]>()
+  for (const disposal of disposals) {
+    const group = groups.get(disposal.taxAssetId) ?? []
+    group.push(disposal)
+    groups.set(disposal.taxAssetId, group)
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([taxAssetId, rows]) => ({
+      taxAssetId,
+      disposalCount: rows.length,
+      quantity: rows
+        .reduce((total, row) => total + BigInt(row.quantity), 0n)
+        .toString(),
+      grossProceeds: sumAmounts(rows.map((row) => row.grossProceeds)),
+      acquisitionCost: sumAmounts(rows.map((row) => row.basis)),
+      ancillaryExpense: sumAmounts(
+        rows.map((row) => row.ancillaryExpense),
+      ),
+      gainLoss: sumAmounts(rows.map((row) => row.gainLoss)),
+    }))
+}
+
 const publicProjection = (
   model: CanonicalTaxReportModelV1,
   reportModelDigest: string,
-): PublicTaxReportDetail => ({
-  schemaVersion: model.schemaVersion,
-  reportId: model.reportId,
-  reportModelDigest,
-  inputDigest: model.inputDigest,
-  evidencePackDigest: model.evidencePackDigest,
-  taxYear: model.taxYear,
-  finality: model.finality,
-  status: model.status,
-  filingStatus: model.filingStatus,
-  denominationAssetId: model.denominationAssetId,
-  counts: model.counts,
-  summary: {
-    gainLoss: publicAmount(model.summary.gainLoss),
-    taxableBase: publicAmount(model.summary.taxableBase),
-    nationalTax: publicAmount(model.summary.nationalTax),
-    localTax: publicAmount(model.summary.localTax),
-    totalTax: publicAmount(model.summary.totalTax),
-  },
-  disposals: model.disposals.map((row) => ({
+): PublicTaxReportDetail => {
+  const disposals = model.disposals.map((row) => ({
     movementId: row.movementId,
     eventId: row.eventId,
     revisionId: row.revisionId,
@@ -905,52 +942,88 @@ const publicProjection = (
     valuationId: row.valuationId ?? null,
     costMethod: row.costMethod,
     rounding: row.rounding ?? null,
-  })),
-  transfers: model.transfers.map((row) => ({
-    movementId: row.movementId,
-    eventId: row.eventId,
-    revisionId: row.revisionId,
-    fromLegId: row.fromLegId,
-    toLegId: row.toLegId,
-    fromAddressId: row.fromAddressId,
-    toAddressId: row.toAddressId,
-    taxAssetId: row.taxAssetId,
-    quantity: row.quantity,
-    basis: publicAmount(row.basis),
-    fromCostMethod: row.fromCostMethod,
-    toCostMethod: row.toCostMethod,
-  })),
-  excludedConversions: model.excludedConversions.map((row) => ({
-    eventId: row.eventId,
-    revisionId: row.revisionId,
-    relationId: row.relationId,
-    taxAddressId: row.taxAddressId,
-    taxAssetId: row.taxAssetId,
-    fromLegId: row.fromLegId,
-    toLegId: row.toLegId,
-    fromQuantity: row.fromQuantity,
-    toQuantity: row.toQuantity,
-  })),
-  limitations: model.limitations.map((row) => ({
-    code: row.code,
-    taxAddressId: row.taxAddressId ?? null,
-    taxAssetId: row.taxAssetId ?? null,
-    movementId: row.movementId ?? null,
-    reason: row.reason,
-    reviewId: row.reviewId ?? null,
-    reviewRevisionId: row.reviewRevisionId ?? null,
-  })),
-  methodology: {
-    taxInventoryRunId: model.taxInventoryRunId,
-    taxEstimateId: model.taxEstimateId,
-    lotRunId: model.lotRunId,
-    generationId: model.generationId,
-    schemaDigest: model.schemaDigest,
-    policy: model.policy,
-    engine: model.engine,
-  },
-  issuedAt: model.issuedAt,
-})
+  }))
+  return {
+    schemaVersion: model.schemaVersion,
+    reportId: model.reportId,
+    reportModelDigest,
+    inputDigest: model.inputDigest,
+    evidencePackDigest: model.evidencePackDigest,
+    taxYear: model.taxYear,
+    finality: model.finality,
+    status: model.status,
+    filingStatus: model.filingStatus,
+    denominationAssetId: model.denominationAssetId,
+    counts: model.counts,
+    summary: {
+      gainLoss: publicAmount(model.summary.gainLoss),
+      taxableBase: publicAmount(model.summary.taxableBase),
+      nationalTax: publicAmount(model.summary.nationalTax),
+      localTax: publicAmount(model.summary.localTax),
+      totalTax: publicAmount(model.summary.totalTax),
+    },
+    totals: {
+      grossProceeds: sumAmounts(
+        model.disposals.map((row) => row.grossProceeds),
+      ),
+      acquisitionCost: sumAmounts(
+        model.disposals.map((row) => row.basis),
+      ),
+      ancillaryExpense: sumAmounts(
+        model.disposals.map((row) => row.ancillaryExpense),
+      ),
+      gainLoss: sumAmounts(
+        model.disposals.map((row) => row.gainLoss),
+      ),
+    },
+    assetSummaries: assetSummaries(model.disposals),
+    disposals,
+    transfers: model.transfers.map((row) => ({
+      movementId: row.movementId,
+      eventId: row.eventId,
+      revisionId: row.revisionId,
+      fromLegId: row.fromLegId,
+      toLegId: row.toLegId,
+      fromAddressId: row.fromAddressId,
+      toAddressId: row.toAddressId,
+      taxAssetId: row.taxAssetId,
+      quantity: row.quantity,
+      basis: publicAmount(row.basis),
+      fromCostMethod: row.fromCostMethod,
+      toCostMethod: row.toCostMethod,
+    })),
+    excludedConversions: model.excludedConversions.map((row) => ({
+      eventId: row.eventId,
+      revisionId: row.revisionId,
+      relationId: row.relationId,
+      taxAddressId: row.taxAddressId,
+      taxAssetId: row.taxAssetId,
+      fromLegId: row.fromLegId,
+      toLegId: row.toLegId,
+      fromQuantity: row.fromQuantity,
+      toQuantity: row.toQuantity,
+    })),
+    limitations: model.limitations.map((row) => ({
+      code: row.code,
+      taxAddressId: row.taxAddressId ?? null,
+      taxAssetId: row.taxAssetId ?? null,
+      movementId: row.movementId ?? null,
+      reason: row.reason,
+      reviewId: row.reviewId ?? null,
+      reviewRevisionId: row.reviewRevisionId ?? null,
+    })),
+    methodology: {
+      taxInventoryRunId: model.taxInventoryRunId,
+      taxEstimateId: model.taxEstimateId,
+      lotRunId: model.lotRunId,
+      generationId: model.generationId,
+      schemaDigest: model.schemaDigest,
+      policy: model.policy,
+      engine: model.engine,
+    },
+    issuedAt: model.issuedAt,
+  }
+}
 
 export const decodeAndProjectTaxReportModel = (
   artifact: TaxReportModelArtifact,
@@ -1041,6 +1114,8 @@ export const publicTaxReportDetailSchema = {
     'denominationAssetId',
     'counts',
     'summary',
+    'totals',
+    'assetSummaries',
     'disposals',
     'transfers',
     'excludedConversions',
@@ -1100,6 +1175,50 @@ export const publicTaxReportDetailSchema = {
         nationalTax: publicAmountSchema,
         localTax: publicAmountSchema,
         totalTax: publicAmountSchema,
+      },
+    },
+    totals: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'grossProceeds',
+        'acquisitionCost',
+        'ancillaryExpense',
+        'gainLoss',
+      ],
+      properties: {
+        grossProceeds: publicAmountSchema,
+        acquisitionCost: publicAmountSchema,
+        ancillaryExpense: publicAmountSchema,
+        gainLoss: publicAmountSchema,
+      },
+    },
+    assetSummaries: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'taxAssetId',
+          'disposalCount',
+          'quantity',
+          'grossProceeds',
+          'acquisitionCost',
+          'ancillaryExpense',
+          'gainLoss',
+        ],
+        properties: {
+          taxAssetId: { type: 'string' },
+          disposalCount: { type: 'integer', minimum: 1 },
+          quantity: {
+            type: 'string',
+            pattern: '^[1-9][0-9]{0,77}$',
+          },
+          grossProceeds: publicAmountSchema,
+          acquisitionCost: publicAmountSchema,
+          ancillaryExpense: publicAmountSchema,
+          gainLoss: publicAmountSchema,
+        },
       },
     },
     disposals: {

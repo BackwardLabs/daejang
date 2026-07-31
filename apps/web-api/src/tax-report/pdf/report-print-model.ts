@@ -1,3 +1,8 @@
+import type {
+  PublicAmount,
+  PublicTaxReportDetail,
+} from '../public-model.js'
+
 export type ReportPrintAmountV1 =
   | {
       status: 'KNOWN'
@@ -12,6 +17,16 @@ export type ReportPrintCountsV1 = {
   transfers: number
   excludedConversions: number
   limitations: number
+}
+
+export type ReportPrintAssetSummaryV1 = {
+  taxAssetId: string
+  disposalCount: number
+  quantity: string
+  grossProceeds: ReportPrintAmountV1
+  acquisitionCost: ReportPrintAmountV1
+  ancillaryExpense: ReportPrintAmountV1
+  gainLoss: ReportPrintAmountV1
 }
 
 export type ReportPrintProducerV1 = {
@@ -88,6 +103,13 @@ export type ReportPrintModelV1 = {
     localTax: ReportPrintAmountV1
     totalTax: ReportPrintAmountV1
   }
+  totals: {
+    grossProceeds: ReportPrintAmountV1
+    acquisitionCost: ReportPrintAmountV1
+    ancillaryExpense: ReportPrintAmountV1
+    gainLoss: ReportPrintAmountV1
+  }
+  assetSummaries: ReadonlyArray<ReportPrintAssetSummaryV1>
   disposals: ReadonlyArray<ReportPrintDisposalV1>
   transfers: ReadonlyArray<ReportPrintTransferV1>
   excludedConversions: ReadonlyArray<ReportPrintExcludedConversionV1>
@@ -140,6 +162,21 @@ export const createReportPrintModel = (
     localTax: printAmount(report.summary.localTax),
     totalTax: printAmount(report.summary.totalTax),
   },
+  totals: {
+    grossProceeds: printAmount(report.totals.grossProceeds),
+    acquisitionCost: printAmount(report.totals.acquisitionCost),
+    ancillaryExpense: printAmount(report.totals.ancillaryExpense),
+    gainLoss: printAmount(report.totals.gainLoss),
+  },
+  assetSummaries: report.assetSummaries.map((row) => ({
+    taxAssetId: row.taxAssetId,
+    disposalCount: row.disposalCount,
+    quantity: row.quantity,
+    grossProceeds: printAmount(row.grossProceeds),
+    acquisitionCost: printAmount(row.acquisitionCost),
+    ancillaryExpense: printAmount(row.ancillaryExpense),
+    gainLoss: printAmount(row.gainLoss),
+  })),
   disposals: report.disposals.map((row) => ({
     movementId: row.movementId,
     eventId: row.eventId,
@@ -199,7 +236,3 @@ export const createReportPrintModel = (
     },
   },
 })
-import type {
-  PublicAmount,
-  PublicTaxReportDetail,
-} from '../public-model.js'

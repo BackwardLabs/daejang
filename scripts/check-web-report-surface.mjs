@@ -9,7 +9,7 @@ const assetsDirectory = resolve(
 const mode = process.env.VITE_REPORTS_UI_MODE ?? 'product'
 const profiles = {
   product: {
-    required: ['CANONICAL CURRENT RESULT', '발행 산출물 이력'],
+    required: ['REPORT WORKSPACE', '장부 PDF 생성', '장부 revision'],
     forbidden: [
       'SYNTHETIC · GIWA SEPOLIA TESTNET',
       '/report-attestations/synthetic-publication',
@@ -24,9 +24,10 @@ const profiles = {
       '/report-attestations/synthetic-publication',
     ],
     forbidden: [
-      'CANONICAL CURRENT RESULT',
+      'REPORT WORKSPACE',
       '/tax-reports/',
-      '발행 산출물 이력',
+      '장부 PDF 생성',
+      '장부 revision',
       '/report-payments/capabilities',
       'FINAL 현재 세금 결과 내려받기',
     ],

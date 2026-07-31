@@ -105,6 +105,15 @@ export type TaxReportLimitationModel = {
 }
 
 export type TaxReportDetailModel = {
+  assetSummaries: Array<{
+    acquisitionCost: TaxReportDetailAmountModel
+    ancillaryExpense: TaxReportDetailAmountModel
+    disposalCount: number
+    gainLoss: TaxReportDetailAmountModel
+    grossProceeds: TaxReportDetailAmountModel
+    quantity: string
+    taxAssetId: string
+  }>
   counts: TaxReportModel['counts']
   denominationAssetId: string
   disposals: TaxReportDisposalModel[]
@@ -136,12 +145,22 @@ export type TaxReportDetailModel = {
     totalTax: TaxReportDetailAmountModel
   }
   taxYear: number
+  totals: {
+    acquisitionCost: TaxReportDetailAmountModel
+    ancillaryExpense: TaxReportDetailAmountModel
+    gainLoss: TaxReportDetailAmountModel
+    grossProceeds: TaxReportDetailAmountModel
+  }
   transfers: TaxReportTransferModel[]
 }
 
-export const loadCurrentTaxReport = (taxYear: string, signal?: AbortSignal) =>
+export const loadCurrentTaxReport = (
+  taxYear: string,
+  finality: 'FINAL' | 'PROVISIONAL',
+  signal?: AbortSignal,
+) =>
   requestApi<{ report: TaxReportModel }>(
-    `/tax-reports/${encodeURIComponent(taxYear)}/current`,
+    `/tax-reports/${encodeURIComponent(taxYear)}/current?finality=${finality}`,
     { signal },
   )
 

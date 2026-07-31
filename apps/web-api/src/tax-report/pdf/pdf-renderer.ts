@@ -111,8 +111,10 @@ export async function renderTaxReportPdf(
   doc.font('Pretendard')
 
   const contentWidth = page.width - page.marginX * 2
+  let addedPageCount = 0
 
   const addPage = (continuedTitle?: string) => {
+    addedPageCount += 1
     doc.addPage({
       size: 'A4',
       margins: {
@@ -125,28 +127,32 @@ export async function renderTaxReportPdf(
         left: page.marginX,
       },
     })
-    doc.font('Pretendard').fillColor(colors.muted).fontSize(7.5)
-    doc.text(
-      `DAEJANG · ${model.taxYear}년 가상자산 세무 검토용 장부`,
-      page.marginX,
-      26,
-      { width: contentWidth * 0.62, lineBreak: false },
-    )
-    doc.text(
-      shortId(model.reportId),
-      page.marginX + contentWidth * 0.62,
-      26,
-      {
-        align: 'right',
-        width: contentWidth * 0.38,
-        lineBreak: false,
-      },
-    )
+    doc.save()
+    if (addedPageCount === 1) {
+      doc.font('Pretendard').fillColor(colors.muted).fontSize(7.5)
+      doc.text(
+        `DAEJANG · ${model.taxYear}년 가상자산 세무 검토용 장부`,
+        page.marginX,
+        26,
+        { width: contentWidth * 0.62, lineBreak: false },
+      )
+      doc.text(
+        shortId(model.reportId),
+        page.marginX + contentWidth * 0.62,
+        26,
+        {
+          align: 'right',
+          width: contentWidth * 0.38,
+          lineBreak: false,
+        },
+      )
+    }
     doc.moveTo(page.marginX, 42)
       .lineTo(page.width - page.marginX, 42)
       .strokeColor(colors.line)
       .lineWidth(0.6)
       .stroke()
+    doc.restore()
     doc.y = page.top
     if (continuedTitle) {
       doc.fillColor(colors.ink).fontSize(13)
@@ -177,22 +183,29 @@ export async function renderTaxReportPdf(
   ) => {
     const labelWidth = 122
     for (const [label, value] of values) {
-      ensureSpace(27, continuedTitle)
+      doc.font('Pretendard').fontSize(8)
+      const valueWidth = contentWidth - labelWidth - 18
+      const valueHeight = doc.heightOfString(value, {
+        width: valueWidth,
+        align: 'right',
+      })
+      const rowHeight = Math.max(25, valueHeight + 12)
+      ensureSpace(rowHeight + 2, continuedTitle)
       const rowY = doc.y
-      doc.rect(page.marginX, rowY, contentWidth, 25)
+      doc.rect(page.marginX, rowY, contentWidth, rowHeight)
         .fillAndStroke(colors.soft, colors.line)
       doc.fillColor(colors.muted).fontSize(8)
-        .text(label, page.marginX + 9, rowY + 8, {
+        .text(label, page.marginX + 9, rowY + 7, {
           width: labelWidth - 18,
           lineBreak: false,
         })
       doc.fillColor(colors.ink).fontSize(8)
-        .text(value, page.marginX + labelWidth, rowY + 8, {
-          width: contentWidth - labelWidth - 9,
+        .text(value, page.marginX + labelWidth, rowY + 6, {
+          width: valueWidth,
+          height: rowHeight - 10,
           align: 'right',
-          lineBreak: false,
         })
-      doc.y = rowY + 25
+      doc.y = rowY + rowHeight
     }
     doc.moveDown(0.6)
   }
@@ -219,7 +232,7 @@ export async function renderTaxReportPdf(
   const drawTable = ({ title, emptyLabel, columns, rows }: TableOptions) => {
     // Keep the section heading with either its empty state or the first table
     // header/row. This prevents an orphaned heading at the bottom of a page.
-    ensureSpace(rows.length === 0 ? 90 : 82, title)
+    ensureSpace(rows.length === 0 ? 90 : 82)
     sectionTitle(title)
     if (rows.length === 0) {
       doc.rect(page.marginX, doc.y, contentWidth, 42)
@@ -324,9 +337,16 @@ export async function renderTaxReportPdf(
     ['생성 시각', model.issuedAt],
   ])
 
-  sectionTitle('세금 계산 요약')
+  sectionTitle('장부 계산 요약')
   drawKeyValues([
-    ['잠정 양도손익', formatReportAmount(model.summary.gainLoss, model.denominationAssetId)],
+    ['총 처분가액', formatReportAmount(model.totals.grossProceeds, model.denominationAssetId)],
+    ['총 취득원가', formatReportAmount(model.totals.acquisitionCost, model.denominationAssetId)],
+    ['총 필요경비', formatReportAmount(model.totals.ancillaryExpense, model.denominationAssetId)],
+    ['양도손익', formatReportAmount(model.totals.gainLoss, model.denominationAssetId)],
+  ])
+
+  sectionTitle('세금 추정 요약')
+  drawKeyValues([
     ['과세표준', formatReportAmount(model.summary.taxableBase, model.denominationAssetId)],
     ['국세', formatReportAmount(model.summary.nationalTax, model.denominationAssetId)],
     ['지방세', formatReportAmount(model.summary.localTax, model.denominationAssetId)],
@@ -354,6 +374,27 @@ export async function renderTaxReportPdf(
       )
     doc.y = noticeY + 84
   }
+
+  drawTable({
+    title: '자산별 계산 요약',
+    emptyLabel: '기록된 처분 자산이 없습니다.',
+    columns: [
+      { header: '자산 / 처분', width: 92 },
+      { header: '처분가액', width: 88, align: 'right' },
+      { header: '취득원가', width: 88, align: 'right' },
+      { header: '필요경비', width: 78, align: 'right' },
+      { header: '손익', width: 82, align: 'right' },
+      { header: '최소 단위 수량', width: 83, align: 'right' },
+    ],
+    rows: model.assetSummaries.map((row) => [
+      `${row.taxAssetId}\n${row.disposalCount}건`,
+      formatReportAmount(row.grossProceeds, model.denominationAssetId),
+      formatReportAmount(row.acquisitionCost, model.denominationAssetId),
+      formatReportAmount(row.ancillaryExpense, model.denominationAssetId),
+      formatReportAmount(row.gainLoss, model.denominationAssetId),
+      formatDecimal(row.quantity),
+    ]),
+  })
 
   drawTable({
     title: '처분별 장부',
@@ -430,6 +471,7 @@ export async function renderTaxReportPdf(
     ]),
   })
 
+  ensureSpace(370)
   sectionTitle(
     '산출 방법과 재현 정보',
     '아래 식별자는 장부 계산에 사용된 정확한 정책과 엔진 실행을 추적하기 위한 정보입니다.',
@@ -442,12 +484,14 @@ export async function renderTaxReportPdf(
     ['Schema digest', model.methodology.schemaDigest],
     [
       'Policy',
-      `${model.methodology.policy.name} ${model.methodology.policy.version} · ${model.methodology.policy.artifactDigest}`,
+      `${model.methodology.policy.name} ${model.methodology.policy.version}`,
     ],
+    ['Policy artifact digest', model.methodology.policy.artifactDigest],
     [
       'Engine',
-      `${model.methodology.engine.name} ${model.methodology.engine.version} · ${model.methodology.engine.artifactDigest}`,
+      `${model.methodology.engine.name} ${model.methodology.engine.version}`,
     ],
+    ['Engine artifact digest', model.methodology.engine.artifactDigest],
     ['Input digest', model.inputDigest],
     ['Evidence pack digest', model.evidencePackDigest],
   ], '산출 방법과 재현 정보')

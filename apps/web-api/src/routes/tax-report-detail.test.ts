@@ -268,6 +268,50 @@ describe('canonical tax report detail route', () => {
           hasAmount: false,
         },
       },
+      totals: {
+        grossProceeds: {
+          status: 'KNOWN',
+          amount: '1500',
+          hasAmount: true,
+        },
+        acquisitionCost: {
+          status: 'KNOWN',
+          amount: '1000',
+          hasAmount: true,
+        },
+        ancillaryExpense: {
+          status: 'KNOWN',
+          amount: '0',
+          hasAmount: true,
+        },
+        gainLoss: {
+          status: 'KNOWN',
+          amount: '500',
+          hasAmount: true,
+        },
+      },
+      assetSummaries: [
+        {
+          taxAssetId: 'BTC',
+          disposalCount: 1,
+          quantity: '10000000',
+          grossProceeds: {
+            status: 'KNOWN',
+            amount: '1500',
+            hasAmount: true,
+          },
+          acquisitionCost: {
+            status: 'KNOWN',
+            amount: '1000',
+            hasAmount: true,
+          },
+          gainLoss: {
+            status: 'KNOWN',
+            amount: '500',
+            hasAmount: true,
+          },
+        },
+      ],
       disposals: [
         {
           grossProceeds: {
@@ -292,6 +336,69 @@ describe('canonical tax report detail route', () => {
     expect(report).not.toHaveProperty('artifactRoots')
     expect(response.body).not.toContain(canonicalModel.subjectId)
     expect(response.body).not.toContain(canonicalModel.residentId)
+  })
+
+  it('keeps a derived total unknown when any included disposal amount is unknown', async () => {
+    const partialModel = structuredClone(
+      canonicalModel,
+    ) as unknown as CanonicalTaxReportModelV1
+    partialModel.counts.disposals = 2
+    const firstDisposal = partialModel.disposals[0]!
+    partialModel.disposals.push({
+      movementId: 'movement-disposal-2',
+      eventId: 'event-4',
+      revisionId: firstDisposal.revisionId,
+      legId: firstDisposal.legId,
+      taxAddressId: firstDisposal.taxAddressId,
+      taxAssetId: firstDisposal.taxAssetId,
+      ledgerAssetId: firstDisposal.ledgerAssetId,
+      quantity: firstDisposal.quantity,
+      grossProceeds: { status: 'KNOWN', amount: '2500' },
+      ancillaryExpense: firstDisposal.ancillaryExpense,
+      basis: { status: 'UNKNOWN' },
+      gainLoss: { status: 'UNKNOWN' },
+      costMethod: firstDisposal.costMethod,
+    })
+    reader.value = artifactFor(partialModel)
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}`,
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().report).toMatchObject({
+      totals: {
+        grossProceeds: {
+          status: 'KNOWN',
+          amount: '4000',
+          hasAmount: true,
+        },
+        acquisitionCost: {
+          status: 'UNKNOWN',
+          amount: null,
+          hasAmount: false,
+        },
+        gainLoss: {
+          status: 'UNKNOWN',
+          amount: null,
+          hasAmount: false,
+        },
+      },
+      assetSummaries: [
+        {
+          taxAssetId: 'BTC',
+          disposalCount: 2,
+          acquisitionCost: {
+            status: 'UNKNOWN',
+            amount: null,
+            hasAmount: false,
+          },
+        },
+      ],
+    })
   })
 
   it('fails closed instead of converting UNKNOWN to zero', async () => {

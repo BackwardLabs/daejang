@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -61,6 +61,23 @@ const detailReport = {
     localTax: unknownAmount,
     totalTax: unknownAmount,
   },
+  totals: {
+    grossProceeds: knownAmount('22500000'),
+    acquisitionCost: knownAmount('18000000'),
+    ancillaryExpense: knownAmount('0'),
+    gainLoss: knownAmount('4500000'),
+  },
+  assetSummaries: [
+    {
+      taxAssetId: 'BTC',
+      disposalCount: 1,
+      quantity: '25000000',
+      grossProceeds: knownAmount('22500000'),
+      acquisitionCost: knownAmount('18000000'),
+      ancillaryExpense: knownAmount('0'),
+      gainLoss: knownAmount('4500000'),
+    },
+  ],
   disposals: [
     {
       movementId: 'disposal-1',
@@ -149,6 +166,10 @@ function jsonResponse(value: unknown, status = 200) {
 function stubReportRequests(options: {
   detail?: unknown
   detailStatus?: number
+  history?: unknown[]
+  finalCurrent?: unknown
+  finalCurrentStatus?: number
+  provisionalCurrent?: unknown
 } = {}) {
   const detail = options.detail ?? detailReport
   vi.stubGlobal(
@@ -156,10 +177,23 @@ function stubReportRequests(options: {
     vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
       if (url.includes('/tax-reports/2027/current')) {
-        return jsonResponse({ report: partialTaxReport })
+        if (url.includes('finality=FINAL')) {
+          if (options.finalCurrentStatus) {
+            return jsonResponse(
+              { error: { code: 'CORRECTION_PENDING' } },
+              options.finalCurrentStatus,
+            )
+          }
+          return options.finalCurrent
+            ? jsonResponse({ report: options.finalCurrent })
+            : jsonResponse({ error: { code: 'RESOURCE_NOT_FOUND' } }, 404)
+        }
+        return jsonResponse({
+          report: options.provisionalCurrent ?? partialTaxReport,
+        })
       }
       if (url.includes('/tax-reports/2027/history')) {
-        return jsonResponse({ items: [partialTaxReport] })
+        return jsonResponse({ items: options.history ?? [partialTaxReport] })
       }
       if (url.endsWith('/api/v1/tax-reports/tax-report-1')) {
         return jsonResponse(
@@ -180,12 +214,12 @@ beforeEach(() => {
 })
 
 describe('ReportPage', () => {
-  it('keeps canonical tax results separate from immutable artifact history', async () => {
+  it('presents one revisioned ledger workspace without legacy or EAS controls', async () => {
     render(<ReportWorkspacePage />)
 
     expect(
       await screen.findByRole('heading', {
-        name: '2027년 현재 세금 계산 결과',
+        name: '장부 계산 요약',
       }),
     ).toBeInTheDocument()
     expect(
@@ -194,54 +228,72 @@ describe('ReportPage', () => {
       }),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '발행 산출물 이력' }),
+      screen.queryByRole('heading', { name: '발행 산출물 이력' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '장부 revision' }),
     ).toBeInTheDocument()
-    expect(screen.getAllByText('PROVISIONAL').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('PARTIAL').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('BLOCKED').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('잠정 입력').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('부분 계산').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('신고 준비 불가').length).toBeGreaterThan(0)
     expect(screen.getAllByText('미확정').length).toBeGreaterThanOrEqual(4)
-    expect(screen.queryByText('0 KRW')).not.toBeInTheDocument()
+    expect(screen.getAllByText('0 KRW').length).toBeGreaterThan(0)
     expect(
-      await screen.findByRole('heading', { name: '2027년 세무 장부 상세' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('0 KRW')).toBeInTheDocument()
-    expect(screen.getAllByText('미확정').length).toBeGreaterThanOrEqual(8)
-    expect(
-      screen.getByRole('heading', { name: '처분 장부' }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '이체' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: '과세 제외 전환' }),
+      screen.getByRole('heading', { name: '세금 추정 요약' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '제한사항' }),
+      screen.getByRole('heading', { name: '자산별 계산 요약' }),
     ).toBeInTheDocument()
+    expect(screen.getByRole('rowheader', { name: 'BTC' })).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '계산 기준과 추적 정보' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('link', { name: 'PDF 내려받기' }),
+      screen.getByRole('link', { name: '장부 PDF 생성' }),
     ).toHaveAttribute(
       'href',
       '/api/v1/tax-reports/tax-report-1/artifacts/pdf',
     )
     expect(
-      screen.getByRole('link', { name: 'PDF 내려받기' }),
+      screen.getByRole('link', { name: '장부 PDF 생성' }),
     ).toHaveAttribute('download')
-    expect(screen.getByText('BASIS_UNKNOWN')).toBeInTheDocument()
-    expect(screen.getByText(/리뷰 review-1/u)).toBeInTheDocument()
-    expect(screen.getByText(/review-revision-1/u)).toBeInTheDocument()
-    expect(screen.getByText(/leg-2-out/u)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '처분 장부' }))
     expect(
-      await screen.findByRole('heading', {
-        name: '아직 발행된 산출물이 없습니다',
-      }),
+      screen.getByRole('heading', { name: '처분 장부' }),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '이체·전환' }))
+    expect(screen.getByRole('heading', { name: '이체' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '과세 제외 전환' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/leg-2-out/u)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: /검토 필요/u }))
+    expect(
+      screen.getByRole('heading', { name: '검토 필요 항목' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('BASIS_UNKNOWN')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('검토 추적 정보'))
+    expect(screen.getByText(/Review review-1/u)).toBeInTheDocument()
+    expect(screen.getByText(/review-revision-1/u)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '계산 근거' }))
+    expect(
+      screen.getByRole('heading', { name: '계산 기준과 추적 정보' }),
     ).toBeInTheDocument()
 
     const fetchMock = vi.mocked(fetch)
     expect(
       fetchMock.mock.calls.some(([url]) =>
-        String(url).endsWith('/api/v1/reports?taxYear=2027'),
+        String(url).endsWith(
+          '/api/v1/tax-reports/2027/current?finality=FINAL',
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith(
+          '/api/v1/tax-reports/2027/current?finality=PROVISIONAL',
+        ),
       ),
     ).toBe(true)
     expect(
@@ -251,16 +303,16 @@ describe('ReportPage', () => {
     ).toBe(true)
     expect(
       fetchMock.mock.calls.some(([url]) =>
-        String(url).endsWith('/api/v1/tax-reports/2027/current'),
-      ),
-    ).toBe(true)
-    expect(
-      fetchMock.mock.calls.some(([url]) =>
         String(url).endsWith(
           '/api/v1/tax-reports/2027/history?limit=20',
         ),
       ),
     ).toBe(true)
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith('/api/v1/reports?taxYear=2027'),
+      ),
+    ).toBe(false)
     expect(
       fetchMock.mock.calls.some(([url]) =>
         /\/api\/v1\/(?:dev\/reports\/.+attestation|reports\/.+\/attestation)/u
@@ -303,8 +355,10 @@ describe('ReportPage', () => {
 
     render(<ReportWorkspacePage />)
 
+    await screen.findByRole('heading', { name: '장부 계산 요약' })
+    fireEvent.click(screen.getByRole('tab', { name: '처분 장부' }))
     expect(await screen.findByText('disposal-large-119')).toBeInTheDocument()
-    expect(screen.getAllByRole('row')).toHaveLength(125)
+    expect(screen.getAllByRole('row')).toHaveLength(121)
     expect(
       screen.getByText('120건', { selector: '.tax-report-detail__section > header p' }),
     ).toBeInTheDocument()
@@ -324,6 +378,7 @@ describe('ReportPage', () => {
           limitations: 0,
         },
         disposals: [],
+        assetSummaries: [],
         transfers: [],
         excludedConversions: [],
         limitations: [],
@@ -332,39 +387,44 @@ describe('ReportPage', () => {
 
     render(<ReportWorkspacePage />)
 
+    await screen.findByRole('heading', { name: '장부 계산 요약' })
+    expect(screen.getByText('요약할 처분 자산이 없습니다.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '처분 장부' }))
     expect(
       await screen.findByText('이 장부에 포함된 처분이 없습니다.'),
     ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '이체·전환' }))
     expect(
       screen.getByText('이 장부에 포함된 이체가 없습니다.'),
     ).toBeInTheDocument()
     expect(
       screen.getByText('과세 대상에서 제외된 동일 자산 전환이 없습니다.'),
     ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '검토 필요' }))
     expect(
       screen.getByText('현재 장부 결과를 제한하는 항목이 없습니다.'),
     ).toBeInTheDocument()
   })
 
-  it('keeps the current summary visible when exact detail returns 404', async () => {
+  it('keeps the revision visible when exact detail returns 404', async () => {
     stubReportRequests({ detailStatus: 404 })
 
     render(<ReportWorkspacePage />)
 
     expect(
       await screen.findByText(
-        '현재 세금 계산은 확인했지만 상세 장부는 아직 준비되지 않았습니다.',
+        '장부 발행 이력은 확인했지만 상세 문서는 아직 준비되지 않았습니다.',
       ),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '2027년 현재 세금 계산 결과' }),
+      screen.getByRole('heading', { name: '장부 revision' }),
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole('link', { name: 'PDF 내려받기' }),
+      screen.queryByRole('link', { name: '장부 PDF 생성' }),
     ).not.toBeInTheDocument()
   })
 
-  it('isolates an exact detail failure from summary and history', async () => {
+  it('isolates an exact detail failure from revision history', async () => {
     stubReportRequests({ detailStatus: 503 })
 
     render(<ReportWorkspacePage />)
@@ -372,13 +432,60 @@ describe('ReportPage', () => {
     expect(
       await screen.findByRole('alert'),
     ).toHaveTextContent(
-      '현재 세금 계산은 유지되지만 상세 장부를 불러오지 못했습니다.',
+      'revision 이력은 유지되지만 선택한 상세 장부를 불러오지 못했습니다.',
     )
     expect(
-      screen.getByRole('heading', { name: '세금 계산 이력' }),
+      screen.getByRole('heading', { name: '장부 revision' }),
+    ).toBeInTheDocument()
+  })
+
+  it('keeps an available provisional ledger visible when the FINAL pointer fails', async () => {
+    stubReportRequests({ finalCurrentStatus: 503 })
+
+    render(<ReportWorkspacePage />)
+
+    expect(
+      await screen.findByRole('heading', { name: '장부 계산 요약' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '발행 산출물 이력' }),
+      screen.getByText('revision 2', { selector: 'strong' }),
+    ).toHaveTextContent('현재')
+    expect(
+      screen.getByRole('link', { name: '장부 PDF 생성' }),
+    ).toHaveAttribute(
+      'href',
+      '/api/v1/tax-reports/tax-report-1/artifacts/pdf',
+    )
+  })
+
+  it('selects the newest current across FINAL and PROVISIONAL pointers', async () => {
+    const olderFinal = {
+      ...partialTaxReport,
+      reportId: 'tax-report-final',
+      finality: 'FINAL',
+      status: 'FINAL',
+      filingStatus: 'READY',
+      pointerVersion: 1,
+      issuedAt: '2027-01-01T00:00:00Z',
+    } as const
+    stubReportRequests({
+      finalCurrent: olderFinal,
+      history: [olderFinal, partialTaxReport],
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(
+      await screen.findByText('revision 2', { selector: 'strong' }),
+    ).toHaveTextContent('현재')
+    expect(
+      await screen.findByRole('link', { name: '장부 PDF 생성' }),
+    ).toHaveAttribute(
+      'href',
+      '/api/v1/tax-reports/tax-report-1/artifacts/pdf',
+    )
+    expect(
+      screen.getByRole('button', { name: /revision 1/u }),
     ).toBeInTheDocument()
   })
 
@@ -392,16 +499,10 @@ describe('ReportPage', () => {
     )
     expect(
       await screen.findByText(
-        '현재 세금 계산 결과는 2027년 이후 과세연도부터 제공됩니다.',
+        '세무 장부는 2027년 이후 과세연도부터 제공됩니다.',
       ),
     ).toBeInTheDocument()
-    await waitFor(() => {
-      expect(
-        vi.mocked(fetch).mock.calls.some(([url]) =>
-          String(url).endsWith('/api/v1/reports?taxYear=2026'),
-        ),
-      ).toBe(true)
-    })
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
 
     fireEvent.change(screen.getByRole('combobox', { name: '조회 기간' }), {
       target: { value: '2025' },

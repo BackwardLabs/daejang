@@ -473,9 +473,13 @@ describe('AppRouter', () => {
 
     render(<AppRouter />)
 
-    expect(await screen.findByRole('heading', { name: '보고서' })).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '현재 세금 계산' }),
+      await screen.findByRole('heading', { name: '세무 장부' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', {
+        name: /^\d{4}년 가상자산 세무 장부$/,
+      }),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: '합성 장부 온체인 증명' }),

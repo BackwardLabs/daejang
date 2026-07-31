@@ -39,6 +39,21 @@ const model = (
     localTax: { status: 'UNKNOWN' },
     totalTax: { status: 'UNKNOWN' },
   },
+  totals: {
+    grossProceeds: { status: 'KNOWN', amount: '22500000' },
+    acquisitionCost: { status: 'KNOWN', amount: '18000000' },
+    ancillaryExpense: { status: 'KNOWN', amount: '0' },
+    gainLoss: { status: 'KNOWN', amount: '12480000' },
+  },
+  assetSummaries: [{
+    taxAssetId: 'BTC',
+    disposalCount: 1,
+    quantity: '25000000',
+    grossProceeds: { status: 'KNOWN', amount: '22500000' },
+    acquisitionCost: { status: 'KNOWN', amount: '18000000' },
+    ancillaryExpense: { status: 'KNOWN', amount: '0' },
+    gainLoss: { status: 'KNOWN', amount: '4500000' },
+  }],
   disposals: [{
     movementId: 'movement:btc:1',
     eventId: 'event:btc:1',

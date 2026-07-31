@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { ApiClientError } from '../../api/client.ts'
-import { loadReports, type ReportModel } from '../../api/productApi.ts'
 import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import {
@@ -12,131 +11,67 @@ import {
   loadCurrentTaxReport,
   loadTaxReportDetail,
   loadTaxReportHistory,
-  type TaxAmountModel,
   type TaxReportDetailModel,
   type TaxReportModel,
 } from './taxReportApi.ts'
 import { TaxReportDetail } from './TaxReportDetail.tsx'
 import './report.css'
 
-const number = (value: string | number) =>
-  Number(value).toLocaleString('ko-KR')
+const finalityLabel = (value: TaxReportModel['finality']) =>
+  value === 'FINAL' ? '입력 확정' : '잠정 입력'
 
-function decimal(value: string) {
-  const [integer = '', fraction] = value.split('.', 2)
-  const sign = integer.startsWith('-') ? '-' : ''
-  const digits = sign ? integer.slice(1) : integer
-  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  return `${sign}${grouped}${fraction === undefined ? '' : `.${fraction}`}`
-}
+const calculationStatusLabel = (value: TaxReportModel['status']) =>
+  value === 'FINAL' ? '계산 완료' : '부분 계산'
 
-function amountLabel(amount: TaxAmountModel, denomination: string) {
-  if (
-    !amount.hasAmount ||
-    amount.amount === null ||
-    amount.amount === undefined
-  ) {
-    return '미확정'
+const filingStatusLabel = (value: TaxReportModel['filingStatus']) =>
+  value === 'READY' ? '신고 준비' : '신고 준비 불가'
+
+const newestFirst = (left: TaxReportModel, right: TaxReportModel) => {
+  const issuedAtDifference =
+    Date.parse(right.issuedAt) - Date.parse(left.issuedAt)
+  if (issuedAtDifference !== 0) return issuedAtDifference
+  if (left.finality !== right.finality) {
+    return left.finality === 'FINAL' ? -1 : 1
   }
-  return `${decimal(amount.amount)} ${denomination}`
-}
-
-function TaxAmount({
-  amount,
-  denomination,
-  label,
-}: {
-  amount: TaxAmountModel
-  denomination: string
-  label: string
-}) {
-  return (
-    <div data-certainty={amount.status}>
-      <span>{label}</span>
-      <strong>{amountLabel(amount, denomination)}</strong>
-      <small>{amount.status}</small>
-    </div>
+  return String(right.pointerVersion).localeCompare(
+    String(left.pointerVersion),
+    undefined,
+    { numeric: true },
   )
 }
 
-function CurrentTaxReport({ report }: { report: TaxReportModel }) {
-  return (
-    <article
-      className="tax-report-current"
-      aria-labelledby="tax-report-current-title"
-    >
-      <header>
-        <div>
-          <span>CANONICAL CURRENT RESULT</span>
-          <h2 id="tax-report-current-title">
-            {report.taxYear}년 현재 세금 계산 결과
-          </h2>
-        </div>
-        <div className="tax-report-badges" aria-label="현재 세금 보고서 상태">
-          <b data-status={report.finality}>{report.finality}</b>
-          <b data-status={report.status}>{report.status}</b>
-          <b data-status={report.filingStatus}>{report.filingStatus}</b>
-        </div>
-      </header>
+const mergeRevisions = (
+  history: TaxReportModel[],
+  ...currentReports: Array<TaxReportModel | null>
+) => {
+  const revisions = new Map<string, TaxReportModel>()
+  for (const report of [...currentReports, ...history]) {
+    if (report) revisions.set(report.reportId, report)
+  }
+  return [...revisions.values()].sort(newestFirst)
+}
 
-      <section className="tax-report-amounts" aria-label="세금 계산 금액">
-        <TaxAmount
-          amount={report.gainLoss}
-          denomination={report.denominationAssetId}
-          label="양도 손익"
-        />
-        <TaxAmount
-          amount={report.taxableBase}
-          denomination={report.denominationAssetId}
-          label="과세표준"
-        />
-        <TaxAmount
-          amount={report.nationalTax}
-          denomination={report.denominationAssetId}
-          label="국세"
-        />
-        <TaxAmount
-          amount={report.localTax}
-          denomination={report.denominationAssetId}
-          label="지방세"
-        />
-        <TaxAmount
-          amount={report.totalTax}
-          denomination={report.denominationAssetId}
-          label="총 세액"
-        />
-      </section>
-
-      <dl className="tax-report-facts">
-        <div><dt>처분</dt><dd>{number(report.counts.disposals)}건</dd></div>
-        <div><dt>이체</dt><dd>{number(report.counts.transfers)}건</dd></div>
-        <div><dt>제외 전환</dt><dd>{number(report.counts.excludedConversions)}건</dd></div>
-        <div><dt>제한사항</dt><dd>{number(report.counts.limitations)}건</dd></div>
-        <div><dt>Report ID</dt><dd>{report.reportId}</dd></div>
-        <div><dt>Pointer version</dt><dd>{String(report.pointerVersion)}</dd></div>
-      </dl>
-
-      {report.filingStatus === 'BLOCKED' ? (
-        <p className="tax-report-notice" role="status">
-          현재 결과에는 미확정 금액 또는 coverage 제한이 있어 신고 준비
-          상태가 아닙니다. 미확정 값을 0원으로 간주하지 않습니다.
-        </p>
-      ) : null}
-    </article>
-  )
+const loadOptionalCurrent = async (
+  taxYear: string,
+  finality: TaxReportModel['finality'],
+  signal: AbortSignal,
+) => {
+  try {
+    return (await loadCurrentTaxReport(taxYear, finality, signal)).report
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 404) return null
+    throw error
+  }
 }
 
 export function ReportWorkspacePage() {
   const [year, setYear] = useState<AppYear>(
     () => loadAppPreferences().year,
   )
-  const [reports, setReports] = useState<ReportModel[]>([])
-  const [selectedId, setSelectedId] = useState<string>()
-  const [artifactStatus, setArtifactStatus] =
-    useState<'error' | 'loading' | 'ready'>('loading')
   const [currentReport, setCurrentReport] =
     useState<TaxReportModel | null>(null)
-  const [taxHistory, setTaxHistory] = useState<TaxReportModel[]>([])
+  const [revisions, setRevisions] = useState<TaxReportModel[]>([])
+  const [selectedReportId, setSelectedReportId] = useState<string>()
   const [taxStatus, setTaxStatus] =
     useState<'error' | 'loading' | 'ready' | 'unsupported'>('loading')
   const [reportDetail, setReportDetail] =
@@ -146,46 +81,58 @@ export function ReportWorkspacePage() {
 
   useEffect(() => {
     const controller = new AbortController()
-    setArtifactStatus('loading')
-    void loadReports(year, controller.signal)
-      .then((result) => {
-        setReports(result.items)
-        setSelectedId((current) =>
-          result.items.some((item) => item.id === current)
-            ? current
-            : result.items[0]?.id,
-        )
-        setArtifactStatus('ready')
-      })
-      .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) {
-          setArtifactStatus('error')
-        }
-      })
+
+    setCurrentReport(null)
+    setRevisions([])
+    setSelectedReportId(undefined)
+    setReportDetail(null)
+    setDetailStatus('idle')
 
     if (Number(year) < 2027) {
-      setCurrentReport(null)
-      setTaxHistory([])
       setTaxStatus('unsupported')
       return () => controller.abort()
     }
 
-    setCurrentReport(null)
-    setTaxHistory([])
     setTaxStatus('loading')
-    const current = loadCurrentTaxReport(year, controller.signal)
-      .then((result) => result.report)
-      .catch((error: unknown) => {
-        if (error instanceof ApiClientError && error.status === 404) return null
-        throw error
-      })
-    void Promise.all([
-      current,
+    void Promise.allSettled([
+      loadOptionalCurrent(year, 'FINAL', controller.signal),
+      loadOptionalCurrent(year, 'PROVISIONAL', controller.signal),
       loadTaxReportHistory(year, controller.signal),
     ])
-      .then(([report, history]) => {
-        setCurrentReport(report)
-        setTaxHistory(history.items)
+      .then(([finalResult, provisionalResult, historyResult]) => {
+        if (
+          finalResult.status === 'rejected' &&
+          provisionalResult.status === 'rejected' &&
+          historyResult.status === 'rejected'
+        ) {
+          throw finalResult.reason
+        }
+        const finalReport =
+          finalResult.status === 'fulfilled' ? finalResult.value : null
+        const provisionalReport =
+          provisionalResult.status === 'fulfilled'
+            ? provisionalResult.value
+            : null
+        const history =
+          historyResult.status === 'fulfilled'
+            ? historyResult.value.items
+            : []
+        const availableCurrents = [
+          finalReport,
+          provisionalReport,
+        ].filter((report): report is TaxReportModel => report !== null)
+        const latestCurrent = availableCurrents.sort(newestFirst)[0] ?? null
+        const availableRevisions = mergeRevisions(
+          history,
+          finalReport,
+          provisionalReport,
+        )
+
+        setCurrentReport(latestCurrent)
+        setRevisions(availableRevisions)
+        setSelectedReportId(
+          latestCurrent?.reportId ?? availableRevisions[0]?.reportId,
+        )
         setTaxStatus('ready')
       })
       .catch((error: unknown) => {
@@ -193,12 +140,12 @@ export function ReportWorkspacePage() {
           setTaxStatus('error')
         }
       })
+
     return () => controller.abort()
   }, [year])
 
   useEffect(() => {
-    const reportId = currentReport?.reportId
-    if (!reportId) {
+    if (!selectedReportId) {
       setReportDetail(null)
       setDetailStatus('idle')
       return
@@ -207,7 +154,7 @@ export function ReportWorkspacePage() {
     const controller = new AbortController()
     setReportDetail(null)
     setDetailStatus('loading')
-    void loadTaxReportDetail(reportId, controller.signal)
+    void loadTaxReportDetail(selectedReportId, controller.signal)
       .then((result) => {
         setReportDetail(result.report)
         setDetailStatus('ready')
@@ -224,9 +171,11 @@ export function ReportWorkspacePage() {
       })
 
     return () => controller.abort()
-  }, [currentReport?.reportId])
+  }, [selectedReportId])
 
-  const selected = reports.find((report) => report.id === selectedId)
+  const selectedReport = revisions.find(
+    (report) => report.reportId === selectedReportId,
+  )
 
   function handleYearChange(nextYear: AppYear) {
     setYear(nextYear)
@@ -242,9 +191,9 @@ export function ReportWorkspacePage() {
       />
       <main className="report-main">
         <PageHeader
-          description="현재 세금 계산 결과와 발행된 불변 산출물을 구분해 확인합니다."
-          eyebrow="REPORTS"
-          title="보고서"
+          description="Tax Engine이 발행한 계산 결과를 장부로 검토하고, 선택한 revision의 PDF를 생성합니다."
+          eyebrow="TAX LEDGER"
+          title="세무 장부"
           tone="workspace"
         />
 
@@ -254,166 +203,133 @@ export function ReportWorkspacePage() {
         >
           <header>
             <div>
-              <span>LIVE TAX RESULT</span>
-              <h2 id="tax-report-section-title">현재 세금 계산</h2>
+              <span>REPORT WORKSPACE</span>
+              <h2 id="tax-report-section-title">
+                {year}년 가상자산 세무 장부
+              </h2>
             </div>
-            <p>Tax Engine의 canonical current 포인터를 조회합니다.</p>
+            <p>
+              미확정 항목은 0원으로 대체하지 않으며, 장부 revision별 상태를
+              그대로 보존합니다.
+            </p>
           </header>
+
           {taxStatus === 'loading' ? (
             <p className="report-api-state" role="status">
-              현재 세금 계산 결과를 불러오는 중입니다.
+              생성된 장부와 revision 이력을 불러오는 중입니다.
             </p>
           ) : null}
           {taxStatus === 'error' ? (
             <p className="report-api-state" role="alert">
-              현재 세금 계산 결과를 불러오지 못했습니다.
+              장부를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
             </p>
           ) : null}
           {taxStatus === 'unsupported' ? (
             <p className="report-api-state">
-              현재 세금 계산 결과는 2027년 이후 과세연도부터 제공됩니다.
+              세무 장부는 2027년 이후 과세연도부터 제공됩니다.
             </p>
           ) : null}
-          {taxStatus === 'ready' && !currentReport ? (
-            <p className="report-api-state">
-              아직 생성된 현재 세금 계산 결과가 없습니다.
-            </p>
-          ) : null}
-          {currentReport ? <CurrentTaxReport report={currentReport} /> : null}
-          {detailStatus === 'loading' ? (
-            <p className="report-detail-state" role="status">
-              현재 장부의 상세 내역을 불러오는 중입니다.
-            </p>
-          ) : null}
-          {detailStatus === 'not-found' ? (
-            <p className="report-detail-state">
-              현재 세금 계산은 확인했지만 상세 장부는 아직 준비되지 않았습니다.
-            </p>
-          ) : null}
-          {detailStatus === 'error' ? (
-            <p className="report-detail-state is-error" role="alert">
-              현재 세금 계산은 유지되지만 상세 장부를 불러오지 못했습니다.
-            </p>
-          ) : null}
-          {detailStatus === 'ready' && reportDetail ? (
-            <TaxReportDetail report={reportDetail} />
-          ) : null}
-          {taxHistory.length > 0 ? (
-            <section
-              className="tax-report-history"
-              aria-labelledby="tax-report-history-title"
-            >
-              <h3 id="tax-report-history-title">세금 계산 이력</h3>
-              <ul>
-                {taxHistory.map((report) => (
-                  <li key={report.reportId}>
-                    <span>
-                      <strong>{report.reportId}</strong>
-                      <small>
-                        {new Date(report.issuedAt).toLocaleString('ko-KR')}
-                      </small>
-                    </span>
-                    <span className="tax-report-badges">
-                      <b data-status={report.finality}>{report.finality}</b>
-                      <b data-status={report.filingStatus}>
-                        {report.filingStatus}
-                      </b>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-        </section>
-
-        <section
-          className="artifact-report-section"
-          aria-labelledby="artifact-report-title"
-        >
-          <header>
-            <div>
-              <span>IMMUTABLE ARTIFACTS</span>
-              <h2 id="artifact-report-title">발행 산출물 이력</h2>
-            </div>
-            <p>입력·결과 digest가 고정된 별도 snapshot입니다.</p>
-          </header>
-          {artifactStatus === 'error' ? (
-            <p className="report-api-state" role="alert">
-              발행 산출물을 불러오지 못했습니다.
-            </p>
-          ) : null}
-          {artifactStatus === 'loading' ? (
-            <p className="report-api-state" role="status">
-              발행 산출물을 불러오는 중입니다.
-            </p>
-          ) : null}
-          {artifactStatus === 'ready' && reports.length === 0 ? (
+          {taxStatus === 'ready' && revisions.length === 0 ? (
             <div className="report-empty-state">
-              <h2>아직 발행된 산출물이 없습니다</h2>
+              <h2>아직 생성된 장부가 없습니다</h2>
               <p>
-                세금 계산 결과와 별개로 발행한 불변 snapshot이 여기에
+                원장과 Lot 계산 결과가 발행되면 이 화면에 최신 장부가
                 표시됩니다.
               </p>
             </div>
           ) : null}
-          {reports.length > 0 ? (
-            <div className="report-live-layout">
-              <section
-                className="report-live-history"
-                aria-labelledby="report-history-title"
-              >
-                <h2 id="report-history-title">발행 내역</h2>
-                {reports.map((report) => (
+
+          {revisions.length > 0 ? (
+            <section
+              className="tax-report-revisions"
+              aria-labelledby="tax-report-revisions-title"
+            >
+              <header>
+                <div>
+                  <h3 id="tax-report-revisions-title">장부 revision</h3>
+                  <p>
+                    현재 장부와 이전 발행본을 전환해 비교할 수 있습니다.
+                  </p>
+                </div>
+                {currentReport &&
+                selectedReportId !== currentReport.reportId ? (
                   <button
                     type="button"
-                    key={report.id}
-                    className={report.id === selectedId ? 'is-active' : undefined}
-                    onClick={() => setSelectedId(report.id)}
+                    className="tax-report-revisions__latest"
+                    onClick={() =>
+                      setSelectedReportId(currentReport.reportId)
+                    }
                   >
-                    <span>
-                      <strong>{report.taxYear}년 산출물</strong>
-                      <small>
-                        {new Date(report.issuedAt).toLocaleString('ko-KR')}
-                      </small>
-                    </span>
-                    <b data-status={report.status}>
-                      {report.status === 'FINAL' ? '최종' : '부분'}
-                    </b>
+                    최신 장부로 이동
                   </button>
-                ))}
-              </section>
-              {selected ? (
-                <article className="report-live-detail">
-                  <header>
-                    <div>
-                      <span>IMMUTABLE SNAPSHOT</span>
-                      <h2>{selected.taxYear}년 발행 산출물</h2>
-                    </div>
-                    <b data-status={selected.status}>
-                      {selected.status === 'FINAL' ? '최종' : '부분 산출'}
-                    </b>
-                  </header>
-                  <section className="report-live-metrics">
-                    <div><span>전체 거래</span><strong>{number(selected.transactionCount)}건</strong></div>
-                    <div><span>완료</span><strong>{number(selected.completeCount)}건</strong></div>
-                    <div><span>예외</span><strong>{number(selected.exceptionCount)}건</strong></div>
-                    <div><span>손익</span><strong>{selected.status === 'PARTIAL' ? '산출 대기' : `${number(selected.profitAmount)} ${selected.denomination}`}</strong></div>
-                  </section>
-                  <h3>무결성 정보</h3>
-                  <dl>
-                    <div><dt>Report ID</dt><dd>{selected.id}</dd></div>
-                    <div><dt>Input digest</dt><dd>{selected.inputDigest}</dd></div>
-                    <div><dt>Result digest</dt><dd>{selected.resultDigest}</dd></div>
-                    <div><dt>Manifest digest</dt><dd>{selected.manifestDigest}</dd></div>
-                    <div><dt>Row digest</dt><dd>{selected.rowDigest}</dd></div>
-                  </dl>
-                  <p className="report-live-note">
-                    부분 산출은 계산 결과가 확정되지 않았음을 뜻합니다. 가짜
-                    손익을 표시하지 않고 입력과 예외 상태만 고정합니다.
-                  </p>
-                </article>
-              ) : null}
-            </div>
+                ) : null}
+              </header>
+              <div className="tax-report-revisions__list">
+                {revisions.map((report) => {
+                  const isCurrent =
+                    report.reportId === currentReport?.reportId
+                  const isSelected = report.reportId === selectedReportId
+                  return (
+                    <button
+                      type="button"
+                      key={report.reportId}
+                      className={isSelected ? 'is-active' : undefined}
+                      aria-pressed={isSelected}
+                      onClick={() => setSelectedReportId(report.reportId)}
+                    >
+                      <span>
+                        <strong>
+                          revision {String(report.pointerVersion)}
+                          {isCurrent ? <em>현재</em> : null}
+                        </strong>
+                        <small>
+                          {new Date(report.issuedAt).toLocaleString('ko-KR')}
+                        </small>
+                      </span>
+                      <span
+                        className="tax-report-badges"
+                        aria-label="장부 revision 상태"
+                      >
+                        <b data-status={report.finality}>
+                          {finalityLabel(report.finality)}
+                        </b>
+                        <b data-status={report.status}>
+                          {calculationStatusLabel(report.status)}
+                        </b>
+                        <b data-status={report.filingStatus}>
+                          {filingStatusLabel(report.filingStatus)}
+                        </b>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          ) : null}
+
+          {detailStatus === 'loading' ? (
+            <p className="report-detail-state" role="status">
+              선택한 장부의 상세 내역을 불러오는 중입니다.
+            </p>
+          ) : null}
+          {detailStatus === 'not-found' ? (
+            <p className="report-detail-state">
+              장부 발행 이력은 확인했지만 상세 문서는 아직 준비되지
+              않았습니다.
+            </p>
+          ) : null}
+          {detailStatus === 'error' ? (
+            <p className="report-detail-state is-error" role="alert">
+              revision 이력은 유지되지만 선택한 상세 장부를 불러오지
+              못했습니다.
+            </p>
+          ) : null}
+          {detailStatus === 'ready' && reportDetail ? (
+            <TaxReportDetail
+              report={reportDetail}
+              pointerVersion={selectedReport?.pointerVersion}
+              isCurrent={selectedReportId === currentReport?.reportId}
+            />
           ) : null}
         </section>
       </main>
