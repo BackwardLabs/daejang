@@ -215,15 +215,15 @@ describe('source flow pages', () => {
 
     expect(
       screen.getByRole('heading', {
-        name: '거래 수집이 잠시 중단되었습니다',
+        name: '거래 수집이 처리 도중 멈췄습니다',
       }),
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        '수집 서비스 연결이 원활하지 않습니다. 잠시 후 다시 수집해 주세요.',
+        '수집 처리에서 문제가 확인되었습니다. 같은 조건으로 다시 시도하면 같은 지점에서 멈출 수 있습니다.',
       ),
     ).toBeInTheDocument()
-    expect(screen.getByText('수집 서비스 일시 오류')).toBeInTheDocument()
+    expect(screen.getByText('수집 처리 확인 필요')).toBeInTheDocument()
     expect(
       screen.queryByText('JIT 실행 요청에 실패했습니다.'),
     ).not.toBeInTheDocument()
@@ -245,6 +245,95 @@ describe('source flow pages', () => {
         body: expect.stringContaining('"intentKey":"source-retry:'),
       }),
     )
+  })
+
+  it('reports the polled attempt count instead of the freshly created one', async () => {
+    const source = {
+      id: '33333333-3333-4333-8333-333333333333',
+      type: 'EVM_WALLET',
+      address: '0x239000000000000000000000000000000000f2b2',
+      accountType: 'EOA',
+      verificationChainId: 'eip155:1',
+      verifiedAt: '2027-01-01T00:00:00.000Z',
+      label: 'EVM Wallet',
+      status: 'ACTIVE',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:00:00.000Z',
+      chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+    }
+    const failedJob = {
+      id: '55555555-5555-4555-8555-555555555555',
+      sourceId: source.id,
+      sourceKind: 'EVM_WALLET',
+      state: 'FAILED',
+      phase: 'PUBLISH',
+      attempts: 3,
+      processedRecords: 0,
+      failureCode: 'JIT_RUN_FAILED',
+      failureMessage: 'JIT 실행이 실패했습니다.',
+      requestedCoverageStart: '2027-01-01',
+      requestedCoverageEnd: '2027-12-31',
+      trigger: 'USER_REQUEST',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:05:00.000Z',
+    }
+    // A newly created retry job always starts at zero attempts. The worker
+    // counts the attempt when it claims the job, so the panel must show what
+    // the poll reports rather than what the creation response carried.
+    const queuedJob = {
+      ...failedJob,
+      id: '66666666-6666-4666-8666-666666666666',
+      state: 'QUEUED',
+      phase: 'QUEUED',
+      attempts: 0,
+      failureCode: undefined,
+      failureMessage: undefined,
+      updatedAt: '2027-01-01T00:06:00.000Z',
+    }
+    const polledJob = {
+      ...queuedJob,
+      state: 'FAILED',
+      phase: 'PUBLISH',
+      attempts: 4,
+      failureCode: 'JIT_RUN_FAILED',
+      failureMessage: 'JIT 실행이 실패했습니다.',
+      updatedAt: '2027-01-01T00:09:00.000Z',
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (body: unknown, status: number) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        })
+      if (url === '/api/v1/sources') return json({ items: [source] }, 200)
+      if (url === '/api/v1/jobs') return json({ items: [failedJob] }, 200)
+      if (url === `/api/v1/jobs/${failedJob.id}/retry`) {
+        return json({ job: queuedJob }, 201)
+      }
+      if (url === `/api/v1/jobs/${queuedJob.id}`) {
+        return json({ job: polledJob }, 200)
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    render(<SourceManagementPage />)
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: '처리 확인 필요' }),
+    )
+    expect(screen.getByText('3')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '다시 수집' }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: '처리 확인 필요' }),
+      ).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: '처리 확인 필요' }))
+
+    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
   })
 
   it('uses a safe fallback for unknown failures and shares the same right-control structure', async () => {

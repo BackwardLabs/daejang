@@ -177,7 +177,9 @@ function toWalletSyncSnapshot(job: SyncJobApiModel): WalletSyncJobSnapshot {
   return {
     id: job.id,
     state: job.state,
+    attempts: job.attempts,
     processedRecords: job.processedRecords,
+    updatedAt: job.updatedAt,
     ...(job.failureCode ? { failureCode: job.failureCode } : {}),
     ...(job.failureMessage ? { failureMessage: job.failureMessage } : {}),
   }

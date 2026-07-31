@@ -40,6 +40,16 @@ const temporaryCollectionFailure: SourceJobFailurePresentation = {
     '수집 서비스 연결이 원활하지 않습니다. 잠시 후 다시 수집해 주세요.',
 }
 
+// A retryable upstream problem leaves the job QUEUED for the worker's own
+// retry, so a FAILED job carrying one of these codes means the upstream call
+// was refused for a reason that a later attempt repeats.
+const persistentCollectionFailure: SourceJobFailurePresentation = {
+  kind: '수집 처리 확인 필요',
+  title: '거래 수집이 처리 도중 멈췄습니다',
+  message:
+    '수집 처리에서 문제가 확인되었습니다. 같은 조건으로 다시 시도하면 같은 지점에서 멈출 수 있습니다.',
+}
+
 const invalidCollectionResponse: SourceJobFailurePresentation = {
   kind: '수집 처리 응답 오류',
   title: '거래 수집을 완료하지 못했습니다',
@@ -57,11 +67,11 @@ const sourceJobFailurePresentationByCode: Record<
   string,
   SourceJobFailurePresentation
 > = {
-  JIT_START_FAILED: temporaryCollectionFailure,
-  JIT_SELECTION_FAILED: temporaryCollectionFailure,
-  JIT_STATUS_FAILED: temporaryCollectionFailure,
+  JIT_START_FAILED: persistentCollectionFailure,
+  JIT_SELECTION_FAILED: persistentCollectionFailure,
+  JIT_STATUS_FAILED: persistentCollectionFailure,
+  JIT_RUN_FAILED: persistentCollectionFailure,
   JIT_AWAIT_TIMEOUT: temporaryCollectionFailure,
-  JIT_RUN_FAILED: temporaryCollectionFailure,
   JIT_RETRYABLE_FAILURE: temporaryCollectionFailure,
   SYNC_UPSTREAM_TIMEOUT: temporaryCollectionFailure,
   SYNC_RETRYABLE_FAILURE: temporaryCollectionFailure,
@@ -438,17 +448,7 @@ export function SourceManagementPage() {
           setJobs((current) =>
             current.map((currentJob) =>
               currentJob.id === snapshot.id
-                ? {
-                    ...currentJob,
-                    state: snapshot.state,
-                    processedRecords: snapshot.processedRecords,
-                    ...(snapshot.failureCode
-                      ? { failureCode: snapshot.failureCode }
-                      : {}),
-                    ...(snapshot.failureMessage
-                      ? { failureMessage: snapshot.failureMessage }
-                      : {}),
-                  }
+                ? { ...currentJob, ...snapshot }
                 : currentJob,
             ),
           )

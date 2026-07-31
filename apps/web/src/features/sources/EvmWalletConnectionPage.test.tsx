@@ -378,8 +378,8 @@ describe('EvmWalletConnectionPage', () => {
       sourceStatus: 'SOURCE_SAVED',
     }))
     const watchSyncJob = vi.fn<WatchWalletSyncJob>(async ({ jobId, onUpdate }) => {
-      onUpdate({ id: jobId, state: 'RUNNING', processedRecords: 5 })
-      const terminal = { id: jobId, state: 'SUCCEEDED' as const, processedRecords: 12 }
+      onUpdate({ id: jobId, state: 'RUNNING', attempts: 1, processedRecords: 5, updatedAt: '2027-01-02T00:00:00Z' })
+      const terminal = { id: jobId, state: 'SUCCEEDED' as const, attempts: 1, processedRecords: 12, updatedAt: '2027-01-02T00:00:05Z' }
       onUpdate(terminal)
       return terminal
     })
