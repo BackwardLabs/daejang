@@ -48,12 +48,39 @@ const formatDecimal = (value: string) => {
   return `${sign}${grouped}${fraction === undefined ? '' : `.${fraction}`}`
 }
 
+const reportDenominations: Record<
+  string,
+  { symbol: string; decimals: number }
+> = {
+  'asset-krw-upbit': { symbol: 'KRW', decimals: 8 },
+}
+
+const formatAtomicAmount = (value: string, decimals: number) => {
+  if (!/^-?\d+$/.test(value)) return formatDecimal(value)
+  const negative = value.startsWith('-')
+  const digits = negative ? value.slice(1) : value
+  const padded = digits.padStart(decimals + 1, '0')
+  const integer = padded.slice(0, -decimals)
+  const fraction = padded.slice(-decimals).replace(/0+$/, '')
+  return formatDecimal(
+    `${negative ? '-' : ''}${integer}${fraction ? `.${fraction}` : ''}`,
+  )
+}
+
 export const formatReportAmount = (
   amount: ReportPrintAmountV1,
   denominationAssetId: string,
-) => amount.status === 'KNOWN'
-  ? `${formatDecimal(amount.amount)} ${denominationAssetId}`
-  : '—'
+) => {
+  if (amount.status !== 'KNOWN') return '—'
+  const presentation = reportDenominations[denominationAssetId]
+  if (presentation) {
+    return `${formatAtomicAmount(
+      amount.amount,
+      presentation.decimals,
+    )} ${presentation.symbol}`
+  }
+  return `${formatDecimal(amount.amount)} ${denominationAssetId}`
+}
 
 const shortId = (value: string) => value.length <= 28
   ? value
