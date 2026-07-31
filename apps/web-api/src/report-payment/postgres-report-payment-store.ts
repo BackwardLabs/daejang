@@ -276,7 +276,10 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
           LIMIT $2
         )
         UPDATE web_private.report_payment_orders AS orders
-        SET updated_at=clock_timestamp()
+        SET updated_at=GREATEST(
+          clock_timestamp(),
+          $1::timestamptz + interval '1 microsecond'
+        )
         FROM candidates
         WHERE orders.id=candidates.id
         RETURNING orders.id, orders.user_id, orders.report_id, orders.resident_id,
