@@ -97,7 +97,7 @@ const validReportPaymentContract = {
   entitlements_table: 'web_private.report_payment_entitlements',
   contract_version: 2,
   contract_digest: '88c83fad4df8baa34ac3da2ccd3165f3a7d1d00cd7405069617c9253f913ff1f',
-  migration_version: '49',
+  migration_version: '56',
 }
 
 const validReportAttestationContract = {

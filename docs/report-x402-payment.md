@@ -245,13 +245,13 @@ stateDiagram-v2
 | settlement recovery worker | `apps/web-api/src/report-payment-reconciler.ts` |
 | 결제 order·entitlement 저장소 | `apps/web-api/src/report-payment/postgres-report-payment-store.ts` |
 | PostgreSQL baseline | `daejang-db/migrations/000035_create_report_x402_payment_persistence.sql` |
-| provider key·recovery schema | `daejang-db/migrations/000049_add_report_x402_settlement_recovery.sql` |
+| provider key·recovery schema | `daejang-db/migrations/000056_add_report_x402_settlement_recovery.sql` |
 | facilitator API implementation | `daejang-x402/src/server/facilitator-api.ts` |
 | facilitator API contract | `daejang-x402/openapi/facilitator-v1.yaml` |
 
 배포는 다음 순서를 지킨다.
 
-1. `daejang-db` migration 49까지 적용하고
+1. `daejang-db` migration 56까지 적용하고
    `report-x402-payment-persistence` contract v2를 확인한다.
 2. `daejang-x402`의 migration, facilitator, provider reconciler와 mTLS gateway를
    배포한다. 기존 GIWA Sepolia MockUSD와 `payTo` deployment artifact를 재사용한다.

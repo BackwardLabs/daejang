@@ -425,7 +425,7 @@ export const assertReportPaymentSchema = async (pool: Pool) => {
     row.entitlements_table !== 'web_private.report_payment_entitlements' ||
     row.contract_version !== 2 ||
     row.contract_digest !== reportPaymentContractDigest ||
-    row.migration_version !== '49'
+    row.migration_version !== '56'
   ) {
     throw new Error('report x402 payment migration contract is invalid')
   }
