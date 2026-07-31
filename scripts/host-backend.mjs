@@ -3,12 +3,14 @@ import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   chmodSync,
+  chownSync,
   cpSync,
   existsSync,
   mkdirSync,
   lstatSync,
   linkSync,
   openSync,
+  readdirSync,
   readlinkSync,
   readFileSync,
   rmSync,
@@ -112,6 +114,94 @@ const pauseFile = join(stateRoot, 'paused')
 const supervisorLockFile = join(stateRoot, 'supervisor.lock')
 const operationLockFile = join(stateRoot, 'operation.lock')
 
+// The runtime tree is owned by the service account and shared with the
+// operator group so other accounts on the same host can read logs, PIDs and
+// the generated runtime config. Group write is never granted: jitd refuses to
+// listen when its socket parent is writable by group or others.
+// GIWA_HOST_RUNTIME_GROUP overrides the group; setting it empty keeps the
+// tree private to the service account.
+const defaultRuntimeGroup = 'daejang'
+
+export const resolveRuntimeGroupID = (
+  value,
+  lookup = (name) =>
+    spawnSync('dscl', ['.', '-read', `/Groups/${name}`, 'PrimaryGroupID'], {
+      encoding: 'utf8',
+    }),
+) => {
+  const group = (value ?? '').trim()
+  if (!group) return -1
+  if (/^[0-9]+$/.test(group)) {
+    const id = Number.parseInt(group, 10)
+    if (!Number.isSafeInteger(id) || id < 0) {
+      throw new Error(`Invalid host runtime group id: ${value}`)
+    }
+    return id
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(group)) {
+    throw new Error(`Invalid host runtime group name: ${value}`)
+  }
+  const result = lookup(group)
+  const match =
+    result.status === 0 && typeof result.stdout === 'string'
+      ? result.stdout.match(/PrimaryGroupID:\s*([0-9]+)/)
+      : null
+  if (!match) throw new Error(`Unable to resolve host runtime group: ${group}`)
+  return Number.parseInt(match[1], 10)
+}
+
+// An explicit setting is strict so a typo fails loudly, while the built-in
+// default degrades to a private tree on hosts that have no such group.
+export const resolveHostRuntimeGroup = ({
+  configured,
+  fallback = defaultRuntimeGroup,
+  resolveGroup = resolveRuntimeGroupID,
+} = {}) => {
+  if (configured !== undefined) return resolveGroup(configured)
+  try {
+    return resolveGroup(fallback)
+  } catch {
+    return -1
+  }
+}
+
+const runtimeGroupID = resolveHostRuntimeGroup({
+  configured: process.env.GIWA_HOST_RUNTIME_GROUP,
+})
+const runtimeShared = runtimeGroupID >= 0
+// setgid keeps the group on entries created later by the services themselves.
+const directoryMode = runtimeShared ? 0o2750 : 0o700
+const fileMode = runtimeShared ? 0o640 : 0o600
+
+// Mirrors the owner read and execute bits into the group without ever adding
+// group write, so prebuilt binaries stay executable for the shared group.
+export const sharedRuntimeFileMode = (mode) =>
+  (mode & 0o7700) | ((mode & 0o500) >> 3)
+
+// Downstream services fail closed on any group or other access to these, so
+// they stay private even when the rest of the tree is shared: taxd rejects a
+// group-readable trust key and a group-accessible claim receipt directory
+// (daejang-tax-engine/internal/daemon/{config,claim_control}.go).
+const privateRuntimePaths = [
+  join(configRoot, 'tax-publication-policy-trust-key.pub'),
+  join(stateRoot, 'tax-claim-receipts'),
+]
+
+export const isPrivateRuntimePath = (path, privatePaths = privateRuntimePaths) =>
+  privatePaths.some((privatePath) => pathIsWithin(privatePath, path))
+
+const applyRuntimeGroup = (path) => {
+  if (runtimeShared && !isPrivateRuntimePath(path)) {
+    chownSync(path, -1, runtimeGroupID)
+  }
+}
+
+// Creation modes are masked by umask, and the services inherit it from this
+// process, so pin it instead of depending on the launchd or login default.
+// 0o027 keeps group read and execute while denying group write and all other
+// access, which is what jitd requires of its socket parent.
+if (runtimeShared) process.umask(0o027)
+
 const pathIsWithin = (parent, candidate) =>
   candidate === parent || candidate.startsWith(`${parent}/`)
 
@@ -157,7 +247,7 @@ const ensureRuntimeDirectories = () => {
     join(runtimeRoot, 'private-objects'),
     join(stateRoot, 'selections'),
   ]) {
-    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    mkdirSync(directory, { recursive: true, mode: directoryMode })
     const linkMetadata = lstatSync(directory)
     if (linkMetadata.isSymbolicLink()) {
       throw new Error(`Runtime directory must not be a symbolic link: ${directory}`)
@@ -166,8 +256,81 @@ const ensureRuntimeDirectories = () => {
     if (!metadata.isDirectory() || metadata.uid !== process.getuid()) {
       throw new Error(`Runtime directory is not owned by this service account: ${directory}`)
     }
-    chmodSync(directory, 0o700)
+    // chown clears setgid on macOS, so take the group before the mode.
+    applyRuntimeGroup(directory)
+    chmodSync(directory, isPrivateRuntimePath(directory) ? 0o700 : directoryMode)
   }
+}
+
+// Entries created before GIWA_HOST_RUNTIME_GROUP was configured keep their
+// private modes, so share them in one pass instead of walking the whole tree
+// on every start.
+export const collectRuntimeShareEntries = (
+  root,
+  {
+    readEntries = readdirSync,
+    describe = lstatSync,
+    sharedDirectoryMode = 0o2750,
+    isPrivate = isPrivateRuntimePath,
+  } = {},
+) => {
+  const shared = []
+  const pending = [root]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    for (const entry of readEntries(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      const metadata = describe(path)
+      if (metadata.isSymbolicLink() || isPrivate(path)) continue
+      if (metadata.isDirectory()) {
+        shared.push({ path, mode: sharedDirectoryMode })
+        pending.push(path)
+      } else if (metadata.isFile()) {
+        shared.push({ path, mode: sharedRuntimeFileMode(metadata.mode & 0o7777) })
+      }
+    }
+  }
+  return shared
+}
+
+const shareRuntime = () => {
+  if (!runtimeShared) {
+    throw new Error(
+      `No host runtime group is active; set GIWA_HOST_RUNTIME_GROUP or create the ${defaultRuntimeGroup} group`,
+    )
+  }
+  assertExternalRuntimeRoot()
+  ensureRuntimeDirectories()
+  let count = 0
+  for (const root of [runtimeRoot, socketRoot]) {
+    for (const { path, mode } of collectRuntimeShareEntries(root)) {
+      if (statSync(path).uid !== process.getuid()) {
+        throw new Error(`Runtime entry is not owned by this service account: ${path}`)
+      }
+      applyRuntimeGroup(path)
+      chmodSync(path, mode)
+      count += 1
+    }
+  }
+  // Skipping is not enough once a path has already been widened, so put the
+  // fail-closed paths back to owner-only.
+  for (const path of privateRuntimePaths) {
+    if (!existsSync(path)) continue
+    const metadata = lstatSync(path)
+    if (metadata.isSymbolicLink()) continue
+    if (!metadata.isDirectory()) {
+      chmodSync(path, 0o600)
+      continue
+    }
+    chmodSync(path, 0o700)
+    for (const nested of collectRuntimeShareEntries(path, {
+      sharedDirectoryMode: 0o700,
+      isPrivate: () => false,
+    })) {
+      chmodSync(nested.path, nested.mode & 0o700)
+    }
+  }
+  console.log(`Shared ${count} runtime entries with group ${runtimeGroupID}`)
 }
 
 const databaseEnvFile = resolve(
@@ -295,7 +458,7 @@ const spawnService = (name, command, args, environment, options = {}) => {
     throw new Error(`${name} executable is missing: ${command}`)
   }
   rmSync(pidFile(name), { force: true })
-  const descriptor = openSync(logFile(name), 'a', 0o600)
+  const descriptor = openSync(logFile(name), 'a', fileMode)
   const child = spawn(command, args, {
     detached: true,
     env: environment,
@@ -307,7 +470,7 @@ const spawnService = (name, command, args, environment, options = {}) => {
   writeFileSync(
     pidFile(name),
     `${JSON.stringify({ pid: child.pid, commandLine: [command, ...args].join(' ') })}\n`,
-    { mode: 0o600 },
+    { mode: fileMode },
   )
 }
 
@@ -470,7 +633,7 @@ export const tryAcquireProcessLock = (
     token: randomUUID(),
   })}\n`
   try {
-    const descriptor = openSync(temporaryPath, 'wx', 0o600)
+    const descriptor = openSync(temporaryPath, 'wx', fileMode)
     try {
       writeFileSync(descriptor, lockContent)
     } catch (error) {
@@ -714,7 +877,7 @@ const build = () => {
   })
   const webAPIRuntime = join(runtimeRoot, 'app', 'web-api')
   rmSync(webAPIRuntime, { recursive: true, force: true })
-  mkdirSync(dirname(webAPIRuntime), { recursive: true, mode: 0o700 })
+  mkdirSync(dirname(webAPIRuntime), { recursive: true, mode: directoryMode })
   cpSync(join(repositoryRoot, 'apps', 'web-api', 'dist'), webAPIRuntime, {
     recursive: true,
   })
@@ -740,7 +903,7 @@ const createCombinedJITConfig = () => {
   )
   if (result.status !== 0)
     throw new Error('Unable to create combined JIT config')
-  writeFileSync(output, result.stdout, { mode: 0o600 })
+  writeFileSync(output, result.stdout, { mode: fileMode })
   return output
 }
 
@@ -794,7 +957,7 @@ const createRuntimeBridgeConfig = (source) => {
     }
   }
   writeFileSync(output, `${JSON.stringify(config, null, 2)}\n`, {
-    mode: 0o600,
+    mode: fileMode,
   })
   return output
 }
@@ -824,8 +987,8 @@ export const createRuntimeSubjectACL = (
   // their explicit subject lists in the same document.
   localGrants[0].subjects = []
   localGrants[0].allowAnySubject = true
-  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
-  chmodSync(output, 0o600)
+  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`, { mode: fileMode })
+  chmodSync(output, fileMode)
   return output
 }
 
@@ -871,15 +1034,15 @@ export const createRuntimeIndexerConfig = (
     sharedRead: true,
     chains: [ethereumTail, optimismTail],
   }
-  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
-  chmodSync(output, 0o600)
+  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`, { mode: fileMode })
+  chmodSync(output, fileMode)
   return output
 }
 
 export const ensureRuntimeIndexerView = (root, stores) => {
   if (!isAbsolute(root)) throw new Error('EVM indexer view root must be absolute')
-  mkdirSync(root, { recursive: true, mode: 0o700 })
-  chmodSync(root, 0o700)
+  mkdirSync(root, { recursive: true, mode: directoryMode })
+  chmodSync(root, directoryMode)
   for (const [name, source] of Object.entries(stores)) {
     if (!/^[a-z0-9-]+$/.test(name) || !isAbsolute(source) || !statSync(source).isDirectory()) {
       throw new Error(`Invalid EVM indexer view store ${name}`)
@@ -1072,14 +1235,15 @@ const createTaxRuntime = async (queryURL) => {
     [files.profiles, profiles],
     [files.quotes, canonicalJSON(upbitConfig)],
   ]) {
-    writeFileSync(path, contents, { mode: 0o600 })
-    chmodSync(path, 0o600)
+    writeFileSync(path, contents, { mode: fileMode })
+    chmodSync(path, fileMode)
   }
   writeFileSync(
     files.trustKey,
     decodePublicationTrustKey(process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY),
     { mode: 0o600 },
   )
+  // taxd refuses to start when the trust key grants group or other access.
   chmodSync(files.trustKey, 0o600)
 
   const taxCommit = gitCommit(taxRepository)
@@ -1417,9 +1581,9 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       writeFileSync(
         taxdNoProfilesMarker,
         'No subjects have fully canonical ledger assets. Restart after canonical Posting materialization.\n',
-        { mode: 0o600 },
+        { mode: fileMode },
       )
-      chmodSync(taxdNoProfilesMarker, 0o600)
+      chmodSync(taxdNoProfilesMarker, fileMode)
       console.warn(
         'Tax Engine is disabled until at least one subject has fully canonical ledger assets; JIT and Posting remain available',
       )
@@ -1528,7 +1692,7 @@ const stopServices = async () => {
 const stop = async () => {
   await withOperationLock(async () => {
     ensureRuntimeDirectories()
-    writeFileSync(pauseFile, 'paused\n', { mode: 0o600 })
+    writeFileSync(pauseFile, 'paused\n', { mode: fileMode })
     await stopServices()
   })
 }
@@ -1545,7 +1709,7 @@ export const runRestartOperation = async ({ prepare, pause, stop, start }) => {
 const restart = () => withOperationLock(async () => {
   await runRestartOperation({
     prepare: ensureRuntimeDirectories,
-    pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
+    pause: () => writeFileSync(pauseFile, 'paused\n', { mode: fileMode }),
     stop: stopServices,
     start: startServices,
   })
@@ -1656,8 +1820,13 @@ export const cronAutostartEntries = ({
   log,
   path,
   marker,
+  group = runtimeGroupID,
 }) => {
-  const environment = `PATH=${shellQuote(path)} GIWA_APP_REPOSITORY=${shellQuote(repository)}`
+  const environment = [
+    `PATH=${shellQuote(path)}`,
+    `GIWA_APP_REPOSITORY=${shellQuote(repository)}`,
+    ...(group >= 0 ? [`GIWA_HOST_RUNTIME_GROUP=${shellQuote(String(group))}`] : []),
+  ].join(' ')
   const command = (operation) =>
     `cd ${shellQuote(repository)} && ${environment} ${shellQuote(node)} ${shellQuote(script)} ${operation} >> ${shellQuote(log)} 2>&1`
   return [
@@ -1677,6 +1846,9 @@ export const supervisorProcessSpec = ({ repository, node, script, path }) => ({
       PATH: path,
       GIWA_APP_REPOSITORY: repository,
       GIWA_HOST_RUNTIME_ROOT: runtimeRoot,
+      ...(runtimeShared
+        ? { GIWA_HOST_RUNTIME_GROUP: String(runtimeGroupID) }
+        : {}),
     },
   },
 })
@@ -1688,7 +1860,7 @@ const startDetachedSupervisor = (script) => {
     script,
     path: stableSupervisorPath({ node: process.execPath, home: homedir() }),
   })
-  const descriptor = openSync(join(logRoot, 'supervisor.log'), 'a', 0o600)
+  const descriptor = openSync(join(logRoot, 'supervisor.log'), 'a', fileMode)
   const child = spawn(spec.command, spec.args, {
     ...spec.options,
     stdio: ['ignore', descriptor, descriptor],
@@ -1715,33 +1887,69 @@ const runSupervisorWatchdog = (script) => {
   startDetachedSupervisor(script)
 }
 
-const installCronAutostart = (script) => {
+const cronMarker = '# GIWA_HOST_BACKEND'
+
+export const rewriteCrontabLines = (existing, entries, marker = cronMarker) => [
+  ...existing.split(/\r?\n/).filter((line) => line && !line.includes(marker)),
+  ...entries,
+]
+
+const readCrontab = () => {
   const existing = spawnSync('crontab', ['-l'], { encoding: 'utf8' })
   if (existing.status !== 0 && existing.status !== 1) {
     throw new Error(`Unable to read crontab: status ${existing.status}`)
   }
-  const marker = '# GIWA_HOST_BACKEND'
-  const retained = (existing.stdout ?? '')
-    .split(/\r?\n/)
-    .filter((line) => line && !line.includes(marker))
-  retained.push(...cronAutostartEntries({
-    repository: canonicalRepositoryRoot,
-    node: process.execPath,
-    script,
-    log: join(logRoot, 'supervisor.log'),
-    path: stableSupervisorPath({ node: process.execPath, home: homedir() }),
-    marker,
-  }))
+  return existing.stdout ?? ''
+}
+
+const writeCrontab = (lines) => {
   const installed = spawnSync('crontab', ['-'], {
-    input: `${retained.join('\n')}\n`,
+    input: lines.length > 0 ? `${lines.join('\n')}\n` : '',
     encoding: 'utf8',
     stdio: ['pipe', 'inherit', 'inherit'],
   })
   if (installed.status !== 0) {
     throw new Error(`Unable to install crontab: status ${installed.status}`)
   }
+}
+
+// launchd and cron would otherwise both try to own the supervisor, and the
+// stale cron entries keep failing every minute against an older script path.
+const removeCronAutostart = () => {
+  const existing = readCrontab()
+  if (!existing.includes(cronMarker)) return
+  writeCrontab(rewriteCrontabLines(existing, []))
+  console.log('Removed the superseded crontab supervisor entries')
+}
+
+const installCronAutostart = (script) => {
+  writeCrontab(rewriteCrontabLines(readCrontab(), cronAutostartEntries({
+    repository: canonicalRepositoryRoot,
+    node: process.execPath,
+    script,
+    log: join(logRoot, 'supervisor.log'),
+    path: stableSupervisorPath({ node: process.execPath, home: homedir() }),
+    marker: cronMarker,
+  })))
   console.log('Installed @reboot supervisor through crontab')
   return 'cron'
+}
+
+// Autostart must run the supervisor from the checkout that owns its
+// dependencies. Node resolves bare specifiers such as `pg` by walking up from
+// the importing module's own directory, so a copy placed under the runtime
+// root can never resolve them no matter what working directory it is given.
+export const resolveSupervisorScript = (repository, fileExists = existsSync) => {
+  const script = join(repository, 'scripts', 'host-backend.mjs')
+  if (!fileExists(script)) {
+    throw new Error(`Supervisor script is missing: ${script}`)
+  }
+  if (!fileExists(join(repository, 'node_modules', 'pg'))) {
+    throw new Error(
+      `Supervisor dependencies are missing; run npm install in ${repository}`,
+    )
+  }
+  return script
 }
 
 const installAutostart = () => {
@@ -1750,9 +1958,8 @@ const installAutostart = () => {
   const launchAgents = join(homedir(), 'Library', 'LaunchAgents')
   mkdirSync(launchAgents, { recursive: true, mode: 0o700 })
   const plist = join(launchAgents, 'io.backwardlabs.giwa-host-backend.plist')
-  const script = join(stateRoot, 'host-backend.mjs')
+  const script = resolveSupervisorScript(canonicalRepositoryRoot)
   const servicePath = stableSupervisorPath({ node: process.execPath, home: homedir() })
-  cpSync(fileURLToPath(import.meta.url), script)
   writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -1771,12 +1978,18 @@ const installAutostart = () => {
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>${xmlEscape(servicePath)}</string>
     <key>GIWA_HOST_RUNTIME_ROOT</key><string>${xmlEscape(runtimeRoot)}</string>
-    <key>GIWA_APP_REPOSITORY</key><string>${xmlEscape(canonicalRepositoryRoot)}</string>
+    <key>GIWA_APP_REPOSITORY</key><string>${xmlEscape(canonicalRepositoryRoot)}</string>${runtimeShared ? `
+    <key>GIWA_HOST_RUNTIME_GROUP</key><string>${xmlEscape(String(runtimeGroupID))}</string>` : ''}
   </dict>
 </dict></plist>
 `, { mode: 0o600 })
   let installedWith
   let launchdDomain
+  // bootstrap fails outright when the label is already loaded, which would
+  // otherwise make a re-install silently fall back to cron.
+  for (const domain of launchdServiceDomains(process.getuid())) {
+    spawnSync('launchctl', ['bootout', domain, plist], { stdio: 'ignore' })
+  }
   for (const domain of launchdServiceDomains(process.getuid())) {
     const bootstrap = spawnSync(
       'launchctl',
@@ -1796,6 +2009,7 @@ const installAutostart = () => {
     installedWith = load.status === 0 ? 'launchd' : installCronAutostart(script)
   }
   if (installedWith === 'launchd') {
+    removeCronAutostart()
     console.log(
       `Installed login supervisor${launchdDomain ? ` in ${launchdDomain}` : ''}: ${plist}`,
     )
@@ -1848,13 +2062,13 @@ for (const [signal, exitCode] of [
         preserveServices: supervising,
         pause: () => pauseForSignalShutdown({
           supervising,
-          pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
+          pause: () => writeFileSync(pauseFile, 'paused\n', { mode: fileMode }),
         }),
         activeOperation: activeOperationPromise,
         stop: () => withOperationLock(async () => {
           pauseForSignalShutdown({
             supervising,
-            pause: () => writeFileSync(pauseFile, 'paused\n', { mode: 0o600 }),
+            pause: () => writeFileSync(pauseFile, 'paused\n', { mode: fileMode }),
           })
           await stopServices()
         }, { allowDuringShutdown: true }),
@@ -1894,8 +2108,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     })
   }
   else if (command === 'install-autostart') installAutostart()
+  else if (command === 'share-runtime') shareRuntime()
   else if (command === 'watchdog') {
     runSupervisorWatchdog(fileURLToPath(import.meta.url))
   }
-  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|tax-backfill <subject> <event>|supervise|watchdog|install-autostart')
+  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|tax-backfill <subject> <event>|supervise|watchdog|install-autostart|share-runtime')
 }

@@ -7,6 +7,7 @@ import {
   readlinkSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -20,6 +21,7 @@ import {
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
   createTaxProfiles,
+  collectRuntimeShareEntries,
   cronAutostartEntries,
   ensureRuntimeIndexerView,
   hostPostingWorkerArgs,
@@ -27,6 +29,7 @@ import {
   hostEVMPostingWorkerArgs,
   hostEVMPostingWorkerEnvironment,
   hostActiveServiceOrder,
+  isPrivateRuntimePath,
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
@@ -41,7 +44,12 @@ import {
   resolvePostingRepository,
   runRestartOperation,
   runSignalShutdown,
+  resolveHostRuntimeGroup,
+  resolveRuntimeGroupID,
   resolveRuntimeSubjectACLSource,
+  resolveSupervisorScript,
+  rewriteCrontabLines,
+  sharedRuntimeFileMode,
   stableSupervisorPath,
   supervisorProcessSpec,
   tryAcquireProcessLock,
@@ -231,7 +239,10 @@ test('limits the runtime indexer config to the JIT chain stores', () => {
     assert.equal(runtime.chains[0].liveSource, undefined)
     assert.equal(runtime.chains[1].startBlock, 154465211)
     assert.equal(runtime.chains[1].supplementalRpcUrl, 'http://127.0.0.1:1')
-    assert.equal(statSync(output).mode & 0o777, 0o600)
+    // Readable by the service account and at most its operator group, never
+    // group writable and never exposed to other accounts.
+    assert.equal(statSync(output).mode & 0o022, 0)
+    assert.equal(statSync(output).mode & 0o007, 0)
   } finally {
     rmSync(parent, { recursive: true, force: true })
   }
@@ -300,7 +311,10 @@ test('rewrites only the local JIT ACL identity to the current service UID', () =
         { identity: 'spiffe://daejang/remote', subjects: ['subject-1'] },
       ],
     })
-    assert.equal(statSync(output).mode & 0o777, 0o600)
+    // Readable by the service account and at most its operator group, never
+    // group writable and never exposed to other accounts.
+    assert.equal(statSync(output).mode & 0o022, 0)
+    assert.equal(statSync(output).mode & 0o007, 0)
   } finally {
     rmSync(parent, { recursive: true, force: true })
   }
@@ -630,6 +644,214 @@ test('cron fallback installs a PATH-aware reboot entry and watchdog', () => {
   assert.match(entries[1], /host-backend\.mjs' watchdog >>/)
   assert.doesNotMatch(entries[1], /pgrep/)
   assert.ok(entries.every((entry) => entry.endsWith('# GIWA_HOST_BACKEND')))
+})
+
+test('cron fallback omits the runtime group when the tree stays private', () => {
+  const entries = cronAutostartEntries({
+    repository: '/srv/giwa app',
+    node: '/opt/homebrew/bin/node',
+    script: '/srv/runtime/host-backend.mjs',
+    log: '/srv/runtime/supervisor.log',
+    path: '/opt/homebrew/bin:/usr/bin:/bin',
+    marker: '# GIWA_HOST_BACKEND',
+    group: -1,
+  })
+  assert.ok(entries.every((entry) => !entry.includes('GIWA_HOST_RUNTIME_GROUP')))
+})
+
+test('cron fallback carries the shared runtime group into the reboot entry', () => {
+  const entries = cronAutostartEntries({
+    repository: '/srv/giwa app',
+    node: '/opt/homebrew/bin/node',
+    script: '/srv/runtime/host-backend.mjs',
+    log: '/srv/runtime/supervisor.log',
+    path: '/opt/homebrew/bin:/usr/bin:/bin',
+    marker: '# GIWA_HOST_BACKEND',
+    group: 501,
+  })
+  assert.ok(entries.every((entry) => entry.includes("GIWA_HOST_RUNTIME_GROUP='501'")))
+})
+
+test('resolves a numeric host runtime group without a directory lookup', () => {
+  assert.equal(
+    resolveRuntimeGroupID('501', () => {
+      throw new Error('lookup must not run for a numeric group')
+    }),
+    501,
+  )
+})
+
+test('resolves a named host runtime group through the directory service', () => {
+  const looked = []
+  const gid = resolveRuntimeGroupID(' daejang ', (name) => {
+    looked.push(name)
+    return { status: 0, stdout: 'PrimaryGroupID: 501\n' }
+  })
+  assert.equal(gid, 501)
+  assert.deepEqual(looked, ['daejang'])
+})
+
+test('treats an unset host runtime group as private', () => {
+  for (const value of [undefined, '', '   ']) {
+    assert.equal(resolveRuntimeGroupID(value), -1)
+  }
+})
+
+test('shares the runtime with the default group when nothing is configured', () => {
+  assert.equal(
+    resolveHostRuntimeGroup({
+      configured: undefined,
+      fallback: 'daejang',
+      resolveGroup: (group) => (group === 'daejang' ? 501 : -1),
+    }),
+    501,
+  )
+})
+
+test('keeps the runtime private when the default group is absent', () => {
+  assert.equal(
+    resolveHostRuntimeGroup({
+      configured: undefined,
+      resolveGroup: () => {
+        throw new Error('Unable to resolve host runtime group: daejang')
+      },
+    }),
+    -1,
+  )
+})
+
+test('lets an explicit empty host runtime group opt out of sharing', () => {
+  assert.equal(
+    resolveHostRuntimeGroup({
+      configured: '',
+      resolveGroup: resolveRuntimeGroupID,
+    }),
+    -1,
+  )
+})
+
+test('fails loudly when an explicitly configured group cannot be resolved', () => {
+  assert.throws(
+    () =>
+      resolveHostRuntimeGroup({
+        configured: 'typo-group',
+        resolveGroup: () => {
+          throw new Error('Unable to resolve host runtime group: typo-group')
+        },
+      }),
+    /Unable to resolve host runtime group: typo-group/,
+  )
+})
+
+test('rejects an unresolvable or malformed host runtime group', () => {
+  assert.throws(
+    () => resolveRuntimeGroupID('missing', () => ({ status: 1, stdout: '' })),
+    /Unable to resolve host runtime group: missing/,
+  )
+  assert.throws(
+    () => resolveRuntimeGroupID('bad group; rm -rf /'),
+    /Invalid host runtime group name/,
+  )
+})
+
+test('shares owner read and execute bits with the group but never write', () => {
+  assert.equal(sharedRuntimeFileMode(0o600), 0o640)
+  assert.equal(sharedRuntimeFileMode(0o700), 0o750)
+  // Executable bits survive, but existing other access is dropped.
+  assert.equal(sharedRuntimeFileMode(0o755), 0o750)
+  // An owner-writable file must not become group writable.
+  assert.equal(sharedRuntimeFileMode(0o600) & 0o020, 0)
+  assert.equal(sharedRuntimeFileMode(0o700) & 0o022, 0)
+  // Existing other-readable bits are dropped rather than widened.
+  assert.equal(sharedRuntimeFileMode(0o644) & 0o007, 0)
+})
+
+test('keeps fail-closed taxd paths private inside a shared runtime', () => {
+  const privatePaths = ['/rt/config/trust.pub', '/rt/supervisor/tax-claim-receipts']
+  assert.ok(isPrivateRuntimePath('/rt/config/trust.pub', privatePaths))
+  assert.ok(isPrivateRuntimePath('/rt/supervisor/tax-claim-receipts', privatePaths))
+  assert.ok(
+    isPrivateRuntimePath('/rt/supervisor/tax-claim-receipts/2027.jsonl', privatePaths),
+  )
+  assert.ok(!isPrivateRuntimePath('/rt/config/trust.pub.bak', privatePaths))
+  assert.ok(!isPrivateRuntimePath('/rt/supervisor/logs/taxd.log', privatePaths))
+})
+
+test('excludes fail-closed paths from the shared runtime entries', () => {
+  const root = mkdtempSync(join(tmpdir(), 'giwa-share-private-'))
+  try {
+    mkdirSync(join(root, 'receipts'))
+    writeFileSync(join(root, 'receipts', '2027.jsonl'), '{}\n', { mode: 0o600 })
+    writeFileSync(join(root, 'shared.log'), 'log\n', { mode: 0o600 })
+
+    const shared = collectRuntimeShareEntries(root, {
+      isPrivate: (path) => path === join(root, 'receipts'),
+    })
+
+    assert.deepEqual(shared.map((entry) => entry.path), [join(root, 'shared.log')])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('collects runtime entries to share without following symlinks', () => {
+  const root = mkdtempSync(join(tmpdir(), 'giwa-share-'))
+  try {
+    mkdirSync(join(root, 'logs'))
+    writeFileSync(join(root, 'logs', 'engine.log'), 'log\n', { mode: 0o600 })
+    writeFileSync(join(root, 'jitd'), '', { mode: 0o755 })
+    symlinkSync('/etc', join(root, 'escape'), 'dir')
+
+    const shared = collectRuntimeShareEntries(root)
+    const byPath = new Map(shared.map(({ path, mode }) => [path, mode]))
+
+    assert.equal(byPath.get(join(root, 'logs')), 0o2750)
+    assert.equal(byPath.get(join(root, 'logs', 'engine.log')), 0o640)
+    assert.equal(byPath.get(join(root, 'jitd')), 0o750)
+    assert.ok(!byPath.has(join(root, 'escape')))
+    assert.ok(![...byPath.keys()].some((path) => path.startsWith('/etc')))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('autostart runs the supervisor from the checkout that owns its dependencies', () => {
+  const repository = '/srv/giwa app'
+  assert.equal(
+    resolveSupervisorScript(repository, () => true),
+    join(repository, 'scripts', 'host-backend.mjs'),
+  )
+})
+
+test('autostart refuses a checkout whose supervisor dependencies are missing', () => {
+  const repository = '/srv/giwa app'
+  assert.throws(
+    () =>
+      resolveSupervisorScript(
+        repository,
+        (path) => path === join(repository, 'scripts', 'host-backend.mjs'),
+      ),
+    /Supervisor dependencies are missing; run npm install in \/srv\/giwa app/,
+  )
+  assert.throws(
+    () => resolveSupervisorScript(repository, () => false),
+    /Supervisor script is missing/,
+  )
+})
+
+test('switching to launchd drops the marked entries and keeps the rest', () => {
+  const existing = [
+    '0 3 * * * /usr/bin/backup',
+    "@reboot cd '/srv' && node '/old/host-backend.mjs' supervise # GIWA_HOST_BACKEND",
+    "* * * * * cd '/srv' && node '/old/host-backend.mjs' watchdog # GIWA_HOST_BACKEND",
+  ].join('\n')
+
+  assert.deepEqual(rewriteCrontabLines(existing, []), ['0 3 * * * /usr/bin/backup'])
+  assert.deepEqual(rewriteCrontabLines(existing, ['@reboot new # GIWA_HOST_BACKEND']), [
+    '0 3 * * * /usr/bin/backup',
+    '@reboot new # GIWA_HOST_BACKEND',
+  ])
+  assert.deepEqual(rewriteCrontabLines('', []), [])
 })
 
 test('autostart tries the background user launchd domain after GUI', () => {
