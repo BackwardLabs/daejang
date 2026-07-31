@@ -105,15 +105,26 @@ describe('current tax report route', () => {
     expect(response.json().report).not.toHaveProperty('evidencePackDigest')
   })
 
-  it('supports explicit provisional reads and rejects invalid years before storage access', async () => {
+  it('supports 2025/2026 simulation reads and rejects 2024 before storage access', async () => {
     const { token } = await createSession()
-    const provisional = await context.app.inject({ method: 'GET', url: '/api/v1/tax-reports/2027/current?finality=PROVISIONAL', headers: { cookie: `${config.sessionCookieName}=${token}` } })
-    expect(provisional.statusCode).toBe(200)
-    expect(reader.calls.at(-1)?.finality).toBe('PROVISIONAL')
+    for (const taxYear of [2025, 2026]) {
+      reader.value = { ...fixture, taxYear }
+      const provisional = await context.app.inject({
+        method: 'GET',
+        url: `/api/v1/tax-reports/${taxYear}/current?finality=PROVISIONAL`,
+        headers: { cookie: `${config.sessionCookieName}=${token}` },
+      })
+      expect(provisional.statusCode).toBe(200)
+      expect(reader.calls.at(-1)).toMatchObject({
+        taxYear,
+        finality: 'PROVISIONAL',
+      })
+      expect(provisional.json().report.taxYear).toBe(taxYear)
+    }
 
-    const invalid = await context.app.inject({ method: 'GET', url: '/api/v1/tax-reports/2026/current', headers: { cookie: `${config.sessionCookieName}=${token}` } })
+    const invalid = await context.app.inject({ method: 'GET', url: '/api/v1/tax-reports/2024/current', headers: { cookie: `${config.sessionCookieName}=${token}` } })
     expect(invalid.statusCode).toBe(400)
-    expect(reader.calls).toHaveLength(1)
+    expect(reader.calls).toHaveLength(2)
   })
 
   it('allows an explicit resident selector but still scopes the lookup to the session subject', async () => {

@@ -64,7 +64,7 @@ Web API는 다음 보안 경계를 기본으로 적용합니다.
 
 메모리 SessionStore와 rate-limit store는 로컬 개발과 테스트 전용입니다. 운영 모드는 `DATABASE_URL`, 32 byte 이상의 `RATE_LIMIT_HMAC_SECRET`, Engine CA·client certificate·private key 설정이 없으면 시작하지 않습니다. Web schema는 `daejang-db` migration이 소유하며 OAuth·이메일 인증 persistence는 `000015`에서 추가됩니다. 현재 Web API는 wallet ownership 경계까지 반영된 `web-auth-persistence` v2 / migration 11 계약을 요구합니다. ingress 기준은 [`deploy/nginx`](deploy/nginx/README.md), DB부터 Worker까지 실제 배포 순서는 [계정 인증 배포 실행 순서](docs/auth-deployment-runbook.md)에 있습니다.
 
-Migration `24`가 적용된 DB에서는 인증 Session의 사용자 ID를 subject 경계로 사용해 현재
+Migration `62`가 적용된 DB에서는 인증 Session의 사용자 ID를 subject 경계로 사용해 현재
 신고서 read model을 조회합니다. 요청 header나 query로 다른 subject를 지정할 수 없으며,
 금액 상태가 `UNKNOWN`이면 `amount`를 0으로 만들지 않고 필드 자체를 생략합니다.
 
@@ -75,7 +75,7 @@ GET /api/v1/tax-reports/:reportId/artifacts/pdf
 ```
 
 서버는 시작 시 읽기 권한이 필요한 `reporting.tax_report`,
-`reporting.current_tax_report`와 `tax-report-persistence` migration `24` 계약만
+`reporting.current_tax_report`와 `tax-report-persistence` migration `62` 계약만
 확인합니다. 세금 계산 상세 테이블은 Web API 역할에 노출하지 않습니다.
 
 두 번째 경로는 Tax Engine이 발행한 exact `ReportModelV1`을 subject 범위와

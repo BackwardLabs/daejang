@@ -55,6 +55,7 @@ import {
   sharedRuntimeFileMode,
   stableSupervisorPath,
   supervisorProcessSpec,
+  taxBackfillArgs,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
 
@@ -182,15 +183,40 @@ test('builds tax profiles only for subjects with canonical ledger assets', () =>
   ])
 
   assert.equal(profiles.schemaVersion, 'tax.downstream-profile-set.v1')
-  assert.equal(profiles.profiles.length, 1)
-  assert.equal(profiles.profiles[0].subjectId, 'subject-canonical')
-  assert.equal(profiles.profiles[0].taxYear, 2027)
+  assert.equal(profiles.profiles.length, 3)
+  assert.deepEqual(
+    profiles.profiles.map(({ subjectId, taxYear }) => ({ subjectId, taxYear })),
+    [
+      { subjectId: 'subject-canonical', taxYear: 2025 },
+      { subjectId: 'subject-canonical', taxYear: 2026 },
+      { subjectId: 'subject-canonical', taxYear: 2027 },
+    ],
+  )
   assert.deepEqual(
     profiles.profiles[0].assetBindings.map((binding) => binding.ledgerAssetId),
     ['asset-krw-upbit', 'asset-zbt-upbit'],
   )
   assert.equal(profiles.profiles[0].accountBindings[0].kind, 'VASP')
   assert.equal(profiles.profiles[0].accountBindings[0].method, 'MOVING_AVERAGE')
+})
+
+test('builds 2025 through 2027 profiles for every canonical subject', () => {
+  const profiles = createTaxProfiles([
+    { subject_id: 'subject-b', account_id: 'account-b', asset_id: 'asset-b' },
+    { subject_id: 'subject-a', account_id: 'account-a', asset_id: 'asset-a' },
+  ])
+
+  assert.deepEqual(
+    profiles.profiles.map(({ subjectId, taxYear }) => `${subjectId}:${taxYear}`),
+    [
+      'subject-a:2025',
+      'subject-a:2026',
+      'subject-a:2027',
+      'subject-b:2025',
+      'subject-b:2026',
+      'subject-b:2027',
+    ],
+  )
 })
 
 test('keeps the core JIT and Posting pipeline active without tax profiles', () => {
@@ -210,6 +236,36 @@ test('keeps the core JIT and Posting pipeline active without tax profiles', () =
       'evm-posting', 'taxd', 'web-api',
     ],
   )
+})
+
+test('passes an explicit 2025+ year to tax-backfill and defaults old calls to 2027', () => {
+  assert.deepEqual(
+    taxBackfillArgs('subject-1', 'event-1', '2025'),
+    [
+      '-subject', 'subject-1',
+      '-event', 'event-1',
+      '-tax-year', '2025',
+      '-apply',
+    ],
+  )
+  assert.deepEqual(
+    taxBackfillArgs('subject-1', 'event-1'),
+    [
+      '-subject', 'subject-1',
+      '-event', 'event-1',
+      '-tax-year', '2027',
+      '-apply',
+    ],
+  )
+})
+
+test('rejects unsupported or malformed tax-backfill years', () => {
+  for (const taxYear of ['2024', '2025.0', 'not-a-year']) {
+    assert.throws(
+      () => taxBackfillArgs('subject-1', 'event-1', taxYear),
+      /integer from 2025 through 9999/,
+    )
+  }
 })
 
 test('pins same-period multichain coverage to one deterministic snapshot', () => {

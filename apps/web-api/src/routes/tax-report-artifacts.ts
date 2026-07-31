@@ -121,7 +121,9 @@ export const registerTaxReportArtifactRoutes = async (
       }
       const pdfDigest = createHash('sha256').update(bytes).digest('hex')
       const fileName = [
-        'daejang-tax-report',
+        report.taxYear < 2027
+          ? 'daejang-tax-simulation'
+          : 'daejang-tax-report',
         String(report.taxYear),
         safeFilePart(report.reportId),
       ].join('-')

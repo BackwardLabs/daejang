@@ -943,19 +943,37 @@ describe('sync and tax report data routes', () => {
     expect(response.json()).toMatchObject({ error: { code: 'SYNC_INTENT_CONFLICT' } })
   })
 
-  it('projects every tax report history item through the browser whitelist', async () => {
+  it('supports 2025/2026 history, rejects 2024 and keeps the browser whitelist', async () => {
     const listTaxReportHistory = vi.fn(async () => [{
-      reportId: 'report-history', residentId: 'resident-private', taxYear: 2027,
+      reportId: 'report-history', residentId: 'resident-private', taxYear: 2026,
       finality: 'FINAL', status: 'FINAL', filingStatus: 'READY', denominationAssetId: 'KRW',
-      pointerVersion: '0', issuedAt: '2027-01-01T00:00:00Z', inputDigest: 'private',
+      pointerVersion: '0', issuedAt: '2026-12-31T00:00:00Z', inputDigest: 'private',
       counts: {}, gainLoss: {}, taxableBase: {}, nationalTax: {}, localTax: {}, totalTax: {},
     }])
     const app = await buildRouteApp(engineClient({ listTaxReportHistory }))
-    const response = await app.inject({ method: 'GET', url: '/api/v1/tax-reports/2027/history?limit=10' })
+    const response = await app.inject({ method: 'GET', url: '/api/v1/tax-reports/2026/history?limit=10' })
     expect(response.statusCode).toBe(200)
-    expect(listTaxReportHistory).toHaveBeenCalledWith(expect.any(Object), 2027, 10)
+    expect(listTaxReportHistory).toHaveBeenCalledWith(expect.any(Object), 2026, 10)
     expect(response.json().items[0]).not.toHaveProperty('residentId')
     expect(response.json().items[0]).not.toHaveProperty('inputDigest')
+
+    const earliest = await app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2025/history',
+    })
+    expect(earliest.statusCode).toBe(200)
+    expect(listTaxReportHistory).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      2025,
+      20,
+    )
+
+    const invalid = await app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2024/history',
+    })
+    expect(invalid.statusCode).toBe(400)
+    expect(listTaxReportHistory).toHaveBeenCalledTimes(2)
   })
 
   it('passes the Event revision through to the lot lineage query', async () => {

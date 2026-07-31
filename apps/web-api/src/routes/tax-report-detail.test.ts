@@ -401,6 +401,36 @@ describe('canonical tax report detail route', () => {
     })
   })
 
+  it('accepts 2025/2026 canonical simulation reports and rejects 2024', async () => {
+    const { token } = await createSession()
+    const headers = {
+      cookie: `${config.sessionCookieName}=${token}`,
+    }
+
+    for (const taxYear of [2025, 2026]) {
+      reader.value = artifactFor({ ...canonicalModel, taxYear })
+      const response = await context.app.inject({
+        method: 'GET',
+        url: `/api/v1/tax-reports/${REPORT_ID}`,
+        headers,
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().report.taxYear).toBe(taxYear)
+      expect(response.json().report).not.toHaveProperty('policySimulation')
+    }
+
+    reader.value = artifactFor({ ...canonicalModel, taxYear: 2024 })
+    const invalid = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}`,
+      headers,
+    })
+    expect(invalid.statusCode).toBe(503)
+    expect(invalid.json()).toMatchObject({
+      error: { code: 'TAX_REPORT_MODEL_INCONSISTENT' },
+    })
+  })
+
   it('fails closed instead of converting UNKNOWN to zero', async () => {
     const malformed = structuredClone(canonicalModel) as unknown as {
       summary: { totalTax: unknown }

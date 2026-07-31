@@ -478,7 +478,7 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
     expect(
       screen.getByRole('heading', {
-        name: /^\d{4}년 가상자산 세무 장부$/,
+        name: /^\d{4}년 가상자산 세무(?: 정책 시뮬레이션)? 장부$/,
       }),
     ).toBeInTheDocument()
     expect(

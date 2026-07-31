@@ -1131,24 +1131,28 @@ export const createTaxProfiles = (rows) => {
   for (const [subjectId, subject] of [...subjects].sort(([left], [right]) =>
     left.localeCompare(right))) {
     if (subject.hasDocumentAsset) continue
-    profiles.push({
-      subjectId,
-      residentId: subjectId,
-      taxYear: 2027,
-      denominationAssetId: 'asset-krw-upbit',
-      accountBindings: [...subject.accounts].sort().map((accountId) => ({
-        accountId,
-        taxAddressId: accountId,
-        kind: accountId.startsWith('cex-account:') ? 'VASP' : 'OTHER',
-        method: accountId.startsWith('cex-account:')
-          ? 'MOVING_AVERAGE'
-          : 'FIFO',
-      })),
-      assetBindings: [...subject.assets].sort().map((assetId) => ({
-        ledgerAssetId: assetId,
-        taxAssetId: `tax-${assetId}`,
-      })),
-    })
+    const accountBindings = [...subject.accounts].sort().map((accountId) => ({
+      accountId,
+      taxAddressId: accountId,
+      kind: accountId.startsWith('cex-account:') ? 'VASP' : 'OTHER',
+      method: accountId.startsWith('cex-account:')
+        ? 'MOVING_AVERAGE'
+        : 'FIFO',
+    }))
+    const assetBindings = [...subject.assets].sort().map((assetId) => ({
+      ledgerAssetId: assetId,
+      taxAssetId: `tax-${assetId}`,
+    }))
+    for (const taxYear of [2025, 2026, 2027]) {
+      profiles.push({
+        subjectId,
+        residentId: subjectId,
+        taxYear,
+        denominationAssetId: 'asset-krw-upbit',
+        accountBindings,
+        assetBindings,
+      })
+    }
   }
   return { schemaVersion: 'tax.downstream-profile-set.v1', profiles }
 }
@@ -1774,10 +1778,24 @@ const restart = () => withOperationLock(async () => {
   })
 })
 
-const taxBackfill = (subjectID, eventID) => withOperationLock(async () => {
+export const taxBackfillArgs = (subjectID, eventID, taxYearInput) => {
   if (!subjectID || !eventID) {
     throw new Error('tax-backfill requires subject and event IDs')
   }
+  const rawTaxYear = taxYearInput === undefined ? '2027' : String(taxYearInput)
+  if (!/^[0-9]{4}$/.test(rawTaxYear) || Number(rawTaxYear) < 2025) {
+    throw new Error('tax-backfill tax year must be an integer from 2025 through 9999')
+  }
+  return [
+    '-subject', subjectID,
+    '-event', eventID,
+    '-tax-year', rawTaxYear,
+    '-apply',
+  ]
+}
+
+const taxBackfill = (subjectID, eventID, taxYearInput) => withOperationLock(async () => {
+  const commandArgs = taxBackfillArgs(subjectID, eventID, taxYearInput)
   if (isRunning('taxd')) {
     throw new Error('Stop taxd before applying a valuation backfill')
   }
@@ -1795,12 +1813,7 @@ const taxBackfill = (subjectID, eventID) => withOperationLock(async () => {
   const runtime = await createTaxRuntime(queryURL)
   run(
     join(binaryRoot, 'tax-backfill'),
-    [
-      '-subject', subjectID,
-      '-event', eventID,
-      '-tax-year', '2027',
-      '-apply',
-    ],
+    commandArgs,
     { cwd: taxRepository, env: taxEnvironment(taxURL, runtime) },
   )
 })
@@ -2151,7 +2164,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   else if (command === 'restart') {
     await restart()
   } else if (command === 'tax-backfill') {
-    await taxBackfill(process.argv[3], process.argv[4])
+    await taxBackfill(process.argv[3], process.argv[4], process.argv[5])
   } else if (command === 'status') status()
   else if (command === 'logs') logs()
   else if (command === 'supervise') {
@@ -2171,5 +2184,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   else if (command === 'watchdog') {
     runSupervisorWatchdog(fileURLToPath(import.meta.url))
   }
-  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|tax-backfill <subject> <event>|supervise|watchdog|install-autostart|share-runtime')
+  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|tax-backfill <subject> <event> [tax-year>=2025]|supervise|watchdog|install-autostart|share-runtime')
 }

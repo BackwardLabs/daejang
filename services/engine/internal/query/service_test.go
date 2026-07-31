@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,7 @@ type fakeTaxReportStore struct {
 	err         error
 	lastSubject string
 	lastTaxYear int
+	lastHistory int
 	lastReport  string
 }
 
@@ -201,7 +203,8 @@ func (f *fakeTaxReportStore) GetCurrentReportForYear(_ context.Context, subject 
 	return f.current, f.found, f.err
 }
 
-func (f *fakeTaxReportStore) ListReportHistory(context.Context, string, int, int32) ([]taxreportstore.StoredReport, error) {
+func (f *fakeTaxReportStore) ListReportHistory(_ context.Context, subject string, taxYear int, _ int32) ([]taxreportstore.StoredReport, error) {
+	f.lastSubject, f.lastHistory = subject, taxYear
 	return nil, f.err
 }
 
@@ -443,6 +446,65 @@ func TestGetCurrentTaxReportDoesNotLeakCrossSubjectOrAmbiguousResidency(t *testi
 				t.Fatalf("query escaped actor subject: %#v", store)
 			}
 		})
+	}
+}
+
+func TestTaxReportQueriesAllow2025And2026SimulationYears(t *testing.T) {
+	for _, taxYear := range []int32{2025, 2026} {
+		t.Run(strconv.Itoa(int(taxYear)), func(t *testing.T) {
+			issuedAt := time.Date(int(taxYear)+1, 1, 10, 0, 0, 0, 0, time.UTC)
+			store := &fakeTaxReportStore{
+				found: true,
+				current: taxreportstore.CurrentReportDetail{
+					StoredReport: taxreportstore.StoredReport{
+						SubjectID: queryTestSubjectID,
+						Report: taxreportstore.Report{
+							ID: "report-simulation", ResidentID: "resident-1",
+							TaxYear: int(taxYear), Finality: "PROVISIONAL",
+							Status: "PARTIAL", FilingStatus: "BLOCKED", IssuedAt: issuedAt,
+						},
+					},
+					PointerVersion: 1,
+					UpdatedAt:      issuedAt,
+				},
+			}
+			service := &Service{TaxReports: store}
+
+			if _, err := service.GetCurrentTaxReport(context.Background(), &enginev1.GetCurrentTaxReportRequest{
+				Context: queryTestContext(), TaxYear: taxYear,
+			}); err != nil {
+				t.Fatalf("current report year %d was rejected: %v", taxYear, err)
+			}
+			if store.lastTaxYear != int(taxYear) {
+				t.Fatalf("current report year=%d, want %d", store.lastTaxYear, taxYear)
+			}
+			if _, err := service.ListTaxReportHistory(context.Background(), &enginev1.ListTaxReportHistoryRequest{
+				Context: queryTestContext(), TaxYear: taxYear,
+			}); err != nil {
+				t.Fatalf("report history year %d was rejected: %v", taxYear, err)
+			}
+			if store.lastHistory != int(taxYear) {
+				t.Fatalf("history year=%d, want %d", store.lastHistory, taxYear)
+			}
+		})
+	}
+}
+
+func TestTaxReportQueriesReject2024BeforeStoreAccess(t *testing.T) {
+	store := &fakeTaxReportStore{}
+	service := &Service{TaxReports: store}
+	if _, err := service.GetCurrentTaxReport(context.Background(), &enginev1.GetCurrentTaxReportRequest{
+		Context: queryTestContext(), TaxYear: 2024,
+	}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("current status=%s, want INVALID_ARGUMENT: %v", status.Code(err), err)
+	}
+	if _, err := service.ListTaxReportHistory(context.Background(), &enginev1.ListTaxReportHistoryRequest{
+		Context: queryTestContext(), TaxYear: 2024,
+	}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("history status=%s, want INVALID_ARGUMENT: %v", status.Code(err), err)
+	}
+	if store.lastTaxYear != 0 || store.lastHistory != 0 {
+		t.Fatalf("store was queried for unsupported year: %#v", store)
 	}
 }
 

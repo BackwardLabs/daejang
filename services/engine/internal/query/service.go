@@ -296,8 +296,8 @@ func (s *Service) GetCurrentTaxReport(ctx context.Context, req *enginev1.GetCurr
 	if err != nil {
 		return nil, err
 	}
-	if req.GetTaxYear() < 2027 {
-		return nil, status.Error(codes.InvalidArgument, "tax year must be 2027 or later")
+	if req.GetTaxYear() < 2025 {
+		return nil, status.Error(codes.InvalidArgument, "tax year must be 2025 or later")
 	}
 	if s.TaxReports == nil {
 		return nil, status.Error(codes.Unavailable, "tax report query is unavailable")
@@ -320,8 +320,8 @@ func (s *Service) ListTaxReportHistory(ctx context.Context, req *enginev1.ListTa
 	if err != nil {
 		return nil, err
 	}
-	if req.GetTaxYear() < 2027 {
-		return nil, status.Error(codes.InvalidArgument, "tax year must be 2027 or later")
+	if req.GetTaxYear() < 2025 {
+		return nil, status.Error(codes.InvalidArgument, "tax year must be 2025 or later")
 	}
 	limit := req.GetLimit()
 	if limit == 0 {

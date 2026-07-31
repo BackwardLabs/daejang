@@ -220,6 +220,25 @@ describe('tax report PDF artifact route', () => {
     expect(rendered).not.toHaveProperty('payment')
   })
 
+  it('renders a 2026 policy simulation PDF without adding simulation fields to the print model', async () => {
+    reader.value = artifactFor({ ...canonicalModel, taxYear: 2026 })
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}/artifacts/pdf`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['content-disposition']).toContain(
+      `daejang-tax-simulation-2026-${REPORT_ID.replace(':', '_')}.pdf`,
+    )
+    expect(rendered).toMatchObject({
+      reportId: REPORT_ID,
+      taxYear: 2026,
+    })
+    expect(rendered).not.toHaveProperty('policySimulation')
+    expect(rendered).not.toHaveProperty('policyEffectiveFrom')
+  })
+
   it('does not query or render a report without an authenticated session', async () => {
     const response = await app.inject({
       method: 'GET',

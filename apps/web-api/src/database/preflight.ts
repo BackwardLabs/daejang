@@ -384,7 +384,7 @@ export const assertTaxReportSchema = async (pool: Pool) => {
     row?.report_table !== 'reporting.tax_report' ||
     row.current_table !== 'reporting.current_tax_report' ||
     row.contract_version !== '1' ||
-    row.migration_version !== '24' ||
+    row.migration_version !== '62' ||
     !row.reporting_usage ||
     row.reporting_create ||
     !row.report_select ||
@@ -427,7 +427,7 @@ export const assertReportPaymentSchema = async (pool: Pool) => {
     row.entitlements_table !== 'web_private.report_payment_entitlements' ||
     row.contract_version !== 1 ||
     row.contract_digest !== reportPaymentContractDigest ||
-    row.migration_version !== '35'
+    row.migration_version !== '62'
   ) {
     throw new Error('report x402 payment migration contract is invalid')
   }

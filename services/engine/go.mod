@@ -3,7 +3,8 @@ module github.com/BackwardLabs/daejang/services/engine
 go 1.26
 
 require (
-	github.com/BackwardLabs/daejang-db v0.0.0-20260730223337-90f48c3999d9
+	github.com/BackwardLabs/daejang-db v0.0.0-20260731115514-56b594f361f1
+	github.com/jackc/pgx/v5 v5.10.0
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 )
@@ -12,7 +13,6 @@ require (
 	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.10.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect

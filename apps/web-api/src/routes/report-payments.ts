@@ -176,7 +176,9 @@ const paymentRequired = (
         x402Version: 2,
         resource: {
           url: resourceUrl,
-          description: `${order.taxYear}년 FINAL 세금 보고서`,
+          description: order.taxYear < 2027
+            ? `${order.taxYear}년 정책 시뮬레이션 장부 (POLICY_SIMULATION · 2027.1.1 시행 예정 기준 · 신고용 아님)`
+            : `${order.taxYear}년 FINAL 세금 보고서`,
           mimeType: 'application/json',
         },
         accepts: [requirement],
@@ -284,7 +286,7 @@ export const registerReportPaymentRoutes = async (
       schema: {
         params: {
           type: 'object', additionalProperties: false, required: ['taxYear'],
-          properties: { taxYear: { type: 'string', pattern: '^(202[7-9]|20[3-9][0-9]|2[1-9][0-9]{2}|[3-9][0-9]{3})$' } },
+          properties: { taxYear: { type: 'string', pattern: '^(202[5-9]|20[3-9][0-9]|2[1-9][0-9]{2}|[3-9][0-9]{3})$' } },
         },
         querystring: {
           type: 'object', additionalProperties: false,

@@ -1360,6 +1360,25 @@
   font-size: 13px;
 }
 
+.tax-report-policy-simulation {
+  margin-top: 20px;
+  padding: 16px 18px;
+  border: 1px solid #e5b864;
+  border-radius: 12px;
+  color: #765009;
+  background: #fffaf0;
+}
+
+.tax-report-policy-simulation strong {
+  font-size: 13px;
+}
+
+.tax-report-policy-simulation p {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .tax-report-current {
   margin-top: 22px;
   padding: 28px;
@@ -1395,7 +1414,8 @@
 
 .tax-report-badges b[data-status='PROVISIONAL'],
 .tax-report-badges b[data-status='PARTIAL'],
-.tax-report-badges b[data-status='BLOCKED'] {
+.tax-report-badges b[data-status='BLOCKED'],
+.tax-report-badges b[data-status='POLICY_SIMULATION'] {
   border-color: #e5b864;
   color: #9a5d00;
   background: #fff9ed;
@@ -1497,7 +1517,8 @@
 .tax-report-detail__header,
 .tax-report-detail__section,
 .tax-report-detail__warning,
-.tax-report-detail__ready {
+.tax-report-detail__ready,
+.tax-report-detail__simulation {
   min-width: 0;
 }
 
@@ -1576,6 +1597,24 @@
 }
 
 .tax-report-detail__warning p {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.tax-report-detail__simulation {
+  padding: 18px 20px;
+  border: 1px solid #e5b864;
+  border-radius: 14px;
+  color: #765009;
+  background: #fffaf0;
+}
+
+.tax-report-detail__simulation strong {
+  font-size: 14px;
+}
+
+.tax-report-detail__simulation p {
   margin-top: 5px;
   font-size: 12px;
   line-height: 1.6;

@@ -38,7 +38,7 @@ const reportResponseSchema = {
   ],
   properties: {
     reportId: { type: 'string' },
-    taxYear: { type: 'integer', minimum: 2027, maximum: 9999 },
+    taxYear: { type: 'integer', minimum: 2025, maximum: 9999 },
     finality: { type: 'string', enum: ['FINAL', 'PROVISIONAL'] },
     status: { type: 'string', enum: ['FINAL', 'PARTIAL'] },
     filingStatus: { type: 'string', enum: ['READY', 'BLOCKED'] },
@@ -97,7 +97,7 @@ export const registerTaxReportRoutes = async (
       schema: {
         params: {
           type: 'object', additionalProperties: false, required: ['taxYear'],
-          properties: { taxYear: { type: 'string', pattern: '^(202[7-9]|20[3-9][0-9]|2[1-9][0-9]{2}|[3-9][0-9]{3})$' } },
+          properties: { taxYear: { type: 'string', pattern: '^(202[5-9]|20[3-9][0-9]|2[1-9][0-9]{2}|[3-9][0-9]{3})$' } },
         },
         querystring: {
           type: 'object', additionalProperties: false,

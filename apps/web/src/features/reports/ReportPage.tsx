@@ -23,8 +23,12 @@ const finalityLabel = (value: TaxReportModel['finality']) =>
 const calculationStatusLabel = (value: TaxReportModel['status']) =>
   value === 'FINAL' ? '계산 완료' : '부분 계산'
 
-const filingStatusLabel = (value: TaxReportModel['filingStatus']) =>
-  value === 'READY' ? '신고 준비' : '신고 준비 불가'
+const filingStatusLabel = (
+  value: TaxReportModel['filingStatus'],
+  taxYear: number,
+) => taxYear < 2027
+  ? '신고용 아님'
+  : value === 'READY' ? '신고 준비' : '신고 준비 불가'
 
 const newestFirst = (left: TaxReportModel, right: TaxReportModel) => {
   const issuedAtDifference =
@@ -88,7 +92,7 @@ export function ReportWorkspacePage() {
     setReportDetail(null)
     setDetailStatus('idle')
 
-    if (Number(year) < 2027) {
+    if (Number(year) < 2025) {
       setTaxStatus('unsupported')
       return () => controller.abort()
     }
@@ -205,7 +209,9 @@ export function ReportWorkspacePage() {
             <div>
               <span>REPORT WORKSPACE</span>
               <h2 id="tax-report-section-title">
-                {year}년 가상자산 세무 장부
+                {Number(year) < 2027
+                  ? `${year}년 가상자산 세무 정책 시뮬레이션 장부`
+                  : `${year}년 가상자산 세무 장부`}
               </h2>
             </div>
             <p>
@@ -213,6 +219,21 @@ export function ReportWorkspacePage() {
               그대로 보존합니다.
             </p>
           </header>
+
+          {Number(year) < 2027 && taxStatus !== 'unsupported' ? (
+            <aside
+              className="tax-report-policy-simulation"
+              aria-label="정책 시뮬레이션 안내"
+            >
+              <strong>POLICY_SIMULATION · 신고용 아님</strong>
+              <p>
+                {year}년 거래에 소득세법 제37조·제64조의3 및 시행령
+                제88조의 2027.1.1 시행 예정 기준을 가정 적용한
+                시뮬레이션입니다. 실제 신고 결과나 현행 세법 적용 결과로
+                사용하지 마세요.
+              </p>
+            </aside>
+          ) : null}
 
           {taxStatus === 'loading' ? (
             <p className="report-api-state" role="status">
@@ -226,7 +247,7 @@ export function ReportWorkspacePage() {
           ) : null}
           {taxStatus === 'unsupported' ? (
             <p className="report-api-state">
-              세무 장부는 2027년 이후 과세연도부터 제공됩니다.
+              세무 장부는 2025년 이후 과세연도부터 제공됩니다.
             </p>
           ) : null}
           {taxStatus === 'ready' && revisions.length === 0 ? (
@@ -296,8 +317,17 @@ export function ReportWorkspacePage() {
                         <b data-status={report.status}>
                           {calculationStatusLabel(report.status)}
                         </b>
-                        <b data-status={report.filingStatus}>
-                          {filingStatusLabel(report.filingStatus)}
+                        <b
+                          data-status={
+                            report.taxYear < 2027
+                              ? 'POLICY_SIMULATION'
+                              : report.filingStatus
+                          }
+                        >
+                          {filingStatusLabel(
+                            report.filingStatus,
+                            report.taxYear,
+                          )}
                         </b>
                       </span>
                     </button>
