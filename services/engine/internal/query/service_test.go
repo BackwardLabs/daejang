@@ -9,6 +9,7 @@ import (
 	"github.com/BackwardLabs/daejang-db/pkg/readmodelstore"
 	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/lotread"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -39,6 +40,19 @@ func (f *fakeObservationReadStore) ListUnmaterialized(_ context.Context, _ strin
 	return f.events, f.err
 }
 
+type fakeLotStore struct {
+	lineage     lotread.Lineage
+	err         error
+	lastSubject string
+	lastEventID string
+	lastRevID   string
+}
+
+func (f *fakeLotStore) EventLineage(_ context.Context, subjectID, eventID, revisionID string, _ int32) (lotread.Lineage, error) {
+	f.lastSubject, f.lastEventID, f.lastRevID = subjectID, eventID, revisionID
+	return f.lineage, f.err
+}
+
 type fakeTaxReportStore struct {
 	current     taxreportstore.CurrentReportDetail
 	found       bool
@@ -59,6 +73,57 @@ func TestObservationReadProjectionMergesBeforeApplyingLedgerLimit(t *testing.T) 
 	}
 	if observations.lastLimit != 1 || len(ledger.GetItems()) != 1 || ledger.GetItems()[0].GetEventId() != "observation" {
 		t.Fatalf("ledger limit was applied before merge: limit=%d response=%#v", observations.lastLimit, ledger)
+	}
+}
+
+func TestLedgerEventLotsProjectsOnlyPersistedAllocations(t *testing.T) {
+	acquiredAt := time.Date(2026, 3, 26, 13, 41, 49, 0, time.UTC)
+	lots := &fakeLotStore{lineage: lotread.Lineage{
+		RunID: "lot-run:abc", Coverage: "PARTIAL",
+		Links: []lotread.Link{
+			{Kind: "ACQUIRE", LegID: "leg:in", LotID: "lot:1", Quantity: "1000", BasisStatus: "UNKNOWN", RemainingQuantity: "400"},
+			{
+				Kind: "DISPOSE", LegID: "leg:out", LotID: "lot:2", Quantity: "600", BasisStatus: "KNOWN",
+				BasisAmount: "152474700000000", BasisDenomination: "asset-krw-upbit",
+				SourceEventID: "event:src", SourceLegID: "leg:src", SourceOccurredAt: &acquiredAt, SourceQuantity: "900",
+			},
+		},
+	}}
+	service := &Service{Lots: lots}
+
+	response, err := service.GetLedgerEventLots(context.Background(), &enginev1.GetLedgerEventLotsRequest{
+		Context: queryTestContext(), EventId: "event:1", RevisionId: "revision:1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lots.lastSubject != queryTestSubjectID || lots.lastEventID != "event:1" || lots.lastRevID != "revision:1" {
+		t.Fatalf("lot lineage was not scoped to the caller and Event revision: %#v", lots)
+	}
+	if response.GetRunId() != "lot-run:abc" || response.GetCoverage() != "PARTIAL" || len(response.GetLinks()) != 2 {
+		t.Fatalf("unexpected lot lineage projection: %#v", response)
+	}
+	acquire := response.GetLinks()[0]
+	if acquire.GetKind() != "ACQUIRE" || acquire.GetRemainingQuantity() != "400" ||
+		acquire.GetBasisStatus() != "UNKNOWN" || acquire.GetBasisAmount() != "" || acquire.GetSourceOccurredAt() != nil {
+		t.Fatalf("acquisition link invented a basis or source: %#v", acquire)
+	}
+	dispose := response.GetLinks()[1]
+	if dispose.GetKind() != "DISPOSE" || dispose.GetQuantity() != "600" || dispose.GetBasisStatus() != "KNOWN" ||
+		dispose.GetBasisAmount() != "152474700000000" || dispose.GetSourceEventId() != "event:src" ||
+		!dispose.GetSourceOccurredAt().AsTime().Equal(acquiredAt) {
+		t.Fatalf("disposal link lost its acquisition provenance: %#v", dispose)
+	}
+}
+
+func TestLedgerEventLotsRejectsMissingEventCoordinates(t *testing.T) {
+	service := &Service{Lots: &fakeLotStore{}}
+
+	_, err := service.GetLedgerEventLots(context.Background(), &enginev1.GetLedgerEventLotsRequest{
+		Context: queryTestContext(), EventId: "event:1",
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument for a missing revision, got %v", err)
 	}
 }
 

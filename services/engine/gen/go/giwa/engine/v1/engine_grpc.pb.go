@@ -459,6 +459,7 @@ var WorkflowService_ServiceDesc = grpc.ServiceDesc{
 const (
 	QueryService_GetDashboard_FullMethodName         = "/giwa.engine.v1.QueryService/GetDashboard"
 	QueryService_ListLedgerEvents_FullMethodName     = "/giwa.engine.v1.QueryService/ListLedgerEvents"
+	QueryService_GetLedgerEventLots_FullMethodName   = "/giwa.engine.v1.QueryService/GetLedgerEventLots"
 	QueryService_ListReviews_FullMethodName          = "/giwa.engine.v1.QueryService/ListReviews"
 	QueryService_CreateReport_FullMethodName         = "/giwa.engine.v1.QueryService/CreateReport"
 	QueryService_ListReports_FullMethodName          = "/giwa.engine.v1.QueryService/ListReports"
@@ -472,6 +473,7 @@ const (
 type QueryServiceClient interface {
 	GetDashboard(ctx context.Context, in *GetDashboardRequest, opts ...grpc.CallOption) (*GetDashboardResponse, error)
 	ListLedgerEvents(ctx context.Context, in *ListLedgerEventsRequest, opts ...grpc.CallOption) (*ListLedgerEventsResponse, error)
+	GetLedgerEventLots(ctx context.Context, in *GetLedgerEventLotsRequest, opts ...grpc.CallOption) (*GetLedgerEventLotsResponse, error)
 	ListReviews(ctx context.Context, in *ListReviewsRequest, opts ...grpc.CallOption) (*ListReviewsResponse, error)
 	CreateReport(ctx context.Context, in *CreateReportRequest, opts ...grpc.CallOption) (*CreateReportResponse, error)
 	ListReports(ctx context.Context, in *ListReportsRequest, opts ...grpc.CallOption) (*ListReportsResponse, error)
@@ -501,6 +503,16 @@ func (c *queryServiceClient) ListLedgerEvents(ctx context.Context, in *ListLedge
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListLedgerEventsResponse)
 	err := c.cc.Invoke(ctx, QueryService_ListLedgerEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryServiceClient) GetLedgerEventLots(ctx context.Context, in *GetLedgerEventLotsRequest, opts ...grpc.CallOption) (*GetLedgerEventLotsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLedgerEventLotsResponse)
+	err := c.cc.Invoke(ctx, QueryService_GetLedgerEventLots_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -563,6 +575,7 @@ func (c *queryServiceClient) ListTaxReportHistory(ctx context.Context, in *ListT
 type QueryServiceServer interface {
 	GetDashboard(context.Context, *GetDashboardRequest) (*GetDashboardResponse, error)
 	ListLedgerEvents(context.Context, *ListLedgerEventsRequest) (*ListLedgerEventsResponse, error)
+	GetLedgerEventLots(context.Context, *GetLedgerEventLotsRequest) (*GetLedgerEventLotsResponse, error)
 	ListReviews(context.Context, *ListReviewsRequest) (*ListReviewsResponse, error)
 	CreateReport(context.Context, *CreateReportRequest) (*CreateReportResponse, error)
 	ListReports(context.Context, *ListReportsRequest) (*ListReportsResponse, error)
@@ -583,6 +596,9 @@ func (UnimplementedQueryServiceServer) GetDashboard(context.Context, *GetDashboa
 }
 func (UnimplementedQueryServiceServer) ListLedgerEvents(context.Context, *ListLedgerEventsRequest) (*ListLedgerEventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListLedgerEvents not implemented")
+}
+func (UnimplementedQueryServiceServer) GetLedgerEventLots(context.Context, *GetLedgerEventLotsRequest) (*GetLedgerEventLotsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLedgerEventLots not implemented")
 }
 func (UnimplementedQueryServiceServer) ListReviews(context.Context, *ListReviewsRequest) (*ListReviewsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListReviews not implemented")
@@ -652,6 +668,24 @@ func _QueryService_ListLedgerEvents_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(QueryServiceServer).ListLedgerEvents(ctx, req.(*ListLedgerEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryService_GetLedgerEventLots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLedgerEventLotsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).GetLedgerEventLots(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryService_GetLedgerEventLots_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).GetLedgerEventLots(ctx, req.(*GetLedgerEventLotsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -760,6 +794,10 @@ var QueryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListLedgerEvents",
 			Handler:    _QueryService_ListLedgerEvents_Handler,
+		},
+		{
+			MethodName: "GetLedgerEventLots",
+			Handler:    _QueryService_GetLedgerEventLots_Handler,
 		},
 		{
 			MethodName: "ListReviews",

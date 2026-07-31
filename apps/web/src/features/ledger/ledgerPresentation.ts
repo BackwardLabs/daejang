@@ -459,3 +459,12 @@ export const describePostingDirection = (direction: string) =>
 
 export const describeReviewReason = (reasonCode: string) =>
   reviewReasonLabels[reasonCode] ?? '추가 확인 필요'
+
+const lotBasisStatusLabels: Record<string, string> = {
+  KNOWN: '취득원가 확정',
+  UNKNOWN: '취득원가 미확정',
+  INHERITED: '취득원가 승계',
+}
+
+export const describeLotBasisStatus = (basisStatus: string) =>
+  lotBasisStatusLabels[basisStatus] ?? '취득원가 상태 확인 필요'

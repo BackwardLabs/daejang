@@ -41,6 +41,11 @@ export type EngineDataClient = {
   listSyncJobs(context: SourceRequestContext, limit?: number): Promise<Array<Record<string, unknown>>>
   getDashboard(context: SourceRequestContext, taxYear: number): Promise<Record<string, unknown>>
   listLedgerEvents(context: SourceRequestContext, taxYear: number, limit?: number): Promise<Array<Record<string, unknown>>>
+  getLedgerEventLots(context: SourceRequestContext, eventId: string, revisionId: string): Promise<{
+    runId: string
+    coverage: string
+    links: Array<Record<string, unknown>>
+  }>
   listReviews(context: SourceRequestContext, limit?: number, pageToken?: string): Promise<{
     items: Array<Record<string, unknown>>
     nextPageToken: string
@@ -75,6 +80,7 @@ const unavailableEngineDataClient: EngineDataClient = {
   listSyncJobs: unavailableEngineMethod,
   getDashboard: unavailableEngineMethod,
   listLedgerEvents: unavailableEngineMethod,
+  getLedgerEventLots: unavailableEngineMethod,
   listReviews: unavailableEngineMethod,
   getReview: unavailableEngineMethod,
   resolveReview: unavailableEngineMethod,
@@ -619,6 +625,16 @@ export const registerDataRoutes = async (
   const eventQuery = { ...taxYearQuery, properties: { ...taxYearQuery.properties, limit: { type: 'integer', minimum: 1, maximum: 200 } } } as const
   app.get<{ Querystring: { taxYear: number; limit?: number } }>('/api/v1/activities', { schema: { querystring: eventQuery } }, listEvents)
   app.get<{ Querystring: { taxYear: number; limit?: number } }>('/api/v1/ledger', { schema: { querystring: eventQuery } }, listEvents)
+
+  const lotQuery = {
+    type: 'object', additionalProperties: false, required: ['eventId', 'revisionId'],
+    properties: {
+      eventId: { type: 'string', minLength: 1, maxLength: 200 },
+      revisionId: { type: 'string', minLength: 1, maxLength: 200 },
+    },
+  } as const
+  app.get<{ Querystring: { eventId: string; revisionId: string } }>('/api/v1/ledger/lots', { schema: { querystring: lotQuery } },
+    async (request) => engine.getLedgerEventLots(contextFor(request), request.query.eventId, request.query.revisionId))
 
   app.get<{ Querystring: { limit?: number; cursor?: string } }>('/api/v1/reviews', {
     schema: {

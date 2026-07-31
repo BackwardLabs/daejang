@@ -19,6 +19,7 @@ import (
 	"github.com/BackwardLabs/daejang-db/pkg/reportstore"
 	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/lotread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/source"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -29,6 +30,9 @@ type ReadStore interface {
 	Dashboard(context.Context, string, int32) (readmodelstore.Dashboard, error)
 	ListLedgerEvents(context.Context, string, int32, int32) ([]readmodelstore.LedgerEvent, error)
 	ListOpenReviewsPage(context.Context, string, *readmodelstore.OpenReviewCursor, int32) (readmodelstore.OpenReviewPage, error)
+}
+type LotStore interface {
+	EventLineage(context.Context, string, string, string, int32) (lotread.Lineage, error)
 }
 type ReportStore interface {
 	List(context.Context, string, int32, int32) ([]reportstore.Snapshot, error)
@@ -47,6 +51,7 @@ type Service struct {
 	Reports      ReportStore
 	TaxReports   TaxReportStore
 	Observations ObservationReadStore
+	Lots         LotStore
 }
 
 func (s *Service) GetDashboard(ctx context.Context, req *enginev1.GetDashboardRequest) (*enginev1.GetDashboardResponse, error) {
@@ -124,6 +129,37 @@ func (s *Service) ListLedgerEvents(ctx context.Context, req *enginev1.ListLedger
 		items = append(items, event)
 	}
 	return &enginev1.ListLedgerEventsResponse{Items: items}, nil
+}
+
+func (s *Service) GetLedgerEventLots(ctx context.Context, req *enginev1.GetLedgerEventLotsRequest) (*enginev1.GetLedgerEventLotsResponse, error) {
+	subject, err := source.ValidateRequestContext(req.GetContext(), false)
+	if err != nil {
+		return nil, err
+	}
+	if req.GetEventId() == "" || req.GetRevisionId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Event and revision identifiers are required")
+	}
+	if s.Lots == nil {
+		return nil, status.Error(codes.Unavailable, "lot lineage is not configured")
+	}
+	lineage, err := s.Lots.EventLineage(ctx, subject, req.GetEventId(), req.GetRevisionId(), 500)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "lot lineage query failed")
+	}
+	links := make([]*enginev1.LedgerLotLink, 0, len(lineage.Links))
+	for _, v := range lineage.Links {
+		link := &enginev1.LedgerLotLink{
+			Kind: v.Kind, LegId: v.LegID, LotId: v.LotID, Quantity: v.Quantity,
+			BasisStatus: v.BasisStatus, BasisAmount: v.BasisAmount, BasisDenomination: v.BasisDenomination,
+			SourceEventId: v.SourceEventID, SourceLegId: v.SourceLegID, SourceQuantity: v.SourceQuantity,
+			RemainingQuantity: v.RemainingQuantity,
+		}
+		if v.SourceOccurredAt != nil {
+			link.SourceOccurredAt = timestamppb.New(*v.SourceOccurredAt)
+		}
+		links = append(links, link)
+	}
+	return &enginev1.GetLedgerEventLotsResponse{RunId: lineage.RunID, Coverage: lineage.Coverage, Links: links}, nil
 }
 
 func (s *Service) ListReviews(ctx context.Context, req *enginev1.ListReviewsRequest) (*enginev1.ListReviewsResponse, error) {

@@ -205,6 +205,67 @@ describe('LedgerPage', () => {
     expect(screen.getByRole('button', { name: '거래 거래 상세 보기' })).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('shows the persisted lot lineage of a disposal without touching the tax basis column', async () => {
+    const sellEvent = {
+      ...ledgerEvent,
+      eventId: 'sell-event',
+      revisionId: 'sell-revision',
+      postings: [{
+        legId: 'leg-out',
+        accountId: 'cex-account:upbit:1',
+        assetId: 'cex-document-asset:upbit:decimal8:usdt',
+        occurredAt: ledgerEvent.effectiveAt,
+        direction: 'OUT',
+        quantity: '90000000',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: 'asset-krw-upbit',
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger/lots?')) return jsonResponse({
+        runId: 'lot-run:1',
+        coverage: 'PARTIAL',
+        links: [{
+          kind: 'DISPOSE', legId: 'leg-out', lotId: 'lot:1', quantity: '90000000',
+          basisStatus: 'KNOWN', basisAmount: '152474700000000', basisDenomination: 'asset-krw-upbit',
+          sourceEventId: 'buy-event', sourceLegId: 'leg-in',
+          sourceOccurredAt: '2026-03-26T13:41:49.000Z', sourceQuantity: '100000000',
+          remainingQuantity: '',
+        }],
+      })
+      if (url.includes('/ledger?')) return jsonResponse({ items: [sellEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /거래 상세 보기/ }))
+
+    expect(await screen.findByText('취득 1건에서 소진')).toBeInTheDocument()
+    expect(screen.getByText('0.9 USDT 소진')).toBeInTheDocument()
+    expect(screen.getByText(/취득 수량 1 USDT · Lot 전체 취득원가 1,524,747 KRW/)).toBeInTheDocument()
+    expect(screen.getByText(/2026\..*취득분/)).toBeInTheDocument()
+    expect(screen.queryByText('산정 대기')).not.toBeInTheDocument()
+  })
+
+  it('reports a missing lot run instead of inferring one', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger/lots?')) return jsonResponse({ runId: '', coverage: '', links: [] })
+      if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /거래 상세 보기/ }))
+
+    expect(await screen.findByText('이 계정에는 아직 Lot 계보가 산출되지 않았습니다.')).toBeInTheDocument()
+  })
+
   it('explains pending tax basis for a pre-2027 digital-asset acquisition', async () => {
     const airdropEvent = {
       ...ledgerEvent,

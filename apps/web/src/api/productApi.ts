@@ -115,12 +115,38 @@ export type ReportModel = {
   issuedAt: string
 }
 
+export type LedgerLotLinkModel = {
+  kind: string
+  legId: string
+  lotId: string
+  quantity: string
+  basisStatus: string
+  basisAmount: string
+  basisDenomination: string
+  sourceEventId: string
+  sourceLegId: string
+  sourceOccurredAt?: string
+  sourceQuantity: string
+  remainingQuantity: string
+}
+
+export type LedgerLotLineageModel = {
+  runId: string
+  coverage: string
+  links: LedgerLotLinkModel[]
+}
+
 export const loadDashboard = (taxYear: string, signal?: AbortSignal) =>
   requestApi<{ dashboard: DashboardModel }>(`/dashboard?taxYear=${taxYear}`, { signal })
 export const loadLedger = (taxYear: string, signal?: AbortSignal) =>
   requestApi<{ items: LedgerEventModel[] }>(`/ledger?taxYear=${taxYear}`, { signal })
 export const loadActivities = (taxYear: string, signal?: AbortSignal) =>
   requestApi<{ items: LedgerEventModel[] }>(`/activities?taxYear=${taxYear}`, { signal })
+export const loadLedgerEventLots = (eventId: string, revisionId: string, signal?: AbortSignal) =>
+  requestApi<LedgerLotLineageModel>(
+    `/ledger/lots?eventId=${encodeURIComponent(eventId)}&revisionId=${encodeURIComponent(revisionId)}`,
+    { signal },
+  )
 export const loadReviews = (options: { cursor?: string; signal?: AbortSignal } = {}) => {
   const query = options.cursor ? `?cursor=${encodeURIComponent(options.cursor)}` : ''
   return requestApi<{ items: ReviewModel[]; nextCursor?: string }>(`/reviews${query}`, {
