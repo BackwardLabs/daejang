@@ -145,6 +145,17 @@ describe('tax report PDF renderer', () => {
     )).toBe('-1,234,567.89 KRW')
   })
 
+  it('formats canonical Upbit KRW atomic amounts as KRW', () => {
+    expect(formatReportAmount(
+      { status: 'KNOWN', amount: '368786100000000' },
+      'asset-krw-upbit',
+    )).toBe('3,687,861 KRW')
+    expect(formatReportAmount(
+      { status: 'KNOWN', amount: '1' },
+      'asset-krw-upbit',
+    )).toBe('0.00000001 KRW')
+  })
+
   it('derives the 2025/2026 policy simulation notice from taxYear only', () => {
     expect(reportPolicySimulationNotice(2025)).toBe(
       'POLICY_SIMULATION · 2027.1.1 시행 예정 기준 · 신고용 아님',
