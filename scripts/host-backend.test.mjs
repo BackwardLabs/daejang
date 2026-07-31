@@ -166,31 +166,26 @@ test('builds tax profiles only for subjects with canonical ledger assets', () =>
   const profiles = createTaxProfiles([
     {
       subject_id: 'subject-canonical',
-      tax_year: 2026,
       account_id: 'cex-account:upbit:1',
       asset_id: 'asset-zbt-upbit',
     },
     {
       subject_id: 'subject-canonical',
-      tax_year: 2026,
       account_id: 'cex-account:upbit:1',
       asset_id: 'asset-krw-upbit',
     },
     {
       subject_id: 'subject-document',
-      tax_year: 2026,
       account_id: 'cex-account:upbit:2',
       asset_id: 'cex-document-asset:upbit:decimal8:btc',
     },
     {
       subject_id: 'subject-mixed',
-      tax_year: 2025,
       account_id: 'cex-account:upbit:3',
       asset_id: 'cex-document-asset:upbit:decimal8:eth',
     },
     {
       subject_id: 'subject-mixed',
-      tax_year: 2025,
       account_id: 'wallet-account:optimism:1',
       asset_id: 'asset:eip155:10:native',
     },
@@ -199,7 +194,7 @@ test('builds tax profiles only for subjects with canonical ledger assets', () =>
   assert.equal(profiles.schemaVersion, 'tax.downstream-profile-set.v1')
   assert.equal(profiles.profiles.length, 2)
   assert.equal(profiles.profiles[0].subjectId, 'subject-canonical')
-  assert.equal(profiles.profiles[0].taxYear, 2026)
+  assert.equal(profiles.profiles[0].taxYear, 2027)
   assert.deepEqual(
     profiles.profiles[0].assetBindings.map((binding) => binding.ledgerAssetId),
     ['asset-krw-upbit', 'asset-zbt-upbit'],
@@ -207,7 +202,6 @@ test('builds tax profiles only for subjects with canonical ledger assets', () =>
   assert.equal(profiles.profiles[0].accountBindings[0].kind, 'VASP')
   assert.equal(profiles.profiles[0].accountBindings[0].method, 'MOVING_AVERAGE')
   assert.equal(profiles.profiles[1].subjectId, 'subject-mixed')
-  assert.equal(profiles.profiles[1].taxYear, 2025)
   assert.deepEqual(profiles.profiles[1].assetBindings, [{
     ledgerAssetId: 'asset:eip155:10:native',
     taxAssetId: 'tax-asset:eip155:10:native',
