@@ -126,7 +126,9 @@ describe('LocalReportAttestationDemo', () => {
     expect(document.body).toHaveTextContent(SUBMISSION_ATTESTATION_UID)
     expect(document.body).toHaveTextContent(REVIEW_TRANSACTION_HASH)
     expect(document.body).toHaveTextContent(REVIEW_ATTESTATION_UID)
-    expect(screen.getByText('승인 조건 충족')).toBeInTheDocument()
+    expect(
+      screen.getByText('승인 조건을 모두 충족했습니다.'),
+    ).toBeInTheDocument()
 
     fireEvent.click(
       screen.getByRole('button', { name: '검증 새로고침' }),
@@ -157,7 +159,12 @@ describe('LocalReportAttestationDemo', () => {
     )
 
     expect(await screen.findByText('UNUSABLE')).toBeInTheDocument()
-    expect(screen.getByText('REVIEW_REJECTED')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '검토 기준을 통과하지 못해 이 장부는 사용할 수 없습니다.',
+      ),
+    ).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('REVIEW_REJECTED')
     expect(
       screen.getByText(
         '검토에서 반려되어 승인본이 만들어지지 않았으므로 이 장부는 사용할 수 없습니다.',

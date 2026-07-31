@@ -13,6 +13,11 @@ import {
   type SyntheticReportAttestationApi,
   type SyntheticReportAttestationSnapshot,
 } from './syntheticReportAttestationApi.ts'
+import {
+  describeReportAttestationCapabilityReason,
+  describeReportAttestationStatusReason,
+  describeReportVerificationReason,
+} from './reportAttestationPresentation.ts'
 
 type Action =
   | 'loading'
@@ -51,27 +56,6 @@ const lifecycleLabels: Record<ReportAttestationLifecycle, string> = {
   RETRY_REQUIRED: '재시도 필요',
   RECONCILIATION_REQUIRED: '온체인 상태 재확인 필요',
   REVIEW_FAILED: '검토 실패',
-}
-
-const capabilityReason = (reasonCode: string) => {
-  switch (reasonCode) {
-    case 'NOT_CONFIGURED':
-      return '서버의 GIWA Sepolia 제출 설정이 아직 준비되지 않았습니다.'
-    case 'RPC_UNAVAILABLE':
-      return '현재 GIWA Sepolia 네트워크에 연결할 수 없습니다.'
-    case 'SIGNER_UNAVAILABLE':
-      return 'Issuer 또는 Reviewer 서명자를 사용할 수 없습니다.'
-    case 'ROLE_MISMATCH':
-      return '온체인 Issuer·Reviewer 권한 설정이 일치하지 않습니다.'
-    case 'STORE_UNAVAILABLE':
-      return '증명 진행 상태를 안전하게 저장할 수 없습니다.'
-    case 'WRITER_NOT_CONFIGURED':
-      return '서버의 GIWA Sepolia Issuer·Reviewer 쓰기 기능이 아직 설정되지 않았습니다.'
-    case 'DEPLOYMENT_NOT_CONFIGURED':
-      return '서버의 GIWA Sepolia 컨트랙트 배포 정보가 아직 설정되지 않았습니다.'
-    default:
-      return '현재 합성 장부 증명 기능을 사용할 수 없습니다.'
-  }
 }
 
 const verificationExplanation = (
@@ -475,14 +459,20 @@ export function SyntheticReportAttestationPanel({
         {status?.reasonCode ? (
           <div>
             <dt>현재 사유</dt>
-            <dd>{status.reasonCode}</dd>
+            <dd>
+              {describeReportAttestationStatusReason(
+                status.reasonCode,
+              )}
+            </dd>
           </div>
         ) : null}
       </dl>
 
       {capability && !capability.enabled ? (
         <p className="report-attestation-demo__capability" role="status">
-          {capabilityReason(capability.reasonCode)}
+          {describeReportAttestationCapabilityReason(
+            capability.reasonCode,
+          )}
         </p>
       ) : null}
 
@@ -500,8 +490,12 @@ export function SyntheticReportAttestationPanel({
           <p>{verificationExplanation(verification)}</p>
           <dl>
             <div>
-              <dt>기술 사유</dt>
-              <dd>{verification.reasonCode ?? '승인 조건 충족'}</dd>
+              <dt>판정 사유</dt>
+              <dd>
+                {describeReportVerificationReason(
+                  verification.reasonCode,
+                )}
+              </dd>
             </div>
             <div>
               <dt>온체인 사용 가능</dt>
