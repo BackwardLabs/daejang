@@ -180,7 +180,7 @@ describe('actual report x402 payment route', () => {
     expect(required).toMatchObject({
       resource: {
         description:
-          '2026년 정책 시뮬레이션 장부 (POLICY_SIMULATION · 2027.1.1 시행 예정 기준 · 신고용 아님)',
+          '2026년 가상자산 세무 장부',
       },
     })
     expect(requirement.extra).toMatchObject({

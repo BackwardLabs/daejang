@@ -239,10 +239,7 @@ describe('ReportPage', () => {
     expect(
       screen.getByRole('heading', { name: '장부 revision' }),
     ).toBeInTheDocument()
-    expect(screen.getAllByText('잠정 입력').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('부분 계산').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('신고 준비 불가').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('미확정').length).toBeGreaterThanOrEqual(4)
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(4)
     expect(screen.getAllByText('0 KRW').length).toBeGreaterThan(0)
     expect(
       screen.getByRole('heading', { name: '세금 추정 요약' }),
@@ -272,15 +269,6 @@ describe('ReportPage', () => {
       screen.getByRole('heading', { name: '과세 제외 전환' }),
     ).toBeInTheDocument()
     expect(screen.getByText(/leg-2-out/u)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('tab', { name: /검토 필요/u }))
-    expect(
-      screen.getByRole('heading', { name: '검토 필요 항목' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('BASIS_UNKNOWN')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('검토 추적 정보'))
-    expect(screen.getByText(/Review review-1/u)).toBeInTheDocument()
-    expect(screen.getByText(/review-revision-1/u)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '계산 근거' }))
     expect(
@@ -406,10 +394,6 @@ describe('ReportPage', () => {
     expect(
       screen.getByText('과세 대상에서 제외된 동일 자산 전환이 없습니다.'),
     ).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: '검토 필요' }))
-    expect(
-      screen.getByText('현재 장부 결과를 제한하는 항목이 없습니다.'),
-    ).toBeInTheDocument()
   })
 
   it('keeps the revision visible when exact detail returns 404', async () => {
@@ -495,7 +479,7 @@ describe('ReportPage', () => {
     ).toBeInTheDocument()
   })
 
-  it('loads 2026 as a non-filing policy simulation and updates the shared tax-year preference', async () => {
+  it('loads 2026 and updates the shared tax-year preference', async () => {
     saveAppPreferences({ currency: 'KRW', year: '2026' })
     stubReportRequests({ taxYear: 2026 })
 
@@ -507,14 +491,6 @@ describe('ReportPage', () => {
     expect(
       await screen.findByRole('heading', { name: '장부 계산 요약' }),
     ).toBeInTheDocument()
-    expect(screen.getAllByText(/POLICY_SIMULATION/u).length).toBeGreaterThan(0)
-    expect(
-      screen.getAllByText(/2027\.1\.1 시행 예정 기준/u).length,
-    ).toBeGreaterThan(0)
-    expect(screen.getAllByText('신고용 아님').length).toBeGreaterThan(0)
-    expect(
-      screen.queryByText('현재 revision의 계산 항목이 모두 준비되었습니다.'),
-    ).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
         String(url).endsWith(
@@ -535,7 +511,7 @@ describe('ReportPage', () => {
     expect(loadAppPreferences().year).toBe('2025')
   })
 
-  it('loads 2025 through the same policy simulation workspace', async () => {
+  it('loads 2025 through the same report workspace', async () => {
     saveAppPreferences({ currency: 'KRW', year: '2025' })
     stubReportRequests({ taxYear: 2025 })
 
@@ -543,11 +519,9 @@ describe('ReportPage', () => {
 
     expect(
       (await screen.findAllByRole('heading', {
-        name: '2025년 가상자산 세무 정책 시뮬레이션 장부',
+        name: '2025년 가상자산 세무 장부',
       })).length,
     ).toBeGreaterThan(0)
-    expect(screen.getAllByText(/POLICY_SIMULATION/u).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('신고용 아님').length).toBeGreaterThan(0)
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
         String(url).endsWith(

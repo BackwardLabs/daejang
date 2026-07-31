@@ -176,9 +176,7 @@ const paymentRequired = (
         x402Version: 2,
         resource: {
           url: resourceUrl,
-          description: order.taxYear < 2027
-            ? `${order.taxYear}년 정책 시뮬레이션 장부 (POLICY_SIMULATION · 2027.1.1 시행 예정 기준 · 신고용 아님)`
-            : `${order.taxYear}년 FINAL 세금 보고서`,
+          description: `${order.taxYear}년 가상자산 세무 장부`,
           mimeType: 'application/json',
         },
         accepts: [requirement],

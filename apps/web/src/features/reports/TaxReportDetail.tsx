@@ -9,29 +9,14 @@ type ReportTab =
   | 'summary'
   | 'disposals'
   | 'movements'
-  | 'limitations'
   | 'trace'
 
 const tabs: Array<{ id: ReportTab; label: string }> = [
   { id: 'summary', label: '요약' },
   { id: 'disposals', label: '처분 장부' },
   { id: 'movements', label: '이체·전환' },
-  { id: 'limitations', label: '검토 필요' },
   { id: 'trace', label: '계산 근거' },
 ]
-
-const finalityLabel = (value: TaxReportModel['finality']) =>
-  value === 'FINAL' ? '입력 확정' : '잠정 입력'
-
-const calculationStatusLabel = (value: TaxReportModel['status']) =>
-  value === 'FINAL' ? '계산 완료' : '부분 계산'
-
-const filingStatusLabel = (
-  value: TaxReportModel['filingStatus'],
-  taxYear: number,
-) => taxYear < 2027
-  ? '신고용 아님'
-  : value === 'READY' ? '신고 준비' : '신고 준비 불가'
 
 const costMethodLabel = (value: string) => {
   const labels: Record<string, string> = {
@@ -58,7 +43,7 @@ function amountLabel(amount: TaxAmountModel, denomination: string) {
     amount.amount === null ||
     amount.amount === undefined
   ) {
-    return '미확정'
+    return '—'
   }
   return `${decimal(amount.amount)} ${denomination}`
 }
@@ -101,11 +86,6 @@ export function TaxReportDetail({
   const [activeTab, setActiveTab] = useState<ReportTab>('summary')
   const pdfHref =
     `/api/v1/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`
-  const constrained =
-    report.status === 'PARTIAL' ||
-    report.filingStatus === 'BLOCKED' ||
-    report.limitations.length > 0
-  const policySimulation = report.taxYear < 2027
 
   useEffect(() => {
     setActiveTab('summary')
@@ -120,9 +100,7 @@ export function TaxReportDetail({
         <div>
           <span>ISSUED TAX LEDGER</span>
           <h2 id="tax-report-detail-title">
-            {policySimulation
-              ? `${report.taxYear}년 가상자산 세무 정책 시뮬레이션 장부`
-              : `${report.taxYear}년 가상자산 세무 장부`}
+            {report.taxYear}년 가상자산 세무 장부
           </h2>
           <p>
             {pointerVersion === undefined
@@ -133,60 +111,11 @@ export function TaxReportDetail({
           </p>
         </div>
         <div className="tax-report-detail__header-actions">
-          <div className="tax-report-badges" aria-label="장부 상태">
-            <b data-status={report.finality}>
-              {finalityLabel(report.finality)}
-            </b>
-            <b data-status={report.status}>
-              {calculationStatusLabel(report.status)}
-            </b>
-            <b
-              data-status={
-                policySimulation
-                  ? 'POLICY_SIMULATION'
-                  : report.filingStatus
-              }
-            >
-              {filingStatusLabel(report.filingStatus, report.taxYear)}
-            </b>
-          </div>
           <a href={pdfHref} download>
             장부 PDF 생성
           </a>
         </div>
       </header>
-
-      {policySimulation ? (
-        <section
-          className="tax-report-detail__simulation"
-          role="status"
-        >
-          <strong>POLICY_SIMULATION · 신고용 아님</strong>
-          <p>
-            {report.taxYear}년 거래에 소득세법 제37조·제64조의3 및 시행령
-            제88조의 2027.1.1 시행 예정 기준을 가정 적용한 정책
-            시뮬레이션입니다. 실제 신고 결과나 현행 세법 적용 결과로
-            사용하지 마세요.
-          </p>
-        </section>
-      ) : null}
-
-      {constrained ? (
-        <section className="tax-report-detail__warning" role="status">
-          <strong>확정되지 않은 내용이 포함된 장부입니다.</strong>
-          <p>
-            장부와 PDF는 생성할 수 있지만 신고 준비가 끝난 것은 아닙니다.
-            미확정 금액은 0원으로 대체하지 않았으며, 검토가 필요한 항목은
-            별도로 표시합니다.
-          </p>
-        </section>
-      ) : policySimulation ? null : (
-        <section className="tax-report-detail__ready" role="status">
-          <strong>현재 revision의 계산 항목이 모두 준비되었습니다.</strong>
-          <p>선택한 장부와 PDF는 동일한 ReportModel을 기준으로 생성됩니다.</p>
-        </section>
-      )}
-
       <div className="tax-report-detail__tabs" role="tablist" aria-label="장부 내용">
         {tabs.map((tab) => (
           <button
@@ -199,9 +128,6 @@ export function TaxReportDetail({
             onClick={() => setActiveTab(tab.id)}
           >
             {tab.label}
-            {tab.id === 'limitations' && report.limitations.length > 0 ? (
-              <span>{report.limitations.length.toLocaleString('ko-KR')}</span>
-            ) : null}
           </button>
         ))}
       </div>
@@ -253,7 +179,6 @@ export function TaxReportDetail({
                 <span>TAX ESTIMATE</span>
                 <h3 id="tax-report-tax-summary-title">세금 추정 요약</h3>
               </div>
-              <p>확정되지 않은 세액은 미확정으로 표시합니다.</p>
             </header>
             <dl className="tax-report-detail__summary">
               {[
@@ -288,10 +213,6 @@ export function TaxReportDetail({
                 <dd>
                   {report.counts.excludedConversions.toLocaleString('ko-KR')}건
                 </dd>
-              </div>
-              <div>
-                <dt>검토 필요</dt>
-                <dd>{report.counts.limitations.toLocaleString('ko-KR')}건</dd>
               </div>
             </dl>
           </section>
@@ -574,67 +495,6 @@ export function TaxReportDetail({
         </div>
       ) : null}
 
-      {activeTab === 'limitations' ? (
-        <section
-          id="tax-report-panel-limitations"
-          role="tabpanel"
-          aria-labelledby="tax-report-tab-limitations"
-          className="tax-report-detail__section tax-report-detail__panel"
-        >
-          <header>
-            <div>
-              <span>REQUIRES ATTENTION</span>
-              <h3>검토 필요 항목</h3>
-            </div>
-            <p>{report.limitations.length.toLocaleString('ko-KR')}건</p>
-          </header>
-          {report.limitations.length === 0 ? (
-            <EmptyRows>현재 장부 결과를 제한하는 항목이 없습니다.</EmptyRows>
-          ) : (
-            <ul className="tax-report-detail__limitations">
-              {report.limitations.map((limitation, index) => (
-                <li
-                  key={`${limitation.code}:${limitation.movementId ?? index}`}
-                >
-                  <span>{limitation.code}</span>
-                  <div>
-                    <strong>{limitation.reason}</strong>
-                    <p>
-                      {[
-                        limitation.taxAssetId &&
-                          `자산 ${limitation.taxAssetId}`,
-                        limitation.taxAddressId &&
-                          `주소 ${limitation.taxAddressId}`,
-                        limitation.movementId &&
-                          `처분 ${limitation.movementId}`,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ') || '장부 전체에 적용'}
-                    </p>
-                    {limitation.reviewId ||
-                    limitation.reviewRevisionId ? (
-                      <details>
-                        <summary>검토 추적 정보</summary>
-                        <p>
-                          {[
-                            limitation.reviewId &&
-                              `Review ${limitation.reviewId}`,
-                            limitation.reviewRevisionId &&
-                              `revision ${limitation.reviewRevisionId}`,
-                          ]
-                            .filter(Boolean)
-                            .join(' · ')}
-                        </p>
-                      </details>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ) : null}
-
       {activeTab === 'trace' ? (
         <section
           id="tax-report-panel-trace"
@@ -654,15 +514,6 @@ export function TaxReportDetail({
               <dt>Report ID</dt>
               <dd>{report.reportId}</dd>
             </div>
-            {policySimulation ? (
-              <div>
-                <dt>계산 성격</dt>
-                <dd>
-                  POLICY_SIMULATION · 소득세법 제37조·제64조의3 및 시행령
-                  제88조 · 2027.1.1 시행 예정 · 신고용 아님
-                </dd>
-              </div>
-            ) : null}
             <div>
               <dt>정책</dt>
               <dd>

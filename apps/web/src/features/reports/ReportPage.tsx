@@ -17,19 +17,6 @@ import {
 import { TaxReportDetail } from './TaxReportDetail.tsx'
 import './report.css'
 
-const finalityLabel = (value: TaxReportModel['finality']) =>
-  value === 'FINAL' ? '입력 확정' : '잠정 입력'
-
-const calculationStatusLabel = (value: TaxReportModel['status']) =>
-  value === 'FINAL' ? '계산 완료' : '부분 계산'
-
-const filingStatusLabel = (
-  value: TaxReportModel['filingStatus'],
-  taxYear: number,
-) => taxYear < 2027
-  ? '신고용 아님'
-  : value === 'READY' ? '신고 준비' : '신고 준비 불가'
-
 const newestFirst = (left: TaxReportModel, right: TaxReportModel) => {
   const issuedAtDifference =
     Date.parse(right.issuedAt) - Date.parse(left.issuedAt)
@@ -209,31 +196,10 @@ export function ReportWorkspacePage() {
             <div>
               <span>REPORT WORKSPACE</span>
               <h2 id="tax-report-section-title">
-                {Number(year) < 2027
-                  ? `${year}년 가상자산 세무 정책 시뮬레이션 장부`
-                  : `${year}년 가상자산 세무 장부`}
+                {year}년 가상자산 세무 장부
               </h2>
             </div>
-            <p>
-              미확정 항목은 0원으로 대체하지 않으며, 장부 revision별 상태를
-              그대로 보존합니다.
-            </p>
           </header>
-
-          {Number(year) < 2027 && taxStatus !== 'unsupported' ? (
-            <aside
-              className="tax-report-policy-simulation"
-              aria-label="정책 시뮬레이션 안내"
-            >
-              <strong>POLICY_SIMULATION · 신고용 아님</strong>
-              <p>
-                {year}년 거래에 소득세법 제37조·제64조의3 및 시행령
-                제88조의 2027.1.1 시행 예정 기준을 가정 적용한
-                시뮬레이션입니다. 실제 신고 결과나 현행 세법 적용 결과로
-                사용하지 마세요.
-              </p>
-            </aside>
-          ) : null}
 
           {taxStatus === 'loading' ? (
             <p className="report-api-state" role="status">
@@ -306,29 +272,6 @@ export function ReportWorkspacePage() {
                         <small>
                           {new Date(report.issuedAt).toLocaleString('ko-KR')}
                         </small>
-                      </span>
-                      <span
-                        className="tax-report-badges"
-                        aria-label="장부 revision 상태"
-                      >
-                        <b data-status={report.finality}>
-                          {finalityLabel(report.finality)}
-                        </b>
-                        <b data-status={report.status}>
-                          {calculationStatusLabel(report.status)}
-                        </b>
-                        <b
-                          data-status={
-                            report.taxYear < 2027
-                              ? 'POLICY_SIMULATION'
-                              : report.filingStatus
-                          }
-                        >
-                          {filingStatusLabel(
-                            report.filingStatus,
-                            report.taxYear,
-                          )}
-                        </b>
                       </span>
                     </button>
                   )

@@ -4,7 +4,6 @@ import type {
   ReportPrintAmountV1,
   ReportPrintModelV1,
 } from './report-print-model.js'
-import { reportPolicySimulationNotice } from './report-print-model.js'
 
 const page = {
   width: 595.28,
@@ -21,9 +20,6 @@ const colors = {
   line: '#DADADA',
   soft: '#F6F6F6',
   accent: '#F15A24',
-  warning: '#FFF6E8',
-  warningLine: '#E99A23',
-  success: '#1B873F',
 } as const
 
 type CellColumn = {
@@ -57,7 +53,7 @@ export const formatReportAmount = (
   denominationAssetId: string,
 ) => amount.status === 'KNOWN'
   ? `${formatDecimal(amount.amount)} ${denominationAssetId}`
-  : '미확정'
+  : '—'
 
 const shortId = (value: string) => value.length <= 28
   ? value
@@ -71,23 +67,12 @@ const asDate = (value: string) => {
   return parsed
 }
 
-const statusLabel = (model: ReportPrintModelV1) => {
-  if (model.taxYear < 2027) return '신고용 아님'
-  if (model.filingStatus === 'BLOCKED') return '신고 준비 BLOCKED'
-  if (model.status === 'PARTIAL') return '일부 미확정'
-  return '신고 준비 가능'
-}
-
 export async function renderTaxReportPdf(
   model: ReportPrintModelV1,
   options: RenderOptions,
 ): Promise<Buffer> {
   const issuedAt = asDate(model.issuedAt)
-  const policySimulationNotice =
-    reportPolicySimulationNotice(model.taxYear)
-  const documentTitle = policySimulationNotice
-    ? `${model.taxYear}년 가상자산 세무 정책 시뮬레이션 장부`
-    : `${model.taxYear}년 가상자산 세무 검토용 장부`
+  const documentTitle = `${model.taxYear}년 가상자산 세무 장부`
   const rendererVersion = options.rendererVersion ?? '1'
   const doc = new PDFDocument({
     autoFirstPage: false,
@@ -292,88 +277,21 @@ export async function renderTaxReportPdf(
 
   addPage()
   doc.fillColor(colors.accent).fontSize(9)
-    .text('TAX LEDGER · REVIEW COPY', page.marginX, doc.y)
+    .text('TAX LEDGER', page.marginX, doc.y)
   doc.moveDown(0.65)
   doc.fillColor(colors.ink).fontSize(25)
     .text(documentTitle, {
       width: contentWidth,
     })
   doc.moveDown(0.3)
-  doc.fillColor(colors.muted).fontSize(9)
-    .text(
-      '확정되지 않은 항목은 0원으로 대체하지 않고 미확정으로 표시합니다.',
-      { width: contentWidth },
-    )
   doc.moveDown(1)
-
-  const badgeY = doc.y
-  const badges = [
-    model.finality,
-    model.status,
-    statusLabel(model),
-  ]
-  let badgeX = page.marginX
-  for (const badge of badges) {
-    const badgeWidth = Math.max(76, doc.widthOfString(badge) + 22)
-    doc.roundedRect(badgeX, badgeY, badgeWidth, 25, 4)
-      .fillAndStroke(
-        model.filingStatus === 'BLOCKED' && badge === statusLabel(model)
-          ? colors.warning
-          : colors.soft,
-        model.filingStatus === 'BLOCKED' && badge === statusLabel(model)
-          ? colors.warningLine
-          : colors.line,
-      )
-    doc.fillColor(
-      model.filingStatus === 'READY' && badge === statusLabel(model)
-        ? colors.success
-        : colors.ink,
-    ).fontSize(8).text(badge, badgeX + 10, badgeY + 8, {
-      width: badgeWidth - 20,
-      align: 'center',
-      lineBreak: false,
-    })
-    badgeX += badgeWidth + 8
-  }
-  doc.y = badgeY + 38
 
   drawKeyValues([
     ['과세연도', String(model.taxYear)],
-    ...(policySimulationNotice
-      ? [
-          ['계산 성격', 'POLICY_SIMULATION'] as const,
-          [
-            '적용 기준',
-            '소득세법 제37조·제64조의3 및 시행령 제88조 · 2027.1.1 시행 예정 · 신고용 아님',
-          ] as const,
-        ]
-      : []),
     ['Report ID', model.reportId],
     ['Report model digest', model.reportModelDigest],
     ['생성 시각', model.issuedAt],
   ])
-
-  if (policySimulationNotice) {
-    ensureSpace(84)
-    const noticeY = doc.y
-    doc.roundedRect(page.marginX, noticeY, contentWidth, 70, 4)
-      .fillAndStroke(colors.warning, colors.warningLine)
-    doc.fillColor(colors.ink).fontSize(10)
-      .text(
-        '정책 시뮬레이션 결과입니다',
-        page.marginX + 14,
-        noticeY + 13,
-        { width: contentWidth - 28 },
-      )
-    doc.fillColor(colors.muted).fontSize(8.2)
-      .text(
-        `${policySimulationNotice}. ${model.taxYear}년 거래에 소득세법 제37조·제64조의3 및 시행령 제88조의 2027.1.1 시행 예정 기준을 가정 적용한 결과이며 실제 신고 결과나 현행 세법 적용 결과로 사용하지 마세요.`,
-        page.marginX + 14,
-        noticeY + 34,
-        { width: contentWidth - 28 },
-      )
-    doc.y = noticeY + 84
-  }
 
   sectionTitle('장부 계산 요약')
   drawKeyValues([
@@ -390,30 +308,6 @@ export async function renderTaxReportPdf(
     ['지방세', formatReportAmount(model.summary.localTax, model.denominationAssetId)],
     ['예상 총 세액', formatReportAmount(model.summary.totalTax, model.denominationAssetId)],
   ])
-
-  if (model.limitations.length > 0 || model.filingStatus === 'BLOCKED') {
-    ensureSpace(84)
-    const noticeY = doc.y
-    doc.roundedRect(page.marginX, noticeY, contentWidth, 70, 4)
-      .fillAndStroke(colors.warning, colors.warningLine)
-    doc.fillColor(colors.ink).fontSize(10)
-      .text(
-        '현재 결과를 제한하는 미확정 항목이 있습니다',
-        page.marginX + 14,
-        noticeY + 13,
-        { width: contentWidth - 28 },
-      )
-    doc.fillColor(colors.muted).fontSize(8.2)
-      .text(
-        policySimulationNotice
-          ? `제한사항 ${model.counts.limitations}건 · 계산 완결도 ${model.status}. 장부는 생성되었지만 미확정 항목의 해결 전에는 확정 시뮬레이션 결과로 사용하지 마세요.`
-          : `제한사항 ${model.counts.limitations}건 · 신고 준비 ${model.filingStatus}. 장부는 생성되었지만 미확정 항목의 해결 전에는 신고용 확정 결과로 사용하지 마세요.`,
-        page.marginX + 14,
-        noticeY + 34,
-        { width: contentWidth - 28 },
-      )
-    doc.y = noticeY + 84
-  }
 
   drawTable({
     title: '자산별 계산 요약',
@@ -493,24 +387,6 @@ export async function renderTaxReportPdf(
     ]),
   })
 
-  drawTable({
-    title: '검토 필요 및 제한사항',
-    emptyLabel: '현재 장부에 기록된 제한사항이 없습니다.',
-    columns: [
-      { header: '코드', width: 105 },
-      { header: '사유', width: 256 },
-      { header: '연관 자산·Review', width: 150 },
-    ],
-    rows: model.limitations.map((row) => [
-      row.code,
-      row.reason,
-      [
-        row.taxAssetId,
-        row.reviewId ? `Review ${shortId(row.reviewId)}` : undefined,
-      ].filter(Boolean).join('\n') || '—',
-    ]),
-  })
-
   ensureSpace(370)
   sectionTitle(
     '산출 방법과 재현 정보',
@@ -536,18 +412,6 @@ export async function renderTaxReportPdf(
     ['Evidence pack digest', model.evidencePackDigest],
   ], '산출 방법과 재현 정보')
 
-  ensureSpace(78)
-  doc.moveDown(0.7)
-  doc.fillColor(colors.muted).fontSize(7.8)
-    .text(
-      policySimulationNotice
-        ? `${policySimulationNotice}. 이 문서는 예정 기준을 적용한 검토용 장부이며 실제 신고 결과나 법적 효력을 보장하지 않습니다.`
-        : '이 문서는 세무 검토를 위한 장부 출력물입니다. 표시된 상태와 제한사항을 함께 확인해야 하며, 세무 정확성이나 법적 효력을 별도로 보장하지 않습니다.',
-      page.marginX,
-      doc.y,
-      { width: contentWidth },
-    )
-
   const range = doc.bufferedPageRange()
   for (let pageIndex = range.start; pageIndex < range.start + range.count; pageIndex += 1) {
     doc.switchToPage(pageIndex)
@@ -560,9 +424,7 @@ export async function renderTaxReportPdf(
       .stroke()
     doc.fillColor(colors.muted).fontSize(7)
       .text(
-        policySimulationNotice
-          ? 'POLICY_SIMULATION · 신고용 아님'
-          : `Report ID ${shortId(model.reportId)}`,
+        `Report ID ${shortId(model.reportId)}`,
         page.marginX,
         page.height - 28,
         {

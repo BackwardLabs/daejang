@@ -125,15 +125,6 @@ export type ReportPrintModelV1 = {
   }
 }
 
-export const reportPolicySimulationNotice = (taxYear: number) => {
-  if (!Number.isInteger(taxYear) || taxYear < 2025) {
-    throw new Error('Report taxYear must be an integer greater than or equal to 2025')
-  }
-  return taxYear < 2027
-    ? 'POLICY_SIMULATION · 2027.1.1 시행 예정 기준 · 신고용 아님'
-    : undefined
-}
-
 const printAmount = (value: PublicAmount): ReportPrintAmountV1 =>
   value.status === 'KNOWN'
     ? { status: 'KNOWN', amount: value.amount }
