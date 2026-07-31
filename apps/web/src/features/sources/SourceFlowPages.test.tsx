@@ -130,6 +130,62 @@ describe('source flow pages', () => {
     ).not.toBeInTheDocument()
   })
 
+  it.each([
+    ['PENDING', '장부 반영 중'],
+    ['REVIEW_REQUIRED', '장부 반영 보류'],
+    ['NO_POSTING', '장부 항목 없음'],
+    ['UNAVAILABLE', '장부 상태 확인 필요'],
+  ] as const)(
+    'does not claim ledger completion for %s EVM materialization',
+    async (ledgerMaterializationState, expectedCopy) => {
+      const source = {
+        id: '33333333-3333-4333-8333-333333333333',
+        type: 'EVM_WALLET',
+        address: '0x239000000000000000000000000000000000f2b2',
+        accountType: 'EOA',
+        verificationChainId: 'eip155:1',
+        verifiedAt: '2027-01-01T00:00:00.000Z',
+        status: 'ACTIVE',
+        createdAt: '2027-01-01T00:00:00.000Z',
+        updatedAt: '2027-01-01T00:00:00.000Z',
+        chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+      }
+      const job = {
+        id: 'job-1',
+        sourceId: source.id,
+        sourceKind: 'EVM_WALLET',
+        state: 'SUCCEEDED',
+        phase: 'COMPLETE',
+        attempts: 1,
+        processedRecords: 8,
+        ledgerMaterializationState,
+        createdAt: '2027-01-01T00:00:00.000Z',
+        updatedAt: '2027-01-01T00:01:00.000Z',
+      }
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/api/v1/sources') {
+          return new Response(JSON.stringify({ items: [source] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        if (url === '/api/v1/jobs') {
+          return new Response(JSON.stringify({ items: [job] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }))
+
+      render(<SourceManagementPage />)
+
+      expect(await screen.findByText(expectedCopy)).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /장부 반영 완료/ })).not.toBeInTheDocument()
+    },
+  )
+
   it('shows failed collection details and starts a new tracked job', async () => {
     const source = {
       id: '33333333-3333-4333-8333-333333333333',
@@ -192,7 +248,13 @@ describe('source flow pages', () => {
       }
       if (url === `/api/v1/jobs/${queuedJob.id}`) {
         return new Response(JSON.stringify({
-          job: { ...queuedJob, state: 'SUCCEEDED', phase: 'COMPLETE' },
+          job: {
+            ...queuedJob,
+            state: 'SUCCEEDED',
+            phase: 'COMPLETE',
+            ledgerMaterializationState: 'POSTED',
+            ledgerPostingCount: 3,
+          },
         }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -235,7 +297,7 @@ describe('source flow pages', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('link', { name: /처리 완료.*장부 보기/ }),
+        screen.getByRole('link', { name: /장부 반영 완료.*3개 항목/ }),
       ).toHaveAttribute('href', '/ledger')
     })
     expect(fetchMock).toHaveBeenCalledWith(

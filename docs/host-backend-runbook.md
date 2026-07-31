@@ -119,6 +119,67 @@ JIT/EVM worker는 `SubjectEvidencePublished/JIT` publication의 sealed ActionPro
 전체 start를 fail-closed 한다. 기존 EVM writer를 stop/drain하고 단일 writer임을 확인한 뒤
 운영자가 서명 policy를 provision하고 backend를 재시작해야 한다.
 
+### Canonical EVM 장부 cutover
+
+`/sources`의 EVM 수집 성공은 JIT evidence fragment가 완성됐다는 뜻이며 Posting 또는
+Lot 생성 성공을 뜻하지 않는다. Engine은 같은 `subject_id`, JIT run, fragment 좌표로
+`subject_evidence.publication_outbox`와 `ledger.posting_observation`을 조회해 다음 상태를
+반환한다.
+
+- `PENDING`: JIT publication이 아직 canonical EVM worker에 소비되지 않음
+- `REVIEW_REQUIRED`: worker가 실행했지만 ActionProof 분류를 fail-closed로 보류함
+- `POSTED`: publication이 소비됐고 그 fragment를 인용하는 Posting이 존재함
+- `NO_POSTING`: publication은 정상 소비됐지만 장부에 반영할 자산 leg가 없음
+- `UNAVAILABLE`: durable JIT 좌표 또는 publication 상태를 확인할 수 없음
+
+운영 cutover는 다음 순서를 지킨다.
+
+1. `DeFi-Label`의 committed runtime release를 검증한다.
+
+   ```bash
+   python3 scripts/registry.py verify-runtime-release \
+     --bundle releases/action-registry-v1.json \
+     --checksum releases/action-registry-v1.json.sha256 \
+     --receipt releases/action-registry-v1.json.receipt.json \
+     --signature releases/action-registry-v1.signature.json \
+     --public-key releases/action-registry-v1.public-key.pem
+   ```
+
+2. `jitd`가 그 checkout을 `--defi-label-dir`로 읽고 있는지 확인한다. DRAFT descriptor나
+   CA/ABI label만 존재하는 프로파일은 실행 권한이 아니다. `compiledAction`이 있고 release
+   policy가 허용한 프로파일만 ActionProof를 만들 수 있다.
+3. 운영자 소유 Ed25519 키로 producer kind `JIT`, stage
+   `normal-single-writer`인 publication claim policy를 서명한다. SOURCE worker policy를
+   복사하거나 키를 Git에 두지 않는다.
+4. 서명 policy를 runtime root의
+   `supervisor/config/evm-publication-claim-policy.json`에 권한 `0600`으로 설치한다.
+5. legacy/임시 EVM writer가 모두 중지됐고 canonical writer가 하나만 기동될 수 있는지
+   확인한 뒤 Daejang checkout에서 재시작한다.
+
+   ```bash
+   npm run backend:restart
+   npm run backend:status
+   ```
+
+6. 상태 출력에서 `jitd`, `engine`, `worker`, `evm-posting`, `web-api`가 모두 준비됐는지
+   확인한다. `evm-posting`이 없으면 `/sources`는 `PENDING`을 계속 표시해야 하며 이를
+   성공으로 간주하지 않는다.
+7. 기존 wallet source는 원본 성공 이력을 수정하지 말고 UI의 재수집 경로로 새 sync job을
+   만든다. 새 job에서 `/sources`가 `POSTED` 또는 `NO_POSTING`으로 수렴하고 `POSTED`인
+   경우에만 `/ledger` 링크와 Posting 개수가 표시되는지 확인한다.
+
+Action Registry, JIT, Posting Service, Daejang을 함께 배포할 때는 이 순서로 checkout을
+갱신한다.
+
+```text
+DeFi-Label → daejang-jit-engine → daejang-posting-service → daejang
+```
+
+앞단보다 먼저 Daejang만 배포하는 것은 안전하다. 이 경우 UI는 기존 false-positive
+`처리 완료` 대신 실제 downstream 상태를 `PENDING`, `REVIEW_REQUIRED` 또는
+`UNAVAILABLE`로 표시한다. 반대로 Posting Service를 먼저 배포해 지원하지 않는 Action
+pair를 소비하게 해서는 안 된다.
+
 Tax Engine은 canonical ledger의 downstream consumer다. 아직 canonical asset
 Posting이 하나도 없는 초기 배포에서는 `taxd`만 명시적으로 disabled 상태로 두고
 JIT·Engine·sync worker·Posting worker·Web API는 정상 기동한다. 첫 canonical Posting이

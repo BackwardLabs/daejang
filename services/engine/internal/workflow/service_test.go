@@ -7,6 +7,7 @@ import (
 
 	"github.com/BackwardLabs/daejang-db/pkg/sourcejobstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/materializationread"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -17,6 +18,15 @@ type fakeStore struct {
 	params     []sourcejobstore.EnqueueParams
 	getSubject string
 	err        error
+}
+
+type fakeMaterializationReader struct {
+	snapshot materializationread.Snapshot
+	err      error
+}
+
+func (r fakeMaterializationReader) Get(context.Context, string, string, string) (materializationread.Snapshot, error) {
+	return r.snapshot, r.err
 }
 
 func (s *fakeStore) Enqueue(_ context.Context, params sourcejobstore.EnqueueParams) (sourcejobstore.SyncJob, error) {
@@ -100,5 +110,31 @@ func TestGetSyncJobAlwaysUsesActorSubject(t *testing.T) {
 	}
 	if store.getSubject != workflowSubject {
 		t.Fatalf("job read was not actor scoped: %q", store.getSubject)
+	}
+}
+
+func TestToProtoReportsCanonicalPostingMaterializationForCompletedEVMJob(t *testing.T) {
+	now := time.Now().UTC()
+	service := &Service{Materializations: fakeMaterializationReader{snapshot: materializationread.Snapshot{
+		State: materializationread.StatePosted, PostingCount: 4,
+	}}}
+	job := service.toProto(context.Background(), workflowSubject, sourcejobstore.SyncJob{
+		ID: "22222222-2222-4222-8222-222222222222", SourceKind: "EVM_WALLET", State: "SUCCEEDED",
+		UpstreamJITRunID: "jit-run:1", OutputFragmentID: "fragment:1", CreatedAt: now, UpdatedAt: now,
+	})
+	if job.GetLedgerMaterializationState() != materializationread.StatePosted || job.GetLedgerPostingCount() != 4 {
+		t.Fatalf("canonical materialization was not exposed: %#v", job)
+	}
+}
+
+func TestToProtoDoesNotClaimLedgerSuccessWhenMaterializationReadFails(t *testing.T) {
+	now := time.Now().UTC()
+	service := &Service{Materializations: fakeMaterializationReader{err: context.DeadlineExceeded}}
+	job := service.toProto(context.Background(), workflowSubject, sourcejobstore.SyncJob{
+		ID: "22222222-2222-4222-8222-222222222222", SourceKind: "EVM_WALLET", State: "SUCCEEDED",
+		UpstreamJITRunID: "jit-run:1", OutputFragmentID: "fragment:1", CreatedAt: now, UpdatedAt: now,
+	})
+	if job.GetLedgerMaterializationState() != materializationread.StateUnavailable || job.GetLedgerPostingCount() != 0 {
+		t.Fatalf("failed read was presented as ledger success: %#v", job)
 	}
 }

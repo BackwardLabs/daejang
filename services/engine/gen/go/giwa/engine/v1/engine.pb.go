@@ -1469,8 +1469,14 @@ type SyncJob struct {
 	SegmentCursor          string                 `protobuf:"bytes,21,opt,name=segment_cursor,json=segmentCursor,proto3" json:"segment_cursor,omitempty"`
 	UpstreamJitRunId       string                 `protobuf:"bytes,22,opt,name=upstream_jit_run_id,json=upstreamJitRunId,proto3" json:"upstream_jit_run_id,omitempty"`
 	ProgressVersion        int64                  `protobuf:"varint,23,opt,name=progress_version,json=progressVersion,proto3" json:"progress_version,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Durable state of the canonical EVM Posting consumer for this JIT fragment.
+	// Empty for non-EVM jobs. Values: PENDING, REVIEW_REQUIRED, POSTED,
+	// NO_POSTING, UNAVAILABLE.
+	LedgerMaterializationState string `protobuf:"bytes,24,opt,name=ledger_materialization_state,json=ledgerMaterializationState,proto3" json:"ledger_materialization_state,omitempty"`
+	// Number of distinct canonical Posting legs that cite this JIT fragment.
+	LedgerPostingCount int64 `protobuf:"varint,25,opt,name=ledger_posting_count,json=ledgerPostingCount,proto3" json:"ledger_posting_count,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SyncJob) Reset() {
@@ -1660,6 +1666,20 @@ func (x *SyncJob) GetUpstreamJitRunId() string {
 func (x *SyncJob) GetProgressVersion() int64 {
 	if x != nil {
 		return x.ProgressVersion
+	}
+	return 0
+}
+
+func (x *SyncJob) GetLedgerMaterializationState() string {
+	if x != nil {
+		return x.LedgerMaterializationState
+	}
+	return ""
+}
+
+func (x *SyncJob) GetLedgerPostingCount() int64 {
+	if x != nil {
+		return x.LedgerPostingCount
 	}
 	return 0
 }
@@ -4543,7 +4563,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\"E\n" +
 	"\x14ListSyncJobsResponse\x12-\n" +
-	"\x05items\x18\x01 \x03(\v2\x17.giwa.engine.v1.SyncJobR\x05items\"\xbf\a\n" +
+	"\x05items\x18\x01 \x03(\v2\x17.giwa.engine.v1.SyncJobR\x05items\"\xb3\b\n" +
 	"\aSyncJob\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vsource_kind\x18\x02 \x01(\tR\n" +
@@ -4572,7 +4592,9 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x11checkpoint_cursor\x18\x14 \x01(\tR\x10checkpointCursor\x12%\n" +
 	"\x0esegment_cursor\x18\x15 \x01(\tR\rsegmentCursor\x12-\n" +
 	"\x13upstream_jit_run_id\x18\x16 \x01(\tR\x10upstreamJitRunId\x12)\n" +
-	"\x10progress_version\x18\x17 \x01(\x03R\x0fprogressVersion\"j\n" +
+	"\x10progress_version\x18\x17 \x01(\x03R\x0fprogressVersion\x12@\n" +
+	"\x1cledger_materialization_state\x18\x18 \x01(\tR\x1aledgerMaterializationState\x120\n" +
+	"\x14ledger_posting_count\x18\x19 \x01(\x03R\x12ledgerPostingCount\"j\n" +
 	"\x13GetDashboardRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x19\n" +
 	"\btax_year\x18\x02 \x01(\x05R\ataxYear\"\xce\x02\n" +
