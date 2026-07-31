@@ -1115,12 +1115,7 @@ const gitCommit = (repository) => {
 export const createTaxProfiles = (rows) => {
   const subjects = new Map()
   for (const row of rows) {
-    const taxYear = Number(row.tax_year)
-    if (!Number.isInteger(taxYear)) continue
-    const profileKey = `${row.subject_id}\u0000${taxYear}`
-    const subject = subjects.get(profileKey) ?? {
-      subjectId: row.subject_id,
-      taxYear,
+    const subject = subjects.get(row.subject_id) ?? {
       accounts: new Set(),
       assets: new Set(),
     }
@@ -1128,16 +1123,16 @@ export const createTaxProfiles = (rows) => {
     if (!row.asset_id.startsWith('cex-document-asset:')) {
       subject.assets.add(row.asset_id)
     }
-    subjects.set(profileKey, subject)
+    subjects.set(row.subject_id, subject)
   }
   const profiles = []
-  for (const subject of [...subjects.values()].sort((left, right) =>
-    left.subjectId.localeCompare(right.subjectId) || left.taxYear - right.taxYear)) {
+  for (const [subjectId, subject] of [...subjects].sort(([left], [right]) =>
+    left.localeCompare(right))) {
     if (subject.assets.size === 0) continue
     profiles.push({
-      subjectId: subject.subjectId,
-      residentId: subject.subjectId,
-      taxYear: subject.taxYear,
+      subjectId,
+      residentId: subjectId,
+      taxYear: 2027,
       denominationAssetId: 'asset-krw-upbit',
       accountBindings: [...subject.accounts].sort().map((accountId) => ({
         accountId,
@@ -1221,18 +1216,14 @@ const createTaxRuntime = async (queryURL) => {
   let rows
   try {
     const result = await client.query(`
-      SELECT DISTINCT
-        event.subject_id,
-        EXTRACT(YEAR FROM posting.occurred_at)::integer AS tax_year,
-        posting.account_id,
-        posting.asset_id
+      SELECT DISTINCT event.subject_id, posting.account_id, posting.asset_id
       FROM ledger.interpreted_event AS event
       JOIN ledger.asset_posting AS posting
         ON posting.subject_id=event.subject_id
        AND posting.event_id=event.event_id
        AND posting.revision_id=event.current_revision_id
       WHERE event.current_revision_id IS NOT NULL
-      ORDER BY event.subject_id,tax_year,posting.account_id,posting.asset_id
+      ORDER BY event.subject_id,posting.account_id,posting.asset_id
     `)
     rows = result.rows
   } finally {
