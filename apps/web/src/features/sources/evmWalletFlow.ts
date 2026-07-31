@@ -105,11 +105,13 @@ export type WalletSyncJobState =
   | 'SUCCEEDED'
 
 export type WalletSyncJobSnapshot = {
+  attempts: number | string
   failureCode?: string
   failureMessage?: string
   id: string
   processedRecords: number | string
   state: WalletSyncJobState
+  updatedAt: string
 }
 
 export type WatchWalletSyncJob = (request: {
