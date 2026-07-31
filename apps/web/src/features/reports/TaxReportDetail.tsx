@@ -4,6 +4,7 @@ import type {
   TaxReportDetailModel,
   TaxReportModel,
 } from './taxReportApi.ts'
+import { formatLedgerQuantity } from '../ledger/ledgerPresentation.ts'
 
 type ReportTab =
   | 'summary'
@@ -18,6 +19,12 @@ const tabs: Array<{ id: ReportTab; label: string }> = [
   { id: 'trace', label: '계산 근거' },
 ]
 
+const reportDenominations: Record<
+  string,
+  { symbol: string; decimals: number }
+> = {
+  'asset-krw-upbit': { symbol: 'KRW', decimals: 8 },
+}
 const costMethodLabel = (value: string) => {
   const labels: Record<string, string> = {
     FIFO: '선입선출법',
@@ -44,6 +51,13 @@ function amountLabel(amount: TaxAmountModel, denomination: string) {
     amount.amount === undefined
   ) {
     return '—'
+  }
+  const presentation = reportDenominations[denomination]
+  if (presentation) {
+    return `${formatLedgerQuantity(
+      amount.amount,
+      presentation.decimals,
+    )} ${presentation.symbol}`
   }
   return `${decimal(amount.amount)} ${denomination}`
 }
