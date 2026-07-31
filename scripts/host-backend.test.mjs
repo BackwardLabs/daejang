@@ -26,6 +26,7 @@ import {
   ensureRuntimeIndexerView,
   hostPostingWorkerArgs,
   hostPostingWorkerEnvironment,
+  hostWebAPIRuntimePaths,
   hostEVMPostingWorkerArgs,
   hostEVMPostingWorkerEnvironment,
   hostActiveServiceOrder,
@@ -54,6 +55,25 @@ import {
   supervisorProcessSpec,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
+
+test('stages PDF assets where the flattened host Web API runtime resolves them', () => {
+  const runtime = hostWebAPIRuntimePaths('/srv/giwa-runtime')
+
+  assert.deepEqual(runtime, {
+    code: '/srv/giwa-runtime/app/web-api',
+    assets: '/srv/giwa-runtime/app/assets',
+    nodeModules: '/srv/giwa-runtime/app/node_modules',
+  })
+  assert.equal(
+    join(
+      runtime.code,
+      'tax-report',
+      'pdf',
+      '../../../assets/fonts/Pretendard-Regular.ttf',
+    ),
+    join(runtime.assets, 'fonts', 'Pretendard-Regular.ttf'),
+  )
+})
 
 test('bounds archived Upbit quote staleness at ten minutes', () => {
   const configured = configureTaxUpbitQuoteRuntime({

@@ -106,6 +106,11 @@ const jitArtifactTemp = resolve(
 )
 const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
+export const hostWebAPIRuntimePaths = (root) => ({
+  code: join(root, 'app', 'web-api'),
+  assets: join(root, 'app', 'assets'),
+  nodeModules: join(root, 'app', 'node_modules'),
+})
 const managedJITBinary = join(binaryRoot, 'jitd')
 const jitBinary = resolve(
   process.env.GIWA_JIT_BINARY ?? managedJITBinary,
@@ -875,16 +880,25 @@ const build = () => {
       GOPROXY: 'direct',
     },
   })
-  const webAPIRuntime = join(runtimeRoot, 'app', 'web-api')
+  const {
+    code: webAPIRuntime,
+    assets: webAPIAssetsRuntime,
+    nodeModules: runtimeNodeModules,
+  } = hostWebAPIRuntimePaths(runtimeRoot)
   rmSync(webAPIRuntime, { recursive: true, force: true })
   mkdirSync(dirname(webAPIRuntime), { recursive: true, mode: directoryMode })
   cpSync(join(repositoryRoot, 'apps', 'web-api', 'dist'), webAPIRuntime, {
     recursive: true,
   })
+  rmSync(webAPIAssetsRuntime, { recursive: true, force: true })
+  cpSync(
+    join(repositoryRoot, 'apps', 'web-api', 'assets'),
+    webAPIAssetsRuntime,
+    { recursive: true },
+  )
   const runtimeProto = join(runtimeRoot, 'proto')
   rmSync(runtimeProto, { recursive: true, force: true })
   cpSync(join(repositoryRoot, 'proto'), runtimeProto, { recursive: true })
-  const runtimeNodeModules = join(runtimeRoot, 'app', 'node_modules')
   rmSync(runtimeNodeModules, { recursive: true, force: true })
   symlinkSync(join(repositoryRoot, 'node_modules'), runtimeNodeModules, 'dir')
 }
