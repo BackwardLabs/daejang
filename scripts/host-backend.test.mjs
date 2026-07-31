@@ -179,10 +179,20 @@ test('builds tax profiles only for subjects with canonical ledger assets', () =>
       account_id: 'cex-account:upbit:2',
       asset_id: 'cex-document-asset:upbit:decimal8:btc',
     },
+    {
+      subject_id: 'subject-mixed',
+      account_id: 'cex-account:upbit:3',
+      asset_id: 'cex-document-asset:upbit:decimal8:eth',
+    },
+    {
+      subject_id: 'subject-mixed',
+      account_id: 'wallet-account:optimism:1',
+      asset_id: 'asset:eip155:10:native',
+    },
   ])
 
   assert.equal(profiles.schemaVersion, 'tax.downstream-profile-set.v1')
-  assert.equal(profiles.profiles.length, 1)
+  assert.equal(profiles.profiles.length, 2)
   assert.equal(profiles.profiles[0].subjectId, 'subject-canonical')
   assert.equal(profiles.profiles[0].taxYear, 2027)
   assert.deepEqual(
@@ -191,6 +201,11 @@ test('builds tax profiles only for subjects with canonical ledger assets', () =>
   )
   assert.equal(profiles.profiles[0].accountBindings[0].kind, 'VASP')
   assert.equal(profiles.profiles[0].accountBindings[0].method, 'MOVING_AVERAGE')
+  assert.equal(profiles.profiles[1].subjectId, 'subject-mixed')
+  assert.deepEqual(profiles.profiles[1].assetBindings, [{
+    ledgerAssetId: 'asset:eip155:10:native',
+    taxAssetId: 'tax-asset:eip155:10:native',
+  }])
 })
 
 test('keeps the core JIT and Posting pipeline active without tax profiles', () => {
