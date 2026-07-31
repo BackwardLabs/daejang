@@ -1,8 +1,8 @@
 # Host backend supervisor
 
 같은 서버에서 실행되는 PostgreSQL, PDF parser, Ethereum/Optimism JIT, Engine,
-sync worker, SOURCE/CEX Posting worker, Web API를 Docker 애플리케이션 이미지 없이
-한 명령으로 관리한다.
+sync worker, SOURCE/CEX Posting worker, JIT/EVM Posting worker, Web API를 Docker
+애플리케이션 이미지 없이 한 명령으로 관리한다.
 PostgreSQL만 기존 `daejang-db` Compose 서비스를 사용한다.
 
 ## 준비
@@ -12,8 +12,14 @@ PostgreSQL만 기존 `daejang-db` Compose 서비스를 사용한다.
 - `daejang-jit-engine/.envrc`
 - `daejang-posting-service` checkout (기존 호스트의 `evm-posting-service` 이름도 지원)
 - runtime `supervisor/config/source-publication-claim-policy.json`
+- canonical EVM writer를 켤 때 runtime
+  `supervisor/config/evm-publication-claim-policy.json`
 - Ethereum/Optimism을 모두 포함한 JIT bridge JSON
-- 빌드된 `daejang-jit-runtime/bin/jitd`, `daejang-jit-runtime/bin/cue`
+- `daejang-jit-engine` checkout과 빌드된 `daejang-jit-runtime/bin/cue`
+- `executionGraph: true`와 현재 schema commit/module digest를 pin한
+  `daejang-jit-engine/configs` JIT config
+- pin과 일치하는 `schema` checkout
+- signed ActionProfile release가 있는 `DeFi-Label` checkout
 - PDF parser Python 가상환경
 
 `daejang-db/.env`의 runtime role 비밀번호를 바꾼 경우에는 backend를 시작하기
@@ -41,11 +47,14 @@ JIT는 호출자의 peer identity와 요청의 `subject_id`를 함께 검사한�
 있으면 기본 ACL보다 우선한다.
 
 override는 `version: 1`과 정확히 하나의 로컬 `uid:<number>` grant를 포함해야 한다.
-backend 시작 시 그 identity만 현재 서비스 UID로 재작성하여
-`subject-acl.runtime.json`을 권한 `0600`으로 생성한다. `subjects`에는 승인된 subject ID를
-명시적으로 나열하며 wildcard나 전체 허용 grant를 사용하지 않는다. subject ID는 운영
-식별자이므로 override를 Git이나 로그에 남기지 않고 감사 가능한 provisioning 절차로만
-추가한다.
+backend 시작 시 그 identity를 현재 서비스 UID로 재작성하고, 해당 grant를
+`allowAnySubject: true`인 로컬 subject broker grant로 바꿔
+`subject-acl.runtime.json`을 권한 `0600`으로 생성한다. dashboard subject는 가입 시점에
+동적으로 만들어지므로 정적 사용자 목록으로 표현하지 않는다. 이 권한은 Unix peer
+credential로 인증된 같은 UID의 sync worker에만 허용되며, 원격 mTLS identity에는 사용할
+수 없다. 원격 grant는 계속 `subjects`에 승인 ID를 명시해야 한다. 따라서 이 설정은
+익명 wildcard가 아니라 Web API 인증·wallet ownership 검증을 통과한 요청만 전달하는
+로컬 broker trust boundary다.
 
 JIT는 ACL을 시작 시점에 snapshot으로 읽으므로 override 변경 후 backend를 재시작해야
 한다. ACL 거부로 실패한 sync job은 원본 실패 이력을 수정하지 말고, 재시작과 readiness
@@ -62,7 +71,7 @@ npm run backend:stop
 npm run backend:install-autostart
 ```
 
-`backend:start`는 Web API와 Go 바이너리를 먼저 빌드한 뒤 의존 순서대로
+`backend:start`는 Web API, JIT와 나머지 Go 바이너리를 먼저 빌드한 뒤 의존 순서대로
 서비스를 시작하고 readiness를 확인한다. 중간 단계가 실패하면 이미 시작한
 프로세스를 정리한다. PID 상태에는 실행 명령 신원도 함께 기록하여 재부팅 후 PID가
 재사용된 경우 다른 프로세스를 종료하지 않는다. `backend:install-autostart`는 macOS
@@ -95,13 +104,26 @@ cron fallback의 1분 watchdog은 프로세스 이름 검색을 사용하지 않
 남아도 다른 프로세스가 해당 PID·명령을 소유하지 않음을 확인한 뒤 lock을 회수하고
 monitor만 다시 시작한다.
 
-Posting worker는 `SOURCE` publication을 소비해 CEX Event·Posting·Relation을
+SOURCE Posting worker는 `SOURCE` publication을 소비해 CEX Event·Posting·Relation을
 원자적으로 저장한다. 시작 시 signed `normal-single-writer` policy로 한 번의 bounded
 claim을 실행해 policy·trust key·DB 권한·materialization을 검증한 뒤 continuous worker를
 올린다. `DAEJANG_PUBLICATION_POLICY_TRUST_KEY`는 policy를 서명한 Ed25519 key의
-raw-base64url public key여야 한다. JIT/EVM canonical writer는 별도의 단일-writer 전환 대상이므로
-이 supervisor가 자동으로 활성화하지 않는다. shadow parity, 기존 Tax Engine writer
-stop/drain, 서명된 publication claim policy 검증이 끝난 뒤에만 전환한다.
+raw-base64url public key여야 한다.
+
+JIT/EVM worker는 `SubjectEvidencePublished/JIT` publication의 sealed ActionProof만
+소비한다. runtime config의 `schema.executionGraph`가 켜져 있고 `jitd`가
+`--defi-label-dir`로 signed profile release를 읽어야 ActionProof가 생긴다. supervisor는
+`evm-publication-claim-policy.json`이 존재할 때만 canonical EVM worker를 dependency set에
+포함한다. policy가 없으면 JIT와 Observation 수집은 계속 동작하지만 EVM Posting은
+명시적으로 disabled 상태다. policy가 있으면 시작 전 one-shot claim 검증에 실패할 경우
+전체 start를 fail-closed 한다. 기존 EVM writer를 stop/drain하고 단일 writer임을 확인한 뒤
+운영자가 서명 policy를 provision하고 backend를 재시작해야 한다.
+
+Tax Engine은 canonical ledger의 downstream consumer다. 아직 canonical asset
+Posting이 하나도 없는 초기 배포에서는 `taxd`만 명시적으로 disabled 상태로 두고
+JIT·Engine·sync worker·Posting worker·Web API는 정상 기동한다. 첫 canonical Posting이
+생긴 뒤 `backend:restart`하면 subject별 downstream profile을 다시 생성하고 `taxd`를
+활성화한다. 초기 tax profile 부재가 upstream evidence 수집을 중단시켜서는 안 된다.
 
 Web API만 `127.0.0.1:3000`을 listen한다. Engine은 외부 TCP 포트를 열지 않고
 권한 `0700` socket directory 안의 소유자 전용 Unix socket(`0600`)으로만 Web API와
@@ -122,7 +144,11 @@ PDF parser 프로세스는 항상 시작한다. production PDF 업로드를 켤 
 
 - `GIWA_DATABASE_REPOSITORY`
 - `GIWA_JIT_REPOSITORY`
+- `GIWA_SCHEMA_REPOSITORY`
 - `GIWA_JIT_RUNTIME`
+- `GIWA_DEFI_LABEL_REPOSITORY`
+- `GIWA_JIT_ARTIFACT_ROOT`
+- `GIWA_JIT_ARTIFACT_TEMP`
 - `GIWA_POSTING_REPOSITORY`
 - `GIWA_HOST_RUNTIME_ROOT`
 - `GIWA_HOST_SOCKET_ROOT`
