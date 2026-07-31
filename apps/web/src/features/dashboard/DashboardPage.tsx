@@ -14,6 +14,7 @@ import {
 } from '../../preferences/appPreferences.ts'
 import {
   describeLedgerAction,
+  formatLedgerMoney,
   formatLedgerQuantity,
   parseLedgerAsset,
 } from '../ledger/ledgerPresentation.ts'
@@ -53,14 +54,6 @@ const postingAsset = (posting: LedgerEventModel['postings'][number]) =>
     posting.hasAssetDecimals ? posting.assetDecimals : undefined,
     posting.assetVenue,
   )
-
-const denominationAsset = (
-  event: LedgerEventModel,
-  denomination: string,
-) => {
-  const posting = event.postings.find((candidate) => candidate.assetId === denomination)
-  return posting ? postingAsset(posting) : parseLedgerAsset(denomination)
-}
 
 export function DashboardPage() {
   const [selectedYear, setSelectedYear] = useState<AppYear>(
@@ -383,11 +376,12 @@ export function DashboardPage() {
                     const quantity = posting && asset
                       ? formatLedgerQuantity(posting.quantity, asset.decimals)
                       : '—'
-                    const denomination = posting?.denomination
-                      ? denominationAsset(transaction, posting.denomination)
-                      : undefined
-                    const fairValue = posting?.fairValue && denomination
-                      ? `${formatLedgerQuantity(posting.fairValue, denomination.decimals)} ${denomination.symbol}`
+                    const fairValue = posting?.fairValue
+                      ? formatLedgerMoney(
+                          posting.fairValue,
+                          posting.denomination,
+                          transaction.postings,
+                        )
                       : '—'
                     const additionalAssetCount = Math.max(0, materialPostings.length - 1)
                     const action = describeLedgerAction(

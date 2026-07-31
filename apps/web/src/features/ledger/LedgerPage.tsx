@@ -46,7 +46,43 @@ const describeReviewResolution = (review: ReviewDetailModel) =>
 
 export const formatReviewQuantity = formatCanonicalQuantity
 
-function LedgerPostingRow({ posting, postings }: { posting: LedgerPostingModel; postings: LedgerPostingModel[] }) {
+const preTaxEffectiveDate = new Date('2027-01-01T00:00:00+09:00')
+
+function LedgerTaxCostBasis({
+  posting,
+  postings,
+  effectiveAt,
+}: {
+  posting: LedgerPostingModel
+  postings: LedgerPostingModel[]
+  effectiveAt: string
+}) {
+  if (posting.costBasis) {
+    return formatLedgerMoney(posting.costBasis, posting.denomination, postings)
+  }
+  const asset = parseLedgerAsset(
+    posting.assetId,
+    posting.assetSymbol,
+    posting.hasAssetDecimals ? posting.assetDecimals : undefined,
+    posting.assetVenue,
+  )
+  if (posting.direction !== 'IN' || posting.role !== 'PRINCIPAL' || asset.symbol === 'KRW') return '—'
+  const isPreTaxHolding = new Date(effectiveAt) < preTaxEffectiveDate
+  return <span className="ledger-posting-value ledger-posting-tax-basis">
+    <strong>산정 대기</strong>
+    <small>{isPreTaxHolding ? '2026.12.31 기준 적용 예정' : 'Lot 계산 후 확정'}</small>
+  </span>
+}
+
+function LedgerPostingRow({
+  posting,
+  postings,
+  effectiveAt,
+}: {
+  posting: LedgerPostingModel
+  postings: LedgerPostingModel[]
+  effectiveAt: string
+}) {
   const asset = parseLedgerAsset(
     posting.assetId,
     posting.assetSymbol,
@@ -81,7 +117,7 @@ function LedgerPostingRow({ posting, postings }: { posting: LedgerPostingModel; 
     </td>
     <td>{formatLedgerMoney(posting.fairValue, posting.denomination, postings)}</td>
     <td>{formatLedgerUnitPrice(posting, postings)}</td>
-    <td>{formatLedgerMoney(posting.costBasis, posting.denomination, postings)}</td>
+    <td><LedgerTaxCostBasis posting={posting} postings={postings} effectiveAt={effectiveAt} /></td>
   </tr>
 }
 
@@ -151,7 +187,7 @@ function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
         <div><span>확정 장부</span><h3 id={`posting-title-${event.eventId}`}>자산 변동과 세무 입력</h3></div>
         <b>{event.postings.length}건</b>
       </header>
-      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>당시 취득·처분 금액</th><th>평균 단가</th><th>세무 취득원가</th></tr></thead><tbody>{event.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} postings={event.postings} />)}</tbody></table></div> : <p>현재 변경본에 확정된 장부 반영 내역이 없습니다.</p>}
+      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>당시 취득·처분 금액</th><th>평균 단가</th><th>세무 취득원가</th></tr></thead><tbody>{event.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} postings={event.postings} effectiveAt={event.effectiveAt} />)}</tbody></table></div> : <p>현재 변경본에 확정된 장부 반영 내역이 없습니다.</p>}
     </section>
 
     <details className="ledger-explorer-provenance">

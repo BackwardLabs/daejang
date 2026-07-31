@@ -976,6 +976,13 @@ export const createTaxProfiles = (rows) => {
   return { schemaVersion: 'tax.downstream-profile-set.v1', profiles }
 }
 
+export const configureTaxUpbitQuoteRuntime = (config) => ({
+  ...config,
+  firstTradeAfterMaxSeconds: 604800,
+  maxCandleAgeSeconds: 600,
+  policyVersion: 'upbit-closed-minute-10m-or-inbound-first-trade-v4',
+})
+
 const createTaxRuntime = async (queryURL) => {
   const client = new Client({ connectionString: queryURL })
   await client.connect()
@@ -1045,12 +1052,10 @@ const createTaxRuntime = async (queryURL) => {
   const profileSet = createTaxProfiles(rows)
   if (profileSet.profiles.length === 0) return null
   const profiles = canonicalJSON(profileSet)
-  const upbitConfig = JSON.parse(readFileSync(
+  const upbitConfig = configureTaxUpbitQuoteRuntime(JSON.parse(readFileSync(
     join(taxRepository, 'config', 'upbit-quote-provider.v1.json'),
     'utf8',
-  ))
-  upbitConfig.firstTradeAfterMaxSeconds = 3600
-  upbitConfig.policyVersion = 'upbit-closed-minute-or-airdrop-first-trade-v2'
+  )))
 
   const files = {
     policy: join(configRoot, 'tax-interpretation-policy.json'),
@@ -1546,6 +1551,37 @@ const restart = () => withOperationLock(async () => {
   })
 })
 
+const taxBackfill = (subjectID, eventID) => withOperationLock(async () => {
+  if (!subjectID || !eventID) {
+    throw new Error('tax-backfill requires subject and event IDs')
+  }
+  if (isRunning('taxd')) {
+    throw new Error('Stop taxd before applying a valuation backfill')
+  }
+  assertExternalRuntimeRoot()
+  ensureRuntimeDirectories()
+  loadRuntimeEnvironment()
+  const queryURL = databaseURL(
+    'daejang_query_app',
+    process.env.DAEJANG_QUERY_APP_PASSWORD,
+  )
+  const taxURL = databaseURL(
+    'daejang_tax_app',
+    process.env.DAEJANG_TAX_APP_PASSWORD,
+  )
+  const runtime = await createTaxRuntime(queryURL)
+  run(
+    join(binaryRoot, 'tax-backfill'),
+    [
+      '-subject', subjectID,
+      '-event', eventID,
+      '-tax-year', '2027',
+      '-apply',
+    ],
+    { cwd: taxRepository, env: taxEnvironment(taxURL, runtime) },
+  )
+})
+
 const status = () => {
   for (const name of allServiceOrder) {
     const state = isRunning(name) ? 'running' : 'stopped'
@@ -1841,6 +1877,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   else if (command === 'stop') await stop()
   else if (command === 'restart') {
     await restart()
+  } else if (command === 'tax-backfill') {
+    await taxBackfill(process.argv[3], process.argv[4])
   } else if (command === 'status') status()
   else if (command === 'logs') logs()
   else if (command === 'supervise') {
@@ -1859,5 +1897,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   else if (command === 'watchdog') {
     runSupervisorWatchdog(fileURLToPath(import.meta.url))
   }
-  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|supervise|watchdog|install-autostart')
+  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|tax-backfill <subject> <event>|supervise|watchdog|install-autostart')
 }

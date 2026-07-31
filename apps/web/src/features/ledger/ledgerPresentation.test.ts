@@ -83,6 +83,18 @@ describe('ledger posting presentation', () => {
     expect(formatLedgerUnitPrice(postings[2]!, postings)).toBe('—')
   })
 
+  it('formats persisted airdrop fair value and derives its unit price without a KRW posting leg', () => {
+    const postings = [{
+      assetId: 'asset-zbt-upbit', assetSymbol: 'ZBT', assetDecimals: 8,
+      hasAssetDecimals: true, assetVenue: 'upbit', direction: 'IN',
+      quantity: '4000000000', role: 'PRINCIPAL', fairValue: '3856000000000',
+      denomination: 'asset-krw-upbit',
+    }]
+
+    expect(formatLedgerMoney(postings[0]!.fairValue, postings[0]!.denomination, postings)).toBe('38,560 KRW')
+    expect(formatLedgerUnitPrice(postings[0]!, postings)).toBe('964 KRW / ZBT')
+  })
+
   it('explains posting directions and roles in product language', () => {
     expect(describePostingDirection('IN')).toBe('들어옴')
     expect(describePostingDirection('OUT')).toBe('나감')
