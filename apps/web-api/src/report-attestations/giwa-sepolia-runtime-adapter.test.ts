@@ -48,6 +48,7 @@ class MemoryOperationStore
   readonly records = new Map<
     string,
     {
+      preparedRecordId: string
       action: ReportAttestationOperationAction
       fingerprint: Hex32
       state: 'IN_FLIGHT' | 'CONFIRMED' | 'RECONCILIATION'
@@ -98,6 +99,7 @@ class MemoryOperationStore
       }
     }
     this.records.set(input.canonicalOperationKey, {
+      preparedRecordId: input.preparedRecordId,
       action: input.action,
       fingerprint: input.planFingerprint,
       state: 'IN_FLIGHT',
@@ -127,6 +129,8 @@ class MemoryOperationStore
 
   async confirm(input: {
     canonicalOperationKey: string
+    preparedRecordId: string
+    action: ReportAttestationOperationAction
     planFingerprint: Hex32
     transactionHash: Hex32
     attestationUID: Hex32
@@ -135,13 +139,41 @@ class MemoryOperationStore
     const record = this.records.get(
       input.canonicalOperationKey,
     )
-    if (!record || record.fingerprint !== input.planFingerprint) {
+    if (
+      !record ||
+      record.preparedRecordId !== input.preparedRecordId ||
+      record.action !== input.action ||
+      record.fingerprint !== input.planFingerprint
+    ) {
       throw new Error('missing claim')
     }
     record.state = 'CONFIRMED'
     record.transactionHash = input.transactionHash
     record.attestationUID = input.attestationUID
     record.resultStatus = input.resultStatus
+  }
+
+  async verifyReconciliationBinding(input: {
+    canonicalOperationKey: string
+    preparedRecordId: string
+    action: ReportAttestationOperationAction
+    planFingerprint: Hex32
+    transactionHash: Hex32
+  }) {
+    const record = this.records.get(
+      input.canonicalOperationKey,
+    )
+    if (
+      !record ||
+      record.preparedRecordId !== input.preparedRecordId ||
+      record.action !== input.action ||
+      record.fingerprint !== input.planFingerprint ||
+      record.transactionHash !== input.transactionHash ||
+      (record.state !== 'RECONCILIATION' &&
+        record.state !== 'CONFIRMED')
+    ) {
+      throw new Error('reconciliation binding mismatch')
+    }
   }
 
   async requireReconciliation(input: {
@@ -186,6 +218,9 @@ const rawPrepared = (input: Record<string, unknown>) => ({
 const contractsModuleForTargets = (
   issuerTarget = EAS_ADDRESS,
   reviewerTarget = EAS_ADDRESS,
+  reconciliationStatus: 'CONFIRMED' | 'PENDING' =
+    'CONFIRMED',
+  reconciliationAttemptsBroadcast = false,
 ) => ({
   createGiwaSepoliaReportRuntimeV1: (options: {
     issuerSigner: {
@@ -271,6 +306,48 @@ const contractsModuleForTargets = (
         transactionHash,
         attestationUID: APPROVAL_UID,
         reasonCode: null,
+      }
+    },
+    reconcileDecision: async (
+      prepared: Record<string, unknown>,
+      submissionUID: Hex32,
+      transactionHash: Hex32,
+    ) => {
+      await options.reviewDecisionSource.readAuthenticatedDecision({
+        preparedRecordId: prepared.preparedRecordId,
+        submissionUID,
+        reportId: prepared.reportId,
+        revision: prepared.revision,
+        commitment: prepared.commitment,
+        evidenceSchemaDigest:
+          prepared.evidenceSchemaDigest,
+        derivationRuleDigest:
+          prepared.derivationRuleDigest,
+      })
+      if (reconciliationAttemptsBroadcast) {
+        await options.reviewerSigner.sendTransaction({
+          operationKey:
+            `reviewer-decision:v1:${submissionUID}`,
+          fingerprint: REVIEW_PLAN,
+          chainId: 91_342,
+          to: EAS_ADDRESS,
+          data: '0xabcd',
+          value: 0n,
+        })
+      }
+      return {
+        status: reconciliationStatus,
+        operationKey: `reviewer-decision:v1:${submissionUID}`,
+        fingerprint: REVIEW_PLAN,
+        transactionHash,
+        attestationUID:
+          reconciliationStatus === 'CONFIRMED'
+            ? APPROVAL_UID
+            : null,
+        reasonCode:
+          reconciliationStatus === 'CONFIRMED'
+            ? null
+            : 'RECEIPT_PENDING',
       }
     },
     readReport: async (
@@ -417,6 +494,7 @@ describe('GIWA Sepolia runtime adapter', () => {
     harness.operationStore.records.set(
       'issuer-submit:v1:ep_test',
       {
+        preparedRecordId: 'ep_test',
         action: 'SUBMIT',
         fingerprint: SUBMIT_PLAN,
         state: 'IN_FLIGHT',
@@ -513,6 +591,155 @@ describe('GIWA Sepolia runtime adapter', () => {
       state: 'CONFIRMED',
       resultStatus: 'USABLE',
     })
+  })
+
+  it('reconciles a saved reviewer tx without invoking either signer', async () => {
+    const harness = await createHarness()
+    const operationKey =
+      `reviewer-decision:v1:${SUBMISSION_UID}`
+    harness.operationStore.records.set(operationKey, {
+      preparedRecordId: 'ep_test',
+      action: 'APPROVE',
+      fingerprint: REVIEW_PLAN,
+      state: 'RECONCILIATION',
+      transactionHash: REVIEW_TX,
+      attestationUID: null,
+      resultStatus: null,
+    })
+
+    const result =
+      await harness.runtime.reviewerReconciler.reconcileReviewer({
+        preparedRecordId: 'ep_test',
+        submissionUID: SUBMISSION_UID,
+        transactionHash: REVIEW_TX,
+      })
+
+    expect(result).toEqual({
+      status: 'CONFIRMED',
+      transactionHash: REVIEW_TX,
+      attestationUID: APPROVAL_UID,
+      reasonCode: null,
+    })
+    expect(harness.issuerSend).not.toHaveBeenCalled()
+    expect(harness.reviewerSend).not.toHaveBeenCalled()
+    expect(
+      harness.operationStore.records.get(operationKey),
+    ).toMatchObject({
+      preparedRecordId: 'ep_test',
+      action: 'APPROVE',
+      state: 'CONFIRMED',
+      transactionHash: REVIEW_TX,
+      attestationUID: APPROVAL_UID,
+      resultStatus: 'USABLE',
+    })
+  })
+
+  it('keeps an observed reviewer tx pending without confirming or rebroadcasting it', async () => {
+    const harness = await createHarness({
+      contractsModule: contractsModuleForTargets(
+        EAS_ADDRESS,
+        EAS_ADDRESS,
+        'PENDING',
+      ),
+    })
+    const operationKey =
+      `reviewer-decision:v1:${SUBMISSION_UID}`
+    harness.operationStore.records.set(operationKey, {
+      preparedRecordId: 'ep_test',
+      action: 'APPROVE',
+      fingerprint: REVIEW_PLAN,
+      state: 'RECONCILIATION',
+      transactionHash: REVIEW_TX,
+      attestationUID: null,
+      resultStatus: null,
+    })
+
+    const result =
+      await harness.runtime.reviewerReconciler.reconcileReviewer({
+        preparedRecordId: 'ep_test',
+        submissionUID: SUBMISSION_UID,
+        transactionHash: REVIEW_TX,
+      })
+
+    expect(result).toEqual({
+      status: 'PENDING',
+      transactionHash: REVIEW_TX,
+      attestationUID: null,
+      reasonCode: 'RECEIPT_PENDING',
+    })
+    expect(harness.reviewerSend).not.toHaveBeenCalled()
+    expect(
+      harness.operationStore.records.get(operationKey)?.state,
+    ).toBe('RECONCILIATION')
+  })
+
+  it('fails closed when the saved operation fingerprint does not match the observed tx plan', async () => {
+    const harness = await createHarness()
+    const operationKey =
+      `reviewer-decision:v1:${SUBMISSION_UID}`
+    harness.operationStore.records.set(operationKey, {
+      preparedRecordId: 'ep_test',
+      action: 'APPROVE',
+      fingerprint: hex32('different-review-plan'),
+      state: 'RECONCILIATION',
+      transactionHash: REVIEW_TX,
+      attestationUID: null,
+      resultStatus: null,
+    })
+
+    const result =
+      await harness.runtime.reviewerReconciler.reconcileReviewer({
+        preparedRecordId: 'ep_test',
+        submissionUID: SUBMISSION_UID,
+        transactionHash: REVIEW_TX,
+      })
+
+    expect(result).toEqual({
+      status: 'RECONCILIATION_REQUIRED',
+      transactionHash: REVIEW_TX,
+      attestationUID: null,
+      reasonCode: 'RUNTIME_RESULT_BINDING_MISMATCH',
+    })
+    expect(harness.reviewerSend).not.toHaveBeenCalled()
+    expect(
+      harness.operationStore.records.get(operationKey)?.state,
+    ).toBe('RECONCILIATION')
+  })
+
+  it('rejects any contracts runtime attempt to broadcast during reconciliation', async () => {
+    const harness = await createHarness({
+      contractsModule: contractsModuleForTargets(
+        EAS_ADDRESS,
+        EAS_ADDRESS,
+        'CONFIRMED',
+        true,
+      ),
+    })
+    const operationKey =
+      `reviewer-decision:v1:${SUBMISSION_UID}`
+    harness.operationStore.records.set(operationKey, {
+      preparedRecordId: 'ep_test',
+      action: 'APPROVE',
+      fingerprint: REVIEW_PLAN,
+      state: 'RECONCILIATION',
+      transactionHash: REVIEW_TX,
+      attestationUID: null,
+      resultStatus: null,
+    })
+
+    await expect(
+      harness.runtime.reviewerReconciler.reconcileReviewer({
+        preparedRecordId: 'ep_test',
+        submissionUID: SUBMISSION_UID,
+        transactionHash: REVIEW_TX,
+      }),
+    ).rejects.toThrow(
+      'Attestation broadcast is disabled during reconciliation',
+    )
+    expect(harness.reviewerSend).not.toHaveBeenCalled()
+    expect(
+      harness.operationStore.records.get(operationKey)?.state,
+    ).toBe('RECONCILIATION')
   })
 
   it('fails before signing when persisted evidence bytes drift', async () => {

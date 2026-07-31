@@ -51,8 +51,17 @@ export interface ReportAttestationOperationStore {
     planFingerprint: Hex32
     transactionHash: Hex32
   }): Promise<void>
+  verifyReconciliationBinding(input: {
+    canonicalOperationKey: string
+    preparedRecordId: string
+    action: ReportAttestationOperationAction
+    planFingerprint: Hex32
+    transactionHash: Hex32
+  }): Promise<void>
   confirm(input: {
     canonicalOperationKey: string
+    preparedRecordId: string
+    action: ReportAttestationOperationAction
     planFingerprint: Hex32
     transactionHash: Hex32
     attestationUID: Hex32
@@ -440,8 +449,73 @@ export class PostgresReportAttestationOperationStore
     })
   }
 
+  async verifyReconciliationBinding(input: {
+    canonicalOperationKey: string
+    preparedRecordId: string
+    action: ReportAttestationOperationAction
+    planFingerprint: Hex32
+    transactionHash: Hex32
+  }) {
+    const databaseKey = databaseOperationKey(
+      input.canonicalOperationKey,
+    )
+    const planFingerprint = normalizeHex32(
+      input.planFingerprint,
+      'Plan fingerprint',
+    )
+    const transactionHash = normalizeHex32(
+      input.transactionHash,
+      'Transaction hash',
+    )
+    if (
+      !/^(SUBMIT|APPROVE|REJECT)$/.test(input.action) ||
+      !/^[A-Za-z0-9_-]{1,160}$/.test(input.preparedRecordId)
+    ) {
+      throw new Error('Operation context is invalid')
+    }
+    await this.#transaction(async (client) => {
+      const recordResult = await client.query<{ id: string }>(
+        `
+          SELECT id
+          FROM web_private.report_attestation_records
+          WHERE prepared_record_id = $1
+          FOR UPDATE
+        `,
+        [input.preparedRecordId],
+      )
+      const recordId = recordResult.rows[0]?.id
+      if (!recordId) {
+        throw new Error(
+          'Prepared report record is unavailable for reconciliation',
+        )
+      }
+      const row = await this.#readForUpdate(client, databaseKey)
+      assertBinding(row, {
+        databaseKey,
+        recordId,
+        action: input.action,
+        planFingerprint,
+      })
+      if (
+        row.state !== 'RECONCILIATION_REQUIRED' &&
+        row.state !== 'CONFIRMED'
+      ) {
+        throw new Error(
+          'Operation is not available for reconciliation',
+        )
+      }
+      if (row.tx_hash !== transactionHash) {
+        throw new Error(
+          'Operation reconciliation transaction hash conflict',
+        )
+      }
+    })
+  }
+
   async confirm(input: {
     canonicalOperationKey: string
+    preparedRecordId: string
+    action: ReportAttestationOperationAction
     planFingerprint: Hex32
     transactionHash: Hex32
     attestationUID: Hex32
@@ -462,11 +536,37 @@ export class PostgresReportAttestationOperationStore
       input.attestationUID,
       'Attestation UID',
     )
+    if (
+      !/^(SUBMIT|APPROVE|REJECT)$/.test(input.action) ||
+      !/^[A-Za-z0-9_-]{1,160}$/.test(input.preparedRecordId)
+    ) {
+      throw new Error('Operation context is invalid')
+    }
     await this.#transaction(async (client) => {
+      const recordResult = await client.query<{ id: string }>(
+        `
+          SELECT id
+          FROM web_private.report_attestation_records
+          WHERE prepared_record_id = $1
+          FOR UPDATE
+        `,
+        [input.preparedRecordId],
+      )
+      const recordId = recordResult.rows[0]?.id
+      if (!recordId) {
+        throw new Error(
+          'Prepared report record is unavailable for operation confirmation',
+        )
+      }
       const row = await this.#readForUpdate(client, databaseKey)
-      assertBinding(row, { databaseKey, planFingerprint })
+      assertBinding(row, {
+        databaseKey,
+        recordId,
+        action: input.action,
+        planFingerprint,
+      })
       const expectedResult = resultForAction(
-        row.action as ReportAttestationOperationAction,
+        input.action,
       )
       if (input.resultStatus !== expectedResult) {
         throw new Error(

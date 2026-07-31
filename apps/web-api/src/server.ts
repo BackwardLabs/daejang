@@ -47,6 +47,9 @@ const start = async () => {
   let pool: Pool | undefined
   let engineClient: EngineClient | undefined
   let giwaRuntime: GiwaRuntimeResources | undefined
+  let reportAttestationSchema:
+    | Awaited<ReturnType<typeof assertReportAttestationSchema>>
+    | undefined
   let uploadCleanup: UploadCleanup | undefined
   let app: Awaited<ReturnType<typeof buildApp>>['app'] | undefined
 
@@ -83,7 +86,8 @@ const start = async () => {
         await assertReportPaymentSchema(pool)
       }
       if (config.reportAttestationSyntheticTestnet) {
-        await assertReportAttestationSchema(pool)
+        reportAttestationSchema =
+          await assertReportAttestationSchema(pool)
       }
     }
     if (config.privateObjectRoot) {
@@ -195,6 +199,9 @@ const start = async () => {
               identityKey: giwaRuntime.identityKey,
               publicationSource:
                 giwaRuntime.publicationSource,
+              reconciliationEnabled:
+                reportAttestationSchema
+                  ?.reconciliationEnabled === true,
             },
           }
         : {}),

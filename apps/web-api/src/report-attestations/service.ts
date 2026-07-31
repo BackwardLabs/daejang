@@ -405,7 +405,8 @@ export class ReportAttestationService {
         const retryableWrite =
           (record.lifecycle === 'PENDING' ||
             record.lifecycle === 'RETRY_REQUIRED') &&
-          confirmedSubmission
+          confirmedSubmission &&
+          !isHex32(record.review?.transactionHash ?? null)
         const retryableReadOnlyReconciliation =
           record.lifecycle === 'RECONCILIATION_REQUIRED' &&
           record.failureCode === 'REVIEW_RECONCILIATION_FAILED' &&
@@ -451,6 +452,76 @@ export class ReportAttestationService {
       this.#runReviewer(ownerId, reportId, queued.revision),
     )
     return serializeStatus(queued)
+  }
+
+  async reconcileReview(ownerId: string, reportId: string) {
+    this.#assertOpen()
+    const target = await this.#store.get(ownerId, reportId)
+    if (!target) return undefined
+
+    const queued = await this.#store.update(
+      ownerId,
+      reportId,
+      target.revision,
+      (record) => {
+        const confirmedSubmission =
+          record.submission !== undefined &&
+          isConfirmedExecutionResult(record.submission)
+        const reviewTransactionHash =
+          record.review?.transactionHash ?? null
+        const receiptNeedsReconciliation =
+          (record.lifecycle === 'RECONCILIATION_REQUIRED' ||
+            record.lifecycle === 'PENDING' ||
+            record.lifecycle === 'RETRY_REQUIRED') &&
+          record.review !== undefined &&
+          (record.review.status ===
+            'RECONCILIATION_REQUIRED' ||
+            record.review.status === 'PENDING' ||
+            record.review.status === 'RETRY_REQUIRED') &&
+          isHex32(reviewTransactionHash) &&
+          record.review.attestationUID === null
+        const postStateNeedsReconciliation =
+          record.lifecycle === 'RECONCILIATION_REQUIRED' &&
+          record.failureCode ===
+            'REVIEW_RECONCILIATION_FAILED' &&
+          record.review !== undefined &&
+          isConfirmedExecutionResult(record.review)
+        if (
+          !confirmedSubmission ||
+          (!receiptNeedsReconciliation &&
+            !postStateNeedsReconciliation)
+        ) {
+          return undefined
+        }
+        return {
+          ...record,
+          lifecycle: 'REVIEW_QUEUED',
+          failureCode: undefined,
+          updatedAt: this.#now(),
+        }
+      },
+    )
+    if (!queued) {
+      const current = await this.#store.get(
+        ownerId,
+        reportId,
+        target.revision,
+      )
+      return current ? serializeStatus(current) : undefined
+    }
+
+    await this.#runReviewer(
+      ownerId,
+      reportId,
+      queued.revision,
+      true,
+    )
+    const reconciled = await this.#store.get(
+      ownerId,
+      reportId,
+      queued.revision,
+    )
+    return reconciled ? serializeStatus(reconciled) : undefined
   }
 
   async verify(ownerId: string, reportId: string): Promise<ReportVerification | undefined> {
@@ -623,6 +694,7 @@ export class ReportAttestationService {
     ownerId: string,
     reportId: string,
     revision: number,
+    reconciliationOnly = false,
   ) {
     const reviewing = await this.#store.update(
       ownerId,
@@ -653,6 +725,60 @@ export class ReportAttestationService {
         : undefined
     if (preservedReceipt) {
       result = preservedReceipt
+    } else if (reconciliationOnly) {
+      const persistedReview = reviewing.review
+      const persistedTransactionHash =
+        persistedReview?.transactionHash ?? null
+      if (
+        !persistedReview ||
+        !isHex32(persistedTransactionHash) ||
+        persistedReview.attestationUID !== null ||
+        !this.#runtime.reviewerReconciler
+      ) {
+        result = persistedReview ?? EMPTY_RESULT
+      } else {
+        try {
+          const rawResult =
+            await this.#runtime.reviewerReconciler.reconcileReviewer({
+              preparedRecordId: reviewing.preparedRecordId,
+              submissionUID,
+              transactionHash: persistedTransactionHash,
+            })
+          const sanitized = sanitizeResult(rawResult)
+          const validConfirmedResult =
+            rawResult.status === 'CONFIRMED' &&
+            isConfirmedExecutionResult(rawResult) &&
+            isHex32(rawResult.transactionHash) &&
+            rawResult.transactionHash.toLowerCase() ===
+              persistedTransactionHash.toLowerCase()
+          const validPendingResult =
+            isNonTerminalRuntimeStatus(rawResult.status) &&
+            rawResult.status !== 'MANUAL_REVIEW' &&
+            rawResult.transactionHash !== null &&
+            rawResult.transactionHash.toLowerCase() ===
+              persistedTransactionHash.toLowerCase() &&
+            rawResult.attestationUID === null
+          result =
+            validConfirmedResult || validPendingResult
+              ? sanitized
+              : {
+                  status: 'RECONCILIATION_REQUIRED',
+                  transactionHash: persistedTransactionHash,
+                  attestationUID: null,
+                  reasonCode:
+                    'RUNTIME_RESULT_BINDING_MISMATCH',
+                }
+        } catch {
+          result = {
+            status: 'RECONCILIATION_REQUIRED',
+            transactionHash: persistedTransactionHash,
+            attestationUID: null,
+            reasonCode:
+              persistedReview.reasonCode ??
+              'RECEIPT_OR_POST_STATE_NOT_VERIFIED',
+          }
+        }
+      }
     } else {
       try {
         const rawResult =

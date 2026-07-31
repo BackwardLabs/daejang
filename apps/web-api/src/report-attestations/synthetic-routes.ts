@@ -225,6 +225,7 @@ export const registerSyntheticReportAttestationRoutes = async (
   app: FastifyInstance,
   options: {
     enabled: boolean
+    reconciliationEnabled: boolean
     disabledReasonCode: string | null
     capability: SyntheticReportAttestationCapabilityDescriptor
     service?: ReportAttestationService
@@ -315,8 +316,20 @@ export const registerSyntheticReportAttestationRoutes = async (
     }
   }
 
+  const assertServiceAvailable = () => {
+    if (!options.enabled || !options.service) {
+      throw new ApiError(
+        503,
+        'REPORT_ATTESTATION_WRITER_UNAVAILABLE',
+        'GIWA Sepolia 증명 쓰기 기능을 현재 사용할 수 없습니다.',
+      )
+    }
+    return options.service
+  }
+
   const assertWritable = () => {
-    if (!options.enabled || !options.service || !options.publicationSource) {
+    const service = assertServiceAvailable()
+    if (!options.publicationSource) {
       throw new ApiError(
         503,
         'REPORT_ATTESTATION_WRITER_UNAVAILABLE',
@@ -324,7 +337,7 @@ export const registerSyntheticReportAttestationRoutes = async (
       )
     }
     return {
-      service: options.service,
+      service,
       publicationSource: options.publicationSource,
     }
   }
@@ -353,6 +366,42 @@ export const registerSyntheticReportAttestationRoutes = async (
       },
     },
     async (request) => snapshot(assertAuthenticatedOwner(request)),
+  )
+
+  app.post(
+    '/api/v1/report-attestations/synthetic-publication/reconcile',
+    {
+      schema: {
+        querystring: emptyRequestSchema,
+        response: { 200: snapshotSchema },
+      },
+    },
+    async (request) => {
+      const ownerId = assertAuthenticatedOwner(request)
+      if (options.enabled && !options.reconciliationEnabled) {
+        throw new ApiError(
+          503,
+          'REPORT_ATTESTATION_RECONCILIATION_NOT_READY',
+          '현재 증명 상태 확인 기능을 준비 중입니다.',
+        )
+      }
+      try {
+        if (options.enabled && options.service) {
+          await options.service.reconcileReview(
+            ownerId,
+            SYNTHETIC_TESTNET_REPORT_ID,
+          )
+        }
+        return snapshot(ownerId)
+      } catch (error) {
+        if (error instanceof ApiError) throw error
+        throw new ApiError(
+          503,
+          'REPORT_ATTESTATION_RECONCILIATION_UNAVAILABLE',
+          '현재 증명 상태를 다시 확인하지 못했습니다.',
+        )
+      }
+    },
   )
 
   app.post(

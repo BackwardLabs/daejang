@@ -73,6 +73,11 @@ type RawRuntime = Readonly<{
     prepared: unknown,
     submissionUID: Hex32,
   ): Promise<unknown>
+  reconcileDecision(
+    prepared: unknown,
+    submissionUID: Hex32,
+    transactionHash: Hex32,
+  ): Promise<unknown>
   readReport(
     reportId: Hex32,
     candidateUID?: Hex32,
@@ -163,6 +168,7 @@ export interface ProductionGiwaSepoliaReportRuntime
 
 type OperationContext = {
   preparedRecordId: string
+  broadcastAllowed: boolean
   action: ReportAttestationOperationAction | null
   claim: ReportAttestationOperationClaim | null
   requestOperationKey: string | null
@@ -389,6 +395,7 @@ const validateRuntime = (value: unknown): RawRuntime => {
     typeof value.preflight !== 'function' ||
     typeof value.submit !== 'function' ||
     typeof value.decide !== 'function' ||
+    typeof value.reconcileDecision !== 'function' ||
     typeof value.readReport !== 'function' ||
     typeof value.verify !== 'function'
   ) {
@@ -550,6 +557,11 @@ class OnceOnlyAttestationSigner {
   async sendTransaction(requestValue: unknown) {
     const request = this.#validateRequest(requestValue)
     const context = this.context.getStore()
+    if (context?.broadcastAllowed === false) {
+      throw new Error(
+        'Attestation broadcast is disabled during reconciliation',
+      )
+    }
     const action = this.defaultAction ?? context?.action
     if (!context || action === null || action === undefined) {
       throw new Error(
@@ -980,6 +992,8 @@ const createRuntimeAdapter = async (
       try {
         await options.operationStore.confirm({
           canonicalOperationKey: result.operationKey,
+          preparedRecordId: context.preparedRecordId,
+          action: context.action,
           planFingerprint: result.fingerprint,
           transactionHash: result.transactionHash,
           attestationUID: result.attestationUID,
@@ -1046,6 +1060,7 @@ const createRuntimeAdapter = async (
     const rebuilt = await readAndRebuild(preparedRecordId)
     const context: OperationContext = {
       preparedRecordId,
+      broadcastAllowed: true,
       action: initialAction,
       claim: null,
       requestOperationKey: null,
@@ -1068,6 +1083,138 @@ const createRuntimeAdapter = async (
       transactionHash: settled.transactionHash,
       attestationUID: settled.attestationUID,
       reasonCode: settled.reasonCode,
+    }
+  }
+
+  const reconcileReview = async (input: {
+    preparedRecordId: string
+    submissionUID: Hex32
+    transactionHash: Hex32
+  }): Promise<RedactedExecutionResult> => {
+    const { prepared, projection } = await readAndRebuild(
+      input.preparedRecordId,
+    )
+    const submissionUID = normalizeHex32(
+      input.submissionUID,
+      'Submission UID',
+    )
+    const transactionHash = normalizeHex32(
+      input.transactionHash,
+      'Transaction hash',
+    )
+    if (
+      projection.submissionAttestationUID !== null &&
+      projection.submissionAttestationUID !== submissionUID
+    ) {
+      throw new GiwaSepoliaContractsRuntimeError(
+        'GIWA_PREPARED_RECORD_MISMATCH',
+      )
+    }
+
+    const context: OperationContext = {
+      preparedRecordId: input.preparedRecordId,
+      broadcastAllowed: false,
+      action: null,
+      claim: null,
+      requestOperationKey: null,
+      requestFingerprint: null,
+      observedTransactionHash: transactionHash,
+    }
+    const result = await operationContext.run(
+      context,
+      async () =>
+        validateRawWriteResult(
+          await rawRuntime.reconcileDecision(
+            prepared,
+            submissionUID,
+            transactionHash,
+          ),
+        ),
+    )
+    if (
+      context.action === null ||
+      result.transactionHash !== transactionHash
+    ) {
+      return {
+        status: 'RECONCILIATION_REQUIRED',
+        transactionHash,
+        attestationUID: null,
+        reasonCode: 'RUNTIME_RESULT_BINDING_MISMATCH',
+      }
+    }
+
+    try {
+      await options.operationStore.verifyReconciliationBinding({
+        canonicalOperationKey: result.operationKey,
+        preparedRecordId: context.preparedRecordId,
+        action: context.action,
+        planFingerprint: result.fingerprint,
+        transactionHash,
+      })
+    } catch {
+      return {
+        status: 'RECONCILIATION_REQUIRED',
+        transactionHash,
+        attestationUID: null,
+        reasonCode: 'RUNTIME_RESULT_BINDING_MISMATCH',
+      }
+    }
+
+    if (
+      result.status !== 'CONFIRMED' ||
+      result.attestationUID === null
+    ) {
+      return {
+        status: result.status,
+        transactionHash,
+        attestationUID: null,
+        reasonCode: result.reasonCode,
+      }
+    }
+
+    if (minimumConfirmations > 1) {
+      try {
+        await confirmationClient?.call(
+          options.publicClient,
+          {
+            hash: transactionHash,
+            confirmations: minimumConfirmations,
+          },
+        )
+      } catch {
+        return {
+          status: 'RECONCILIATION_REQUIRED',
+          transactionHash,
+          attestationUID: null,
+          reasonCode: 'MINIMUM_CONFIRMATIONS_NOT_REACHED',
+        }
+      }
+    }
+
+    try {
+      await options.operationStore.confirm({
+        canonicalOperationKey: result.operationKey,
+        preparedRecordId: context.preparedRecordId,
+        action: context.action,
+        planFingerprint: result.fingerprint,
+        transactionHash,
+        attestationUID: result.attestationUID,
+        resultStatus: resultStatusForAction(context.action),
+      })
+    } catch {
+      return {
+        status: 'RECONCILIATION_REQUIRED',
+        transactionHash,
+        attestationUID: null,
+        reasonCode: 'OPERATION_CONFIRMATION_NOT_PERSISTED',
+      }
+    }
+
+    return {
+      status: 'CONFIRMED',
+      transactionHash,
+      attestationUID: result.attestationUID,
+      reasonCode: null,
     }
   }
 
@@ -1108,6 +1255,9 @@ const createRuntimeAdapter = async (
             )
           },
         ),
+    },
+    reviewerReconciler: {
+      reconcileReviewer: reconcileReview,
     },
     prepareSyntheticEvidence: async (
       input: PreparedReportInput,

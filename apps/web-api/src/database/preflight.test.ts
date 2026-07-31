@@ -103,10 +103,11 @@ const validReportPaymentContract = {
 const validReportAttestationContract = {
   records_table: 'web_private.report_attestation_records',
   operations_table: 'web_private.report_attestation_operations',
-  contract_version: 1,
+  contract_version: 2,
   contract_digest:
-    'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561',
-  migration_version: '53',
+    '75a290d93496fee07431e35bf0b7b2db6930b9571884e08140ab2fedef30ee40',
+  meta_contract_version: 2,
+  migration_version: '61',
   record_guard: true,
   operation_guard: true,
   web_usage: true,
@@ -222,12 +223,30 @@ describe('report payment schema preflight', () => {
 })
 
 describe('report attestation schema preflight', () => {
-  it('accepts the guarded DB53 report attestation contract', async () => {
+  it('accepts the guarded DB53 and DB54 report attestation contracts', async () => {
+    await expect(
+      assertReportAttestationSchema(
+        poolReturning({
+          ...validReportAttestationContract,
+          contract_version: 1,
+          contract_digest:
+            'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561',
+          meta_contract_version: 1,
+          migration_version: '53',
+        }),
+      ),
+    ).resolves.toEqual({
+      contractVersion: 1,
+      reconciliationEnabled: false,
+    })
     await expect(
       assertReportAttestationSchema(
         poolReturning(validReportAttestationContract),
       ),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({
+      contractVersion: 2,
+      reconciliationEnabled: true,
+    })
   })
 
   it('rejects a wrong digest or missing transition guard', async () => {
@@ -246,6 +265,34 @@ describe('report attestation schema preflight', () => {
         poolReturning({
           ...validReportAttestationContract,
           operation_guard: false,
+        }),
+      ),
+    ).rejects.toThrow(
+      'report attestation persistence migration contract is invalid',
+    )
+  })
+
+  it('rejects mixed report attestation contract and migration versions', async () => {
+    await expect(
+      assertReportAttestationSchema(
+        poolReturning({
+          ...validReportAttestationContract,
+          contract_version: 1,
+          contract_digest:
+            'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561',
+          meta_contract_version: 2,
+          migration_version: '54',
+        }),
+      ),
+    ).rejects.toThrow(
+      'report attestation persistence migration contract is invalid',
+    )
+    await expect(
+      assertReportAttestationSchema(
+        poolReturning({
+          ...validReportAttestationContract,
+          meta_contract_version: 1,
+          migration_version: '53',
         }),
       ),
     ).rejects.toThrow(

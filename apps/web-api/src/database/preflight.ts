@@ -398,8 +398,10 @@ export const assertTaxReportSchema = async (pool: Pool) => {
 
 const reportPaymentContractDigest =
   '28f6894a953e6acc5c238b04e025662ee6bc7d3b5dbd31e783c40789b9e6dcf4'
-const reportAttestationContractDigest =
+const reportAttestationContractDigestV1 =
   'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561'
+const reportAttestationContractDigestV2 =
+  '75a290d93496fee07431e35bf0b7b2db6930b9571884e08140ab2fedef30ee40'
 
 export const assertReportPaymentSchema = async (pool: Pool) => {
   const result = await pool.query<{
@@ -437,6 +439,7 @@ export const assertReportAttestationSchema = async (pool: Pool) => {
     operations_table: string | null
     contract_version: number | null
     contract_digest: string | null
+    meta_contract_version: number | null
     migration_version: string | null
     record_guard: boolean
     operation_guard: boolean
@@ -466,10 +469,14 @@ export const assertReportAttestationSchema = async (pool: Pool) => {
         WHERE component = 'report-attestation-persistence'
       ) AS contract_digest,
       (
+        SELECT contract_version
+        FROM daejang_meta.schema_contract
+        WHERE component = 'report-attestation-persistence'
+      ) AS meta_contract_version,
+      (
         SELECT migration_version::text
         FROM daejang_meta.schema_contract
         WHERE component = 'report-attestation-persistence'
-          AND contract_version = 1
       ) AS migration_version,
       EXISTS (
         SELECT 1
@@ -540,14 +547,23 @@ export const assertReportAttestationSchema = async (pool: Pool) => {
       ) AS dangerous_write
   `)
   const row = result.rows[0]
+  const supportedContractPair =
+    (row?.contract_version === 1 &&
+      row.contract_digest ===
+        reportAttestationContractDigestV1 &&
+      row.meta_contract_version === 1 &&
+      row.migration_version === '53') ||
+    (row?.contract_version === 2 &&
+      row.contract_digest ===
+        reportAttestationContractDigestV2 &&
+      row.meta_contract_version === 2 &&
+      row.migration_version === '61')
   if (
     row?.records_table !==
       'web_private.report_attestation_records' ||
     row.operations_table !==
       'web_private.report_attestation_operations' ||
-    row.contract_version !== 1 ||
-    row.contract_digest !== reportAttestationContractDigest ||
-    row.migration_version !== '53' ||
+    !supportedContractPair ||
     !row.record_guard ||
     !row.operation_guard ||
     !row.web_usage ||
@@ -564,4 +580,8 @@ export const assertReportAttestationSchema = async (pool: Pool) => {
       'report attestation persistence migration contract is invalid',
     )
   }
+  return Object.freeze({
+    contractVersion: row.contract_version as 1 | 2,
+    reconciliationEnabled: row.contract_version === 2,
+  })
 }

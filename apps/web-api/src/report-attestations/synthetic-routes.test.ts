@@ -8,6 +8,7 @@ import {
   type GiwaSepoliaReportAttestationRuntime,
   type LocalReportAttestationRuntime,
   type Hex32,
+  type RedactedExecutionResult,
 } from './types.js'
 
 const OWNER_A = '00000000-0000-4000-8000-000000000028'
@@ -66,16 +67,27 @@ const createRuntime = (approved = true) => {
     attestationUID: SUBMISSION_UID,
     reasonCode: null,
   }))
-  const executeReviewer = vi.fn(async () => ({
-    status: 'CONFIRMED',
-    transactionHash: TRANSACTION_HASH,
-    attestationUID: REVIEW_UID,
-    reasonCode: null,
-  }))
+  const executeReviewer = vi.fn(
+    async (): Promise<RedactedExecutionResult> => ({
+      status: 'CONFIRMED',
+      transactionHash: TRANSACTION_HASH,
+      attestationUID: REVIEW_UID,
+      reasonCode: null,
+    }),
+  )
+  const reconcileReviewer = vi.fn(
+    async (): Promise<RedactedExecutionResult> => ({
+      status: 'CONFIRMED',
+      transactionHash: TRANSACTION_HASH,
+      attestationUID: REVIEW_UID,
+      reasonCode: null,
+    }),
+  )
   const runtime: GiwaSepoliaReportAttestationRuntime = {
     kind: GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND,
     issuerExecutor: { executeIssuer },
     reviewerExecutor: { executeReviewer },
+    reviewerReconciler: { reconcileReviewer },
     prepareSyntheticEvidence: vi.fn(async (input) => {
       preparedReportIds.push(input.reportId)
       return {
@@ -97,12 +109,16 @@ const createRuntime = (approved = true) => {
     runtime,
     executeIssuer,
     executeReviewer,
+    reconcileReviewer,
     preparedReportIds,
     verifyPreparedReport,
   }
 }
 
-const createHarness = async (approved = true) => {
+const createHarness = async (
+  approved = true,
+  reconciliationEnabled = true,
+) => {
   const fake = createRuntime(approved)
   const context = await buildApp({
     config: enabledConfig,
@@ -139,6 +155,7 @@ const createHarness = async (approved = true) => {
       runtime: fake.runtime,
       reviewOutcome: approved ? 'APPROVE' : 'REJECT',
       identityKey: IDENTITY_KEY,
+      reconciliationEnabled,
     },
   })
   const sessions = {
@@ -195,6 +212,7 @@ describe('GIWA Sepolia synthetic report attestation routes', () => {
       })
       expect(harness.fake.executeIssuer).not.toHaveBeenCalled()
       expect(harness.fake.executeReviewer).not.toHaveBeenCalled()
+      expect(harness.fake.reconcileReviewer).not.toHaveBeenCalled()
 
       const [firstSubmit, duplicateSubmit] = await Promise.all([
         harness.request(
@@ -285,6 +303,266 @@ describe('GIWA Sepolia synthetic report attestation routes', () => {
         '/api/v1/report-attestations/synthetic-publication/review',
       )
       expect(harness.fake.executeReviewer).toHaveBeenCalledTimes(1)
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('recovers a false-negative review receipt through the explicit read-only reconciliation endpoint', async () => {
+    const harness = await createHarness()
+    harness.fake.executeReviewer.mockResolvedValueOnce({
+      status: 'RECONCILIATION_REQUIRED',
+      transactionHash: TRANSACTION_HASH,
+      attestationUID: null,
+      reasonCode: 'RECEIPT_OR_POST_STATE_NOT_VERIFIED',
+    })
+    try {
+      await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/submission',
+      )
+      await harness.context.reportAttestationService?.waitForIdle()
+      await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/review',
+      )
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const readOnlyGet = await harness.request(
+        'A',
+        'GET',
+        '/api/v1/report-attestations/synthetic-publication',
+      )
+      expect(readOnlyGet.json()).toMatchObject({
+        status: {
+          lifecycle: 'RECONCILIATION_REQUIRED',
+          review: {
+            status: 'RECONCILIATION_REQUIRED',
+            transactionHash: TRANSACTION_HASH,
+            attestationUID: null,
+          },
+        },
+      })
+      expect(harness.fake.reconcileReviewer).not.toHaveBeenCalled()
+
+      const reconciled = await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/reconcile',
+      )
+      expect(reconciled.statusCode).toBe(200)
+      expect(reconciled.json()).toMatchObject({
+        status: {
+          lifecycle: 'APPROVED',
+          review: {
+            status: 'CONFIRMED',
+            transactionHash: TRANSACTION_HASH,
+            attestationUID: REVIEW_UID,
+          },
+        },
+        verification: {
+          lifecycle: 'APPROVED',
+          result: 'USABLE',
+        },
+      })
+      expect(harness.fake.executeReviewer).toHaveBeenCalledTimes(1)
+      expect(harness.fake.reconcileReviewer).toHaveBeenCalledTimes(1)
+
+      const repeated = await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/reconcile',
+      )
+      expect(repeated.json()).toMatchObject({
+        status: { lifecycle: 'APPROVED' },
+      })
+      expect(harness.fake.reconcileReviewer).toHaveBeenCalledTimes(1)
+
+      const otherOwner = await harness.request(
+        'B',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/reconcile',
+      )
+      expect(otherOwner.statusCode).toBe(200)
+      expect(otherOwner.json().status).toBeNull()
+      expect(harness.fake.reconcileReviewer).toHaveBeenCalledTimes(1)
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('keeps reconciliation unavailable until the DB54 transition contract is active', async () => {
+    const harness = await createHarness(true, false)
+    try {
+      const response = await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/reconcile',
+      )
+
+      expect(response.statusCode).toBe(503)
+      expect(response.json()).toMatchObject({
+        error: {
+          code: 'REPORT_ATTESTATION_RECONCILIATION_NOT_READY',
+        },
+      })
+      expect(harness.fake.reconcileReviewer).not.toHaveBeenCalled()
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('keeps an unresolved review receipt pending and never re-executes the reviewer write', async () => {
+    const harness = await createHarness()
+    harness.fake.executeReviewer.mockResolvedValueOnce({
+      status: 'RECONCILIATION_REQUIRED',
+      transactionHash: TRANSACTION_HASH,
+      attestationUID: null,
+      reasonCode: 'RECEIPT_OR_POST_STATE_NOT_VERIFIED',
+    })
+    harness.fake.reconcileReviewer.mockResolvedValue({
+      status: 'PENDING',
+      transactionHash: TRANSACTION_HASH,
+      attestationUID: null,
+      reasonCode: 'RECEIPT_PENDING',
+    })
+    try {
+      await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/submission',
+      )
+      await harness.context.reportAttestationService?.waitForIdle()
+      await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/review',
+      )
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const pending = await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/reconcile',
+      )
+      expect(pending.json()).toMatchObject({
+        status: {
+          lifecycle: 'PENDING',
+          review: {
+            status: 'PENDING',
+            transactionHash: TRANSACTION_HASH,
+            attestationUID: null,
+          },
+        },
+        verification: null,
+      })
+      expect(harness.fake.executeReviewer).toHaveBeenCalledTimes(1)
+      expect(harness.fake.reconcileReviewer).toHaveBeenCalledTimes(1)
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('recovers a confirmed REJECT review as REJECTED and UNUSABLE', async () => {
+    const harness = await createHarness(false)
+    harness.fake.executeReviewer.mockResolvedValueOnce({
+      status: 'RECONCILIATION_REQUIRED',
+      transactionHash: TRANSACTION_HASH,
+      attestationUID: null,
+      reasonCode: 'RECEIPT_OR_POST_STATE_NOT_VERIFIED',
+    })
+    try {
+      await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/submission',
+      )
+      await harness.context.reportAttestationService?.waitForIdle()
+      await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/review',
+      )
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const reconciled = await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/reconcile',
+      )
+      expect(reconciled.json()).toMatchObject({
+        status: {
+          lifecycle: 'REJECTED',
+          review: {
+            status: 'CONFIRMED',
+            transactionHash: TRANSACTION_HASH,
+            attestationUID: REVIEW_UID,
+          },
+        },
+        verification: {
+          lifecycle: 'REJECTED',
+          result: 'UNUSABLE',
+          reasonCode: 'REVIEW_REJECTED',
+        },
+      })
+      expect(harness.fake.executeReviewer).toHaveBeenCalledTimes(1)
+      expect(harness.fake.reconcileReviewer).toHaveBeenCalledTimes(1)
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('keeps the report fail-closed when reconciliation returns a different tx hash', async () => {
+    const harness = await createHarness()
+    const differentTransactionHash =
+      `0x${'8'.repeat(64)}`
+    harness.fake.executeReviewer.mockResolvedValueOnce({
+      status: 'RECONCILIATION_REQUIRED',
+      transactionHash: TRANSACTION_HASH,
+      attestationUID: null,
+      reasonCode: 'RECEIPT_OR_POST_STATE_NOT_VERIFIED',
+    })
+    harness.fake.reconcileReviewer.mockResolvedValueOnce({
+      status: 'CONFIRMED',
+      transactionHash: differentTransactionHash,
+      attestationUID: REVIEW_UID,
+      reasonCode: null,
+    })
+    try {
+      await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/submission',
+      )
+      await harness.context.reportAttestationService?.waitForIdle()
+      await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/review',
+      )
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const reconciled = await harness.request(
+        'A',
+        'POST',
+        '/api/v1/report-attestations/synthetic-publication/reconcile',
+      )
+      expect(reconciled.json()).toMatchObject({
+        status: {
+          lifecycle: 'RECONCILIATION_REQUIRED',
+          review: {
+            status: 'RECONCILIATION_REQUIRED',
+            transactionHash: TRANSACTION_HASH,
+            attestationUID: null,
+            reasonCode: 'RUNTIME_RESULT_BINDING_MISMATCH',
+          },
+        },
+        verification: null,
+      })
+      expect(harness.fake.executeReviewer).toHaveBeenCalledTimes(1)
+      expect(harness.fake.reconcileReviewer).toHaveBeenCalledTimes(1)
     } finally {
       await harness.context.app.close()
     }
@@ -505,6 +783,22 @@ describe('GIWA Sepolia synthetic report attestation routes', () => {
           enabled: false,
           reasonCode: 'DEPLOYMENT_NOT_CONFIGURED',
         },
+      })
+      const reconciliation = await context.app.inject({
+        method: 'POST',
+        url:
+          '/api/v1/report-attestations/' +
+          'synthetic-publication/reconcile',
+        headers,
+      })
+      expect(reconciliation.statusCode).toBe(200)
+      expect(reconciliation.json()).toMatchObject({
+        capability: {
+          enabled: false,
+          reasonCode: 'DEPLOYMENT_NOT_CONFIGURED',
+        },
+        status: null,
+        verification: null,
       })
       const write = await context.app.inject({
         method: 'POST',

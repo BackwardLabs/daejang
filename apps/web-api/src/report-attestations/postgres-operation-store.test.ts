@@ -71,7 +71,9 @@ class FakeOperationDatabase {
         'SELECT id FROM web_private.report_attestation_records',
       )
     ) {
-      return { rows: [{ id: 'record-1' }], rowCount: 1 }
+      return parameters[0] === 'ep_record'
+        ? { rows: [{ id: 'record-1' }], rowCount: 1 }
+        : { rows: [], rowCount: 0 }
     }
     if (
       normalized.startsWith(
@@ -196,6 +198,8 @@ describe('Postgres report attestation operation store', () => {
     })
     await store.confirm({
       canonicalOperationKey: operationKey,
+      preparedRecordId: 'ep_record',
+      action: 'SUBMIT',
       planFingerprint: hex32('1'),
       transactionHash: hex32('3'),
       attestationUID: hex32('4'),
@@ -248,5 +252,72 @@ describe('Postgres report attestation operation store', () => {
       transactionHash: null,
     })
     expect(database.row?.state).toBe('IN_FLIGHT')
+  })
+
+  it('fails closed when a reconciliation binding changes owner-scoped record, action, fingerprint, or tx', async () => {
+    const database = new FakeOperationDatabase()
+    const store =
+      new PostgresReportAttestationOperationStore(
+        database.pool,
+      )
+    const operationKey =
+      'reviewer-decision:v1:submission_uid'
+    await store.claimForBroadcast({
+      canonicalOperationKey: operationKey,
+      preparedRecordId: 'ep_record',
+      action: 'APPROVE',
+      planFingerprint: hex32('1'),
+      requestFingerprint: hex32('2'),
+    })
+    await store.recordTransactionHash({
+      canonicalOperationKey: operationKey,
+      planFingerprint: hex32('1'),
+      transactionHash: hex32('3'),
+    })
+    await store.requireReconciliation({
+      canonicalOperationKey: operationKey,
+      planFingerprint: hex32('1'),
+      transactionHash: hex32('3'),
+      reasonCode: 'POST_STATE_NOT_VERIFIED',
+    })
+
+    const valid = {
+      canonicalOperationKey: operationKey,
+      preparedRecordId: 'ep_record',
+      action: 'APPROVE' as const,
+      planFingerprint: hex32('1'),
+      transactionHash: hex32('3'),
+    }
+    await expect(
+      store.verifyReconciliationBinding({
+        ...valid,
+        preparedRecordId: 'ep_other',
+      }),
+    ).rejects.toThrow()
+    await expect(
+      store.verifyReconciliationBinding({
+        ...valid,
+        action: 'REJECT',
+      }),
+    ).rejects.toThrow()
+    await expect(
+      store.verifyReconciliationBinding({
+        ...valid,
+        planFingerprint: hex32('4'),
+      }),
+    ).rejects.toThrow()
+    await expect(
+      store.verifyReconciliationBinding({
+        ...valid,
+        transactionHash: hex32('5'),
+      }),
+    ).rejects.toThrow()
+
+    await expect(
+      store.verifyReconciliationBinding(valid),
+    ).resolves.toBeUndefined()
+    expect(database.row?.state).toBe(
+      'RECONCILIATION_REQUIRED',
+    )
   })
 })
