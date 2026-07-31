@@ -1183,13 +1183,20 @@ const createTaxRuntime = async (queryURL) => {
   const registryPin = {
     bundleSchemaVersion: 'defi-label.action-registry.v1',
     registrySourceRepository: 'BackwardLabs/DeFi-Label',
-    registrySourceCommit: '9ccbf885736117fd602ad61aa139ae6fc32d72c3',
+    registrySourceCommit: '02d7b5f9a99aa6cce41d48e43cc5229434addaf9',
     exporterContractRepository: 'BackwardLabs/DeFi-Label',
-    exporterContractCommit: '9582907645de48ffd2049a6d4757b0933b6779ad',
-    bundleSha256: '18cf13e50ad20ad42db7fbf56ca42058efd050914284482fce1f9f7aa940ecda',
+    exporterContractCommit: 'ff97a512ed917486cc781c85cc62350292560061',
+    bundleSha256: '2ec4576b842a522fa619ef7b8825381071a67e08a8fd8dea20ead422c514ccc7',
     signatureKeyId: 'ac3bfd53c95e743e',
     signaturePublicKeySha256: 'ac3bfd53c95e743eb76c104385968699a1f70c2a3cc64e6ba3c680364cf0029a',
   }
+  const actionProfiles = [
+    { profileId: 'aave-v3.supply', profileVersion: '1.0.0-canary.1' },
+    { profileId: 'aave-v3.withdraw-erc20', profileVersion: '1.0.0-canary.1' },
+    { profileId: 'aave-v3.withdraw-eth', profileVersion: '1.0.0-canary.1' },
+    { profileId: 'weth9.unwrap', profileVersion: '1.0.0' },
+    { profileId: 'weth9.wrap', profileVersion: '1.0.0' },
+  ]
   const policy = canonicalJSON({
     name: 'production-ledger-consumer-policy',
     version: 'v1',
@@ -1203,10 +1210,7 @@ const createTaxRuntime = async (queryURL) => {
     v2ActionRegistry: {
       schemaVersion: 'tax.action-registry-declaration.v1',
       registryPin,
-      profileDeclarations: [
-        { profileId: 'weth9.unwrap' },
-        { profileId: 'weth9.wrap' },
-      ],
+      profileDeclarations: actionProfiles.map(({ profileId }) => ({ profileId })),
     },
   })
   const activation = canonicalJSON({
@@ -1215,10 +1219,10 @@ const createTaxRuntime = async (queryURL) => {
     rawPolicySha256: sha256(policy),
     registryPin,
     emergencyDenyProfileIds: [],
-    profiles: ['weth9.unwrap', 'weth9.wrap'].map((profileId) => ({
+    profiles: actionProfiles.map(({ profileId, profileVersion }) => ({
       schemaVersion: 'tax.profile-activation.v1',
       profileId,
-      profileVersion: '1.0.0',
+      profileVersion,
       runtimeState: 'DISABLED',
       activationIntentPath: null,
       activationIntentSha256: null,

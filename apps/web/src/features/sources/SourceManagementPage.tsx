@@ -189,6 +189,42 @@ function SourceJobStatus({
     )
   }
   if (job.state === 'SUCCEEDED') {
+    if (job.sourceKind === 'EVM_WALLET') {
+      if (job.ledgerMaterializationState === 'POSTED') {
+        return (
+          <AppLink
+            className="source-job-status source-job-status--succeeded"
+            href="/ledger"
+          >
+            <span>장부 반영 완료</span>
+            <span>
+              {job.ledgerPostingCount === undefined
+                ? '장부 보기'
+                : `${job.ledgerPostingCount}개 항목`}
+            </span>
+          </AppLink>
+        )
+      }
+      const materializationCopy = {
+        NO_POSTING: ['실행 분석 완료', '장부 항목 없음'],
+        PENDING: ['실행 분석 완료', '장부 반영 중'],
+        REVIEW_REQUIRED: ['분류 확인 필요', '장부 반영 보류'],
+        UNAVAILABLE: ['실행 분석 완료', '장부 상태 확인 필요'],
+      }[job.ledgerMaterializationState ?? 'UNAVAILABLE']
+      return (
+        <small
+          className={`source-job-status source-job-status--${
+            job.ledgerMaterializationState?.toLowerCase().replace('_', '-') ??
+            'unavailable'
+          }`}
+          data-job-state={job.state}
+          data-ledger-state={job.ledgerMaterializationState ?? 'UNAVAILABLE'}
+        >
+          <span>{materializationCopy[0]}</span>
+          <span>{materializationCopy[1]}</span>
+        </small>
+      )
+    }
     return (
       <AppLink
         className="source-job-status source-job-status--succeeded"
@@ -376,6 +412,7 @@ export function SourceManagementPage() {
         void watchSyncJob({
           jobId: job.id,
           signal: controller.signal,
+          waitForLedger: true,
           onUpdate: (snapshot) => {
             setJobs((current) =>
               current.map((candidate) =>
@@ -444,6 +481,7 @@ export function SourceManagementPage() {
       void watchSyncJob({
         jobId: result.job.id,
         signal: controller.signal,
+        waitForLedger: true,
         onUpdate: (snapshot) => {
           setJobs((current) =>
             current.map((currentJob) =>

@@ -519,6 +519,26 @@ body:has(.source-page) {
   color: #0f5132;
 }
 
+.source-job-status--pending,
+.source-job-status--unavailable {
+  color: #6b7280;
+}
+
+.source-job-status--review-required {
+  color: #c2410c;
+}
+
+.source-job-status--no-posting {
+  color: #475569;
+}
+
+.source-job-status--pending span:last-child,
+.source-job-status--review-required span:last-child,
+.source-job-status--no-posting span:last-child,
+.source-job-status--unavailable span:last-child {
+  font-weight: 700;
+}
+
 .source-job-details {
   grid-column: 1 / -1;
   width: 100%;

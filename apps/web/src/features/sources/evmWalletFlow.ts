@@ -112,12 +112,20 @@ export type WalletSyncJobSnapshot = {
   processedRecords: number | string
   state: WalletSyncJobState
   updatedAt: string
+  ledgerMaterializationState?:
+    | 'NO_POSTING'
+    | 'PENDING'
+    | 'POSTED'
+    | 'REVIEW_REQUIRED'
+    | 'UNAVAILABLE'
+  ledgerPostingCount?: number | string
 }
 
 export type WatchWalletSyncJob = (request: {
   jobId: string
   onUpdate: (job: WalletSyncJobSnapshot) => void
   signal: AbortSignal
+  waitForLedger?: boolean
 }) => Promise<WalletSyncJobSnapshot>
 
 export const EVM_WALLET_ALLOWED_TAX_YEARS = [

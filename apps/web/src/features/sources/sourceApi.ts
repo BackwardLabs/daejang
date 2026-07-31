@@ -54,6 +54,13 @@ export type SyncJobApiModel = {
   requestedCoverageEnd?: string
   trigger?: string
   upstreamJitRunId?: string
+  ledgerMaterializationState?:
+    | 'NO_POSTING'
+    | 'PENDING'
+    | 'POSTED'
+    | 'REVIEW_REQUIRED'
+    | 'UNAVAILABLE'
+  ledgerPostingCount?: number | string
   createdAt: string
   updatedAt: string
 }
@@ -182,6 +189,12 @@ function toWalletSyncSnapshot(job: SyncJobApiModel): WalletSyncJobSnapshot {
     updatedAt: job.updatedAt,
     ...(job.failureCode ? { failureCode: job.failureCode } : {}),
     ...(job.failureMessage ? { failureMessage: job.failureMessage } : {}),
+    ...(job.ledgerMaterializationState
+      ? { ledgerMaterializationState: job.ledgerMaterializationState }
+      : {}),
+    ...(job.ledgerPostingCount !== undefined
+      ? { ledgerPostingCount: job.ledgerPostingCount }
+      : {}),
   }
 }
 
@@ -189,12 +202,20 @@ export const watchSyncJob: WatchWalletSyncJob = async ({
   jobId,
   onUpdate,
   signal,
+  waitForLedger = false,
 }) => {
   for (;;) {
     const { job } = await getSyncJob(jobId, signal)
     const snapshot = toWalletSyncSnapshot(job)
     onUpdate(snapshot)
-    if (snapshot.state === 'SUCCEEDED' || snapshot.state === 'FAILED') {
+    const ledgerPending =
+      waitForLedger &&
+      snapshot.state === 'SUCCEEDED' &&
+      snapshot.ledgerMaterializationState === 'PENDING'
+    if (
+      snapshot.state === 'FAILED' ||
+      (snapshot.state === 'SUCCEEDED' && !ledgerPending)
+    ) {
       return snapshot
     }
     await waitForNextPoll(1_500, signal)

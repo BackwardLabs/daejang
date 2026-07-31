@@ -135,6 +135,45 @@ describe('EVM sync API integration', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/jobs/job-1', expect.any(Object))
   })
 
+  it('can keep polling after JIT success until canonical Posting materializes', async () => {
+    vi.useFakeTimers()
+    const jobs = [
+      {
+        id: 'job-1',
+        state: 'SUCCEEDED',
+        processedRecords: 9,
+        ledgerMaterializationState: 'PENDING',
+      },
+      {
+        id: 'job-1',
+        state: 'SUCCEEDED',
+        processedRecords: 9,
+        ledgerMaterializationState: 'POSTED',
+        ledgerPostingCount: 4,
+      },
+    ]
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ job: jobs.shift() }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const states: string[] = []
+
+    const terminalPromise = watchSyncJob({
+      jobId: 'job-1',
+      signal: new AbortController().signal,
+      waitForLedger: true,
+      onUpdate: (job) => states.push(job.ledgerMaterializationState ?? ''),
+    })
+    await vi.advanceTimersByTimeAsync(1_500)
+    const terminal = await terminalPromise
+
+    expect(terminal.ledgerMaterializationState).toBe('POSTED')
+    expect(terminal.ledgerPostingCount).toBe(4)
+    expect(states).toEqual(['PENDING', 'POSTED'])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('reuses the caller-owned intent key when retrying a failed job', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       job: {

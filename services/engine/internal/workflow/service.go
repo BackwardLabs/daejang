@@ -8,6 +8,7 @@ import (
 
 	"github.com/BackwardLabs/daejang-db/pkg/sourcejobstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/materializationread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/source"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -20,9 +21,14 @@ type Store interface {
 	ListJobs(context.Context, string, int32) ([]sourcejobstore.SyncJob, error)
 }
 
+type MaterializationReader interface {
+	Get(context.Context, string, string, string) (materializationread.Snapshot, error)
+}
+
 type Service struct {
 	enginev1.UnimplementedWorkflowServiceServer
-	Store Store
+	Store            Store
+	Materializations MaterializationReader
 }
 
 func (s *Service) EnqueueSync(ctx context.Context, request *enginev1.EnqueueSyncRequest) (*enginev1.EnqueueSyncResponse, error) {
@@ -48,7 +54,7 @@ func (s *Service) EnqueueSync(ctx context.Context, request *enginev1.EnqueueSync
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &enginev1.EnqueueSyncResponse{Job: toProto(value)}, nil
+	return &enginev1.EnqueueSyncResponse{Job: s.toProto(ctx, subjectID, value)}, nil
 }
 
 func requestedCoverage(start, end string) (time.Time, time.Time, error) {
@@ -72,7 +78,7 @@ func (s *Service) GetSyncJob(ctx context.Context, request *enginev1.GetSyncJobRe
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &enginev1.GetSyncJobResponse{Job: toProto(value)}, nil
+	return &enginev1.GetSyncJobResponse{Job: s.toProto(ctx, subjectID, value)}, nil
 }
 
 func (s *Service) ListSyncJobs(ctx context.Context, request *enginev1.ListSyncJobsRequest) (*enginev1.ListSyncJobsResponse, error) {
@@ -90,7 +96,7 @@ func (s *Service) ListSyncJobs(ctx context.Context, request *enginev1.ListSyncJo
 	}
 	items := make([]*enginev1.SyncJob, 0, len(values))
 	for _, value := range values {
-		items = append(items, toProto(value))
+		items = append(items, s.toProto(ctx, subjectID, value))
 	}
 	return &enginev1.ListSyncJobsResponse{Items: items}, nil
 }
@@ -108,7 +114,7 @@ func mapError(err error) error {
 	return status.Error(codes.Internal, "sync job operation failed")
 }
 
-func toProto(value sourcejobstore.SyncJob) *enginev1.SyncJob {
+func (s *Service) toProto(ctx context.Context, subjectID string, value sourcejobstore.SyncJob) *enginev1.SyncJob {
 	result := &enginev1.SyncJob{Id: value.ID, SourceKind: value.SourceKind, SourceId: value.SourceID, State: value.State,
 		Phase: value.Phase, Attempts: value.Attempts, ProcessedRecords: value.ProcessedRecords,
 		FailureCode: value.FailureCode, FailureMessage: value.FailureMessage, OutputFragmentId: value.OutputFragmentID,
@@ -133,5 +139,15 @@ func toProto(value sourcejobstore.SyncJob) *enginev1.SyncJob {
 	}
 	result.StartedAt = setTime(value.StartedAt)
 	result.CompletedAt = setTime(value.CompletedAt)
+	if value.SourceKind == "EVM_WALLET" && value.State == "SUCCEEDED" {
+		result.LedgerMaterializationState = materializationread.StateUnavailable
+		if s.Materializations != nil {
+			snapshot, err := s.Materializations.Get(ctx, subjectID, value.UpstreamJITRunID, value.OutputFragmentID)
+			if err == nil {
+				result.LedgerMaterializationState = snapshot.State
+				result.LedgerPostingCount = snapshot.PostingCount
+			}
+		}
+	}
 	return result
 }

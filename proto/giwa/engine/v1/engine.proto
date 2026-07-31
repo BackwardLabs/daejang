@@ -196,6 +196,12 @@ message SyncJob {
   string segment_cursor = 21;
   string upstream_jit_run_id = 22;
   int64 progress_version = 23;
+  // Durable state of the canonical EVM Posting consumer for this JIT fragment.
+  // Empty for non-EVM jobs. Values: PENDING, REVIEW_REQUIRED, POSTED,
+  // NO_POSTING, UNAVAILABLE.
+  string ledger_materialization_state = 24;
+  // Number of distinct canonical Posting legs that cite this JIT fragment.
+  int64 ledger_posting_count = 25;
 }
 
 message GetDashboardRequest { RequestContext context = 1; int32 tax_year = 2; }

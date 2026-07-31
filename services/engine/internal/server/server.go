@@ -18,6 +18,7 @@ import (
 	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
 	"github.com/BackwardLabs/daejang/services/engine/internal/lotread"
+	"github.com/BackwardLabs/daejang/services/engine/internal/materializationread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/observationread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/pdfparser"
 	"github.com/BackwardLabs/daejang/services/engine/internal/query"
@@ -73,6 +74,16 @@ func Run(ctx context.Context, config Config) error {
 		return fmt.Errorf("open lot read persistence: %w", err)
 	}
 	defer lotRuntime.Close()
+	materializationRuntime, err := materializationread.Open(
+		ctx,
+		config.SourceArtifactDatabaseURL,
+		config.QueryDatabaseURL,
+		"daejang-engine-materialization-read-api",
+	)
+	if err != nil {
+		return fmt.Errorf("open Posting materialization read persistence: %w", err)
+	}
+	defer materializationRuntime.Close()
 	reportRuntime, err := reportstore.Open(ctx, reportstore.Options{DatabaseURL: config.ReportDatabaseURL, ApplicationName: "daejang-engine-report-api"})
 	if err != nil {
 		return fmt.Errorf("open report persistence: %w", err)
@@ -184,7 +195,9 @@ func Run(ctx context.Context, config Config) error {
 			LeaseDuration: config.PDFImportLeaseDuration,
 		},
 	})
-	enginev1.RegisterWorkflowServiceServer(grpcServer, &workflow.Service{Store: jobRuntime.Store})
+	enginev1.RegisterWorkflowServiceServer(grpcServer, &workflow.Service{
+		Store: jobRuntime.Store, Materializations: materializationRuntime.Store,
+	})
 	enginev1.RegisterQueryServiceServer(grpcServer, &query.Service{
 		Reads: readRuntime.Store, Reports: reportRuntime.Store, TaxReports: taxReportRuntime.Store,
 		TaxReportArtifacts: taxArtifactStore, Observations: observationRuntime.Store, Lots: lotRuntime.Store,
@@ -219,6 +232,9 @@ func Run(ctx context.Context, config Config) error {
 			return err
 		}
 		if err := observationRuntime.Ping(checkCtx); err != nil {
+			return err
+		}
+		if err := materializationRuntime.Ping(checkCtx); err != nil {
 			return err
 		}
 		if err := reportRuntime.Ping(checkCtx); err != nil {
