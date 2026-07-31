@@ -37,7 +37,8 @@ const feeRoles = new Set(['FEE', 'GAS'])
 const sourceKindLabels = { CEX: '거래소', WALLET: '개인지갑', UNKNOWN: '출처 미확인' } as const
 
 const formatLedgerDateTime = (value: string) => new Date(value).toLocaleString('ko-KR', {
-  year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit',
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  hourCycle: 'h23',
 })
 
 const describeReviewResolution = (review: ReviewDetailModel) =>
@@ -581,10 +582,13 @@ export function LedgerPage() {
                     const action = describeLedgerAction(event.eventType, event.flowShape, event.postings, event.subtype)
                     const isOpen = event.eventId === selectedId
                     return <Fragment key={event.eventId}>
-                      <tr className={isOpen ? 'ledger-explorer__row is-open' : 'ledger-explorer__row'}>
+                      <tr
+                        className={isOpen ? 'ledger-explorer__row is-open' : 'ledger-explorer__row'}
+                        onClick={() => setSelectedId(isOpen ? undefined : event.eventId)}
+                      >
                         <td className="ledger-explorer__time">
                           <span className="ledger-explorer__time-content">
-                            <button type="button" aria-label={`${action.label} 거래 상세 ${isOpen ? '접기' : '보기'}`} aria-expanded={isOpen} aria-controls={`ledger-detail-${event.eventId}`} onClick={() => setSelectedId(isOpen ? undefined : event.eventId)}>{isOpen ? '접기' : '보기'}</button>
+                            <button type="button" className="ledger-explorer__toggle" aria-label={`${action.label} 거래 상세 ${isOpen ? '접기' : '보기'}`} aria-expanded={isOpen} aria-controls={`ledger-detail-${event.eventId}`} />
                             <time dateTime={event.effectiveAt}>{formatLedgerDateTime(event.effectiveAt)}</time>
                           </span>
                         </td>
@@ -594,7 +598,7 @@ export function LedgerPage() {
                         <td><LedgerMovementList postings={fees} /></td>
                         <td><LedgerStatusBadges event={event} /></td>
                       </tr>
-                      {isOpen ? <tr className="ledger-explorer__detail-row"><td colSpan={6}><div id={`ledger-detail-${event.eventId}`}><LedgerExplorerDetail
+                      {isOpen ? <tr className="ledger-explorer__detail-row"><td colSpan={6}><div className="ledger-explorer__detail-panel" id={`ledger-detail-${event.eventId}`}><LedgerExplorerDetail
                         event={event}
                         reviewNavigationStatus={reviewNavigation.eventId === event.eventId ? reviewNavigation.status : 'idle'}
                         onOpenReview={openReviewForEvent}
