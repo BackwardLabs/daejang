@@ -180,6 +180,31 @@ describe('LedgerPage', () => {
     expect(rawQuantity.closest('details')).not.toHaveAttribute('open')
   })
 
+  it('toggles the transaction detail from anywhere in the row, not only the toggle control', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    const toggle = await screen.findByRole('button', { name: '거래 거래 상세 보기' })
+    const rowTime = toggle.closest('tr')?.querySelector('time')
+    if (!rowTime) throw new Error('ledger row time is missing')
+
+    fireEvent.click(rowTime)
+
+    expect(screen.getByRole('heading', { name: '자산 변동과 세무 입력' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '거래 거래 상세 접기' })).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.click(rowTime)
+
+    expect(screen.queryByRole('heading', { name: '자산 변동과 세무 입력' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '거래 거래 상세 보기' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('explains pending tax basis for a pre-2027 digital-asset acquisition', async () => {
     const airdropEvent = {
       ...ledgerEvent,
