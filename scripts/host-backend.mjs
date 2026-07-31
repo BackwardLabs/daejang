@@ -900,9 +900,9 @@ export const createTaxProfiles = (rows) => {
 
 export const configureTaxUpbitQuoteRuntime = (config) => ({
   ...config,
-  firstTradeAfterMaxSeconds: 3600,
+  firstTradeAfterMaxSeconds: 604800,
   maxCandleAgeSeconds: 600,
-  policyVersion: 'upbit-closed-minute-10m-or-airdrop-first-trade-v3',
+  policyVersion: 'upbit-closed-minute-10m-or-inbound-first-trade-v4',
 })
 
 const createTaxRuntime = async (queryURL) => {

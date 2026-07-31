@@ -52,10 +52,10 @@ test('bounds archived Upbit quote staleness at ten minutes', () => {
   })
 
   assert.equal(configured.maxCandleAgeSeconds, 600)
-  assert.equal(configured.firstTradeAfterMaxSeconds, 3600)
+  assert.equal(configured.firstTradeAfterMaxSeconds, 604800)
   assert.equal(
     configured.policyVersion,
-    'upbit-closed-minute-10m-or-airdrop-first-trade-v3',
+    'upbit-closed-minute-10m-or-inbound-first-trade-v4',
   )
 })
 
