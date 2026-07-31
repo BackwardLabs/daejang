@@ -246,7 +246,7 @@ describe('LedgerPage', () => {
 
     expect(await screen.findByText('취득 1건에서 소진')).toBeInTheDocument()
     expect(screen.getByText('0.9 USDT 소진')).toBeInTheDocument()
-    expect(screen.getByText(/취득 수량 1 USDT · 취득원가 1,524,747 KRW/)).toBeInTheDocument()
+    expect(screen.getByText(/취득 수량 1 USDT · Lot 전체 취득원가 1,524,747 KRW/)).toBeInTheDocument()
     expect(screen.getByText(/2026\..*취득분/)).toBeInTheDocument()
     expect(screen.queryByText('산정 대기')).not.toBeInTheDocument()
   })

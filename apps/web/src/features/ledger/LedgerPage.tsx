@@ -150,6 +150,11 @@ function LedgerLotLinks({
   const basisOf = (link: LedgerLotLinkModel) => link.basisStatus === 'KNOWN' && link.basisAmount
     ? `취득원가 ${formatLedgerMoney(link.basisAmount, link.basisDenomination, postings)}`
     : describeLotBasisStatus(link.basisStatus)
+  // 저장된 금액은 취득 Lot 전체의 원가다. 한 Lot이 여러 처분에 나뉘어 소진되므로
+  // 소진분의 원가로 읽히면 합산 시 중복된다. 소진분 원가는 아직 산출되지 않는다.
+  const lotBasisOf = (link: LedgerLotLinkModel) => link.basisStatus === 'KNOWN' && link.basisAmount
+    ? `Lot 전체 ${basisOf(link)}`
+    : describeLotBasisStatus(link.basisStatus)
   const acquisitions = links.filter((link) => link.kind === 'ACQUIRE')
   const disposals = links.filter((link) => link.kind === 'DISPOSE')
   const summary = [
@@ -167,7 +172,7 @@ function LedgerLotLinks({
       {disposals.map((link) => <li key={`${link.lotId}:${link.sourceLegId}`}>
         <span>{link.sourceOccurredAt ? `${formatLedgerDateTime(link.sourceOccurredAt)} 취득분` : '취득 시각 미확인'}</span>
         <strong>{quantityOf(link.quantity)} 소진</strong>
-        <small>취득 수량 {quantityOf(link.sourceQuantity)} · {basisOf(link)}</small>
+        <small>취득 수량 {quantityOf(link.sourceQuantity)} · {lotBasisOf(link)}</small>
       </li>)}
     </ul>
   </details>
