@@ -157,7 +157,15 @@ function LedgerStatusBadges({ event }: { event: LedgerEventModel }) {
   </span>
 }
 
-function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
+function LedgerExplorerDetail({
+  event,
+  reviewNavigationStatus,
+  onOpenReview,
+}: {
+  event: LedgerEventModel
+  reviewNavigationStatus: 'idle' | 'loading' | 'error'
+  onOpenReview: (eventId: string) => void
+}) {
   const source = describeLedgerSource(event.postings)
   const action = describeLedgerAction(event.eventType, event.flowShape, event.postings, event.subtype)
   const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
@@ -179,7 +187,18 @@ function LedgerExplorerDetail({ event }: { event: LedgerEventModel }) {
     {transferEndpoint ? <section className="ledger-explorer-endpoint" data-tone={transferEndpoint.tone}>
       <span>{transferEndpoint.label}</span>
       <div><strong>{transferEndpoint.title}</strong><small>{transferEndpoint.detail}</small></div>
-      <b>{transferEndpoint.status}</b>
+      {event.transferEndpoint?.reviewRequired ? <span className="ledger-explorer-endpoint__actions">
+        <b>{transferEndpoint.status}</b>
+        <button
+          type="button"
+          className="ledger-explorer-endpoint__review"
+          disabled={reviewNavigationStatus === 'loading'}
+          onClick={() => onOpenReview(event.eventId)}
+        >
+          {reviewNavigationStatus === 'loading' ? '검토 찾는 중…' : '검토하러 가기'}
+        </button>
+      </span> : <b>{transferEndpoint.status}</b>}
+      {reviewNavigationStatus === 'error' ? <p role="alert">이 거래의 열린 검토를 찾지 못했습니다. 검토 목록을 새로고침한 뒤 다시 시도해 주세요.</p> : null}
     </section> : null}
 
     <section className="ledger-explorer-detail__postings" aria-labelledby={`posting-title-${event.eventId}`}>
@@ -224,6 +243,8 @@ export function LedgerPage() {
   const [reviewStatus, setReviewStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [reviewReloadKey, setReviewReloadKey] = useState(0)
   const reviewListGenerationRef = useRef(0)
+  const [reviewOccurredAtById, setReviewOccurredAtById] = useState<Record<string, string>>({})
+  const [reviewNavigation, setReviewNavigation] = useState<{ eventId?: string; status: 'idle' | 'loading' | 'error' }>({ status: 'idle' })
   const [selectedId, setSelectedId] = useState<string>()
   const [selectedReviewId, setSelectedReviewId] = useState<string>()
   const selectedReviewIdRef = useRef<string | undefined>(undefined)
@@ -269,6 +290,7 @@ export function LedgerPage() {
     const generation = ++reviewListGenerationRef.current
     setReviewStatus('loading')
     setReviewPageStatus('idle')
+    setReviewNavigation({ status: 'idle' })
     setReviews([])
     setReviewCursor(undefined)
     selectedReviewIdRef.current = undefined
@@ -311,6 +333,15 @@ export function LedgerPage() {
           reviewDetailGenerationRef.current !== generation
         ) return
         setReviewDetail(review)
+        const occurredAt = review.observations
+          .map((observation) => observation.occurredAt)
+          .filter((value): value is string => Boolean(value))
+          .sort()[0]
+        if (occurredAt) {
+          setReviewOccurredAtById((current) => current[review.id] === occurredAt
+            ? current
+            : { ...current, [review.id]: occurredAt })
+        }
         setResolutionCode(review.options[0]?.code ?? '')
         setResolutionNote('')
         setReviewDetailStatus('ready')
@@ -363,6 +394,45 @@ export function LedgerPage() {
       setReviewPageStatus('idle')
     } catch {
       if (reviewListGenerationRef.current === generation) setReviewPageStatus('error')
+    }
+  }
+
+  const openReviewForEvent = async (eventId: string) => {
+    if (reviewNavigation.status === 'loading') return
+    const loadedReview = reviews.find((review) => review.executionId === eventId && review.status === 'OPEN')
+    if (loadedReview) {
+      selectReview(loadedReview.id)
+      setReviewNavigation({ status: 'idle' })
+      setView('review')
+      return
+    }
+
+    const generation = reviewListGenerationRef.current
+    let cursor = reviewCursor
+    const loadedIds = new Set(reviews.map((review) => review.id))
+    setReviewNavigation({ eventId, status: 'loading' })
+    try {
+      while (cursor) {
+        const page = await loadReviews({ cursor })
+        if (reviewListGenerationRef.current !== generation) return
+        const newItems = page.items.filter((review) => !loadedIds.has(review.id))
+        newItems.forEach((review) => loadedIds.add(review.id))
+        setReviews((current) => [...current, ...newItems])
+        setReviewCursor(page.nextCursor)
+        const matchingReview = page.items.find((review) => review.executionId === eventId && review.status === 'OPEN')
+        if (matchingReview) {
+          selectReview(matchingReview.id)
+          setReviewNavigation({ status: 'idle' })
+          setView('review')
+          return
+        }
+        cursor = page.nextCursor
+      }
+      setReviewNavigation({ eventId, status: 'error' })
+    } catch {
+      if (reviewListGenerationRef.current === generation) {
+        setReviewNavigation({ eventId, status: 'error' })
+      }
     }
   }
 
@@ -524,7 +594,11 @@ export function LedgerPage() {
                         <td><LedgerMovementList postings={fees} /></td>
                         <td><LedgerStatusBadges event={event} /></td>
                       </tr>
-                      {isOpen ? <tr className="ledger-explorer__detail-row"><td colSpan={6}><div id={`ledger-detail-${event.eventId}`}><LedgerExplorerDetail event={event} /></div></td></tr> : null}
+                      {isOpen ? <tr className="ledger-explorer__detail-row"><td colSpan={6}><div id={`ledger-detail-${event.eventId}`}><LedgerExplorerDetail
+                        event={event}
+                        reviewNavigationStatus={reviewNavigation.eventId === event.eventId ? reviewNavigation.status : 'idle'}
+                        onOpenReview={openReviewForEvent}
+                      /></div></td></tr> : null}
                     </Fragment>
                   })}</tbody>
                 </table>
@@ -555,10 +629,13 @@ export function LedgerPage() {
           reviews.length === 0 ? <section className="ledger-state-card ledger-state-card--empty"><h2>열린 검토가 없습니다</h2><p>추가 확인이 필요한 거래가 생기면 사유와 근거가 여기에 표시됩니다</p></section> :
           <section className="ledger-review-browser" aria-label="열린 검토">
             <div className="ledger-review-browser__list">
-              {reviews.map((review) => <button type="button" key={review.id} className={review.id === selectedReviewId ? 'is-selected' : undefined} onClick={() => selectReview(review.id)}>
-                <span><strong>{describeReviewReason(review.reasonCodes[0] ?? '')}</strong><small>{new Date(review.createdAt).toLocaleString('ko-KR')}</small></span>
+              {reviews.map((review) => {
+                const occurredAt = events.find((event) => event.eventId === review.executionId)?.effectiveAt
+                  ?? reviewOccurredAtById[review.id]
+                return <button type="button" key={review.id} className={review.id === selectedReviewId ? 'is-selected' : undefined} onClick={() => selectReview(review.id)}>
+                <span><strong>{describeReviewReason(review.reasonCodes[0] ?? '')}</strong><small>{occurredAt ? formatLedgerDateTime(occurredAt) : '거래 시각은 상세에서 확인'}</small></span>
                 <b>{statusLabel(review.status)}</b>
-              </button>)}
+              </button>})}
               {reviewCursor ? <button type="button" className="ledger-review-browser__more" onClick={loadMoreReviews} disabled={reviewPageStatus === 'loading'}>
                 {reviewPageStatus === 'loading' ? '검토 불러오는 중…' : '검토 더 보기'}
               </button> : null}
