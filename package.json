@@ -23,6 +23,7 @@
     "backend:logs": "node scripts/host-backend.mjs logs",
     "backend:supervise": "node scripts/host-backend.mjs supervise",
     "backend:install-autostart": "node scripts/host-backend.mjs install-autostart",
+    "backend:share-runtime": "node scripts/host-backend.mjs share-runtime",
     "build": "npm run build --workspace @daejang/web --workspace @daejang/web-api --workspace @daejang/edge --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
