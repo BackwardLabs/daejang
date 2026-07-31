@@ -107,6 +107,7 @@ type WorkflowServiceClient = Client & {
 type QueryServiceClient = Client & {
   getDashboard: UnaryMethod
   listLedgerEvents: UnaryMethod
+  getLedgerEventLots: UnaryMethod
   listReviews: UnaryMethod
   createReport: UnaryMethod
   listReports: UnaryMethod
@@ -347,6 +348,17 @@ export class EngineMtlsClient implements WalletSourceRegistry {
   async listLedgerEvents(context: SourceRequestContext, taxYear: number, limit = 100) {
     const response = await this.#unaryOn(this.#queryClient, 'listLedgerEvents', { context: requestContext(context), taxYear, limit }) as { items: Array<Record<string, unknown>> }
     return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
+  }
+
+  async getLedgerEventLots(context: SourceRequestContext, eventId: string, revisionId: string) {
+    const response = await this.#unaryOn(this.#queryClient, 'getLedgerEventLots', {
+      context: requestContext(context), eventId, revisionId,
+    }) as { runId: string; coverage: string; links: Array<Record<string, unknown>> }
+    return {
+      runId: response.runId,
+      coverage: response.coverage,
+      links: normalizeProtoValue(response.links) as Array<Record<string, unknown>>,
+    }
   }
 
   async listReviews(context: SourceRequestContext, limit = 100, pageToken = '') {

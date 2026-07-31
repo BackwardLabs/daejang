@@ -258,6 +258,10 @@ class JourneyEngine implements EngineDataClient {
     return []
   }
 
+  async getLedgerEventLots() {
+    return { runId: '', coverage: '', links: [] }
+  }
+
   async listReviews() {
     return { items: [], nextPageToken: '' }
   }

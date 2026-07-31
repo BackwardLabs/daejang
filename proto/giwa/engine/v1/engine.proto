@@ -26,6 +26,7 @@ service WorkflowService {
 service QueryService {
   rpc GetDashboard(GetDashboardRequest) returns (GetDashboardResponse);
   rpc ListLedgerEvents(ListLedgerEventsRequest) returns (ListLedgerEventsResponse);
+  rpc GetLedgerEventLots(GetLedgerEventLotsRequest) returns (GetLedgerEventLotsResponse);
   rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
   rpc CreateReport(CreateReportRequest) returns (CreateReportResponse);
   rpc ListReports(ListReportsRequest) returns (ListReportsResponse);
@@ -249,6 +250,34 @@ message LedgerEvent {
   string subtype = 11;
 }
 message ListLedgerEventsResponse { repeated LedgerEvent items = 1; }
+
+message GetLedgerEventLotsRequest {
+  RequestContext context = 1;
+  string event_id = 2;
+  string revision_id = 3;
+}
+// LedgerLotLink is one provenance lot edge on a posting leg. ACQUIRE describes
+// the lot the leg created, DISPOSE describes an acquisition the leg consumed.
+// Fields left empty mean the downstream row does not exist.
+message LedgerLotLink {
+  string kind = 1;
+  string leg_id = 2;
+  string lot_id = 3;
+  string quantity = 4;
+  string basis_status = 5;
+  string basis_amount = 6;
+  string basis_denomination = 7;
+  string source_event_id = 8;
+  string source_leg_id = 9;
+  google.protobuf.Timestamp source_occurred_at = 10;
+  string source_quantity = 11;
+  string remaining_quantity = 12;
+}
+message GetLedgerEventLotsResponse {
+  string run_id = 1;
+  string coverage = 2;
+  repeated LedgerLotLink links = 3;
+}
 
 message ListReviewsRequest {
   RequestContext context = 1;

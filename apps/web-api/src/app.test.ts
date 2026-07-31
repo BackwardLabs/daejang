@@ -616,6 +616,7 @@ describe('web api authentication boundary', () => {
       listAllSources: vi.fn(async () => ({ wallets: [], documents: [] })),
       getSyncJob: vi.fn(async () => ({})), listSyncJobs: vi.fn(async () => []),
       getDashboard: vi.fn(async () => ({})), listLedgerEvents: vi.fn(async () => []),
+      getLedgerEventLots: vi.fn(async () => ({ runId: '', coverage: '', links: [] })),
       listReviews: vi.fn(async () => ({ items: [], nextPageToken: '' })), getReview: vi.fn(async () => ({})),
       resolveReview: vi.fn(async () => ({ review: {}, replayed: false })),
       createReport: vi.fn(async () => ({})),

@@ -17,6 +17,7 @@ import (
 	"github.com/BackwardLabs/daejang-db/pkg/sourcestore"
 	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/lotread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/observationread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/pdfparser"
 	"github.com/BackwardLabs/daejang/services/engine/internal/query"
@@ -67,6 +68,11 @@ func Run(ctx context.Context, config Config) error {
 		return fmt.Errorf("open observation read persistence: %w", err)
 	}
 	defer observationRuntime.Close()
+	lotRuntime, err := lotread.Open(ctx, config.QueryDatabaseURL, "daejang-engine-lot-read-api")
+	if err != nil {
+		return fmt.Errorf("open lot read persistence: %w", err)
+	}
+	defer lotRuntime.Close()
 	reportRuntime, err := reportstore.Open(ctx, reportstore.Options{DatabaseURL: config.ReportDatabaseURL, ApplicationName: "daejang-engine-report-api"})
 	if err != nil {
 		return fmt.Errorf("open report persistence: %w", err)
@@ -167,7 +173,7 @@ func Run(ctx context.Context, config Config) error {
 	enginev1.RegisterWorkflowServiceServer(grpcServer, &workflow.Service{Store: jobRuntime.Store})
 	enginev1.RegisterQueryServiceServer(grpcServer, &query.Service{
 		Reads: readRuntime.Store, Reports: reportRuntime.Store, TaxReports: taxReportRuntime.Store,
-		Observations: observationRuntime.Store,
+		Observations: observationRuntime.Store, Lots: lotRuntime.Store,
 	})
 	services := []string{"", enginev1.SourceService_ServiceDesc.ServiceName, enginev1.WorkflowService_ServiceDesc.ServiceName, enginev1.QueryService_ServiceDesc.ServiceName}
 	if reviewRuntime != nil {

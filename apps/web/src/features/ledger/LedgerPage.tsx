@@ -4,10 +4,13 @@ import { AppLink } from '../../components/AppLink.tsx'
 import { ApiClientError } from '../../api/client.ts'
 import {
   loadLedger,
+  loadLedgerEventLots,
   loadReview,
   loadReviews,
   resolveReview,
   type LedgerEventModel,
+  type LedgerLotLineageModel,
+  type LedgerLotLinkModel,
   type LedgerPostingModel,
   type ReviewDetailModel,
   type ReviewModel,
@@ -20,6 +23,7 @@ import {
 import {
   describeLedgerAction,
   describeLedgerSource,
+  describeLotBasisStatus,
   describePostingDirection,
   describePostingRole,
   describeReviewReason,
@@ -48,6 +52,8 @@ const describeReviewResolution = (review: ReviewDetailModel) =>
 export const formatReviewQuantity = formatCanonicalQuantity
 
 const preTaxEffectiveDate = new Date('2027-01-01T00:00:00+09:00')
+
+type LotStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 function LedgerTaxCostBasis({
   posting,
@@ -122,6 +128,51 @@ function LedgerPostingRow({
   </tr>
 }
 
+// Lot 계보는 취득원가 확정과 다른 층이므로 세무 취득원가 칸과 섞지 않고,
+// 저장된 allocation 행이 있을 때만 그 내용 그대로 보여 준다.
+function LedgerLotLinks({
+  posting,
+  postings,
+  links,
+}: {
+  posting: LedgerPostingModel
+  postings: LedgerPostingModel[]
+  links: LedgerLotLinkModel[]
+}) {
+  const asset = parseLedgerAsset(
+    posting.assetId,
+    posting.assetSymbol,
+    posting.hasAssetDecimals ? posting.assetDecimals : undefined,
+    posting.assetVenue,
+  )
+  const unit = asset.decimals !== undefined ? ` ${asset.symbol}` : ''
+  const quantityOf = (value: string) => `${formatLedgerQuantity(value, asset.decimals)}${unit}`
+  const basisOf = (link: LedgerLotLinkModel) => link.basisStatus === 'KNOWN' && link.basisAmount
+    ? `취득원가 ${formatLedgerMoney(link.basisAmount, link.basisDenomination, postings)}`
+    : describeLotBasisStatus(link.basisStatus)
+  const acquisitions = links.filter((link) => link.kind === 'ACQUIRE')
+  const disposals = links.filter((link) => link.kind === 'DISPOSE')
+  const summary = [
+    ...acquisitions.map((link) => `Lot 생성 · 잔여 ${quantityOf(link.remainingQuantity)}`),
+    ...(disposals.length ? [`취득 ${disposals.length}건에서 소진`] : []),
+  ].join(' · ')
+  return <details className="ledger-lot">
+    <summary>{summary}</summary>
+    <ul>
+      {acquisitions.map((link) => <li key={link.lotId}>
+        <span>이 거래로 생긴 Lot</span>
+        <strong>{quantityOf(link.quantity)}</strong>
+        <small>잔여 {quantityOf(link.remainingQuantity)} · {basisOf(link)}</small>
+      </li>)}
+      {disposals.map((link) => <li key={`${link.lotId}:${link.sourceLegId}`}>
+        <span>{link.sourceOccurredAt ? `${formatLedgerDateTime(link.sourceOccurredAt)} 취득분` : '취득 시각 미확인'}</span>
+        <strong>{quantityOf(link.quantity)} 소진</strong>
+        <small>취득 수량 {quantityOf(link.sourceQuantity)} · {basisOf(link)}</small>
+      </li>)}
+    </ul>
+  </details>
+}
+
 function LedgerMovementList({ postings }: { postings: LedgerPostingModel[] }) {
   if (!postings.length) return <span className="ledger-explorer__empty-value">—</span>
   return <span className="ledger-explorer__movements">
@@ -158,14 +209,27 @@ function LedgerStatusBadges({ event }: { event: LedgerEventModel }) {
   </span>
 }
 
+function LedgerLotNote({ status, lineage }: { status: LotStatus; lineage?: LedgerLotLineageModel }) {
+  if (status === 'loading') return <p className="ledger-lot-note" role="status">Lot 계보를 불러오는 중입니다.</p>
+  if (status === 'error') return <p className="ledger-lot-note" role="alert">Lot 계보를 불러오지 못했습니다. 장부 내용은 그대로 확인할 수 있습니다.</p>
+  if (status !== 'ready') return null
+  if (!lineage?.runId) return <p className="ledger-lot-note">이 계정에는 아직 Lot 계보가 산출되지 않았습니다.</p>
+  if (!lineage.links.length) return <p className="ledger-lot-note">현재 Lot 실행에 이 거래로 연결된 취득·처분 Lot이 없습니다.</p>
+  return null
+}
+
 function LedgerExplorerDetail({
   event,
   reviewNavigationStatus,
   onOpenReview,
+  lotStatus,
+  lotLineage,
 }: {
   event: LedgerEventModel
   reviewNavigationStatus: 'idle' | 'loading' | 'error'
   onOpenReview: (eventId: string) => void
+  lotStatus: LotStatus
+  lotLineage?: LedgerLotLineageModel
 }) {
   const source = describeLedgerSource(event.postings)
   const action = describeLedgerAction(event.eventType, event.flowShape, event.postings, event.subtype)
@@ -207,7 +271,16 @@ function LedgerExplorerDetail({
         <div><span>확정 장부</span><h3 id={`posting-title-${event.eventId}`}>자산 변동과 세무 입력</h3></div>
         <b>{event.postings.length}건</b>
       </header>
-      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>당시 취득·처분 금액</th><th>평균 단가</th><th>세무 취득원가</th></tr></thead><tbody>{event.postings.map((posting) => <LedgerPostingRow key={posting.legId} posting={posting} postings={event.postings} effectiveAt={event.effectiveAt} />)}</tbody></table></div> : <p>현재 변경본에 확정된 장부 반영 내역이 없습니다.</p>}
+      {event.postings.length ? <div className="ledger-posting-table"><table><thead><tr><th>자산</th><th>방향</th><th>수량</th><th>역할</th><th>당시 취득·처분 금액</th><th>평균 단가</th><th>세무 취득원가</th></tr></thead><tbody>{event.postings.map((posting) => {
+        const links = lotLineage?.links.filter((link) => link.legId === posting.legId) ?? []
+        return <Fragment key={posting.legId}>
+          <LedgerPostingRow posting={posting} postings={event.postings} effectiveAt={event.effectiveAt} />
+          {links.length ? <tr className="ledger-lot-row"><td colSpan={7}>
+            <LedgerLotLinks posting={posting} postings={event.postings} links={links} />
+          </td></tr> : null}
+        </Fragment>
+      })}</tbody></table></div> : <p>현재 변경본에 확정된 장부 반영 내역이 없습니다.</p>}
+      <LedgerLotNote status={lotStatus} lineage={lotLineage} />
     </section>
 
     <details className="ledger-explorer-provenance">
@@ -247,6 +320,9 @@ export function LedgerPage() {
   const [reviewOccurredAtById, setReviewOccurredAtById] = useState<Record<string, string>>({})
   const [reviewNavigation, setReviewNavigation] = useState<{ eventId?: string; status: 'idle' | 'loading' | 'error' }>({ status: 'idle' })
   const [selectedId, setSelectedId] = useState<string>()
+  const [lotLineage, setLotLineage] = useState<LedgerLotLineageModel>()
+  const [lotStatus, setLotStatus] = useState<LotStatus>('idle')
+  const lotGenerationRef = useRef(0)
   const [selectedReviewId, setSelectedReviewId] = useState<string>()
   const selectedReviewIdRef = useRef<string | undefined>(undefined)
   const reviewDetailGenerationRef = useRef(0)
@@ -285,6 +361,31 @@ export function LedgerPage() {
       })
     return () => controller.abort()
   }, [ledgerReloadKey, year])
+
+  useEffect(() => {
+    const generation = ++lotGenerationRef.current
+    const selected = events.find((event) => event.eventId === selectedId)
+    setLotLineage(undefined)
+    if (!selected) {
+      setLotStatus('idle')
+      return
+    }
+    const controller = new AbortController()
+    setLotStatus('loading')
+    void loadLedgerEventLots(selected.eventId, selected.revisionId, controller.signal)
+      .then((lineage) => {
+        if (lotGenerationRef.current !== generation) return
+        setLotLineage(lineage)
+        setLotStatus('ready')
+      })
+      .catch((error: unknown) => {
+        if (
+          lotGenerationRef.current === generation &&
+          !(error instanceof DOMException && error.name === 'AbortError')
+        ) setLotStatus('error')
+      })
+    return () => controller.abort()
+  }, [events, selectedId])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -602,6 +703,8 @@ export function LedgerPage() {
                         event={event}
                         reviewNavigationStatus={reviewNavigation.eventId === event.eventId ? reviewNavigation.status : 'idle'}
                         onOpenReview={openReviewForEvent}
+                        lotStatus={lotStatus}
+                        lotLineage={lotLineage}
                       /></div></td></tr> : null}
                     </Fragment>
                   })}</tbody>

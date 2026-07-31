@@ -48,6 +48,7 @@ const engineClient = (overrides: Partial<EngineDataClient> = {}): EngineDataClie
   listSyncJobs: vi.fn(async () => []),
   getDashboard: vi.fn(async () => ({})),
   listLedgerEvents: vi.fn(async () => []),
+  getLedgerEventLots: vi.fn(async () => ({ runId: '', coverage: '', links: [] })),
   listReviews: vi.fn(async () => ({ items: [], nextPageToken: '' })),
   getReview: vi.fn(async () => ({ id: 'review-1' })),
   resolveReview: vi.fn(async () => ({ review: { id: 'review-1', status: 'RESOLVED' }, replayed: false })),
@@ -955,6 +956,29 @@ describe('sync and tax report data routes', () => {
     expect(listTaxReportHistory).toHaveBeenCalledWith(expect.any(Object), 2027, 10)
     expect(response.json().items[0]).not.toHaveProperty('residentId')
     expect(response.json().items[0]).not.toHaveProperty('inputDigest')
+  })
+
+  it('passes the Event revision through to the lot lineage query', async () => {
+    const getLedgerEventLots = vi.fn(async () => ({
+      runId: 'lot-run:1', coverage: 'PARTIAL',
+      links: [{ kind: 'DISPOSE', legId: 'leg:out', lotId: 'lot:1', quantity: '600', basisStatus: 'KNOWN' }],
+    }))
+    const app = await buildRouteApp(engineClient({ getLedgerEventLots }))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/ledger/lots?eventId=event%3A1&revisionId=revision%3A1',
+    })
+    expect(response.statusCode).toBe(200)
+    expect(getLedgerEventLots).toHaveBeenCalledWith(expect.any(Object), 'event:1', 'revision:1')
+    expect(response.json()).toMatchObject({ runId: 'lot-run:1', coverage: 'PARTIAL' })
+  })
+
+  it('rejects a lot lineage request without an Event revision', async () => {
+    const getLedgerEventLots = vi.fn(async () => ({ runId: '', coverage: '', links: [] }))
+    const app = await buildRouteApp(engineClient({ getLedgerEventLots }))
+    const response = await app.inject({ method: 'GET', url: '/api/v1/ledger/lots?eventId=event%3A1' })
+    expect(response.statusCode).toBe(400)
+    expect(getLedgerEventLots).not.toHaveBeenCalled()
   })
 
   it('returns an explicit replacement response for legacy zero-KRW report generation', async () => {
