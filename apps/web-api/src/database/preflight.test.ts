@@ -95,9 +95,9 @@ const validReportPaymentContract = {
   orders_table: 'web_private.report_payment_orders',
   authorizations_table: 'web_private.report_payment_authorizations',
   entitlements_table: 'web_private.report_payment_entitlements',
-  contract_version: 1,
-  contract_digest: '28f6894a953e6acc5c238b04e025662ee6bc7d3b5dbd31e783c40789b9e6dcf4',
-  migration_version: '35',
+  contract_version: 2,
+  contract_digest: '88c83fad4df8baa34ac3da2ccd3165f3a7d1d00cd7405069617c9253f913ff1f',
+  migration_version: '49',
 }
 
 const validReportAttestationContract = {

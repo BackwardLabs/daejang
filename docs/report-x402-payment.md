@@ -62,7 +62,14 @@ sequenceDiagram
     A->>F: settle(payload, requirements)
     F->>G: transferWithAuthorization
     G-->>F: confirmed receipt · transaction hash
-    F-->>A: settlement success
+    alt receipt confirmed
+      F-->>A: 200 settlement success
+    else persisted but confirmation pending
+      F-->>A: 202 pending + paymentKey
+      A-->>W: 409 + Retry-After
+      W->>A: 동일 PAYMENT-SIGNATURE 재전송
+      A->>F: settle 또는 recovery
+    end
     A->>D: SETTLED + entitlement 원자적 기록
     A->>D: 동일 revision의 개인정보 최소화 결과 읽기
     A->>D: DELIVERED 기록
@@ -146,6 +153,22 @@ Content-Type: application/json
 현재 세금 결과 JSON이다. `residentId`와 내부 artifact digest는 결제 binding에만
 사용하고 브라우저 응답에는 노출하지 않는다.
 
+### 정산 확인 대기
+
+facilitator가 정산 요청과 raw transaction을 영속화했지만 receipt를 아직 확정하지
+못하면 Web API는 주문을 `SETTLING`으로 유지하고 다음 응답을 반환한다.
+
+```http
+HTTP/1.1 409 Conflict
+Retry-After: 5
+Cache-Control: private, no-store
+```
+
+React는 유효한 정수형 `Retry-After`가 있는 `409`만 재시도한다. 최초 EIP-712
+서명으로 만든 동일한 `PAYMENT-SIGNATURE`를 그대로 사용하며 새 nonce나 서명을
+생성하지 않는다. 클라이언트 재시도는 최대 25회, 누적 대기 2분으로 제한된다.
+그 이후에도 주문은 `FAILED`로 바뀌지 않으며 서버 reconciler가 복구를 계속한다.
+
 ## 6. 결제 상태
 
 ```mermaid
@@ -165,6 +188,12 @@ stateDiagram-v2
 - facilitator는 같은 authorization nonce를 두 번 정산하지 않아야 한다.
 - Web API는 동일 payment order가 재요청되면 기존 정산 결과 또는 entitlement를 사용한다.
 - 결제 성공과 entitlement 생성은 PostgreSQL 트랜잭션 하나에서 기록한다.
+- Web API는 provider의 canonical payment key를 주문에 저장한다. 별도
+  `report-payment-reconciler`가 stale `SETTLING` 주문을 claim한 뒤
+  `GET /v1/settlements/{paymentKey}`로 조회한다.
+- recovery가 `settled`이면 entitlement를 생성하고, `pending`, `missing` 또는
+  transport 오류면 `SETTLING`을 유지한다. provider가 `failed`를 확정한 경우에만
+  주문을 `FAILED`로 전환한다.
 
 ## 7. 거부 조건
 
@@ -185,7 +214,11 @@ stateDiagram-v2
 - `PAYMENT-SIGNATURE`, 전체 지갑 주소와 결제 authorization은 일반 로그와 분석 이벤트에 남기지 않는다.
 - 로그에는 request ID, payment order ID, report ID, 상태와 축약된 transaction hash만 기록한다.
 - 모든 결제·보고서 응답은 `private, no-store`를 사용한다.
-- 운영 facilitator URL은 HTTPS를 사용하고 ingress에서 Web API만 접근할 수 있게 제한한다.
+- 운영 facilitator URL은 HTTPS를 사용한다. raw Fastify port는 x402 전용
+  private network에만 두고, 공유 integration network의 nginx gateway는
+  `daejang` client certificate를 mTLS로 검증한다.
+- Web API와 report-payment reconciler는 같은 CA, client certificate, private
+  key와 `x402-facilitator.internal` server name 검증 설정을 사용한다.
 - GIWA 공개 RPC는 rate limit이 있으므로 운영 경로에는 전용 RPC를 사용한다.
 - Mock USD 결제는 실제 구매·환불 정책이 적용되는 상용 결제가 아님을 UI에 표시한다.
 - 실제 가치가 있는 자산을 사용하기 전 이용약관, 환불, 전자상거래와 회계 처리 기준을 별도로 승인한다.
@@ -209,15 +242,76 @@ stateDiagram-v2
 | 보고서 화면 진입점 | `apps/web/src/features/reports/ReportPage.tsx` |
 | Fastify x402 resource route | `apps/web-api/src/routes/report-payments.ts` |
 | facilitator HTTPS adapter | `apps/web-api/src/report-payment/facilitator.ts` |
+| settlement recovery worker | `apps/web-api/src/report-payment-reconciler.ts` |
 | 결제 order·entitlement 저장소 | `apps/web-api/src/report-payment/postgres-report-payment-store.ts` |
-| PostgreSQL schema | `daejang-db/migrations/000035_create_report_x402_payment_persistence.sql` |
+| PostgreSQL baseline | `daejang-db/migrations/000035_create_report_x402_payment_persistence.sql` |
+| provider key·recovery schema | `daejang-db/migrations/000049_add_report_x402_settlement_recovery.sql` |
+| facilitator API implementation | `daejang-x402/src/server/facilitator-api.ts` |
+| facilitator API contract | `daejang-x402/openapi/facilitator-v1.yaml` |
 
 배포는 다음 순서를 지킨다.
 
-1. `daejang-db` migration 35를 먼저 적용한다.
-2. GIWA Sepolia Mock USD를 지원하는 self-hosted facilitator를 private HTTPS 주소에 배포한다.
-3. Web API에 `X402_REPORT_PAYMENTS_ENABLED=true`와 facilitator, token, amount, `payTo` 설정을 주입한다.
-4. Web API preflight가 order, authorization replay, entitlement table과 schema contract를 확인한 뒤 기동되는지 확인한다.
-5. React에서 실제 FINAL 보고서의 ID와 402 binding이 같은 경우에만 지갑 서명을 요청한다.
+1. `daejang-db` migration 49까지 적용하고
+   `report-x402-payment-persistence` contract v2를 확인한다.
+2. `daejang-x402`의 migration, facilitator, provider reconciler와 mTLS gateway를
+   배포한다. 기존 GIWA Sepolia MockUSD와 `payTo` deployment artifact를 재사용한다.
+3. facilitator `/health/ready`와 v1 verify·settle·recovery 계약을 private
+   integration network에서 확인한다.
+4. Web API와 report-payment reconciler에 같은 facilitator URL, mTLS client
+   identity, token, amount와 `payTo` 설정을 주입한다.
+5. 공유 `DAEJANG_X402_NETWORK`를 생성하고, 결제 전용 Compose override와
+   `x402-payments` profile로 Web API와 report-payment reconciler를 실행한 뒤
+   `X402_REPORT_PAYMENTS_ENABLED=true`를 적용한다.
+6. React에서 실제 FINAL 보고서의 ID와 402 binding이 같은 경우에만 지갑 서명을
+   요청하는지 확인한다.
 
-facilitator는 이 저장소 안에서 private key를 소유하지 않는다. `X402_FACILITATOR_URL`의 서비스가 GIWA Sepolia RPC, gas payer key와 `transferWithAuthorization` 실행 책임을 가진다. 해당 서비스가 배포되지 않았거나 verify·settle 계약을 만족하지 않으면 Web API는 보고서를 fail-closed로 반환하지 않는다.
+결제가 비활성화된 기본 배포는 x402 인증서나 외부 integration network를 요구하지
+않는다. 결제를 활성화할 때만 다음 override를 함께 사용한다.
+
+```bash
+docker network inspect "$DAEJANG_X402_NETWORK" >/dev/null 2>&1 ||
+  docker network create "$DAEJANG_X402_NETWORK"
+docker compose \
+  -f deploy/compose.production.yaml \
+  -f deploy/compose.x402-payments.yaml \
+  --profile x402-payments \
+  config --quiet
+docker compose \
+  -f deploy/compose.production.yaml \
+  -f deploy/compose.x402-payments.yaml \
+  --profile x402-payments \
+  up -d --build
+```
+
+긴급 rollback은 먼저 feature flag를 내리고 Web API를 재기동한 뒤 worker를
+중지한다. 비활성 worker는 직접 실행되더라도 성공 상태로 종료하며
+`on-failure` 정책이 이를 다시 시작하지 않는다.
+
+```bash
+export X402_REPORT_PAYMENTS_ENABLED=false
+docker compose \
+  -f deploy/compose.production.yaml \
+  -f deploy/compose.x402-payments.yaml \
+  --profile x402-payments \
+  up -d --build web-api
+docker compose \
+  -f deploy/compose.production.yaml \
+  -f deploy/compose.x402-payments.yaml \
+  --profile x402-payments \
+  stop report-payment-reconciler
+```
+
+facilitator는 이 저장소 안에서 private key를 소유하지 않는다.
+`X402_FACILITATOR_URL`의 서비스가 GIWA Sepolia RPC, gas payer key와
+`transferWithAuthorization` 실행 책임을 가진다. 해당 서비스가 배포되지
+않았거나 verify·settle 계약을 만족하지 않으면 Web API는 fail-closed로
+보고서를 반환하지 않는다.
+
+저장소 간 호환성 검사는 x402의 실제 Fastify 계약 fixture를 daejang HTTP
+client로 호출한다.
+
+```bash
+DAEJANG_X402_REPO=/path/to/daejang-x402 \
+  npm test --workspace @daejang/web-api -- \
+  --run src/report-payment/facilitator.contract.test.ts
+```

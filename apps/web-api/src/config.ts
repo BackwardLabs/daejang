@@ -36,6 +36,12 @@ export type AppConfig = {
 
 export type ReportPaymentConfig = {
   facilitatorUrl: string
+  tls?: {
+    caPath: string
+    certPath: string
+    keyPath: string
+    serverName: string
+  }
   network: 'eip155:91342'
   asset: string
   amount: string
@@ -303,7 +309,7 @@ const loadReportAttestationDeploymentConfig = (
   }
 }
 
-const loadReportPaymentConfig = (
+export const loadReportPaymentConfig = (
   environment: NodeJS.ProcessEnv,
   production: boolean,
 ): ReportPaymentConfig | undefined => {
@@ -340,9 +346,34 @@ const loadReportPaymentConfig = (
   if (!/^[1-9][0-9]*$/.test(amount)) {
     throw new Error('X402_AMOUNT_ATOMIC must be a positive integer string')
   }
+  const facilitatorTls = {
+    caPath: environment.X402_FACILITATOR_CA_PATH,
+    certPath: environment.X402_FACILITATOR_CERT_PATH,
+    keyPath: environment.X402_FACILITATOR_KEY_PATH,
+    serverName: environment.X402_FACILITATOR_SERVER_NAME,
+  }
+  const tlsValues = Object.values(facilitatorTls)
+  if (
+    (production || tlsValues.some((value) => value !== undefined)) &&
+    tlsValues.some((value) => value === undefined || value.length === 0)
+  ) {
+    throw new Error(
+      'X402 facilitator mTLS requires CA, client certificate, client key and server name',
+    )
+  }
 
   return {
     facilitatorUrl: url.origin,
+    ...(tlsValues.every((value) => value !== undefined && value.length > 0)
+      ? {
+          tls: {
+            caPath: facilitatorTls.caPath as string,
+            certPath: facilitatorTls.certPath as string,
+            keyPath: facilitatorTls.keyPath as string,
+            serverName: facilitatorTls.serverName as string,
+          },
+        }
+      : {}),
     network: 'eip155:91342',
     asset,
     amount,

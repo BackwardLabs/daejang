@@ -9,6 +9,7 @@ import type {
   X402PaymentRequirement,
   X402Settlement,
 } from '../report-payment/facilitator.js'
+import { facilitatorPaymentKeyFor } from '../report-payment/facilitator.js'
 import type {
   ReportPaymentBinding,
   ReportPaymentOrder,
@@ -331,7 +332,13 @@ export const registerReportPaymentRoutes = async (
 
       const binding = bindingFor(userId, paymentReport)
       reply.header('cache-control', 'private, no-store')
-      if (await store.findEntitlement(userId, binding.resourceDigest, 'json')) {
+      const entitlement = await store.findEntitlement(
+        userId,
+        binding.resourceDigest,
+        'json',
+      )
+      if (entitlement) {
+        await store.markDelivered(entitlement.paymentOrderId, userId)
         reply.header('x-daejang-payment-entitlement', 'reused')
         return reportEnvelope(report)
       }
@@ -357,7 +364,18 @@ export const registerReportPaymentRoutes = async (
       }
 
       const payment = decodePaymentPayload(signatureHeader)
-      if (!matchesRequirement(payment.accepted, requirement) || !validateAuthorization(payment, requirement, now)) {
+      const payloadHash = createHash('sha256').update(signatureHeader).digest('hex')
+      const facilitatorPaymentKey = facilitatorPaymentKeyFor(payment)
+      const reserved = await store.findReservedSettlement({
+        orderId: order.id,
+        userId,
+        resourceDigest: binding.resourceDigest,
+        payloadHash,
+      })
+      if (
+        !matchesRequirement(payment.accepted, requirement) ||
+        (!reserved && !validateAuthorization(payment, requirement, now))
+      ) {
         throw paymentRequired(order, requirement, resourceUrl)
       }
 
@@ -374,12 +392,12 @@ export const registerReportPaymentRoutes = async (
         throw paymentRequired(order, requirement, resourceUrl)
       }
 
-      const payloadHash = createHash('sha256').update(signatureHeader).digest('hex')
       const reservation = await store.reserveSettlement({
         orderId: order.id,
         userId,
         resourceDigest: binding.resourceDigest,
         payloadHash,
+        facilitatorPaymentKey,
         payer: verification.payer,
         authorizationNonce: payment.payload.authorization.nonce,
         now,
@@ -388,6 +406,7 @@ export const registerReportPaymentRoutes = async (
         throw paymentRequired(order, requirement, resourceUrl)
       }
       if (reservation.kind === 'busy') {
+        reply.header('retry-after', '5')
         throw new ApiError(409, 'PAYMENT_SETTLEMENT_IN_PROGRESS', '동일한 결제를 정산하고 있습니다.')
       }
 
@@ -398,7 +417,8 @@ export const registerReportPaymentRoutes = async (
           throw new ApiError(503, 'PAYMENT_STATE_INCONSISTENT', '결제 상태를 확인할 수 없습니다.')
         }
         settlement = {
-          success: true,
+          status: 'settled',
+          paymentKey: facilitatorPaymentKey,
           transaction: settled.transactionHash,
           network: settled.network,
           payer: settled.payer,
@@ -413,14 +433,49 @@ export const registerReportPaymentRoutes = async (
         } catch {
           throw new ApiError(503, 'PAYMENT_FACILITATOR_UNAVAILABLE', '결제 정산 서비스에 연결할 수 없습니다.')
         }
+        if (result.status === 'pending') {
+          if (
+            result.paymentKey.toLowerCase() !==
+            facilitatorPaymentKey.toLowerCase()
+          ) {
+            throw new ApiError(
+              503,
+              'PAYMENT_STATE_INCONSISTENT',
+              '결제 상태를 확인할 수 없습니다.',
+            )
+          }
+          reply.header('retry-after', `${result.retryAfterSeconds}`)
+          throw new ApiError(
+            409,
+            'PAYMENT_SETTLEMENT_IN_PROGRESS',
+            '동일한 결제를 정산하고 있습니다.',
+          )
+        }
+        if (result.status === 'failed') {
+          if (
+            result.paymentKey.toLowerCase() !==
+              facilitatorPaymentKey.toLowerCase()
+          ) {
+            throw new ApiError(
+              503,
+              'PAYMENT_STATE_INCONSISTENT',
+              '결제 상태를 확인할 수 없습니다.',
+            )
+          }
+          await store.failSettlement(order.id, userId)
+          throw paymentRequired(order, requirement, resourceUrl)
+        }
         if (
-          !result.success ||
+          result.paymentKey.toLowerCase() !== facilitatorPaymentKey.toLowerCase() ||
           result.network !== requirement.network ||
           !transactionHashPattern.test(result.transaction) ||
           !sameAddress(result.payer, verification.payer)
         ) {
-          await store.failSettlement(order.id, userId)
-          throw paymentRequired(order, requirement, resourceUrl)
+          throw new ApiError(
+            503,
+            'PAYMENT_STATE_INCONSISTENT',
+            '결제 상태를 확인할 수 없습니다.',
+          )
         }
         await store.completeSettlement({
           orderId: order.id,
@@ -432,7 +487,12 @@ export const registerReportPaymentRoutes = async (
         settlement = result
       }
 
-      reply.header('payment-response', encodeBase64Json(settlement))
+      reply.header('payment-response', encodeBase64Json({
+        success: true,
+        transaction: settlement.transaction,
+        network: settlement.network,
+        payer: settlement.payer,
+      }))
       await store.markDelivered(order.id, userId)
       return reportEnvelope(report)
     },

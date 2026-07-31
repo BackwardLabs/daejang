@@ -397,7 +397,7 @@ export const assertTaxReportSchema = async (pool: Pool) => {
 }
 
 const reportPaymentContractDigest =
-  '28f6894a953e6acc5c238b04e025662ee6bc7d3b5dbd31e783c40789b9e6dcf4'
+  '88c83fad4df8baa34ac3da2ccd3165f3a7d1d00cd7405069617c9253f913ff1f'
 const reportAttestationContractDigest =
   'ff6eee9232fc6a2b1845b94829e8ac26047cc3b9162a2cf9bb890d250ae85561'
 
@@ -416,16 +416,16 @@ export const assertReportPaymentSchema = async (pool: Pool) => {
       to_regclass('web_private.report_payment_entitlements')::text AS entitlements_table,
       (SELECT version FROM web_private.schema_contracts WHERE component='report-x402-payment') AS contract_version,
       (SELECT digest FROM web_private.schema_contracts WHERE component='report-x402-payment') AS contract_digest,
-      (SELECT migration_version::text FROM daejang_meta.schema_contract WHERE component='report-x402-payment-persistence' AND contract_version=1) AS migration_version
+      (SELECT migration_version::text FROM daejang_meta.schema_contract WHERE component='report-x402-payment-persistence' AND contract_version=2) AS migration_version
   `)
   const row = result.rows[0]
   if (
     row?.orders_table !== 'web_private.report_payment_orders' ||
     row.authorizations_table !== 'web_private.report_payment_authorizations' ||
     row.entitlements_table !== 'web_private.report_payment_entitlements' ||
-    row.contract_version !== 1 ||
+    row.contract_version !== 2 ||
     row.contract_digest !== reportPaymentContractDigest ||
-    row.migration_version !== '35'
+    row.migration_version !== '49'
   ) {
     throw new Error('report x402 payment migration contract is invalid')
   }

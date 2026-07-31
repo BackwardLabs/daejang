@@ -40,6 +40,10 @@ describe('web api configuration', () => {
         'X402_MAX_TIMEOUT_SECONDS',
         'X402_TOKEN_NAME',
         'X402_TOKEN_VERSION',
+        'X402_FACILITATOR_CA_PATH',
+        'X402_FACILITATOR_CERT_PATH',
+        'X402_FACILITATOR_KEY_PATH',
+        'X402_FACILITATOR_SERVER_NAME',
         'GIWA_REPORT_ATTESTATIONS_ENABLED',
         'GIWA_REPORT_RPC_URL',
         'GIWA_REPORT_EAS_ADDRESS',
@@ -100,6 +104,43 @@ describe('web api configuration', () => {
       X402_REPORT_PAYMENTS_ENABLED: 'true',
       X402_FACILITATOR_URL: 'https://facilitator.example.com',
     })).toThrow('are required')
+  })
+
+  it('requires complete facilitator mTLS credentials in production', () => {
+    const production = {
+      NODE_ENV: 'production',
+      PUBLIC_ORIGIN: 'https://daejang.backwardlabs.io',
+      DATABASE_URL: 'postgresql://example.invalid/daejang',
+      PRIVATE_OBJECT_ROOT: '/var/lib/daejang/private',
+      RATE_LIMIT_HMAC_SECRET: 'test-rate-limit-secret-at-least-32-bytes',
+      ENGINE_GRPC_TARGET: 'jit-engine.internal:8443',
+      ENGINE_GRPC_CA_PATH: '/run/secrets/engine-ca.pem',
+      ENGINE_GRPC_CERT_PATH: '/run/secrets/client.pem',
+      ENGINE_GRPC_KEY_PATH: '/run/secrets/client-key.pem',
+      X402_REPORT_PAYMENTS_ENABLED: 'true',
+      X402_FACILITATOR_URL: 'https://x402-facilitator.internal',
+      X402_ASSET_ADDRESS: '0x1111111111111111111111111111111111111111',
+      X402_PAY_TO_ADDRESS: '0x2222222222222222222222222222222222222222',
+      X402_AMOUNT_ATOMIC: '100000',
+    }
+
+    expect(() => loadConfig(production)).toThrow('X402 facilitator mTLS')
+    expect(
+      loadConfig({
+        ...production,
+        X402_FACILITATOR_CA_PATH: '/run/secrets/x402-ca.pem',
+        X402_FACILITATOR_CERT_PATH: '/run/secrets/x402-client.pem',
+        X402_FACILITATOR_KEY_PATH: '/run/secrets/x402-client-key.pem',
+        X402_FACILITATOR_SERVER_NAME: 'x402-facilitator.internal',
+      }).reportPayments,
+    ).toMatchObject({
+      tls: {
+        caPath: '/run/secrets/x402-ca.pem',
+        certPath: '/run/secrets/x402-client.pem',
+        keyPath: '/run/secrets/x402-client-key.pem',
+        serverName: 'x402-facilitator.internal',
+      },
+    })
   })
 
   it('loads the GIWA report attestation deployment only as one complete binding', () => {

@@ -30,6 +30,7 @@ type OrderRow = {
   expires_at: Date
   payer_address: string | null
   payload_hash: string | null
+  facilitator_payment_key: string | null
   authorization_nonce: string | null
   transaction_hash: string | null
   updated_at: Date
@@ -56,6 +57,9 @@ const toOrder = (row: OrderRow): ReportPaymentOrder => ({
   expiresAt: row.expires_at,
   ...(row.payer_address ? { payer: row.payer_address } : {}),
   ...(row.payload_hash ? { payloadHash: row.payload_hash } : {}),
+  ...(row.facilitator_payment_key
+    ? { facilitatorPaymentKey: row.facilitator_payment_key }
+    : {}),
   ...(row.authorization_nonce ? { authorizationNonce: row.authorization_nonce } : {}),
   ...(row.transaction_hash ? { transactionHash: row.transaction_hash } : {}),
 })
@@ -64,7 +68,8 @@ const selectOrder = `
   SELECT id, user_id, report_id, resident_id, tax_year, finality, pointer_version,
     report_artifact_digest, format, resource_digest, scheme, network, asset_address,
     amount_atomic::text, pay_to_address, max_timeout_seconds, state, expires_at,
-    payer_address, payload_hash, authorization_nonce, transaction_hash, updated_at
+    payer_address, payload_hash, facilitator_payment_key, authorization_nonce,
+    transaction_hash, updated_at
   FROM web_private.report_payment_orders
 `
 
@@ -74,11 +79,12 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
   constructor(private readonly pool: Pool) {}
 
   async findEntitlement(userId: string, resourceDigest: string, format: 'json') {
-    const result = await this.pool.query(
-      `SELECT 1 FROM web_private.report_payment_entitlements WHERE user_id=$1 AND resource_digest=$2 AND format=$3`,
+    const result = await this.pool.query<{ payment_order_id: string }>(
+      `SELECT payment_order_id FROM web_private.report_payment_entitlements WHERE user_id=$1 AND resource_digest=$2 AND format=$3`,
       [userId, resourceDigest, format],
     )
-    return result.rowCount === 1
+    const row = result.rows[0]
+    return row ? { paymentOrderId: row.payment_order_id } : undefined
   }
 
   async getOrCreateQuote(binding: ReportPaymentBinding, terms: ReportPaymentTerms, expiresAt: Date) {
@@ -99,6 +105,7 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
             state = 'QUOTED',
             payer_address = NULL,
             payload_hash = NULL,
+            facilitator_payment_key = NULL,
             authorization_nonce = NULL,
             transaction_hash = NULL,
             settled_at = NULL,
@@ -107,7 +114,8 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
           RETURNING id, user_id, report_id, resident_id, tax_year, finality, pointer_version,
             report_artifact_digest, format, resource_digest, scheme, network, asset_address,
             amount_atomic::text, pay_to_address, max_timeout_seconds, state, expires_at,
-            payer_address, payload_hash, authorization_nonce, transaction_hash, updated_at
+            payer_address, payload_hash, facilitator_payment_key, authorization_nonce,
+            transaction_hash, updated_at
         `,
         [
           randomUUID(), binding.userId, binding.reportId, binding.residentId, binding.taxYear,
@@ -129,11 +137,28 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
     })
   }
 
+  async findReservedSettlement(input: {
+    orderId: string
+    userId: string
+    resourceDigest: string
+    payloadHash: string
+  }) {
+    const result = await this.pool.query<OrderRow>(
+      `${selectOrder}
+       WHERE id=$1 AND user_id=$2 AND resource_digest=$3
+         AND payload_hash=$4 AND state='SETTLING'`,
+      [input.orderId, input.userId, input.resourceDigest, input.payloadHash],
+    )
+    const row = result.rows[0]
+    return row ? toOrder(row) : undefined
+  }
+
   async reserveSettlement(input: {
     orderId: string
     userId: string
     resourceDigest: string
     payloadHash: string
+    facilitatorPaymentKey: string
     payer: string
     authorizationNonce: string
     now: Date
@@ -144,7 +169,7 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
         [input.orderId, input.userId, input.resourceDigest],
       )
       const row = result.rows[0]
-      if (!row || row.expires_at <= input.now || row.state === 'FAILED') return { kind: 'invalid' }
+      if (!row || row.state === 'FAILED') return { kind: 'invalid' }
       const order = toOrder(row)
       if (row.state === 'SETTLED' || row.state === 'DELIVERED') {
         return row.payload_hash === input.payloadHash ? { kind: 'settled', order } : { kind: 'invalid' }
@@ -159,12 +184,14 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
             RETURNING id, user_id, report_id, resident_id, tax_year, finality, pointer_version,
               report_artifact_digest, format, resource_digest, scheme, network, asset_address,
               amount_atomic::text, pay_to_address, max_timeout_seconds, state, expires_at,
-              payer_address, payload_hash, authorization_nonce, transaction_hash, updated_at
+              payer_address, payload_hash, facilitator_payment_key, authorization_nonce,
+              transaction_hash, updated_at
           `,
           [row.id, input.now],
         )
         return { kind: 'reserved', order: toOrder(reclaimed.rows[0] as OrderRow) }
       }
+      if (row.expires_at <= input.now) return { kind: 'invalid' }
 
       const authorization = await client.query(
         `
@@ -182,14 +209,22 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
         `
           UPDATE web_private.report_payment_orders SET
             state='SETTLING', payer_address=$2, payload_hash=$3,
-            authorization_nonce=$4, updated_at=$5
+            authorization_nonce=$4, facilitator_payment_key=$5, updated_at=$6
           WHERE id=$1
           RETURNING id, user_id, report_id, resident_id, tax_year, finality, pointer_version,
             report_artifact_digest, format, resource_digest, scheme, network, asset_address,
             amount_atomic::text, pay_to_address, max_timeout_seconds, state, expires_at,
-            payer_address, payload_hash, authorization_nonce, transaction_hash, updated_at
+            payer_address, payload_hash, facilitator_payment_key, authorization_nonce,
+            transaction_hash, updated_at
         `,
-        [row.id, input.payer, input.payloadHash, input.authorizationNonce, input.now],
+        [
+          row.id,
+          input.payer,
+          input.payloadHash,
+          input.authorizationNonce,
+          input.facilitatorPaymentKey,
+          input.now,
+        ],
       )
       return { kind: 'reserved', order: toOrder(updated.rows[0] as OrderRow) }
     })
@@ -212,7 +247,8 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
           RETURNING id, user_id, report_id, resident_id, tax_year, finality, pointer_version,
             report_artifact_digest, format, resource_digest, scheme, network, asset_address,
             amount_atomic::text, pay_to_address, max_timeout_seconds, state, expires_at,
-            payer_address, payload_hash, authorization_nonce, transaction_hash, updated_at
+            payer_address, payload_hash, facilitator_payment_key, authorization_nonce,
+            transaction_hash, updated_at
         `,
         [input.orderId, input.userId, input.resourceDigest, input.payer, input.transactionHash],
       )
@@ -224,6 +260,38 @@ export class PostgresReportPaymentStore implements ReportPaymentStore {
       )
       return toOrder(row)
     })
+  }
+
+  async claimRecoverableSettlements(before: Date, limit: number) {
+    const result = await this.pool.query<OrderRow>(
+      `
+        WITH candidates AS (
+          SELECT id
+          FROM web_private.report_payment_orders
+          WHERE state='SETTLING'
+            AND facilitator_payment_key IS NOT NULL
+            AND updated_at <= $1
+          ORDER BY updated_at, id
+          FOR UPDATE SKIP LOCKED
+          LIMIT $2
+        )
+        UPDATE web_private.report_payment_orders AS orders
+        SET updated_at=clock_timestamp()
+        FROM candidates
+        WHERE orders.id=candidates.id
+        RETURNING orders.id, orders.user_id, orders.report_id, orders.resident_id,
+          orders.tax_year, orders.finality, orders.pointer_version,
+          orders.report_artifact_digest, orders.format, orders.resource_digest,
+          orders.scheme, orders.network, orders.asset_address,
+          orders.amount_atomic::text, orders.pay_to_address,
+          orders.max_timeout_seconds, orders.state, orders.expires_at,
+          orders.payer_address, orders.payload_hash,
+          orders.facilitator_payment_key, orders.authorization_nonce,
+          orders.transaction_hash, orders.updated_at
+      `,
+      [before, limit],
+    )
+    return result.rows.map(toOrder)
   }
 
   async failSettlement(orderId: string, userId: string) {

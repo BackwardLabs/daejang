@@ -11,6 +11,8 @@ const GIWA_CHAIN_ID_HEX = '0x164ce'
 const GIWA_NETWORK = 'eip155:91342'
 const GIWA_RPC_URL = 'https://sepolia-rpc.giwa.io'
 const GIWA_EXPLORER_URL = 'https://sepolia-explorer.giwa.io'
+const SETTLEMENT_MAX_ATTEMPTS = 25
+const SETTLEMENT_MAX_WAIT_MILLISECONDS = 120_000
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
@@ -243,6 +245,62 @@ const parseSettlement = (
   return value.transaction
 }
 
+type SettlementRetryOptions = {
+  wait?: (milliseconds: number) => Promise<void>
+  maxAttempts?: number
+  maxWaitMilliseconds?: number
+  now?: () => number
+}
+
+const waitFor = (milliseconds: number) =>
+  new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds))
+
+export async function requestSettlementWithRetry(
+  resourceUrl: string,
+  paymentSignature: string,
+  options: SettlementRetryOptions = {},
+) {
+  const wait = options.wait ?? waitFor
+  const maxAttempts = options.maxAttempts ?? SETTLEMENT_MAX_ATTEMPTS
+  const maxWaitMilliseconds =
+    options.maxWaitMilliseconds ?? SETTLEMENT_MAX_WAIT_MILLISECONDS
+  const now = options.now ?? (() => performance.now())
+  const startedAt = now()
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const remainingMilliseconds =
+      maxWaitMilliseconds - (now() - startedAt)
+    if (remainingMilliseconds <= 0) {
+      throw new Error('결제 정산 재시도 시간이 만료되었습니다.')
+    }
+    const response = await requestRawResponse(resourceUrl, {
+      headers: {
+        accept: 'application/json',
+        'payment-signature': paymentSignature,
+      },
+      signal: AbortSignal.timeout(Math.max(1, Math.ceil(remainingMilliseconds))),
+    })
+    if (response.status !== 409 || attempt === maxAttempts) {
+      return response
+    }
+
+    const retryAfter = response.headers.get('retry-after')
+    if (!retryAfter || !/^[1-9][0-9]*$/.test(retryAfter)) {
+      return response
+    }
+    const delayMilliseconds = Number(retryAfter) * 1_000
+    if (
+      !Number.isSafeInteger(delayMilliseconds) ||
+      now() - startedAt + delayMilliseconds > maxWaitMilliseconds
+    ) {
+      return response
+    }
+    await wait(delayMilliseconds)
+  }
+
+  throw new Error('결제 정산 재시도 횟수가 올바르지 않습니다.')
+}
+
 export async function loadReportPaymentCapability(
   signal?: AbortSignal,
 ): Promise<ReportPaymentCapability> {
@@ -354,16 +412,15 @@ export async function downloadPaidFinalReport(
       },
     )
     onPhaseChange?.('settling')
-    const paid = await requestRawResponse(quote.resourceUrl, {
-      headers: {
-        accept: 'application/json',
-        'payment-signature': encodeBase64Json({
-          x402Version: 2,
-          accepted: quote.requirement,
-          payload: { signature, authorization },
-        }),
-      },
+    const paymentSignature = encodeBase64Json({
+      x402Version: 2,
+      accepted: quote.requirement,
+      payload: { signature, authorization },
     })
+    const paid = await requestSettlementWithRetry(
+      quote.resourceUrl,
+      paymentSignature,
+    )
     if (!paid.ok) {
       throw new Error(`결제 정산이 HTTP ${paid.status}로 실패했습니다.`)
     }

@@ -19,7 +19,7 @@ import {
 import {
   createGiwaSepoliaReportAttestationServerRuntime,
 } from './report-attestations/giwa-sepolia-server-runtime.js'
-import { HttpReportPaymentFacilitator } from './report-payment/facilitator.js'
+import { createReportPaymentFacilitator } from './report-payment/facilitator.js'
 import { PostgresReportPaymentStore } from './report-payment/postgres-report-payment-store.js'
 import {
   assessReportAttestationDeploymentSnapshot,
@@ -168,8 +168,8 @@ const start = async () => {
                   reportPaymentStore:
                     new PostgresReportPaymentStore(pool),
                   reportPaymentFacilitator:
-                    new HttpReportPaymentFacilitator(
-                      config.reportPayments.facilitatorUrl,
+                    createReportPaymentFacilitator(
+                      config.reportPayments,
                     ),
                 }
               : {}),
@@ -327,7 +327,6 @@ const start = async () => {
     throw error
   }
 }
-
 try {
   await start()
 } catch (error) {

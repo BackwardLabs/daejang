@@ -1,0 +1,47 @@
+services:
+  web-api:
+    volumes:
+      - ${X402_FACILITATOR_CA_PATH}:/run/secrets/x402-ca.pem:ro
+      - ${X402_FACILITATOR_CERT_PATH}:/run/secrets/x402-client-cert.pem:ro
+      - ${X402_FACILITATOR_KEY_PATH}:/run/secrets/x402-client-key.pem:ro
+    networks:
+      - x402-integration
+
+  report-payment-reconciler:
+    profiles: ["x402-payments"]
+    build: { context: .., dockerfile: apps/web-api/Dockerfile }
+    command: ["node", "apps/web-api/dist/report-payment-reconciler.js"]
+    restart: "on-failure:5"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${WEB_DATABASE_URL}
+      X402_REPORT_PAYMENTS_ENABLED: ${X402_REPORT_PAYMENTS_ENABLED:-false}
+      X402_FACILITATOR_URL: ${X402_FACILITATOR_URL:-}
+      X402_ASSET_ADDRESS: ${X402_ASSET_ADDRESS:-}
+      X402_PAY_TO_ADDRESS: ${X402_PAY_TO_ADDRESS:-}
+      X402_AMOUNT_ATOMIC: ${X402_AMOUNT_ATOMIC:-}
+      X402_MAX_TIMEOUT_SECONDS: ${X402_MAX_TIMEOUT_SECONDS:-300}
+      X402_TOKEN_NAME: ${X402_TOKEN_NAME:-Mock USD}
+      X402_TOKEN_VERSION: ${X402_TOKEN_VERSION:-1}
+      X402_FACILITATOR_CA_PATH: /run/secrets/x402-ca.pem
+      X402_FACILITATOR_CERT_PATH: /run/secrets/x402-client-cert.pem
+      X402_FACILITATOR_KEY_PATH: /run/secrets/x402-client-key.pem
+      X402_FACILITATOR_SERVER_NAME: x402-facilitator.internal
+      X402_RECONCILE_INTERVAL_SECONDS: ${X402_RECONCILE_INTERVAL_SECONDS:-30}
+      X402_RECONCILE_STALE_SECONDS: ${X402_RECONCILE_STALE_SECONDS:-60}
+      X402_RECONCILE_LIMIT: ${X402_RECONCILE_LIMIT:-100}
+    volumes:
+      - ${X402_FACILITATOR_CA_PATH}:/run/secrets/x402-ca.pem:ro
+      - ${X402_FACILITATOR_CERT_PATH}:/run/secrets/x402-client-cert.pem:ro
+      - ${X402_FACILITATOR_KEY_PATH}:/run/secrets/x402-client-key.pem:ro
+    networks: [database, x402-integration]
+
+networks:
+  x402-integration:
+    external: true
+    name: ${DAEJANG_X402_NETWORK}

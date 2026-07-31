@@ -7,6 +7,7 @@ import type {
   X402PaymentPayload,
   X402PaymentRequirement,
 } from '../report-payment/facilitator.js'
+import { facilitatorPaymentKeyFor } from '../report-payment/facilitator.js'
 import { MemoryReportPaymentStore } from '../report-payment/types.js'
 import type {
   CurrentTaxReport,
@@ -81,17 +82,48 @@ class FakeFacilitator implements ReportPaymentFacilitator {
   settleCalls = 0
   settlePayer = PAYER
   throwSettleOnce = false
+  settleStatus: 'settled' | 'pending' | 'failed' = 'settled'
   async verify(input: { paymentPayload: X402PaymentPayload; paymentRequirements: X402PaymentRequirement }) {
     this.verifyCalls += 1
     return { valid: true as const, payer: input.paymentPayload.payload.authorization.from }
   }
-  async settle() {
+  async settle(input: {
+    paymentPayload: X402PaymentPayload
+    paymentRequirements: X402PaymentRequirement
+  }) {
     this.settleCalls += 1
     if (this.throwSettleOnce) {
       this.throwSettleOnce = false
       throw new Error('temporary facilitator outage')
     }
-    return { success: true as const, transaction: TX_HASH, network: 'eip155:91342', payer: this.settlePayer }
+    if (this.settleStatus === 'pending') {
+      return {
+        status: 'pending' as const,
+        paymentKey: facilitatorPaymentKeyFor(input.paymentPayload),
+        retryAfterSeconds: 5,
+      }
+    }
+    if (this.settleStatus === 'failed') {
+      return {
+        status: 'failed' as const,
+        paymentKey: facilitatorPaymentKeyFor(input.paymentPayload),
+        reason: 'payment_binding_mismatch',
+      }
+    }
+    return {
+      status: 'settled' as const,
+      paymentKey: facilitatorPaymentKeyFor(input.paymentPayload),
+      transaction: TX_HASH,
+      network: 'eip155:91342',
+      payer: this.settlePayer,
+    }
+  }
+  async recover(paymentKey: string) {
+    return {
+      status: 'settled' as const,
+      paymentKey,
+      transaction: TX_HASH,
+    }
   }
 }
 
@@ -179,6 +211,37 @@ describe('actual report x402 payment route', () => {
     expect(facilitator.settleCalls).toBe(1)
   })
 
+  it('repairs SETTLED to DELIVERED when the first delivery write fails', async () => {
+    const { headers, requirement } = await quote()
+    const markDelivered = store.markDelivered.bind(store)
+    let failDelivery = true
+    store.markDelivered = async (orderId, userId) => {
+      if (failDelivery) {
+        failDelivery = false
+        throw new Error('temporary delivery write failure')
+      }
+      await markDelivered(orderId, userId)
+    }
+
+    const first = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/current/download?finality=FINAL&format=json',
+      headers: { ...headers, 'payment-signature': paymentFor(requirement) },
+    })
+    expect(first.statusCode).toBe(500)
+    expect([...store.orders.values()][0]?.state).toBe('SETTLED')
+
+    const replay = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/current/download?finality=FINAL&format=json',
+      headers,
+    })
+    expect(replay.statusCode).toBe(200)
+    expect(replay.headers['x-daejang-payment-entitlement']).toBe('reused')
+    expect([...store.orders.values()][0]?.state).toBe('DELIVERED')
+    expect(facilitator.settleCalls).toBe(1)
+  })
+
   it('does not accept a quote after the report revision changes', async () => {
     const { headers, requirement } = await quote()
     reader.value = {
@@ -229,8 +292,9 @@ describe('actual report x402 payment route', () => {
       headers: { ...headers, 'payment-signature': signed },
     })
     expect(stillLeased.statusCode).toBe(409)
+    expect(stillLeased.headers['retry-after']).toBe('5')
 
-    now = new Date(now.getTime() + 31_000)
+    now = new Date(now.getTime() + 301_000)
     const recovered = await context.app.inject({
       method: 'GET', url: '/api/v1/tax-reports/2027/current/download?finality=FINAL&format=json',
       headers: { ...headers, 'payment-signature': signed },
@@ -239,7 +303,39 @@ describe('actual report x402 payment route', () => {
     expect(facilitator.settleCalls).toBe(2)
   })
 
-  it('rejects PARTIAL reports and a settlement payer mismatch without returning report data', async () => {
+  it('keeps provider pending non-terminal and completes the same payment after its lease', async () => {
+    const { headers, requirement } = await quote()
+    const signed = paymentFor(requirement)
+    facilitator.settleStatus = 'pending'
+
+    const pending = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/current/download?finality=FINAL&format=json',
+      headers: { ...headers, 'payment-signature': signed },
+    })
+
+    expect(pending.statusCode).toBe(409)
+    expect(pending.headers['retry-after']).toBe('5')
+    expect(pending.json()).toMatchObject({
+      error: { code: 'PAYMENT_SETTLEMENT_IN_PROGRESS' },
+    })
+    const settlingOrder = [...store.orders.values()][0]
+    expect(settlingOrder?.state).toBe('SETTLING')
+    expect(settlingOrder?.facilitatorPaymentKey).toMatch(/^0x[0-9a-f]{64}$/)
+
+    facilitator.settleStatus = 'settled'
+    now = new Date(now.getTime() + 301_000)
+    const recovered = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/current/download?finality=FINAL&format=json',
+      headers: { ...headers, 'payment-signature': signed },
+    })
+
+    expect(recovered.statusCode).toBe(200)
+    expect([...store.orders.values()][0]?.state).toBe('DELIVERED')
+  })
+
+  it('rejects PARTIAL reports and keeps a malformed settlement response recoverable', async () => {
     const headers = await sessionHeaders()
     reader.value = {
       ...paymentReport,
@@ -254,8 +350,23 @@ describe('actual report x402 payment route', () => {
     const requirement = (decode(first.headers['payment-required'] as string) as { accepts: X402PaymentRequirement[] }).accepts[0] as X402PaymentRequirement
     facilitator.settlePayer = '0x9999999999999999999999999999999999999999'
     const mismatch = await context.app.inject({ method: 'GET', url: '/api/v1/tax-reports/2027/current/download', headers: { ...headers, 'payment-signature': paymentFor(requirement) } })
-    expect(mismatch.statusCode).toBe(402)
+    expect(mismatch.statusCode).toBe(503)
     expect(mismatch.json()).not.toHaveProperty('report')
+    expect([...store.orders.values()][0]?.state).toBe('SETTLING')
+  })
+
+  it('marks only an explicit provider terminal failure as FAILED', async () => {
+    const { headers, requirement } = await quote()
+    facilitator.settleStatus = 'failed'
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/current/download?finality=FINAL&format=json',
+      headers: { ...headers, 'payment-signature': paymentFor(requirement) },
+    })
+
+    expect(response.statusCode).toBe(402)
+    expect([...store.orders.values()][0]?.state).toBe('FAILED')
   })
 
   it('publishes an explicit server-owned payment capability', async () => {

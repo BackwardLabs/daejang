@@ -28,6 +28,7 @@ export type ReportPaymentOrder = ReportPaymentBinding &
     expiresAt: Date
     payer?: string
     payloadHash?: string
+    facilitatorPaymentKey?: string
     authorizationNonce?: string
     transactionHash?: string
     settlementLeaseUntil?: Date
@@ -39,19 +40,34 @@ export type SettlementReservation =
   | { kind: 'busy' }
   | { kind: 'invalid' }
 
+export type ReportPaymentEntitlement = {
+  paymentOrderId: string
+}
+
 export interface ReportPaymentStore {
   readonly durable: boolean
-  findEntitlement(userId: string, resourceDigest: string, format: 'json'): Promise<boolean>
+  findEntitlement(
+    userId: string,
+    resourceDigest: string,
+    format: 'json',
+  ): Promise<ReportPaymentEntitlement | undefined>
   getOrCreateQuote(
     binding: ReportPaymentBinding,
     terms: ReportPaymentTerms,
     expiresAt: Date,
   ): Promise<ReportPaymentOrder>
+  findReservedSettlement(input: {
+    orderId: string
+    userId: string
+    resourceDigest: string
+    payloadHash: string
+  }): Promise<ReportPaymentOrder | undefined>
   reserveSettlement(input: {
     orderId: string
     userId: string
     resourceDigest: string
     payloadHash: string
+    facilitatorPaymentKey: string
     payer: string
     authorizationNonce: string
     now: Date
@@ -63,6 +79,7 @@ export interface ReportPaymentStore {
     payer: string
     transactionHash: string
   }): Promise<ReportPaymentOrder>
+  claimRecoverableSettlements(before: Date, limit: number): Promise<ReportPaymentOrder[]>
   failSettlement(orderId: string, userId: string): Promise<void>
   markDelivered(orderId: string, userId: string): Promise<void>
 }
@@ -70,7 +87,7 @@ export interface ReportPaymentStore {
 export class MemoryReportPaymentStore implements ReportPaymentStore {
   readonly durable = false
   readonly orders = new Map<string, ReportPaymentOrder>()
-  readonly entitlements = new Set<string>()
+  readonly entitlements = new Map<string, ReportPaymentEntitlement>()
   readonly nonces = new Set<string>()
 
   private entitlementKey(userId: string, resourceDigest: string, format: 'json') {
@@ -78,7 +95,7 @@ export class MemoryReportPaymentStore implements ReportPaymentStore {
   }
 
   async findEntitlement(userId: string, resourceDigest: string, format: 'json') {
-    return this.entitlements.has(this.entitlementKey(userId, resourceDigest, format))
+    return this.entitlements.get(this.entitlementKey(userId, resourceDigest, format))
   }
 
   async getOrCreateQuote(
@@ -108,6 +125,7 @@ export class MemoryReportPaymentStore implements ReportPaymentStore {
         expiresAt,
         payer: undefined,
         payloadHash: undefined,
+        facilitatorPaymentKey: undefined,
         authorizationNonce: undefined,
         transactionHash: undefined,
         settlementLeaseUntil: undefined,
@@ -126,11 +144,28 @@ export class MemoryReportPaymentStore implements ReportPaymentStore {
     return order
   }
 
+  async findReservedSettlement(input: {
+    orderId: string
+    userId: string
+    resourceDigest: string
+    payloadHash: string
+  }) {
+    const order = this.orders.get(input.orderId)
+    return order &&
+      order.userId === input.userId &&
+      order.resourceDigest === input.resourceDigest &&
+      order.payloadHash === input.payloadHash &&
+      order.state === 'SETTLING'
+      ? order
+      : undefined
+  }
+
   async reserveSettlement(input: {
     orderId: string
     userId: string
     resourceDigest: string
     payloadHash: string
+    facilitatorPaymentKey: string
     payer: string
     authorizationNonce: string
     now: Date
@@ -140,7 +175,6 @@ export class MemoryReportPaymentStore implements ReportPaymentStore {
       !order ||
       order.userId !== input.userId ||
       order.resourceDigest !== input.resourceDigest ||
-      order.expiresAt <= input.now ||
       order.state === 'FAILED'
     ) {
       return { kind: 'invalid' }
@@ -158,6 +192,7 @@ export class MemoryReportPaymentStore implements ReportPaymentStore {
       order.settlementLeaseUntil = new Date(input.now.getTime() + 30_000)
       return { kind: 'reserved', order }
     }
+    if (order.expiresAt <= input.now) return { kind: 'invalid' }
     if (this.nonces.has(`${order.network}:${input.authorizationNonce}`)) {
       return { kind: 'invalid' }
     }
@@ -166,6 +201,7 @@ export class MemoryReportPaymentStore implements ReportPaymentStore {
     Object.assign(order, {
       state: 'SETTLING' as const,
       payloadHash: input.payloadHash,
+      facilitatorPaymentKey: input.facilitatorPaymentKey,
       payer: input.payer,
       authorizationNonce: input.authorizationNonce,
       settlementLeaseUntil: new Date(input.now.getTime() + 30_000),
@@ -194,10 +230,26 @@ export class MemoryReportPaymentStore implements ReportPaymentStore {
       state: 'SETTLED' as const,
       transactionHash: input.transactionHash,
     })
-    this.entitlements.add(
+    this.entitlements.set(
       this.entitlementKey(order.userId, order.resourceDigest, order.format),
+      { paymentOrderId: order.id },
     )
     return order
+  }
+
+  async claimRecoverableSettlements(before: Date, limit: number) {
+    return [...this.orders.values()]
+      .filter(
+        (order) =>
+          order.state === 'SETTLING' &&
+          order.facilitatorPaymentKey !== undefined &&
+          (order.settlementLeaseUntil?.getTime() ?? 0) <= before.getTime(),
+      )
+      .slice(0, limit)
+      .map((order) => {
+        order.settlementLeaseUntil = new Date(before.getTime() + 30_000)
+        return order
+      })
   }
 
   async failSettlement(orderId: string, userId: string) {
