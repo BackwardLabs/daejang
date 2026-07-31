@@ -2,9 +2,10 @@
 
 이 문서는 분석 Engine이 만든 열린 Review를 로그인 사용자가 확인하고, 응답
 revision과 ReviewRoom·application engine 전달 대기열까지 안전하게 저장하는
-현재 구현 경계를 설명한다. 실제 delivery worker, ReviewRoom Anchor Worker,
-ReviewProofRegistry receipt, Report gate와 최종 PDF 생성은 이 vertical
-slice의 후속 의존성이다.
+현재 구현 경계를 설명한다. `BackwardLabs/daejang-reviewroom`에는
+`REVIEWROOM` delivery worker, strict canonical V2 ingest와 Anchor Worker가
+구현되어 있다. `APPLICATION_ENGINE` worker, Report gate와 최종 PDF 생성은
+아직 후속 의존성이다.
 
 ## 구현된 경계
 
@@ -17,8 +18,8 @@ sequenceDiagram
   participant QueryDB as readmodelstore
   participant Artifact as artifactstore
   participant ReviewDB as reviewstore
-  participant Delivery as Delivery Workers (후속)
-  participant Room as ReviewRoom (후속)
+  participant Delivery as ReviewRoom Delivery Worker
+  participant Room as ReviewRoom
 
   User->>Web: 열린 Review 선택
   Web->>BFF: GET /reviews/:reviewId
@@ -33,8 +34,8 @@ sequenceDiagram
   Engine->>ReviewDB: ResolveV2(CAS + schema pin)
   Note over ReviewDB: 새 immutable revision + pointer advance<br/>+ V2 event + consumer delivery 2건
   ReviewDB-->>Web: resolved revision
-  Delivery-->>ReviewDB: consumer별 claim/ack/nack (후속)
-  Delivery->>Room: canonical ReviewResolved V2 ingest (후속)
+  Delivery-->>ReviewDB: REVIEWROOM claim/ack/nack
+  Delivery->>Room: canonical ReviewResolved V2 ingest
 ```
 
 브라우저가 보내는 해결 본문은 다음 값으로 제한한다.
@@ -120,11 +121,12 @@ Review DB transaction은 다음을 한 번에 수행한다.
 
 Web이나 BFF는 ReviewRoom 컨트랙트, EAS 또는 ReviewProofRegistry를 직접 호출하지
 않는다. 두 delivery row는 durable handoff 기록이며 자체로 recalculation, anchoring
-또는 report delivery 완료를 증명하지 않는다. delivery worker가 구현된 뒤 두
-consumer는 독립적으로 lease·retry하며 downstream은 immutable `eventId`를
-idempotency key로 사용한다. ReviewRoom delivery worker가 canonical
-HTTP ingest를 완료한 뒤에야 ReviewRoom 내부 Anchor Worker가 온체인 proof를
-발행한다.
+또는 report delivery 완료를 증명하지 않는다. ReviewRoom delivery worker는
+`REVIEWROOM` row만 독립적으로 lease·retry하고 immutable `eventId`를
+idempotency key로 사용한다. canonical HTTP ingest를 완료한 뒤 ReviewRoom 내부
+Anchor Worker가 온체인 proof를 발행한다. 별도 `APPLICATION_ENGINE` row를
+소비해 실제 장부·세금 계산에 반영하는 worker는 `daejang-tax-engine`에 구현해야
+한다.
 
 ## API와 UI 상태
 
@@ -165,7 +167,7 @@ required Review set만 평가하고, V1-only 행을 Manifest 후보로 선택하
    legacy OPEN/V1-only RESOLVED Review가 남아 있지 않다.
 2. 분석 Engine이 각 응답 revision을 ledger/tax 계산에 반영했다.
 3. 각 최신 `ReviewResolved V2` event에 대응하는 proof가 anchored되고 receipt가
-   저장됐다.
+   저장됐다. 이 기능의 구현 소유자는 `BackwardLabs/daejang-reviewroom`이다.
 4. DB의 최신 proof ID와 `ReviewProofRegistry.latestProofId`가 일치한다.
 5. 그 proof 목록을 immutable Review Proof Manifest로 고정했다.
 

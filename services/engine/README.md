@@ -70,7 +70,10 @@ preflight하고, 실행 중 health check에서도 반복 검증합니다. 따라
 16 → 17 → 18을 모두 적용한 뒤 Engine을 배포해야 합니다. 브라우저와 Web API는
 ReviewRoom이나 체인을 직접 호출하지 않고 Engine이 원자적으로 생성한
 `ReviewResolved V2` event와 `REVIEWROOM`·`APPLICATION_ENGINE` delivery를
-downstream worker 경계로 사용합니다. 상세 계약과 후속 의존성은
+downstream worker 경계로 사용합니다. `REVIEWROOM` consumer와 Anchor Worker는
+`BackwardLabs/daejang-reviewroom`에 구현되어 있고, 실제 재분석을 수행하는
+`APPLICATION_ENGINE` consumer는 `daejang-tax-engine`의 후속 경계입니다. 상세
+계약과 후속 의존성은
 [Review 응답 흐름](../../docs/review-resolution-flow.md)에 정리되어 있습니다.
 
 ```bash

@@ -247,6 +247,90 @@ describe('LedgerPage', () => {
     expect(screen.getByText('거래 목적 확인 필요')).toBeInTheDocument()
   })
 
+  it('shows the source transaction time on review cards instead of the review creation time', async () => {
+    const sourceEvent = {
+      ...ledgerEvent,
+      eventId: reviewSummary.executionId,
+      effectiveAt: '2025-09-26T00:13:26+09:00',
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [sourceEvent] })
+      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
+
+    const reviewCard = screen.getByRole('button', { name: /거래 유형 확인 필요/ })
+    expect(reviewCard).toHaveTextContent('2025')
+    expect(reviewCard).not.toHaveTextContent('2027')
+  })
+
+  it('opens the matching review from a review-required ledger transfer across cursor pages', async () => {
+    const transferEvent = {
+      ...ledgerEvent,
+      eventId: secondReviewSummary.executionId,
+      revisionId: 'transfer-review-revision',
+      eventType: 'TRANSFER',
+      flowShape: 'EXTERNAL_OUT',
+      resolution: 'PARTIAL',
+      postings: [{
+        legId: 'transfer-review-leg',
+        accountId: 'account-upbit',
+        assetId: 'cex-document-asset:upbit:decimal8:usdt',
+        occurredAt: ledgerEvent.effectiveAt,
+        direction: 'OUT',
+        quantity: '180108722500',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: '',
+        assetSymbol: 'USDT',
+        assetDecimals: 8,
+        hasAssetDecimals: true,
+        assetVenue: 'upbit',
+      }],
+      transferEndpoint: {
+        resolution: 'UNKNOWN',
+        kind: 'UNKNOWN',
+        display: '',
+        addressFamily: '',
+        walletSourceId: '',
+        chainCandidates: [],
+        connectionStatus: 'COUNTERPARTY_REVIEW_REQUIRED',
+        reviewRequired: true,
+      },
+    }
+    const reviewRequests: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [transferEvent] })
+      if (url.endsWith('/reviews') && !init?.method) {
+        reviewRequests.push(url)
+        return jsonResponse({ items: [reviewSummary], nextCursor: 'page-2' })
+      }
+      if (url.endsWith('/reviews?cursor=page-2') && !init?.method) {
+        reviewRequests.push(url)
+        return jsonResponse({ items: [secondReviewSummary] })
+      }
+      if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
+      if (url.endsWith('/reviews/review-2') && !init?.method) return jsonResponse({ review: secondReviewDetail })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '출금 거래 상세 보기' }))
+    expect(screen.getByText('송신자·수신자 확인 필요')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '검토하러 가기' }))
+
+    expect(await screen.findByRole('heading', { name: '추가 정보 필요' })).toBeInTheDocument()
+    expect(screen.getByText('review-2')).toBeInTheDocument()
+    expect(reviewRequests).toHaveLength(2)
+  })
+
   it('renders normalized Upbit postings with decimal quantities, source, and action tones', async () => {
     const depositEvent = {
       ...ledgerEvent,
