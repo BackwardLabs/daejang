@@ -24,6 +24,9 @@ import {
   ensureRuntimeIndexerView,
   hostPostingWorkerArgs,
   hostPostingWorkerEnvironment,
+  hostEVMPostingWorkerArgs,
+  hostEVMPostingWorkerEnvironment,
+  hostActiveServiceOrder,
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
@@ -88,6 +91,25 @@ test('builds tax profiles only for subjects with canonical ledger assets', () =>
   )
   assert.equal(profiles.profiles[0].accountBindings[0].kind, 'VASP')
   assert.equal(profiles.profiles[0].accountBindings[0].method, 'MOVING_AVERAGE')
+})
+
+test('keeps the core JIT and Posting pipeline active without tax profiles', () => {
+  const profiles = createTaxProfiles([])
+  assert.deepEqual(profiles, {
+    schemaVersion: 'tax.downstream-profile-set.v1',
+    profiles: [],
+  })
+  assert.deepEqual(
+    hostActiveServiceOrder({ evmPosting: false, taxd: false }),
+    ['pdf-parser', 'jit', 'engine', 'worker', 'posting', 'web-api'],
+  )
+  assert.deepEqual(
+    hostActiveServiceOrder({ evmPosting: true, taxd: true }),
+    [
+      'pdf-parser', 'jit', 'engine', 'worker', 'posting',
+      'evm-posting', 'taxd', 'web-api',
+    ],
+  )
 })
 
 test('pins same-period multichain coverage to one deterministic snapshot', () => {
@@ -274,7 +296,7 @@ test('rewrites only the local JIT ACL identity to the current service UID', () =
     assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
       version: 1,
       grants: [
-        { identity: 'uid:502', subjects: ['audit-public'] },
+        { identity: 'uid:502', subjects: [], allowAnySubject: true },
         { identity: 'spiffe://daejang/remote', subjects: ['subject-1'] },
       ],
     })
@@ -327,7 +349,7 @@ test('prefers the operator-owned JIT ACL override when it exists', () => {
     assert.equal(source, overrideSource)
     assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
       version: 1,
-      grants: [{ identity: 'uid:502', subjects: ['audit-public', 'subject-1'] }],
+      grants: [{ identity: 'uid:502', subjects: [], allowAnySubject: true }],
     })
   } finally {
     rmSync(parent, { recursive: true, force: true })
@@ -400,6 +422,33 @@ test('requires a signed SOURCE claim policy for the host Posting worker', () => 
   )
   assert.throws(
     () => hostPostingWorkerEnvironment('', 'event-url', 'source-url'),
+    /TRUST_KEY is missing/,
+  )
+})
+
+test('requires a distinct signed JIT claim policy for the canonical EVM worker', () => {
+  assert.deepEqual(
+    hostEVMPostingWorkerArgs(
+      '/runtime/jit-artifacts',
+      '/runtime/jit-temp',
+      '/runtime/evm-policy.json',
+    ),
+    [
+      '--mode', 'canonical',
+      '--artifact-root', '/runtime/jit-artifacts',
+      '--artifact-temp', '/runtime/jit-temp',
+      '--claim-policy', '/runtime/evm-policy.json',
+    ],
+  )
+  assert.deepEqual(
+    hostEVMPostingWorkerEnvironment('public-key', 'event-url'),
+    {
+      DAEJANG_PUBLICATION_POLICY_TRUST_KEY: 'public-key',
+      DAEJANG_POSTING_DATABASE_URL: 'event-url',
+    },
+  )
+  assert.throws(
+    () => hostEVMPostingWorkerEnvironment('', 'event-url'),
     /TRUST_KEY is missing/,
   )
 })
