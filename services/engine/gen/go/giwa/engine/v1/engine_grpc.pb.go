@@ -465,6 +465,7 @@ const (
 	QueryService_ListReports_FullMethodName          = "/giwa.engine.v1.QueryService/ListReports"
 	QueryService_GetCurrentTaxReport_FullMethodName  = "/giwa.engine.v1.QueryService/GetCurrentTaxReport"
 	QueryService_ListTaxReportHistory_FullMethodName = "/giwa.engine.v1.QueryService/ListTaxReportHistory"
+	QueryService_GetTaxReportModel_FullMethodName    = "/giwa.engine.v1.QueryService/GetTaxReportModel"
 )
 
 // QueryServiceClient is the client API for QueryService service.
@@ -479,6 +480,7 @@ type QueryServiceClient interface {
 	ListReports(ctx context.Context, in *ListReportsRequest, opts ...grpc.CallOption) (*ListReportsResponse, error)
 	GetCurrentTaxReport(ctx context.Context, in *GetCurrentTaxReportRequest, opts ...grpc.CallOption) (*GetCurrentTaxReportResponse, error)
 	ListTaxReportHistory(ctx context.Context, in *ListTaxReportHistoryRequest, opts ...grpc.CallOption) (*ListTaxReportHistoryResponse, error)
+	GetTaxReportModel(ctx context.Context, in *GetTaxReportModelRequest, opts ...grpc.CallOption) (*GetTaxReportModelResponse, error)
 }
 
 type queryServiceClient struct {
@@ -569,6 +571,16 @@ func (c *queryServiceClient) ListTaxReportHistory(ctx context.Context, in *ListT
 	return out, nil
 }
 
+func (c *queryServiceClient) GetTaxReportModel(ctx context.Context, in *GetTaxReportModelRequest, opts ...grpc.CallOption) (*GetTaxReportModelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTaxReportModelResponse)
+	err := c.cc.Invoke(ctx, QueryService_GetTaxReportModel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServiceServer is the server API for QueryService service.
 // All implementations must embed UnimplementedQueryServiceServer
 // for forward compatibility.
@@ -581,6 +593,7 @@ type QueryServiceServer interface {
 	ListReports(context.Context, *ListReportsRequest) (*ListReportsResponse, error)
 	GetCurrentTaxReport(context.Context, *GetCurrentTaxReportRequest) (*GetCurrentTaxReportResponse, error)
 	ListTaxReportHistory(context.Context, *ListTaxReportHistoryRequest) (*ListTaxReportHistoryResponse, error)
+	GetTaxReportModel(context.Context, *GetTaxReportModelRequest) (*GetTaxReportModelResponse, error)
 	mustEmbedUnimplementedQueryServiceServer()
 }
 
@@ -614,6 +627,9 @@ func (UnimplementedQueryServiceServer) GetCurrentTaxReport(context.Context, *Get
 }
 func (UnimplementedQueryServiceServer) ListTaxReportHistory(context.Context, *ListTaxReportHistoryRequest) (*ListTaxReportHistoryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTaxReportHistory not implemented")
+}
+func (UnimplementedQueryServiceServer) GetTaxReportModel(context.Context, *GetTaxReportModelRequest) (*GetTaxReportModelResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTaxReportModel not implemented")
 }
 func (UnimplementedQueryServiceServer) mustEmbedUnimplementedQueryServiceServer() {}
 func (UnimplementedQueryServiceServer) testEmbeddedByValue()                      {}
@@ -780,6 +796,24 @@ func _QueryService_ListTaxReportHistory_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryService_GetTaxReportModel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaxReportModelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServiceServer).GetTaxReportModel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryService_GetTaxReportModel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServiceServer).GetTaxReportModel(ctx, req.(*GetTaxReportModelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QueryService_ServiceDesc is the grpc.ServiceDesc for QueryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -818,6 +852,10 @@ var QueryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTaxReportHistory",
 			Handler:    _QueryService_ListTaxReportHistory_Handler,
+		},
+		{
+			MethodName: "GetTaxReportModel",
+			Handler:    _QueryService_GetTaxReportModel_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

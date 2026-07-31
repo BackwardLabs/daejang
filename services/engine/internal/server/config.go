@@ -23,6 +23,9 @@ type Config struct {
 	SourceArtifactDatabaseURL string
 	SourceArtifactRoot        string
 	SourceArtifactTemp        string
+	TaxArtifactDatabaseURL    string
+	TaxArtifactRoot           string
+	TaxArtifactTemp           string
 	PDFParserSocketPath       string
 	PDFParserTimeout          time.Duration
 	PDFImportLeaseDuration    time.Duration
@@ -48,6 +51,9 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		SourceArtifactDatabaseURL: getenv("DAEJANG_SOURCE_ARTIFACT_DATABASE_URL"),
 		SourceArtifactRoot:        getenv("DAEJANG_SOURCE_ARTIFACT_ROOT"),
 		SourceArtifactTemp:        getenv("DAEJANG_SOURCE_ARTIFACT_TEMP"),
+		TaxArtifactDatabaseURL:    getenv("DAEJANG_TAX_ARTIFACT_DATABASE_URL"),
+		TaxArtifactRoot:           getenv("DAEJANG_TAX_ARTIFACT_ROOT"),
+		TaxArtifactTemp:           getenv("DAEJANG_TAX_ARTIFACT_TEMP"),
 		PDFParserSocketPath:       getenv("ENGINE_PDF_PARSER_SOCKET_PATH"),
 		TLSCertificatePath:        getenv("ENGINE_TLS_CERT_PATH"),
 		TLSPrivateKeyPath:         getenv("ENGINE_TLS_KEY_PATH"),
@@ -113,6 +119,20 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 	if result.ReportDatabaseURL == "" {
 		result.ReportDatabaseURL = result.QueryDatabaseURL
+	}
+	taxArtifactValues := []string{
+		result.TaxArtifactDatabaseURL,
+		result.TaxArtifactRoot,
+		result.TaxArtifactTemp,
+	}
+	taxArtifactCount := 0
+	for _, value := range taxArtifactValues {
+		if value != "" {
+			taxArtifactCount++
+		}
+	}
+	if taxArtifactCount != 0 && taxArtifactCount != len(taxArtifactValues) {
+		return Config{}, errors.New("tax artifact database and paths must be configured together")
 	}
 	reviewValues := []string{
 		result.ReviewDatabaseURL,

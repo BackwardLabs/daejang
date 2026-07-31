@@ -14,6 +14,7 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
   const reader = new PostgresTaxReportReader(pool)
   const config: AppConfig = {
     runtimeMode: 'test',
+    reportsUiMode: 'product',
     host: '127.0.0.1',
     port: 3000,
     publicOrigin: 'http://localhost:5173',

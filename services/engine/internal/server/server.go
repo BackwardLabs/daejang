@@ -86,6 +86,20 @@ func Run(ctx context.Context, config Config) error {
 	}
 	defer taxReportRuntime.Close()
 
+	var taxArtifactRuntime *artifactstore.Runtime
+	var taxArtifactStore query.TaxReportArtifactStore
+	if config.TaxArtifactDatabaseURL != "" {
+		taxArtifactRuntime, err = artifactstore.Open(ctx, artifactstore.Options{
+			DatabaseURL: config.TaxArtifactDatabaseURL, ApplicationName: "daejang-engine-tax-report-artifacts",
+			ArtifactRoot: config.TaxArtifactRoot, ArtifactTemp: config.TaxArtifactTemp,
+		})
+		if err != nil {
+			return fmt.Errorf("open tax report artifact persistence: %w", err)
+		}
+		defer taxArtifactRuntime.Close()
+		taxArtifactStore = taxArtifactRuntime.Store
+	}
+
 	var reviewRuntime *reviewstore.Runtime
 	var reviewArtifactRuntime *artifactstore.Runtime
 	if config.ReviewDatabaseURL != "" {
@@ -173,7 +187,7 @@ func Run(ctx context.Context, config Config) error {
 	enginev1.RegisterWorkflowServiceServer(grpcServer, &workflow.Service{Store: jobRuntime.Store})
 	enginev1.RegisterQueryServiceServer(grpcServer, &query.Service{
 		Reads: readRuntime.Store, Reports: reportRuntime.Store, TaxReports: taxReportRuntime.Store,
-		Observations: observationRuntime.Store, Lots: lotRuntime.Store,
+		TaxReportArtifacts: taxArtifactStore, Observations: observationRuntime.Store, Lots: lotRuntime.Store,
 	})
 	services := []string{"", enginev1.SourceService_ServiceDesc.ServiceName, enginev1.WorkflowService_ServiceDesc.ServiceName, enginev1.QueryService_ServiceDesc.ServiceName}
 	if reviewRuntime != nil {
@@ -209,6 +223,11 @@ func Run(ctx context.Context, config Config) error {
 		}
 		if err := reportRuntime.Ping(checkCtx); err != nil {
 			return err
+		}
+		if taxArtifactRuntime != nil {
+			if err := taxArtifactRuntime.Ping(checkCtx); err != nil {
+				return err
+			}
 		}
 		if reviewRuntime != nil {
 			if err := readRuntime.Store.CheckReviewEvidenceAccess(checkCtx); err != nil {

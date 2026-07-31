@@ -9,17 +9,14 @@ import {
   type AppYear,
 } from '../../preferences/appPreferences.ts'
 import {
-  downloadPaidFinalReport,
-  loadReportPaymentCapability,
-  type ReportPaymentCapability,
-} from './reportPaymentApi.ts'
-import {
   loadCurrentTaxReport,
+  loadTaxReportDetail,
   loadTaxReportHistory,
   type TaxAmountModel,
+  type TaxReportDetailModel,
   type TaxReportModel,
 } from './taxReportApi.ts'
-import { SyntheticReportAttestationPanel } from './SyntheticReportAttestationPanel.tsx'
+import { TaxReportDetail } from './TaxReportDetail.tsx'
 import './report.css'
 
 const number = (value: string | number) =>
@@ -34,8 +31,13 @@ function decimal(value: string) {
 }
 
 function amountLabel(amount: TaxAmountModel, denomination: string) {
-  if (amount.status === 'UNKNOWN' || !amount.hasAmount) return '미확정'
-  if (amount.amount === undefined) return '표시 불가'
+  if (
+    !amount.hasAmount ||
+    amount.amount === null ||
+    amount.amount === undefined
+  ) {
+    return '미확정'
+  }
   return `${decimal(amount.amount)} ${denomination}`
 }
 
@@ -124,7 +126,7 @@ function CurrentTaxReport({ report }: { report: TaxReportModel }) {
   )
 }
 
-export function ReportPage() {
+export function ReportWorkspacePage() {
   const [year, setYear] = useState<AppYear>(
     () => loadAppPreferences().year,
   )
@@ -137,12 +139,10 @@ export function ReportPage() {
   const [taxHistory, setTaxHistory] = useState<TaxReportModel[]>([])
   const [taxStatus, setTaxStatus] =
     useState<'error' | 'loading' | 'ready' | 'unsupported'>('loading')
-  const [paymentCapability, setPaymentCapability] =
-    useState<ReportPaymentCapability>({ enabled: false })
-  const [paymentStatus, setPaymentStatus] =
-    useState<'idle' | 'signing' | 'settling' | 'success' | 'error'>('idle')
-  const [paymentMessage, setPaymentMessage] = useState<string>()
-  const [explorerUrl, setExplorerUrl] = useState<string>()
+  const [reportDetail, setReportDetail] =
+    useState<TaxReportDetailModel | null>(null)
+  const [detailStatus, setDetailStatus] =
+    useState<'error' | 'idle' | 'loading' | 'not-found' | 'ready'>('idle')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -163,18 +163,6 @@ export function ReportPage() {
         }
       })
 
-    void loadReportPaymentCapability(controller.signal)
-      .then(setPaymentCapability)
-      .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) {
-          setPaymentCapability({ enabled: false })
-        }
-      })
-
-    setPaymentStatus('idle')
-    setPaymentMessage(undefined)
-    setExplorerUrl(undefined)
-
     if (Number(year) < 2027) {
       setCurrentReport(null)
       setTaxHistory([])
@@ -182,6 +170,8 @@ export function ReportPage() {
       return () => controller.abort()
     }
 
+    setCurrentReport(null)
+    setTaxHistory([])
     setTaxStatus('loading')
     const current = loadCurrentTaxReport(year, controller.signal)
       .then((result) => result.report)
@@ -206,61 +196,37 @@ export function ReportPage() {
     return () => controller.abort()
   }, [year])
 
-  const selected = reports.find((report) => report.id === selectedId)
-  const pointerVersion = Number(currentReport?.pointerVersion)
-  const payableReport =
-    paymentCapability.enabled &&
-    currentReport?.finality === 'FINAL' &&
-    currentReport.status === 'FINAL' &&
-    currentReport.filingStatus === 'READY' &&
-    Number.isSafeInteger(pointerVersion) &&
-    pointerVersion > 0
-      ? currentReport
-      : undefined
-
-  async function handlePaidDownload(
-    report: TaxReportModel,
-    capability: Extract<ReportPaymentCapability, { enabled: true }>,
-  ) {
-    const reportPointerVersion = Number(report.pointerVersion)
-    setPaymentStatus('signing')
-    setPaymentMessage(undefined)
-    setExplorerUrl(undefined)
-    try {
-      const result = await downloadPaidFinalReport(
-        report.taxYear,
-        report.reportId,
-        reportPointerVersion,
-        capability,
-        setPaymentStatus,
-      )
-      const blob = new Blob(
-        [JSON.stringify(result.report, null, 2)],
-        { type: 'application/json' },
-      )
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download =
-        `daejang-tax-report-${report.taxYear}-${reportPointerVersion}.json`
-      anchor.click()
-      URL.revokeObjectURL(url)
-      setExplorerUrl(result.explorerUrl)
-      setPaymentMessage(
-        result.reusedEntitlement
-          ? '결제된 결과를 다시 내려받았습니다.'
-          : '결제가 확인되어 결과를 내려받았습니다.',
-      )
-      setPaymentStatus('success')
-    } catch (error) {
-      setPaymentMessage(
-        error instanceof Error
-          ? error.message
-          : '보고서 결제를 완료하지 못했습니다.',
-      )
-      setPaymentStatus('error')
+  useEffect(() => {
+    const reportId = currentReport?.reportId
+    if (!reportId) {
+      setReportDetail(null)
+      setDetailStatus('idle')
+      return
     }
-  }
+
+    const controller = new AbortController()
+    setReportDetail(null)
+    setDetailStatus('loading')
+    void loadTaxReportDetail(reportId, controller.signal)
+      .then((result) => {
+        setReportDetail(result.report)
+        setDetailStatus('ready')
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+        setDetailStatus(
+          error instanceof ApiClientError && error.status === 404
+            ? 'not-found'
+            : 'error',
+        )
+      })
+
+    return () => controller.abort()
+  }, [currentReport?.reportId])
+
+  const selected = reports.find((report) => report.id === selectedId)
 
   function handleYearChange(nextYear: AppYear) {
     setYear(nextYear)
@@ -281,8 +247,6 @@ export function ReportPage() {
           title="보고서"
           tone="workspace"
         />
-
-        <SyntheticReportAttestationPanel />
 
         <section
           className="tax-report-section"
@@ -316,54 +280,23 @@ export function ReportPage() {
             </p>
           ) : null}
           {currentReport ? <CurrentTaxReport report={currentReport} /> : null}
-          {payableReport && paymentCapability.enabled ? (
-            <section
-              className="report-payment-panel"
-              aria-labelledby="report-payment-title"
-            >
-              <div>
-                <span>GIWA SEPOLIA · x402</span>
-                <h3 id="report-payment-title">
-                  FINAL 현재 세금 결과 내려받기
-                </h3>
-                <p>
-                  {paymentCapability.tokenName} 결제 후 현재 revision #
-                  {pointerVersion}의 JSON 다운로드 권한이 저장됩니다.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={
-                  paymentStatus === 'signing' ||
-                  paymentStatus === 'settling'
-                }
-                onClick={() =>
-                  void handlePaidDownload(payableReport, paymentCapability)
-                }
-              >
-                {paymentStatus === 'signing'
-                  ? '지갑 서명 중…'
-                  : paymentStatus === 'settling'
-                    ? '결제 확인 중…'
-                    : `${paymentCapability.tokenName}로 내려받기`}
-              </button>
-              {paymentMessage ? (
-                <p
-                  className={`report-payment-feedback is-${paymentStatus}`}
-                  role={paymentStatus === 'error' ? 'alert' : 'status'}
-                >
-                  {paymentMessage}
-                  {explorerUrl ? (
-                    <>
-                      {' '}
-                      <a href={explorerUrl} target="_blank" rel="noreferrer">
-                        트랜잭션 보기
-                      </a>
-                    </>
-                  ) : null}
-                </p>
-              ) : null}
-            </section>
+          {detailStatus === 'loading' ? (
+            <p className="report-detail-state" role="status">
+              현재 장부의 상세 내역을 불러오는 중입니다.
+            </p>
+          ) : null}
+          {detailStatus === 'not-found' ? (
+            <p className="report-detail-state">
+              현재 세금 계산은 확인했지만 상세 장부는 아직 준비되지 않았습니다.
+            </p>
+          ) : null}
+          {detailStatus === 'error' ? (
+            <p className="report-detail-state is-error" role="alert">
+              현재 세금 계산은 유지되지만 상세 장부를 불러오지 못했습니다.
+            </p>
+          ) : null}
+          {detailStatus === 'ready' && reportDetail ? (
+            <TaxReportDetail report={reportDetail} />
           ) : null}
           {taxHistory.length > 0 ? (
             <section

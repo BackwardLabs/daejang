@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path'
 
 export type AppConfig = {
   runtimeMode: 'development' | 'test' | 'production'
+  reportsUiMode: 'product' | 'giwa28-demo'
   host: string
   port: number
   publicOrigin: string
@@ -803,6 +804,10 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
   if (!['development', 'test', 'production'].includes(runtimeMode)) {
     throw new Error('NODE_ENV must be development, test, or production')
   }
+  const reportsUiMode = environment.REPORTS_UI_MODE ?? 'product'
+  if (reportsUiMode !== 'product' && reportsUiMode !== 'giwa28-demo') {
+    throw new Error('REPORTS_UI_MODE must be product or giwa28-demo')
+  }
 
   const production = runtimeMode === 'production'
   const upbitPdfImportEnabled = parseBoolean(
@@ -921,6 +926,7 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
 
   return {
     runtimeMode: runtimeMode as AppConfig['runtimeMode'],
+    reportsUiMode,
     host: environment.HOST ?? '127.0.0.1',
     port: parsePositiveInteger(environment.PORT, 3000, 'PORT'),
     publicOrigin: parseOrigin(environment.PUBLIC_ORIGIN ?? 'http://localhost:5173'),

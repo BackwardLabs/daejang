@@ -208,6 +208,9 @@ const start = async () => {
       ...(reportAttestationDeploymentReader
         ? { reportAttestationDeploymentReader }
         : {}),
+      ...(engineClient
+        ? { taxReportModelReader: engineClient }
+        : {}),
       ...(pool
         ? {
             readinessCheck: async () => {

@@ -43,6 +43,7 @@ const fixturePassword = 'synthetic-pdf-password-do-not-persist'
 
 const config = (databaseUrl: string): AppConfig => ({
   runtimeMode: 'test',
+  reportsUiMode: 'product',
   host: '127.0.0.1',
   port: 3000,
   publicOrigin: 'http://localhost:5173',
