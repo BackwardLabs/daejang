@@ -3,6 +3,7 @@ package query
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/BackwardLabs/daejang-db/pkg/artifactstore"
 	"github.com/BackwardLabs/daejang-db/pkg/readmodelstore"
 	"github.com/BackwardLabs/daejang-db/pkg/reportstore"
 	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
@@ -44,15 +46,26 @@ type ObservationReadStore interface {
 type TaxReportStore interface {
 	GetCurrentReportForYear(context.Context, string, int) (taxreportstore.CurrentReportDetail, bool, error)
 	ListReportHistory(context.Context, string, int, int32) ([]taxreportstore.StoredReport, error)
+	GetReport(context.Context, string, string) (taxreportstore.StoredReport, bool, error)
+}
+type TaxReportArtifactStore interface {
+	GetTaxReportArtifact(context.Context, string, string, string) (artifactstore.Object, bool, error)
 }
 type Service struct {
 	enginev1.UnimplementedQueryServiceServer
-	Reads        ReadStore
-	Reports      ReportStore
-	TaxReports   TaxReportStore
-	Observations ObservationReadStore
-	Lots         LotStore
+	Reads              ReadStore
+	Reports            ReportStore
+	TaxReports         TaxReportStore
+	TaxReportArtifacts TaxReportArtifactStore
+	Observations       ObservationReadStore
+	Lots               LotStore
 }
+
+const (
+	taxReportModelMediaType = "application/vnd.giwa.tax-report-model.v1+json"
+	taxReportModelSchemaV1  = "giwa.tax-report-model.v1"
+	maxTaxReportModelBytes  = 16 << 20
+)
 
 func (s *Service) GetDashboard(ctx context.Context, req *enginev1.GetDashboardRequest) (*enginev1.GetDashboardResponse, error) {
 	subject, err := source.ValidateRequestContext(req.GetContext(), false)
@@ -332,6 +345,118 @@ func (s *Service) ListTaxReportHistory(ctx context.Context, req *enginev1.ListTa
 		items = append(items, taxReportToProto(value, 0, time.Time{}))
 	}
 	return &enginev1.ListTaxReportHistoryResponse{Items: items}, nil
+}
+
+func (s *Service) GetTaxReportModel(ctx context.Context, req *enginev1.GetTaxReportModelRequest) (*enginev1.GetTaxReportModelResponse, error) {
+	subject, err := source.ValidateRequestContext(req.GetContext(), false)
+	if err != nil {
+		return nil, err
+	}
+	if !validTaxReportID(req.GetReportId()) {
+		return nil, status.Error(codes.InvalidArgument, "tax report ID is invalid")
+	}
+	if s.TaxReports == nil || s.TaxReportArtifacts == nil {
+		return nil, status.Error(codes.Unavailable, "tax report model query is unavailable")
+	}
+	value, found, err := s.TaxReports.GetReport(ctx, subject, req.GetReportId())
+	if err != nil {
+		return nil, status.Error(codes.Internal, "tax report query failed")
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "tax report model not found")
+	}
+	if value.SubjectID != subject || value.ID != req.GetReportId() {
+		log.Printf("tax report model row identity verification failed: report=%q", req.GetReportId())
+		return nil, status.Error(codes.DataLoss, "tax report model integrity verification failed")
+	}
+	object, found, err := s.TaxReportArtifacts.GetTaxReportArtifact(
+		ctx,
+		subject,
+		value.ID,
+		value.ReportArtifactDigest,
+	)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "tax report model query failed")
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "tax report model not found")
+	}
+	if len(object.Bytes) > maxTaxReportModelBytes {
+		return nil, status.Error(codes.ResourceExhausted, "tax report model exceeds the response limit")
+	}
+	if err := validateTaxReportModelArtifact(subject, value, object); err != nil {
+		log.Printf("tax report model integrity verification failed: report=%q err=%v", value.ID, err)
+		return nil, status.Error(codes.DataLoss, "tax report model integrity verification failed")
+	}
+	return &enginev1.GetTaxReportModelResponse{
+		ReportId:       value.ID,
+		ArtifactDigest: value.ReportArtifactDigest,
+		MediaType:      object.MediaType,
+		CanonicalJson:  append([]byte(nil), object.Bytes...),
+	}, nil
+}
+
+func validTaxReportID(value string) bool {
+	const prefix = "tax-report:"
+	if len(value) != len(prefix)+64 || !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	for _, character := range value[len(prefix):] {
+		if (character < '0' || character > '9') &&
+			(character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+type taxReportModelIdentity struct {
+	SchemaVersion      string `json:"schemaVersion"`
+	ReportID           string `json:"reportId"`
+	InputDigest        string `json:"inputDigest"`
+	SubjectID          string `json:"subjectId"`
+	ResidentID         string `json:"residentId"`
+	TaxYear            int    `json:"taxYear"`
+	SchemaDigest       string `json:"schemaDigest"`
+	EvidencePackDigest string `json:"evidencePackDigest"`
+}
+
+func validateTaxReportModelArtifact(
+	subject string,
+	report taxreportstore.StoredReport,
+	object artifactstore.Object,
+) error {
+	if len(object.Bytes) == 0 {
+		return errors.New("artifact bytes are empty")
+	}
+	if object.MediaType != taxReportModelMediaType {
+		return fmt.Errorf("unexpected media type %q", object.MediaType)
+	}
+	if object.PrivacyClass != artifactstore.PrivacySubjectPrivate {
+		return fmt.Errorf("unexpected privacy class %q", object.PrivacyClass)
+	}
+	if object.Ref.Algorithm != "sha256" || object.Ref.Digest != report.ReportArtifactDigest {
+		return errors.New("artifact reference does not match the report digest")
+	}
+	actualDigest := fmt.Sprintf("%x", sha256.Sum256(object.Bytes))
+	if actualDigest != report.ReportArtifactDigest {
+		return errors.New("artifact bytes do not match the report digest")
+	}
+	var identity taxReportModelIdentity
+	if err := json.Unmarshal(object.Bytes, &identity); err != nil {
+		return fmt.Errorf("decode report model identity: %w", err)
+	}
+	if identity.SchemaVersion != taxReportModelSchemaV1 ||
+		identity.ReportID != report.ID ||
+		identity.InputDigest != report.InputDigest ||
+		identity.SubjectID != subject ||
+		identity.ResidentID != report.ResidentID ||
+		identity.TaxYear != report.TaxYear ||
+		identity.SchemaDigest != report.SchemaDigest ||
+		identity.EvidencePackDigest != report.EvidencePackDigest {
+		return errors.New("artifact model identity does not match the stored report")
+	}
+	return nil
 }
 
 func currentTaxReportToProto(value taxreportstore.CurrentReportDetail) *enginev1.TaxReport {

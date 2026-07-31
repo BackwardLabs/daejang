@@ -24,7 +24,7 @@ const PAYER = '0x1111111111111111111111111111111111111111'
 const TX_HASH = `0x${'2'.repeat(64)}`
 
 const config: AppConfig = {
-  runtimeMode: 'test', host: '127.0.0.1', port: 3000,
+  runtimeMode: 'test', reportsUiMode: 'product', host: '127.0.0.1', port: 3000,
   publicOrigin: 'http://localhost:5173', sessionCookieName: 'daejang_session',
   signupSessionCookieName: 'daejang_signup', sessionAbsoluteTtlSeconds: 3_600,
   sessionIdleTtlSeconds: 600, signupSessionTtlSeconds: 3_600, bodyLimitBytes: 65_536,

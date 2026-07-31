@@ -19,6 +19,7 @@ const USER_ID = '00000000-0000-4000-8000-000000000001'
 
 const config: AppConfig = {
   runtimeMode: 'test',
+  reportsUiMode: 'product',
   host: '127.0.0.1',
   port: 3000,
   publicOrigin: 'http://localhost:5173',

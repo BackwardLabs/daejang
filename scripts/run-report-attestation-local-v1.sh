@@ -61,10 +61,6 @@ if [[ "$contracts_source" != /* ]]; then
   source_parent="$(CDPATH= cd -- "$(dirname -- "$contracts_source")" && pwd)"
   contracts_source="$source_parent/$(basename -- "$contracts_source")"
 fi
-if [[ "$(node -p 'process.versions.node')" != "24.18.0" ]]; then
-  echo "Node.js 24.18.0 is required. Run your version manager for .nvmrc first." >&2
-  exit 2
-fi
 case "$mode" in
   --test)
     if [[ ! -x "$repo_root/node_modules/.bin/vitest" ]]; then
@@ -297,6 +293,7 @@ if [[ "$mode" == "--test" ]]; then
     echo "=== GIWA-28 $review_outcome scenario ==="
     GIWA28_RUN_LOCAL_CONTRACTS_INTEGRATION=1 \
       GIWA28_REVIEW_OUTCOME="$review_outcome" \
+      REPORTS_UI_MODE=giwa28-demo \
       npm run test --workspace @daejang/web-api -- \
         --run src/report-attestations/local-v1.integration.test.ts
   done
@@ -324,6 +321,7 @@ demo_display_name='Giwa Local Demo'
     PORT="$api_port" \
     PUBLIC_ORIGIN="$web_origin" \
     TRUST_PROXY_HOPS=0 \
+    REPORTS_UI_MODE=giwa28-demo \
     GIWA28_DEMO_USER_ID="$demo_user_id" \
     GIWA28_DEMO_DISPLAY_NAME="$demo_display_name" \
     GIWA28_REVIEW_OUTCOME="$review_outcome" \
@@ -337,6 +335,7 @@ api_pid=$!
     NODE_ENV=development \
     VITE_API_PROXY_TARGET="$api_origin" \
     VITE_WEB_API_BASE_URL=/api/v1 \
+    VITE_REPORTS_UI_MODE=giwa28-demo \
     VITE_GIWA28_LOCAL_DEMO=true \
     node "$repo_root/node_modules/vite/bin/vite.js" \
       --host 127.0.0.1 \

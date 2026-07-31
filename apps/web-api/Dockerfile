@@ -21,6 +21,7 @@ RUN groupadd --system --gid 65532 daejang \
 COPY --from=build --chown=daejang:daejang /app/node_modules ./node_modules
 COPY --from=build --chown=daejang:daejang /app/apps/web-api/dist ./apps/web-api/dist
 COPY --from=build --chown=daejang:daejang /app/apps/web-api/package.json ./apps/web-api/package.json
+COPY --from=build --chown=daejang:daejang /app/apps/web-api/assets ./apps/web-api/assets
 COPY --from=build --chown=daejang:daejang /app/proto ./proto
 USER daejang
 EXPOSE 3000

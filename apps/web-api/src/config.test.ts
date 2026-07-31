@@ -30,6 +30,7 @@ describe('web api configuration', () => {
         'EMAIL_VERIFICATION_RESEND_AFTER_SECONDS',
         'IDENTITY_VERIFICATION_MODE',
         'UPBIT_PDF_IMPORT_ENABLED',
+        'REPORTS_UI_MODE',
         'ENV_RPC_URL_ETHEREUM_MAINNET',
         'ENV_RPC_URL_OPTIMISM_MAINNET',
         'X402_REPORT_PAYMENTS_ENABLED',
@@ -78,6 +79,16 @@ describe('web api configuration', () => {
       ['eip155:1', 'https://eth-mainnet.g.alchemy.com/v2/test'],
       ['eip155:10', 'https://opt-mainnet.g.alchemy.com/v2/test'],
     ]))
+  })
+
+  it('uses the product report surface by default and rejects unknown modes', () => {
+    expect(loadConfig().reportsUiMode).toBe('product')
+    expect(
+      loadConfig({ REPORTS_UI_MODE: 'giwa28-demo' }).reportsUiMode,
+    ).toBe('giwa28-demo')
+    expect(() => loadConfig({ REPORTS_UI_MODE: 'demo' })).toThrow(
+      'REPORTS_UI_MODE must be product or giwa28-demo',
+    )
   })
 
   it('loads GIWA Sepolia report payment terms only when explicitly enabled', () => {

@@ -21,6 +21,9 @@ buf generate
 | `DAEJANG_SOURCE_ARTIFACT_DATABASE_URL` | PDF source evidence artifact writer PostgreSQL DSN. 미설정 시 source DSN 사용 |
 | `DAEJANG_SOURCE_ARTIFACT_ROOT` | 암호화 원본·subject-private parser evidence artifact root |
 | `DAEJANG_SOURCE_ARTIFACT_TEMP` | 같은 filesystem에 있는 source artifact 임시 디렉터리 |
+| `DAEJANG_TAX_ARTIFACT_DATABASE_URL` | subject-scoped ReportModel artifact를 조회할 수 있는 Tax runtime PostgreSQL DSN |
+| `DAEJANG_TAX_ARTIFACT_ROOT` | Tax Engine의 `DAEJANG_ARTIFACT_ROOT`와 동일한 ReportModel artifact root |
+| `DAEJANG_TAX_ARTIFACT_TEMP` | Tax Engine의 `DAEJANG_ARTIFACT_TEMP`와 동일한 filesystem의 임시 디렉터리 |
 | `DAEJANG_QUERY_DATABASE_URL` | ledger·review read model 및 subject-scoped tax report 조회 PostgreSQL DSN (`daejang_query_app`) |
 | `DAEJANG_REPORT_DATABASE_URL` | immutable report snapshot PostgreSQL DSN |
 | `DAEJANG_REVIEW_DATABASE_URL` | Review revision·reference·outbox write PostgreSQL DSN |
@@ -75,6 +78,13 @@ downstream worker 경계로 사용합니다. `REVIEWROOM` consumer와 Anchor Wor
 `APPLICATION_ENGINE` consumer는 `daejang-tax-engine`의 후속 경계입니다. 상세
 계약과 후속 의존성은
 [Review 응답 흐름](../../docs/review-resolution-flow.md)에 정리되어 있습니다.
+
+Tax ReportModel 조회는 세 Tax artifact 설정값을 모두 지정했을 때만 활성화됩니다.
+Source artifact root와 Tax Engine artifact root는 서로 다른 저장소이므로 대체해서
+사용하지 않습니다. API는 `RequestContext.actor.user_id`와 `report_id`를 함께
+검증하고, `reporting.tax_report`에 고정된 exact digest의 canonical ReportModel만
+반환합니다. Tax artifact 설정이 없으면 다른 Query RPC는 유지하되
+`GetTaxReportModel`만 `UNAVAILABLE`로 닫힙니다.
 
 ```bash
 go test ./...

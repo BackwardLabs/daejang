@@ -9,7 +9,7 @@ import { DashboardPage } from './features/dashboard/DashboardPage.tsx'
 import type { ProductPageKind } from './features/product/ProductPage.tsx'
 
 const loadLedgerPage = () => import('./features/ledger/LedgerPage.tsx')
-const loadReportPage = () => import('./features/reports/ReportPage.tsx')
+const loadReportPage = () => import('@reports-page')
 const loadSourceManagementPage = () =>
   import('./features/sources/SourceManagementPage.tsx')
 const loadSourceMethodIntroPage = () =>

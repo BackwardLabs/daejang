@@ -82,6 +82,35 @@ func TestLoadConfigAcceptsCompleteReviewV2Configuration(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRequiresCompleteTaxArtifactConfiguration(t *testing.T) {
+	_, err := LoadConfig(func(key string) string {
+		values := validImportConfig()
+		values["DAEJANG_TAX_ARTIFACT_ROOT"] = "/var/lib/daejang/tax-artifacts"
+		return values[key]
+	})
+	if err == nil {
+		t.Fatal("Engine accepted a tax artifact root without its database and temporary path")
+	}
+}
+
+func TestLoadConfigAcceptsSeparateTaxArtifactRuntime(t *testing.T) {
+	config, err := LoadConfig(func(key string) string {
+		values := validImportConfig()
+		values["DAEJANG_TAX_ARTIFACT_DATABASE_URL"] = "postgres://example.invalid/tax"
+		values["DAEJANG_TAX_ARTIFACT_ROOT"] = "/var/lib/daejang/tax-artifacts"
+		values["DAEJANG_TAX_ARTIFACT_TEMP"] = "/var/lib/daejang/tax-artifacts-tmp"
+		return values[key]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.TaxArtifactDatabaseURL == "" ||
+		config.TaxArtifactRoot == config.SourceArtifactRoot ||
+		config.TaxArtifactTemp == "" {
+		t.Fatalf("unexpected tax artifact config: %#v", config)
+	}
+}
+
 func TestLoadConfigRequiresWebAPIIdentityWithMTLS(t *testing.T) {
 	_, err := LoadConfig(func(key string) string {
 		values := validImportConfig()

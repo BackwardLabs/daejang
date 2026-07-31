@@ -32,6 +32,7 @@ service QueryService {
   rpc ListReports(ListReportsRequest) returns (ListReportsResponse);
   rpc GetCurrentTaxReport(GetCurrentTaxReportRequest) returns (GetCurrentTaxReportResponse);
   rpc ListTaxReportHistory(ListTaxReportHistoryRequest) returns (ListTaxReportHistoryResponse);
+  rpc GetTaxReportModel(GetTaxReportModelRequest) returns (GetTaxReportModelResponse);
 }
 
 service ReviewService {
@@ -431,3 +432,15 @@ message TaxReport {
 
 message GetCurrentTaxReportResponse { TaxReport report = 1; }
 message ListTaxReportHistoryResponse { repeated TaxReport items = 1; }
+
+message GetTaxReportModelRequest {
+  RequestContext context = 1;
+  string report_id = 2;
+}
+
+message GetTaxReportModelResponse {
+  string report_id = 1;
+  string artifact_digest = 2;
+  string media_type = 3;
+  bytes canonical_json = 4;
+}

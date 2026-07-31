@@ -23,6 +23,7 @@ const IDENTITY_KEY = new Uint8Array(32).fill(28)
 
 const enabledConfig = loadConfig({
   NODE_ENV: 'test',
+  REPORTS_UI_MODE: 'giwa28-demo',
   PUBLIC_ORIGIN: 'http://localhost:5173',
   RATE_LIMIT_HMAC_SECRET:
     'synthetic-report-attestation-rate-limit-secret',
@@ -117,11 +118,12 @@ const createRuntime = (approved = true) => {
 
 const createHarness = async (
   approved = true,
+  appConfig = enabledConfig,
   reconciliationEnabled = true,
 ) => {
   const fake = createRuntime(approved)
   const context = await buildApp({
-    config: enabledConfig,
+    config: appConfig,
     logger: false,
     reportAttestationDeploymentReader: {
       read: vi.fn(async () => ({
@@ -133,21 +135,21 @@ const createHarness = async (
           reportConsumer: '0x6003',
         },
         easSchemaRegistryAddress:
-          enabledConfig.reportAttestationDeployment
+          appConfig.reportAttestationDeployment
             ?.schemaRegistryAddress as string,
         registry: {
           easAddress:
-            enabledConfig.reportAttestationDeployment
+            appConfig.reportAttestationDeployment
               ?.easAddress as string,
           schemaUID:
-            enabledConfig.reportAttestationDeployment
+            appConfig.reportAttestationDeployment
               ?.schemaUID as string,
           evidenceSchemaDigest:
-            enabledConfig.reportAttestationDeployment
+            appConfig.reportAttestationDeployment
               ?.evidenceSchemaDigest as string,
         },
         consumerReportRegistryAddress:
-          enabledConfig.reportAttestationDeployment
+          appConfig.reportAttestationDeployment
             ?.reportRegistryProxyAddress as string,
       })),
     },
@@ -166,23 +168,42 @@ const createHarness = async (
       user: { id: OWNER_B, displayName: 'owner-b' },
     }),
   }
-    const request = (
-      owner: 'A' | 'B',
-      method: 'GET' | 'POST',
-      url: string,
-    ) =>
-      context.app.inject({
-        method,
-        url,
-        headers: {
-        cookie: `${enabledConfig.sessionCookieName}=${sessions[owner].token}`,
-        origin: enabledConfig.publicOrigin,
+  const request = (
+    owner: 'A' | 'B',
+    method: 'GET' | 'POST',
+    url: string,
+  ) =>
+    context.app.inject({
+      method,
+      url,
+      headers: {
+        cookie: `${appConfig.sessionCookieName}=${sessions[owner].token}`,
+        origin: appConfig.publicOrigin,
       },
     })
   return { context, fake, request }
 }
 
 describe('GIWA Sepolia synthetic report attestation routes', () => {
+  it('does not mount the synthetic routes on the product surface', async () => {
+    const harness = await createHarness(true, {
+      ...enabledConfig,
+      reportsUiMode: 'product',
+    })
+    try {
+      const response = await harness.request(
+        'A',
+        'GET',
+        '/api/v1/report-attestations/synthetic-publication',
+      )
+
+      expect(response.statusCode).toBe(404)
+      expect(harness.context.reportAttestationService).toBeDefined()
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
   it('exposes a GET-only initial snapshot and runs split idempotent writes', async () => {
     const harness = await createHarness()
     try {
@@ -394,7 +415,7 @@ describe('GIWA Sepolia synthetic report attestation routes', () => {
   })
 
   it('keeps reconciliation unavailable until the DB54 transition contract is active', async () => {
-    const harness = await createHarness(true, false)
+    const harness = await createHarness(true, enabledConfig, false)
     try {
       const response = await harness.request(
         'A',
@@ -631,6 +652,7 @@ describe('GIWA Sepolia synthetic report attestation routes', () => {
   it('runs the same synthetic API against local Anvil only on a loopback development server', async () => {
     const config = loadConfig({
       NODE_ENV: 'development',
+      REPORTS_UI_MODE: 'giwa28-demo',
       HOST: '127.0.0.1',
       PORT: '3100',
       PUBLIC_ORIGIN: 'http://127.0.0.1:5174',
@@ -730,6 +752,7 @@ describe('GIWA Sepolia synthetic report attestation routes', () => {
   it('rejects the local synthetic fixture outside loopback development', async () => {
     const config = loadConfig({
       NODE_ENV: 'development',
+      REPORTS_UI_MODE: 'giwa28-demo',
       HOST: '0.0.0.0',
       PORT: '3100',
       PUBLIC_ORIGIN: 'http://127.0.0.1:5174',
@@ -760,6 +783,7 @@ describe('GIWA Sepolia synthetic report attestation routes', () => {
   it('fails closed when the writer capability is not configured', async () => {
     const config = loadConfig({
       NODE_ENV: 'test',
+      REPORTS_UI_MODE: 'giwa28-demo',
       PUBLIC_ORIGIN: 'http://localhost:5173',
       RATE_LIMIT_HMAC_SECRET: 'disabled-writer-test-secret',
     })

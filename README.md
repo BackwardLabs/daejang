@@ -70,11 +70,30 @@ Migration `24`가 적용된 DB에서는 인증 Session의 사용자 ID를 subjec
 
 ```text
 GET /api/v1/tax-reports/:taxYear/current?finality=FINAL|PROVISIONAL&residentId=...
+GET /api/v1/tax-reports/:reportId
+GET /api/v1/tax-reports/:reportId/artifacts/pdf
 ```
 
 서버는 시작 시 읽기 권한이 필요한 `reporting.tax_report`,
 `reporting.current_tax_report`와 `tax-report-persistence` migration `24` 계약만
 확인합니다. 세금 계산 상세 테이블은 Web API 역할에 노출하지 않습니다.
+
+두 번째 경로는 Tax Engine이 발행한 exact `ReportModelV1`을 subject 범위와
+artifact digest까지 확인한 뒤 사용자용 상세 장부로 투영합니다. 세 번째 경로는
+같은 `reportId`로 한글 PDF를 즉시 생성합니다. `UNKNOWN` 금액은 두 출력 모두
+`0`이 아니라 `미확정`으로 유지하고, PDF에는 EAS transaction·UID나 x402 상태를
+포함하지 않습니다.
+
+로컬에서 상세 장부와 PDF까지 확인하려면 Tax Engine과 같은 artifact database 및
+filesystem을 Engine API에 연결해야 합니다. 통합 host runtime을 이미 provision한
+환경은 `npm run backend:start`를 사용합니다. 수동 개발 runtime은
+`./scripts/dev-local.sh --help`에 나온 DB 환경 변수와 함께
+`GIWA_TAX_ARTIFACT_DATABASE_URL`, `GIWA_TAX_ARTIFACT_BASE`를 설정한 뒤 아래처럼
+실행합니다.
+
+```bash
+./scripts/dev-local.sh --with-engine
+```
 
 ## 검증 명령
 

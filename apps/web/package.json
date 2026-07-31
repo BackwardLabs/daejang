@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node ../../scripts/check-web-bundle-cycles.mjs",
+    "build": "tsc -b && vite build && node ../../scripts/check-web-bundle-cycles.mjs && node ../../scripts/check-web-report-surface.mjs",
+    "build:giwa28-demo": "VITE_REPORTS_UI_MODE=giwa28-demo npm run build",
     "lint": "oxlint src",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",

@@ -16,6 +16,7 @@ ENGINE_PORT="${GIWA_ENGINE_PORT:-50051}"
 START_TIMEOUT_SECONDS="${GIWA_DEV_START_TIMEOUT_SECONDS:-90}"
 ARTIFACT_BASE="${GIWA_REVIEW_ARTIFACT_BASE:-${TMPDIR:-/tmp}/giwa-final-review-artifacts}"
 SOURCE_ARTIFACT_BASE="${GIWA_SOURCE_ARTIFACT_BASE:-${TMPDIR:-/tmp}/giwa-source-artifacts}"
+TAX_ARTIFACT_BASE="${GIWA_TAX_ARTIFACT_BASE:-${TMPDIR:-/tmp}/giwa-tax-artifacts}"
 PDF_PARSER_PYTHON="${GIWA_PDF_PARSER_PYTHON_PATH:-${ENGINE_DIR}/.venv-pdf-parser/bin/python}"
 PDF_PARSER_RUNTIME_BASE="${GIWA_PDF_PARSER_RUNTIME_BASE:-${TMPDIR:-/tmp}/giwa-pdf-parser-runtime}"
 PDF_PARSER_SOCKET="${PDF_PARSER_RUNTIME_BASE}/parser.sock"
@@ -26,6 +27,9 @@ WEB_DATABASE_URL="${GIWA_WEB_DATABASE_URL:-}"
 SOURCE_DATABASE_URL="${GIWA_SOURCE_DATABASE_URL:-}"
 QUERY_DATABASE_URL="${GIWA_QUERY_DATABASE_URL:-}"
 EVENT_DATABASE_URL="${GIWA_EVENT_DATABASE_URL:-}"
+TAX_ARTIFACT_DATABASE_URL="${GIWA_TAX_ARTIFACT_DATABASE_URL:-}"
+TAX_ARTIFACT_ROOT=""
+TAX_ARTIFACT_TEMP=""
 
 PIDS=()
 LABELS=()
@@ -64,12 +68,18 @@ Optional overrides:
   GIWA_DEV_START_TIMEOUT_SECONDS
   GIWA_REVIEW_ARTIFACT_BASE
   GIWA_SOURCE_ARTIFACT_BASE
+  GIWA_TAX_ARTIFACT_BASE
   GIWA_PDF_PARSER_PYTHON_PATH
   GIWA_PDF_PARSER_RUNTIME_BASE
   GIWA_WEB_DATABASE_URL
   GIWA_SOURCE_DATABASE_URL
   GIWA_QUERY_DATABASE_URL
   GIWA_EVENT_DATABASE_URL
+  GIWA_TAX_ARTIFACT_DATABASE_URL
+
+GIWA_TAX_ARTIFACT_DATABASE_URL is optional. Set it to the Tax Engine artifact
+database DSN to enable exact report detail and PDF downloads. GIWA_TAX_ARTIFACT_BASE
+must point at the same artifact filesystem used by taxd.
 EOF
 }
 
@@ -150,12 +160,22 @@ preflight() {
     mkdir -p "${ARTIFACT_BASE}/objects" "${ARTIFACT_BASE}/tmp" \
       "${SOURCE_ARTIFACT_BASE}/objects" "${SOURCE_ARTIFACT_BASE}/tmp" \
       "$PDF_PARSER_RUNTIME_BASE"
+    if [[ -n "$TAX_ARTIFACT_DATABASE_URL" ]]; then
+      TAX_ARTIFACT_ROOT="${TAX_ARTIFACT_BASE}/objects"
+      TAX_ARTIFACT_TEMP="${TAX_ARTIFACT_BASE}/tmp"
+      mkdir -p "$TAX_ARTIFACT_ROOT" "$TAX_ARTIFACT_TEMP"
+    fi
   fi
 
   printf 'Preflight passed\n'
   printf '  PostgreSQL: %s:%s/%s\n' "$DB_HOST" "$DB_PORT" "$DB_NAME"
   if ((START_ENGINE == 1)); then
     printf '  Engine:     127.0.0.1:%s\n' "$ENGINE_PORT"
+    if [[ -n "$TAX_ARTIFACT_DATABASE_URL" ]]; then
+      printf '  Tax report: exact detail and PDF enabled\n'
+    else
+      printf '  Tax report: current summary only (set GIWA_TAX_ARTIFACT_DATABASE_URL for detail/PDF)\n'
+    fi
   else
     printf '  Engine:     disabled (use --with-engine to enable)\n'
   fi
@@ -230,6 +250,9 @@ start_engine() {
       DAEJANG_REVIEW_ARTIFACT_DATABASE_URL="$SOURCE_DATABASE_URL" \
       DAEJANG_REVIEW_ARTIFACT_ROOT="${ARTIFACT_BASE}/objects" \
       DAEJANG_REVIEW_ARTIFACT_TEMP="${ARTIFACT_BASE}/tmp" \
+      DAEJANG_TAX_ARTIFACT_DATABASE_URL="$TAX_ARTIFACT_DATABASE_URL" \
+      DAEJANG_TAX_ARTIFACT_ROOT="$TAX_ARTIFACT_ROOT" \
+      DAEJANG_TAX_ARTIFACT_TEMP="$TAX_ARTIFACT_TEMP" \
       ENGINE_PDF_PARSER_SOCKET_PATH="$PDF_PARSER_SOCKET" \
       go run ./cmd/engine-api
   ) &

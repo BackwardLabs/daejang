@@ -106,6 +106,11 @@ const jitArtifactTemp = resolve(
 )
 const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
+export const hostWebAPIRuntimePaths = (root) => ({
+  code: join(root, 'app', 'web-api'),
+  assets: join(root, 'app', 'assets'),
+  nodeModules: join(root, 'app', 'node_modules'),
+})
 const managedJITBinary = join(binaryRoot, 'jitd')
 const jitBinary = resolve(
   process.env.GIWA_JIT_BINARY ?? managedJITBinary,
@@ -875,16 +880,25 @@ const build = () => {
       GOPROXY: 'direct',
     },
   })
-  const webAPIRuntime = join(runtimeRoot, 'app', 'web-api')
+  const {
+    code: webAPIRuntime,
+    assets: webAPIAssetsRuntime,
+    nodeModules: runtimeNodeModules,
+  } = hostWebAPIRuntimePaths(runtimeRoot)
   rmSync(webAPIRuntime, { recursive: true, force: true })
   mkdirSync(dirname(webAPIRuntime), { recursive: true, mode: directoryMode })
   cpSync(join(repositoryRoot, 'apps', 'web-api', 'dist'), webAPIRuntime, {
     recursive: true,
   })
+  rmSync(webAPIAssetsRuntime, { recursive: true, force: true })
+  cpSync(
+    join(repositoryRoot, 'apps', 'web-api', 'assets'),
+    webAPIAssetsRuntime,
+    { recursive: true },
+  )
   const runtimeProto = join(runtimeRoot, 'proto')
   rmSync(runtimeProto, { recursive: true, force: true })
   cpSync(join(repositoryRoot, 'proto'), runtimeProto, { recursive: true })
-  const runtimeNodeModules = join(runtimeRoot, 'app', 'node_modules')
   rmSync(runtimeNodeModules, { recursive: true, force: true })
   symlinkSync(join(repositoryRoot, 'node_modules'), runtimeNodeModules, 'dir')
 }
@@ -1461,6 +1475,9 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       DAEJANG_REVIEW_ARTIFACT_DATABASE_URL: sourceURL,
       DAEJANG_SOURCE_ARTIFACT_ROOT: join(artifactRoot, 'source', 'root'),
       DAEJANG_SOURCE_ARTIFACT_TEMP: join(artifactRoot, 'source', 'tmp'),
+      DAEJANG_TAX_ARTIFACT_DATABASE_URL: taxURL,
+      DAEJANG_TAX_ARTIFACT_ROOT: join(artifactRoot, 'tax', 'root'),
+      DAEJANG_TAX_ARTIFACT_TEMP: join(artifactRoot, 'tax', 'tmp'),
       DAEJANG_REVIEW_ARTIFACT_ROOT: join(artifactRoot, 'review', 'root'),
       DAEJANG_REVIEW_ARTIFACT_TEMP: join(artifactRoot, 'review', 'tmp'),
       ENGINE_PDF_PARSER_SOCKET_PATH: parserSocket,

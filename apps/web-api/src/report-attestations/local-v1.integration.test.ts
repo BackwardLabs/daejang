@@ -43,6 +43,7 @@ const readReviewOutcome = (): ReportReviewOutcome => {
 
 const config = loadConfig({
   NODE_ENV: 'development',
+  REPORTS_UI_MODE: 'giwa28-demo',
   HOST: '127.0.0.1',
   PORT: '3100',
   PUBLIC_ORIGIN: 'http://127.0.0.1:5174',

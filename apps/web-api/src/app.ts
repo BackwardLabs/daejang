@@ -39,6 +39,8 @@ import { registerAuthRoutes } from './routes/auth.js'
 import { registerAccountAuthRoutes } from './routes/account-auth.js'
 import { registerSourceRoutes } from './routes/sources.js'
 import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
+import { registerTaxReportArtifactRoutes } from './routes/tax-report-artifacts.js'
+import { registerTaxReportDetailRoutes } from './routes/tax-report-detail.js'
 import { registerTaxReportRoutes } from './routes/tax-reports.js'
 import { registerReportPaymentRoutes } from './routes/report-payments.js'
 import { registerSecurityPolicy } from './security.js'
@@ -73,6 +75,7 @@ import {
   type WalletSourceStore,
 } from './sources/wallet-source-store.js'
 import type { TaxReportReader } from './tax-report/types.js'
+import type { TaxReportModelReader } from './tax-report/model-reader.js'
 import { UnavailableWalletSourceStore } from './sources/unavailable-wallet-source-store.js'
 import type { ReportPaymentFacilitator } from './report-payment/facilitator.js'
 import type { ReportPaymentStore } from './report-payment/types.js'
@@ -95,6 +98,7 @@ type BuildAppOptions = {
   uploadStore?: UploadStore
   engineDataClient?: EngineDataClient
   taxReportReader?: TaxReportReader
+  taxReportModelReader?: TaxReportModelReader
   reportPaymentTaxReportReader?: ReportPaymentTaxReportReader
   reportPaymentStore?: ReportPaymentStore
   reportPaymentFacilitator?: ReportPaymentFacilitator
@@ -200,6 +204,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   }
   if (config.runtimeMode === 'production' && options.taxReportReader?.durable !== true) {
     throw new Error('A durable TaxReportReader is required in production')
+  }
+  if (
+    config.runtimeMode === 'production' &&
+    options.taxReportModelReader &&
+    options.taxReportModelReader.durable !== true
+  ) {
+    throw new Error(
+      'A durable TaxReportModelReader is required in production',
+    )
   }
   if (
     config.runtimeMode === 'production' &&
@@ -517,6 +530,14 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         reader: options.taxReportReader,
       })
     }
+    if (options.taxReportModelReader) {
+      await registerTaxReportDetailRoutes(protectedApp, {
+        reader: options.taxReportModelReader,
+      })
+      await registerTaxReportArtifactRoutes(protectedApp, {
+        reader: options.taxReportModelReader,
+      })
+    }
     await registerReportPaymentRoutes(protectedApp, {
       config,
       ...(config.reportPayments
@@ -539,48 +560,50 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         ? { reader: options.reportAttestationDeploymentReader }
         : {}),
     })
-    await registerSyntheticReportAttestationRoutes(protectedApp, {
-      enabled: Boolean(
-        (config.reportAttestationSyntheticTestnet ||
-          localSyntheticFixture) &&
-          reportAttestationService,
-      ),
-      disabledReasonCode: config.reportAttestationDeployment
-        ? 'WRITER_NOT_CONFIGURED'
-        : 'DEPLOYMENT_NOT_CONFIGURED',
-      reconciliationEnabled:
-        localSyntheticFixture ||
-        options.reportAttestations?.reconciliationEnabled === true,
-      capability: localSyntheticFixture
-        ? {
-            network: 'eip155:31337',
-            mode: 'LOCAL_ANVIL',
-            explorerBaseUrl: null,
-          }
-        : {
-            network: 'eip155:91342',
-            mode: 'SYNTHETIC_TESTNET',
-            explorerBaseUrl:
-              config.reportAttestationSyntheticTestnet?.explorerBaseUrl ??
-              'https://sepolia-explorer.giwa.io',
-          },
-      ...(reportAttestationService
-        ? { service: reportAttestationService }
-        : {}),
-      ...(config.reportAttestationSyntheticTestnet ||
-      localSyntheticFixture
-        ? {
-            publicationSource:
-              options.reportAttestations?.publicationSource ??
-              (localSyntheticFixture
-                ? new MockReportAttestationPublicationSource()
-                : new SyntheticTestnetReportAttestationPublicationSource()),
-          }
-        : {}),
-      ...(reportAttestationWriteRateLimiter
-        ? { writeRateLimiter: reportAttestationWriteRateLimiter }
-        : {}),
-    })
+    if (config.reportsUiMode === 'giwa28-demo') {
+      await registerSyntheticReportAttestationRoutes(protectedApp, {
+        enabled: Boolean(
+          (config.reportAttestationSyntheticTestnet ||
+            localSyntheticFixture) &&
+            reportAttestationService,
+        ),
+        disabledReasonCode: config.reportAttestationDeployment
+          ? 'WRITER_NOT_CONFIGURED'
+          : 'DEPLOYMENT_NOT_CONFIGURED',
+        reconciliationEnabled:
+          localSyntheticFixture ||
+          options.reportAttestations?.reconciliationEnabled === true,
+        capability: localSyntheticFixture
+          ? {
+              network: 'eip155:31337',
+              mode: 'LOCAL_ANVIL',
+              explorerBaseUrl: null,
+            }
+          : {
+              network: 'eip155:91342',
+              mode: 'SYNTHETIC_TESTNET',
+              explorerBaseUrl:
+                config.reportAttestationSyntheticTestnet?.explorerBaseUrl ??
+                'https://sepolia-explorer.giwa.io',
+            },
+        ...(reportAttestationService
+          ? { service: reportAttestationService }
+          : {}),
+        ...(config.reportAttestationSyntheticTestnet ||
+        localSyntheticFixture
+          ? {
+              publicationSource:
+                options.reportAttestations?.publicationSource ??
+                (localSyntheticFixture
+                  ? new MockReportAttestationPublicationSource()
+                  : new SyntheticTestnetReportAttestationPublicationSource()),
+            }
+          : {}),
+        ...(reportAttestationWriteRateLimiter
+          ? { writeRateLimiter: reportAttestationWriteRateLimiter }
+          : {}),
+      })
+    }
     if (
       reportAttestationService &&
       options.reportAttestations?.runtime.kind ===
