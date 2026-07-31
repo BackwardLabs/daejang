@@ -7,6 +7,7 @@ import {
   formatReportAmount,
   renderTaxReportPdf,
 } from './pdf-renderer.js'
+import { reportPolicySimulationNotice } from './report-print-model.js'
 import type { ReportPrintModelV1 } from './report-print-model.js'
 
 const digest = (value: string) =>
@@ -142,6 +143,35 @@ describe('tax report PDF renderer', () => {
       { status: 'KNOWN', amount: '-1234567.89' },
       'KRW',
     )).toBe('-1,234,567.89 KRW')
+  })
+
+  it('derives the 2025/2026 policy simulation notice from taxYear only', () => {
+    expect(reportPolicySimulationNotice(2025)).toBe(
+      'POLICY_SIMULATION · 2027.1.1 시행 예정 기준 · 신고용 아님',
+    )
+    expect(reportPolicySimulationNotice(2026)).toBe(
+      'POLICY_SIMULATION · 2027.1.1 시행 예정 기준 · 신고용 아님',
+    )
+    expect(reportPolicySimulationNotice(2027)).toBeUndefined()
+    expect(() => reportPolicySimulationNotice(2024)).toThrow('taxYear')
+  })
+
+  it('renders a deterministic 2026 simulation PDF', async () => {
+    const fontBytes = await loadPretendardFont()
+    const input = model({ taxYear: 2026 })
+
+    const first = await renderTaxReportPdf(input, {
+      fontBytes,
+      rendererVersion: 'test-simulation-1',
+    })
+    const second = await renderTaxReportPdf(input, {
+      fontBytes,
+      rendererVersion: 'test-simulation-1',
+    })
+
+    expect(first.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    expect(first.equals(second)).toBe(true)
+    expect(first.byteLength).toBeGreaterThan(15_000)
   })
 
   it('paginates a large disposal ledger', async () => {

@@ -26,8 +26,12 @@ const finalityLabel = (value: TaxReportModel['finality']) =>
 const calculationStatusLabel = (value: TaxReportModel['status']) =>
   value === 'FINAL' ? '계산 완료' : '부분 계산'
 
-const filingStatusLabel = (value: TaxReportModel['filingStatus']) =>
-  value === 'READY' ? '신고 준비' : '신고 준비 불가'
+const filingStatusLabel = (
+  value: TaxReportModel['filingStatus'],
+  taxYear: number,
+) => taxYear < 2027
+  ? '신고용 아님'
+  : value === 'READY' ? '신고 준비' : '신고 준비 불가'
 
 const costMethodLabel = (value: string) => {
   const labels: Record<string, string> = {
@@ -101,6 +105,7 @@ export function TaxReportDetail({
     report.status === 'PARTIAL' ||
     report.filingStatus === 'BLOCKED' ||
     report.limitations.length > 0
+  const policySimulation = report.taxYear < 2027
 
   useEffect(() => {
     setActiveTab('summary')
@@ -115,7 +120,9 @@ export function TaxReportDetail({
         <div>
           <span>ISSUED TAX LEDGER</span>
           <h2 id="tax-report-detail-title">
-            {report.taxYear}년 가상자산 세무 장부
+            {policySimulation
+              ? `${report.taxYear}년 가상자산 세무 정책 시뮬레이션 장부`
+              : `${report.taxYear}년 가상자산 세무 장부`}
           </h2>
           <p>
             {pointerVersion === undefined
@@ -133,8 +140,14 @@ export function TaxReportDetail({
             <b data-status={report.status}>
               {calculationStatusLabel(report.status)}
             </b>
-            <b data-status={report.filingStatus}>
-              {filingStatusLabel(report.filingStatus)}
+            <b
+              data-status={
+                policySimulation
+                  ? 'POLICY_SIMULATION'
+                  : report.filingStatus
+              }
+            >
+              {filingStatusLabel(report.filingStatus, report.taxYear)}
             </b>
           </div>
           <a href={pdfHref} download>
@@ -142,6 +155,21 @@ export function TaxReportDetail({
           </a>
         </div>
       </header>
+
+      {policySimulation ? (
+        <section
+          className="tax-report-detail__simulation"
+          role="status"
+        >
+          <strong>POLICY_SIMULATION · 신고용 아님</strong>
+          <p>
+            {report.taxYear}년 거래에 소득세법 제37조·제64조의3 및 시행령
+            제88조의 2027.1.1 시행 예정 기준을 가정 적용한 정책
+            시뮬레이션입니다. 실제 신고 결과나 현행 세법 적용 결과로
+            사용하지 마세요.
+          </p>
+        </section>
+      ) : null}
 
       {constrained ? (
         <section className="tax-report-detail__warning" role="status">
@@ -152,7 +180,7 @@ export function TaxReportDetail({
             별도로 표시합니다.
           </p>
         </section>
-      ) : (
+      ) : policySimulation ? null : (
         <section className="tax-report-detail__ready" role="status">
           <strong>현재 revision의 계산 항목이 모두 준비되었습니다.</strong>
           <p>선택한 장부와 PDF는 동일한 ReportModel을 기준으로 생성됩니다.</p>
@@ -626,6 +654,15 @@ export function TaxReportDetail({
               <dt>Report ID</dt>
               <dd>{report.reportId}</dd>
             </div>
+            {policySimulation ? (
+              <div>
+                <dt>계산 성격</dt>
+                <dd>
+                  POLICY_SIMULATION · 소득세법 제37조·제64조의3 및 시행령
+                  제88조 · 2027.1.1 시행 예정 · 신고용 아님
+                </dd>
+              </div>
+            ) : null}
             <div>
               <dt>정책</dt>
               <dd>

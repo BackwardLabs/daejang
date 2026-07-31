@@ -51,7 +51,7 @@ const validTaxReportContract = {
   report_table: 'reporting.tax_report',
   current_table: 'reporting.current_tax_report',
   contract_version: '1',
-  migration_version: '24',
+  migration_version: '62',
   reporting_usage: true,
   reporting_create: false,
   report_select: true,
@@ -97,7 +97,7 @@ const validReportPaymentContract = {
   entitlements_table: 'web_private.report_payment_entitlements',
   contract_version: 1,
   contract_digest: '28f6894a953e6acc5c238b04e025662ee6bc7d3b5dbd31e783c40789b9e6dcf4',
-  migration_version: '35',
+  migration_version: '62',
 }
 
 const validReportAttestationContract = {
@@ -147,7 +147,7 @@ describe('web authentication schema preflight', () => {
 })
 
 describe('tax report schema preflight', () => {
-  it('accepts the canonical tax report persistence contract at migration 24', async () => {
+  it('accepts the simulation-year tax report persistence contract at migration 62', async () => {
     await expect(
       assertTaxReportSchema(poolReturning(validTaxReportContract)),
     ).resolves.toBeUndefined()
@@ -158,7 +158,7 @@ describe('tax report schema preflight', () => {
       assertTaxReportSchema(
         poolReturning({
           ...validTaxReportContract,
-          migration_version: '19',
+          migration_version: '24',
         }),
       ),
     ).rejects.toThrow('tax report persistence migration contract is invalid')
@@ -206,7 +206,7 @@ describe('subject-name provisioner schema preflight', () => {
 })
 
 describe('report payment schema preflight', () => {
-  it('accepts the durable order, replay and entitlement contract', async () => {
+  it('accepts the simulation-year durable order, replay and entitlement contract', async () => {
     await expect(
       assertReportPaymentSchema(poolReturning(validReportPaymentContract)),
     ).resolves.toBeUndefined()
@@ -217,6 +217,15 @@ describe('report payment schema preflight', () => {
       assertReportPaymentSchema(poolReturning({
         ...validReportPaymentContract,
         authorizations_table: null,
+      })),
+    ).rejects.toThrow('report x402 payment migration contract is invalid')
+  })
+
+  it('rejects the pre-simulation payment persistence migration', async () => {
+    await expect(
+      assertReportPaymentSchema(poolReturning({
+        ...validReportPaymentContract,
+        migration_version: '35',
       })),
     ).rejects.toThrow('report x402 payment migration contract is invalid')
   })

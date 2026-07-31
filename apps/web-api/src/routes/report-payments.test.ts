@@ -127,9 +127,9 @@ describe('actual report x402 payment route', () => {
     return { cookie: `${config.sessionCookieName}=${token}` }
   }
 
-  const quote = async () => {
+  const quote = async (taxYear = 2027) => {
     const headers = await sessionHeaders()
-    const response = await context.app.inject({ method: 'GET', url: '/api/v1/tax-reports/2027/current/download?finality=FINAL&format=json', headers })
+    const response = await context.app.inject({ method: 'GET', url: `/api/v1/tax-reports/${taxYear}/current/download?finality=FINAL&format=json`, headers })
     expect(response.statusCode).toBe(402)
     const requiredHeader = response.headers['payment-required']
     expect(requiredHeader).toBeTypeOf('string')
@@ -152,13 +152,49 @@ describe('actual report x402 payment route', () => {
 
   it('binds a 402 quote to the authenticated user and exact FINAL report revision', async () => {
     const { required, requirement } = await quote()
-    expect(required).toMatchObject({ x402Version: 2, resource: { mimeType: 'application/json' } })
+    expect(required).toMatchObject({
+      x402Version: 2,
+      resource: {
+        description: '2027년 FINAL 세금 보고서',
+        mimeType: 'application/json',
+      },
+    })
     expect(requirement).toMatchObject({
       scheme: 'exact', network: 'eip155:91342', amount: '100000',
       extra: { reportId: 'report-final-1', pointerVersion: 3, format: 'json' },
     })
     expect(requirement.extra).not.toHaveProperty('residentId')
     expect(requirement.extra).not.toHaveProperty('reportArtifactDigest')
+  })
+
+  it('labels a 2025/2026 x402 resource as a non-filing policy simulation and rejects 2024', async () => {
+    reader.value = {
+      ...paymentReport,
+      report: {
+        ...report,
+        reportId: 'report-simulation-2026',
+        taxYear: 2026,
+      },
+    }
+    const { required, requirement } = await quote(2026)
+    expect(required).toMatchObject({
+      resource: {
+        description:
+          '2026년 정책 시뮬레이션 장부 (POLICY_SIMULATION · 2027.1.1 시행 예정 기준 · 신고용 아님)',
+      },
+    })
+    expect(requirement.extra).toMatchObject({
+      reportId: 'report-simulation-2026',
+      taxYear: 2026,
+    })
+
+    const headers = await sessionHeaders()
+    const invalid = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2024/current/download?finality=FINAL&format=json',
+      headers,
+    })
+    expect(invalid.statusCode).toBe(400)
   })
 
   it('returns the actual report only after verify and settle, then reuses the entitlement', async () => {

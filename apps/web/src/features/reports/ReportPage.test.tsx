@@ -170,13 +170,19 @@ function stubReportRequests(options: {
   finalCurrent?: unknown
   finalCurrentStatus?: number
   provisionalCurrent?: unknown
+  taxYear?: 2025 | 2026 | 2027
 } = {}) {
-  const detail = options.detail ?? detailReport
+  const taxYear = options.taxYear ?? 2027
+  const detail = options.detail ?? { ...detailReport, taxYear }
+  const provisionalCurrent = options.provisionalCurrent ?? {
+    ...partialTaxReport,
+    taxYear,
+  }
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
-      if (url.includes('/tax-reports/2027/current')) {
+      if (url.includes(`/tax-reports/${taxYear}/current`)) {
         if (url.includes('finality=FINAL')) {
           if (options.finalCurrentStatus) {
             return jsonResponse(
@@ -189,11 +195,11 @@ function stubReportRequests(options: {
             : jsonResponse({ error: { code: 'RESOURCE_NOT_FOUND' } }, 404)
         }
         return jsonResponse({
-          report: options.provisionalCurrent ?? partialTaxReport,
+          report: provisionalCurrent,
         })
       }
-      if (url.includes('/tax-reports/2027/history')) {
-        return jsonResponse({ items: options.history ?? [partialTaxReport] })
+      if (url.includes(`/tax-reports/${taxYear}/history`)) {
+        return jsonResponse({ items: options.history ?? [provisionalCurrent] })
       }
       if (url.endsWith('/api/v1/tax-reports/tax-report-1')) {
         return jsonResponse(
@@ -489,8 +495,9 @@ describe('ReportPage', () => {
     ).toBeInTheDocument()
   })
 
-  it('uses and updates the shared tax-year preference', async () => {
+  it('loads 2026 as a non-filing policy simulation and updates the shared tax-year preference', async () => {
     saveAppPreferences({ currency: 'KRW', year: '2026' })
+    stubReportRequests({ taxYear: 2026 })
 
     render(<ReportWorkspacePage />)
 
@@ -498,16 +505,55 @@ describe('ReportPage', () => {
       '2026',
     )
     expect(
-      await screen.findByText(
-        '세무 장부는 2027년 이후 과세연도부터 제공됩니다.',
-      ),
+      await screen.findByRole('heading', { name: '장부 계산 요약' }),
     ).toBeInTheDocument()
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+    expect(screen.getAllByText(/POLICY_SIMULATION/u).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/2027\.1\.1 시행 예정 기준/u).length,
+    ).toBeGreaterThan(0)
+    expect(screen.getAllByText('신고용 아님').length).toBeGreaterThan(0)
+    expect(
+      screen.queryByText('현재 revision의 계산 항목이 모두 준비되었습니다.'),
+    ).not.toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).endsWith(
+          '/api/v1/tax-reports/2026/current?finality=PROVISIONAL',
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).endsWith('/api/v1/tax-reports/2026/history?limit=20'),
+      ),
+    ).toBe(true)
 
     fireEvent.change(screen.getByRole('combobox', { name: '조회 기간' }), {
       target: { value: '2025' },
     })
 
     expect(loadAppPreferences().year).toBe('2025')
+  })
+
+  it('loads 2025 through the same policy simulation workspace', async () => {
+    saveAppPreferences({ currency: 'KRW', year: '2025' })
+    stubReportRequests({ taxYear: 2025 })
+
+    render(<ReportWorkspacePage />)
+
+    expect(
+      (await screen.findAllByRole('heading', {
+        name: '2025년 가상자산 세무 정책 시뮬레이션 장부',
+      })).length,
+    ).toBeGreaterThan(0)
+    expect(screen.getAllByText(/POLICY_SIMULATION/u).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('신고용 아님').length).toBeGreaterThan(0)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).endsWith(
+          '/api/v1/tax-reports/2025/current?finality=PROVISIONAL',
+        ),
+      ),
+    ).toBe(true)
   })
 })

@@ -724,7 +724,7 @@ export const registerDataRoutes = async (
   app.get<{ Params: { taxYear: string }; Querystring: { limit?: number } }>('/api/v1/tax-reports/:taxYear/history', {
     schema: {
       params: { type: 'object', additionalProperties: false, required: ['taxYear'], properties: {
-        taxYear: { type: 'string', pattern: '^(202[7-9]|20[3-9][0-9]|2[1-9][0-9]{2}|[3-9][0-9]{3})$' },
+        taxYear: { type: 'string', pattern: '^(202[5-9]|20[3-9][0-9]|2[1-9][0-9]{2}|[3-9][0-9]{3})$' },
       } },
       querystring: { type: 'object', additionalProperties: false, properties: { limit: { type: 'integer', minimum: 1, maximum: 100 } } },
     },

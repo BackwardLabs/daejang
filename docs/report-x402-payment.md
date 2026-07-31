@@ -214,7 +214,9 @@ stateDiagram-v2
 
 배포는 다음 순서를 지킨다.
 
-1. `daejang-db` migration 35를 먼저 적용한다.
+1. `daejang-db` migration 62를 먼저 적용한다. 이 migration은 기존 x402
+   persistence를 유지하면서 2025·2026 정책 시뮬레이션 장부의 결제 주문을
+   허용한다.
 2. GIWA Sepolia Mock USD를 지원하는 self-hosted facilitator를 private HTTPS 주소에 배포한다.
 3. Web API에 `X402_REPORT_PAYMENTS_ENABLED=true`와 facilitator, token, amount, `payTo` 설정을 주입한다.
 4. Web API preflight가 order, authorization replay, entitlement table과 schema contract를 확인한 뒤 기동되는지 확인한다.
