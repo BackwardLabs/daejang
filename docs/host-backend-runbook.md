@@ -134,6 +134,19 @@ Lot 생성 성공을 뜻하지 않는다. Engine은 같은 `subject_id`, JIT run
 
 운영 cutover는 다음 순서를 지킨다.
 
+현재 QA 대상 Action Registry release tuple은 하나의 원자적 배포 단위다.
+
+| 항목 | 값 |
+| --- | --- |
+| registry source commit | `02d7b5f9a99aa6cce41d48e43cc5229434addaf9` |
+| exporter/runtime commit | `ff97a512ed917486cc781c85cc62350292560061` |
+| unsigned bundle SHA-256 | `2ec4576b842a522fa619ef7b8825381071a67e08a8fd8dea20ead422c514ccc7` |
+| executable canaries | `weth9.wrap`, `weth9.unwrap`, `aave-v3.supply`, `aave-v3.withdraw-erc20`, `aave-v3.withdraw-eth` |
+
+JIT, Posting, Tax/Lot runtime 중 하나라도 이 tuple과 다르면 재수집을 시작하지 않는다.
+서명은 기존 운영 Ed25519 key로 별도 수행하며 private key를 checkout이나 runtime
+receipt에 복사하지 않는다.
+
 1. `DeFi-Label`의 committed runtime release를 검증한다.
 
    ```bash
