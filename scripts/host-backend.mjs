@@ -1160,6 +1160,58 @@ export const configureTaxUpbitQuoteRuntime = (config) => ({
   policyVersion: 'upbit-closed-minute-10m-or-inbound-first-trade-v4',
 })
 
+export const loadTaxActionRegistryRuntime = (
+  repository,
+  read = readFileSync,
+) => {
+  const releaseRoot = join(repository, 'internal', 'registry', 'release')
+  const readRelease = (name) => read(join(releaseRoot, name), 'utf8')
+  const bundleContents = readRelease('action-registry-v1.json')
+  const bundle = JSON.parse(bundleContents)
+  const receipt = JSON.parse(readRelease('action-registry-v1.json.receipt.json'))
+  const signature = JSON.parse(readRelease('action-registry-v1.signature.json'))
+  const bundleDigest = sha256(bundleContents)
+
+  if (
+    bundleDigest !== receipt.bundleSha256 ||
+    bundleDigest !== signature.bundleSha256 ||
+    bundle.registrySourceRepository !== receipt.registrySourceRepository ||
+    bundle.registrySourceCommit !== receipt.registrySourceCommit ||
+    bundle.exporterContractRepository !== receipt.exporterContractRepository ||
+    bundle.exporterContractCommit !== receipt.exporterContractCommit ||
+    bundle.profileCount !== bundle.profiles?.length
+  ) {
+    throw new Error('Tax Action Registry release artifacts are inconsistent')
+  }
+
+  const actionProfiles = bundle.profiles
+    .filter(({ maturity }) => maturity === 'CANARY')
+    .map(({ id, profileVersion, compiledAction }) => {
+      if (!id || !profileVersion || !compiledAction) {
+        throw new Error('Tax Action Registry CANARY profile is not executable')
+      }
+      return { profileId: id, profileVersion }
+    })
+    .sort((left, right) => left.profileId.localeCompare(right.profileId))
+  if (actionProfiles.length === 0) {
+    throw new Error('Tax Action Registry has no executable CANARY profiles')
+  }
+
+  return {
+    registryPin: {
+      bundleSchemaVersion: bundle.schemaVersion,
+      registrySourceRepository: bundle.registrySourceRepository,
+      registrySourceCommit: bundle.registrySourceCommit,
+      exporterContractRepository: bundle.exporterContractRepository,
+      exporterContractCommit: bundle.exporterContractCommit,
+      bundleSha256: bundleDigest,
+      signatureKeyId: signature.keyId,
+      signaturePublicKeySha256: signature.publicKeySha256,
+    },
+    actionProfiles,
+  }
+}
+
 const createTaxRuntime = async (queryURL) => {
   const client = new Client({ connectionString: queryURL })
   await client.connect()
@@ -1180,23 +1232,9 @@ const createTaxRuntime = async (queryURL) => {
     await client.end()
   }
 
-  const registryPin = {
-    bundleSchemaVersion: 'defi-label.action-registry.v1',
-    registrySourceRepository: 'BackwardLabs/DeFi-Label',
-    registrySourceCommit: '02d7b5f9a99aa6cce41d48e43cc5229434addaf9',
-    exporterContractRepository: 'BackwardLabs/DeFi-Label',
-    exporterContractCommit: 'ff97a512ed917486cc781c85cc62350292560061',
-    bundleSha256: '2ec4576b842a522fa619ef7b8825381071a67e08a8fd8dea20ead422c514ccc7',
-    signatureKeyId: 'ac3bfd53c95e743e',
-    signaturePublicKeySha256: 'ac3bfd53c95e743eb76c104385968699a1f70c2a3cc64e6ba3c680364cf0029a',
-  }
-  const actionProfiles = [
-    { profileId: 'aave-v3.supply', profileVersion: '1.0.0-canary.1' },
-    { profileId: 'aave-v3.withdraw-erc20', profileVersion: '1.0.0-canary.1' },
-    { profileId: 'aave-v3.withdraw-eth', profileVersion: '1.0.0-canary.1' },
-    { profileId: 'weth9.unwrap', profileVersion: '1.0.0' },
-    { profileId: 'weth9.wrap', profileVersion: '1.0.0' },
-  ]
+  const { registryPin, actionProfiles } = loadTaxActionRegistryRuntime(
+    taxRepository,
+  )
   const policy = canonicalJSON({
     name: 'production-ledger-consumer-policy',
     version: 'v1',

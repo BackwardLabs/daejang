@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdtempSync,
@@ -35,6 +36,7 @@ import {
   hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
   handoffSupervisorAfterSignal,
+  loadTaxActionRegistryRuntime,
   launchdServiceDomains,
   normalizeMultichainSnapshotIds,
   pauseForSignalShutdown,
@@ -88,6 +90,76 @@ test('bounds archived Upbit quote staleness at ten minutes', () => {
     configured.policyVersion,
     'upbit-closed-minute-10m-or-inbound-first-trade-v4',
   )
+})
+
+test('derives the Tax Action Registry runtime from one verified release', () => {
+  const bundle = JSON.stringify({
+    schemaVersion: 'defi-label.action-registry.v1',
+    registrySourceRepository: 'BackwardLabs/DeFi-Label',
+    registrySourceCommit: '1'.repeat(40),
+    exporterContractRepository: 'BackwardLabs/DeFi-Label',
+    exporterContractCommit: '2'.repeat(40),
+    profileCount: 3,
+    profiles: [
+      {
+        id: 'weth9.wrap',
+        profileVersion: '1.0.0',
+        maturity: 'CANARY',
+        compiledAction: { actionKind: 'WRAP' },
+      },
+      {
+        id: 'aave-v3.supply',
+        profileVersion: '1.0.0',
+        maturity: 'DRAFT',
+        compiledAction: null,
+      },
+      {
+        id: 'weth9.unwrap',
+        profileVersion: '1.0.0',
+        maturity: 'CANARY',
+        compiledAction: { actionKind: 'UNWRAP' },
+      },
+    ],
+  })
+  const bundleSha256 = createHash('sha256').update(bundle).digest('hex')
+  const files = new Map([
+    ['action-registry-v1.json', bundle],
+    ['action-registry-v1.json.receipt.json', JSON.stringify({
+      bundleSha256,
+      registrySourceRepository: 'BackwardLabs/DeFi-Label',
+      registrySourceCommit: '1'.repeat(40),
+      exporterContractRepository: 'BackwardLabs/DeFi-Label',
+      exporterContractCommit: '2'.repeat(40),
+    })],
+    ['action-registry-v1.signature.json', JSON.stringify({
+      bundleSha256,
+      keyId: 'release-key',
+      publicKeySha256: '3'.repeat(64),
+    })],
+  ])
+
+  const runtime = loadTaxActionRegistryRuntime('/tax', (path) => {
+    const contents = files.get(path.split('/').at(-1))
+    if (contents === undefined) throw new Error(`unexpected release path ${path}`)
+    return contents
+  })
+
+  assert.deepEqual(runtime, {
+    registryPin: {
+      bundleSchemaVersion: 'defi-label.action-registry.v1',
+      registrySourceRepository: 'BackwardLabs/DeFi-Label',
+      registrySourceCommit: '1'.repeat(40),
+      exporterContractRepository: 'BackwardLabs/DeFi-Label',
+      exporterContractCommit: '2'.repeat(40),
+      bundleSha256,
+      signatureKeyId: 'release-key',
+      signaturePublicKeySha256: '3'.repeat(64),
+    },
+    actionProfiles: [
+      { profileId: 'weth9.unwrap', profileVersion: '1.0.0' },
+      { profileId: 'weth9.wrap', profileVersion: '1.0.0' },
+    ],
+  })
 })
 
 test('builds tax profiles only for subjects with canonical ledger assets', () => {
