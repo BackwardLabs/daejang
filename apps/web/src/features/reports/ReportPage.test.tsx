@@ -72,14 +72,6 @@ function stubReportRequests(options: {
         }
         return jsonResponse(options.capability ?? { enabled: false })
       }
-      if (url.includes('/report-attestations/deployment')) {
-        return jsonResponse({
-          enabled: false,
-          network: 'eip155:91342',
-          mode: 'READ_ONLY',
-          status: 'NOT_CONFIGURED',
-        })
-      }
       if (url.includes('/report-attestations/synthetic-publication')) {
         return jsonResponse({
           capability: {
@@ -136,12 +128,9 @@ describe('ReportPage', () => {
     expect(
       screen.getByRole('button', { name: '장부 생성 및 제출' }),
     ).toBeDisabled()
-    expect(screen.getByText('기술 연결 정보')).toBeInTheDocument()
     expect(
-      await screen.findByText(
-        'GIWA Sepolia 배포 정보가 아직 연결되지 않았습니다',
-      ),
-    ).toBeInTheDocument()
+      screen.queryByText('기술 연결 정보'),
+    ).not.toBeInTheDocument()
     expect(
       screen.getByRole('heading', { name: '발행 산출물 이력' }),
     ).toBeInTheDocument()
@@ -184,7 +173,7 @@ describe('ReportPage', () => {
       fetchMock.mock.calls.some(([url]) =>
         String(url).endsWith('/api/v1/report-attestations/deployment'),
       ),
-    ).toBe(true)
+    ).toBe(false)
     expect(
       fetchMock.mock.calls.some(([url]) =>
         String(url).endsWith(

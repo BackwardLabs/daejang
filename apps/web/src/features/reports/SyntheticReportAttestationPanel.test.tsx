@@ -157,7 +157,9 @@ describe('SyntheticReportAttestationPanel', () => {
     )
 
     expect(await screen.findByText('USABLE')).toBeInTheDocument()
-    expect(screen.getByText('승인 조건 충족')).toBeInTheDocument()
+    expect(
+      screen.getByText('승인 조건을 모두 충족했습니다.'),
+    ).toBeInTheDocument()
     expect(
       screen.getByText(
         'Reviewer가 승인했고, 합성 장부의 commitment와 현재 온체인 승인본이 일치해 사용할 수 있습니다.',
@@ -210,7 +212,7 @@ describe('SyntheticReportAttestationPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows the exact reject reason as UNUSABLE without a user outcome selector', async () => {
+  it('explains a rejected result without exposing its internal code', async () => {
     const api = createApi(snapshot('SUBMITTED'), {
       review: vi.fn(async () => snapshot('REJECTED')),
     })
@@ -223,12 +225,12 @@ describe('SyntheticReportAttestationPanel', () => {
     )
 
     expect(await screen.findByText('UNUSABLE')).toBeInTheDocument()
-    expect(screen.getByText('REVIEW_REJECTED')).toBeInTheDocument()
     expect(
       screen.getByText(
-        'Reviewer가 반려해 승인본이 만들어지지 않았으므로 사용할 수 없습니다.',
+        '검토 기준을 통과하지 못해 이 장부는 사용할 수 없습니다.',
       ),
     ).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('REVIEW_REJECTED')
     expect(screen.getByText('반려 Tx')).toBeInTheDocument()
     expect(screen.getByText('REJECT Attestation UID')).toBeInTheDocument()
     expect(
@@ -255,7 +257,7 @@ describe('SyntheticReportAttestationPanel', () => {
 
     expect(
       await screen.findByText(
-        'Issuer 또는 Reviewer 서명자를 사용할 수 없습니다.',
+        '현재 증명 요청을 처리할 수 없습니다. 잠시 후 다시 확인해 주세요.',
       ),
     ).toBeInTheDocument()
     expect(
@@ -291,6 +293,14 @@ describe('SyntheticReportAttestationPanel', () => {
 
     render(<SyntheticReportAttestationPanel api={api} />)
 
+    expect(
+      await screen.findByText(
+        /요청이 증명 네트워크에 반영됐을 수 있지만/,
+      ),
+    ).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent(
+      'REVIEW_RECONCILIATION_FAILED',
+    )
     const retry = await screen.findByRole('button', {
       name: '검토 요청 및 검증',
     })
@@ -364,6 +374,10 @@ describe('SyntheticReportAttestationPanel', () => {
 
     render(<SyntheticReportAttestationPanel api={api} />)
 
+    expect(
+      await screen.findByText(/증명 네트워크의 확인이 진행 중입니다/),
+    ).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('RECEIPT_PENDING')
     const continuation = await screen.findByRole('button', {
       name: '제출 상태 이어서 확인',
     })
@@ -425,5 +439,51 @@ describe('SyntheticReportAttestationPanel', () => {
     expect(
       screen.queryByRole('button', { name: '검토 및 검증 완료' }),
     ).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '자동 검토만으로 결정할 수 없어 담당자 확인이 필요합니다.',
+      ),
+    ).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent(
+      'MANUAL_REVIEW_REQUIRED',
+    )
+  })
+
+  it('explains uncertain post-broadcast state without suggesting another write', async () => {
+    const uncertain: SyntheticReportAttestationSnapshot = {
+      capability,
+      fixture,
+      status: {
+        lifecycle: 'RECONCILIATION_REQUIRED',
+        failureCode: null,
+        reasonCode: 'RECEIPT_OR_POST_STATE_NOT_VERIFIED',
+        submissionConfirmed: false,
+        reviewConfirmed: false,
+        submissionEvidence: null,
+        reviewEvidence: null,
+      },
+      verification: null,
+    }
+
+    render(
+      <SyntheticReportAttestationPanel
+        api={createApi(uncertain)}
+      />,
+    )
+
+    expect(
+      await screen.findByText(
+        /같은 요청을 다시 보내지 말고 ‘현재 상태 새로고침’을 눌러 주세요/,
+      ),
+    ).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent(
+      'RECEIPT_OR_POST_STATE_NOT_VERIFIED',
+    )
+    expect(
+      screen.getByRole('button', { name: '장부 생성 및 제출' }),
+    ).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: '현재 상태 새로고침' }),
+    ).toBeEnabled()
   })
 })

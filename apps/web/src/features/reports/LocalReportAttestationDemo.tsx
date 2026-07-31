@@ -10,6 +10,9 @@ import {
   type ReportAttestationStatus,
   type ReportVerification,
 } from './reportAttestationApi.ts'
+import {
+  describeReportVerificationReason,
+} from './reportAttestationPresentation.ts'
 
 type DemoPhase =
   | 'idle'
@@ -467,8 +470,12 @@ export function LocalReportAttestationDemo({
           <p>{verificationExplanation(state.verification)}</p>
           <dl>
             <div>
-              <dt>기술 사유</dt>
-              <dd>{state.verification.reasonCode ?? '승인 조건 충족'}</dd>
+              <dt>판정 사유</dt>
+              <dd>
+                {describeReportVerificationReason(
+                  state.verification.reasonCode,
+                )}
+              </dd>
             </div>
             <div>
               <dt>온체인 사용 가능</dt>

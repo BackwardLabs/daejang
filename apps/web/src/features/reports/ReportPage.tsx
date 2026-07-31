@@ -19,7 +19,6 @@ import {
   type TaxAmountModel,
   type TaxReportModel,
 } from './taxReportApi.ts'
-import { GiwaReportAttestationPanel } from './GiwaReportAttestationPanel.tsx'
 import { SyntheticReportAttestationPanel } from './SyntheticReportAttestationPanel.tsx'
 import './report.css'
 
@@ -484,8 +483,6 @@ export function ReportPage() {
             </div>
           ) : null}
         </section>
-
-        <GiwaReportAttestationPanel />
       </main>
     </div>
   )
