@@ -82,6 +82,14 @@ export interface ReportAttestationReviewerExecutor {
   }): Promise<RedactedExecutionResult>
 }
 
+export interface ReportAttestationReviewerReconciler {
+  reconcileReviewer(input: {
+    preparedRecordId: string
+    submissionUID: Hex32
+    transactionHash: Hex32
+  }): Promise<RedactedExecutionResult>
+}
+
 /**
  * Structural port for the optional local Anvil runtime. Keeping this interface
  * in the web API means ordinary lint/typecheck/test/build never import the
@@ -91,6 +99,7 @@ export interface ReportAttestationRuntime {
   readonly kind: string
   readonly issuerExecutor: ReportAttestationIssuerExecutor
   readonly reviewerExecutor: ReportAttestationReviewerExecutor
+  readonly reviewerReconciler?: ReportAttestationReviewerReconciler
   prepareSyntheticEvidence(
     input: PreparedReportInput,
   ): Promise<PreparedSyntheticEvidence>
@@ -114,6 +123,7 @@ export interface LocalReportAttestationRuntime
 export interface GiwaSepoliaReportAttestationRuntime
   extends ReportAttestationRuntime {
   readonly kind: typeof GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND
+  readonly reviewerReconciler: ReportAttestationReviewerReconciler
 }
 
 export type ReportAttestationRecord = {

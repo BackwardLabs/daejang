@@ -65,6 +65,7 @@ export type SyntheticReportAttestationSnapshot = Readonly<{
 
 export type SyntheticReportAttestationApi = Readonly<{
   load(signal?: AbortSignal): Promise<SyntheticReportAttestationSnapshot>
+  reconcile(signal?: AbortSignal): Promise<SyntheticReportAttestationSnapshot>
   submit(signal?: AbortSignal): Promise<SyntheticReportAttestationSnapshot>
   review(signal?: AbortSignal): Promise<SyntheticReportAttestationSnapshot>
 }>
@@ -584,6 +585,12 @@ const loadSnapshot = async (
 export const syntheticReportAttestationApi: SyntheticReportAttestationApi = {
   load(signal) {
     return loadSnapshot(publicationPath, { signal })
+  },
+  reconcile(signal) {
+    return loadSnapshot(`${publicationPath}/reconcile`, {
+      method: 'POST',
+      signal,
+    })
   },
   submit(signal) {
     return loadSnapshot(`${publicationPath}/submission`, {

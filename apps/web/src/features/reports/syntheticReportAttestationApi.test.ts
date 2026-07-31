@@ -57,7 +57,7 @@ afterEach(() => {
 })
 
 describe('synthetic report attestation API', () => {
-  it('uses one authenticated GET and two empty POST endpoints', async () => {
+  it('uses one authenticated GET and three empty POST endpoints', async () => {
     const submittedSnapshot = {
       ...emptySnapshot,
       status: submitted,
@@ -67,14 +67,17 @@ describe('synthetic report attestation API', () => {
       .mockResolvedValueOnce(jsonResponse(emptySnapshot))
       .mockResolvedValueOnce(jsonResponse(submittedSnapshot))
       .mockResolvedValueOnce(jsonResponse(submittedSnapshot))
+      .mockResolvedValueOnce(jsonResponse(submittedSnapshot))
     vi.stubGlobal('fetch', fetchMock)
 
     await syntheticReportAttestationApi.load()
+    await syntheticReportAttestationApi.reconcile()
     await syntheticReportAttestationApi.submit()
     await syntheticReportAttestationApi.review()
 
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
       '/api/v1/report-attestations/synthetic-publication',
+      '/api/v1/report-attestations/synthetic-publication/reconcile',
       '/api/v1/report-attestations/synthetic-publication/submission',
       '/api/v1/report-attestations/synthetic-publication/review',
     ])

@@ -105,6 +105,7 @@ type BuildAppOptions = {
     identityKey?: Uint8Array
     publicationSource?: ReportAttestationPublicationSource
     localSyntheticFixture?: boolean
+    reconciliationEnabled?: boolean
   }
   reportAttestationDeploymentReader?: ReportAttestationDeploymentReader
   walletSignatureVerifier?: WalletSignatureVerifier
@@ -547,6 +548,9 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       disabledReasonCode: config.reportAttestationDeployment
         ? 'WRITER_NOT_CONFIGURED'
         : 'DEPLOYMENT_NOT_CONFIGURED',
+      reconciliationEnabled:
+        localSyntheticFixture ||
+        options.reportAttestations?.reconciliationEnabled === true,
       capability: localSyntheticFixture
         ? {
             network: 'eip155:31337',

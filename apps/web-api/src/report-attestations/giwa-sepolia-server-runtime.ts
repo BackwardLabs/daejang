@@ -15,6 +15,7 @@ import { loadEncryptedKeystoreSigner } from './encrypted-keystore-signer.js'
 import {
   loadGiwaSepoliaReportAttestationRuntime,
   type GiwaSepoliaPreparedRecordProjection,
+  type GiwaSepoliaTrustedReviewDecisionSource,
 } from './giwa-sepolia-runtime-adapter.js'
 import { PostgresReportAttestationOperationStore } from './postgres-operation-store.js'
 import { PostgresReportAttestationStore } from './postgres-store.js'
@@ -122,6 +123,47 @@ const asPreparedProjection = (
   }
 }
 
+const persistedReviewDecisionSource = (
+  store: PostgresReportAttestationStore,
+  deployment: ReportAttestationDeploymentConfig,
+): GiwaSepoliaTrustedReviewDecisionSource => ({
+  readAuthenticatedDecision: async (request) => {
+    const stored = await store.getByPreparedRecordId(
+      request.preparedRecordId,
+    )
+    const record = stored?.record
+    const submissionUID =
+      record?.submission?.status === 'CONFIRMED'
+        ? record.submission.attestationUID
+        : null
+    if (
+      !record ||
+      record.preparedRecordId !== request.preparedRecordId ||
+      record.contractReportId.toLowerCase() !==
+        request.reportId.toLowerCase() ||
+      record.revision !== request.revision ||
+      record.commitment?.toLowerCase() !==
+        request.commitment.toLowerCase() ||
+      record.derivationRuleDigest?.toLowerCase() !==
+        request.derivationRuleDigest.toLowerCase() ||
+      deployment.evidenceSchemaDigest.toLowerCase() !==
+        request.evidenceSchemaDigest.toLowerCase() ||
+      submissionUID?.toLowerCase() !==
+        request.submissionUID.toLowerCase() ||
+      (record.desiredReviewOutcome !== 'APPROVE' &&
+        record.desiredReviewOutcome !== 'REJECT')
+    ) {
+      throw new Error(
+        'Persisted authenticated review decision is unavailable',
+      )
+    }
+    return {
+      outcome: record.desiredReviewOutcome,
+      reasonCode: 'SYNTHETIC_POLICY_PASS',
+    }
+  },
+})
+
 export const createGiwaSepoliaReportAttestationServerRuntime =
   async (input: {
     pool: Pool
@@ -216,12 +258,10 @@ export const createGiwaSepoliaReportAttestationServerRuntime =
                 ),
               ),
           },
-          reviewDecisionSource: {
-            readAuthenticatedDecision: async () => ({
-              outcome: input.writer.reviewOutcome,
-              reasonCode: 'SYNTHETIC_POLICY_PASS',
-            }),
-          },
+          reviewDecisionSource: persistedReviewDecisionSource(
+            store,
+            input.deployment,
+          ),
           derivationRuleDigest:
             SYNTHETIC_TESTNET_DERIVATION_RULE_DIGEST,
           verificationFinality: 'safe',

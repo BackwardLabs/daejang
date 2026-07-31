@@ -77,6 +77,7 @@ const createApi = (
   overrides: Partial<SyntheticReportAttestationApi> = {},
 ): SyntheticReportAttestationApi => ({
   load: vi.fn(async () => initial),
+  reconcile: vi.fn(async () => initial),
   submit: vi.fn(async () => snapshot('SUBMITTED')),
   review: vi.fn(async () => snapshot('APPROVED')),
   ...overrides,
@@ -266,7 +267,7 @@ describe('SyntheticReportAttestationPanel', () => {
     expect(api.submit).not.toHaveBeenCalled()
   })
 
-  it('allows only the safe read-only retry for a confirmed review receipt', async () => {
+  it('uses refresh reconciliation instead of the reviewer write for a confirmed review receipt', async () => {
     const reconciliation: SyntheticReportAttestationSnapshot = {
       capability,
       fixture,
@@ -288,7 +289,7 @@ describe('SyntheticReportAttestationPanel', () => {
       verification: null,
     }
     const api = createApi(reconciliation, {
-      review: vi.fn(async () => snapshot('APPROVED')),
+      reconcile: vi.fn(async () => snapshot('APPROVED')),
     })
 
     render(<SyntheticReportAttestationPanel api={api} />)
@@ -301,13 +302,18 @@ describe('SyntheticReportAttestationPanel', () => {
     expect(document.body).not.toHaveTextContent(
       'REVIEW_RECONCILIATION_FAILED',
     )
-    const retry = await screen.findByRole('button', {
-      name: '검토 요청 및 검증',
+    expect(
+      screen.getByRole('button', {
+        name: '검토 요청 및 검증',
+      }),
+    ).toBeDisabled()
+    const refresh = screen.getByRole('button', {
+      name: '현재 상태 새로고침',
     })
-    expect(retry).toBeEnabled()
-    fireEvent.click(retry)
+    fireEvent.click(refresh)
     expect(await screen.findByText('USABLE')).toBeInTheDocument()
-    expect(api.review).toHaveBeenCalledTimes(1)
+    expect(api.reconcile).toHaveBeenCalledTimes(1)
+    expect(api.review).not.toHaveBeenCalled()
   })
 
   it('polls an asynchronous submission without issuing another POST', async () => {
@@ -389,7 +395,7 @@ describe('SyntheticReportAttestationPanel', () => {
     expect(api.submit).toHaveBeenCalledTimes(1)
   })
 
-  it('refreshes with GET only and never turns refresh into an onchain write', async () => {
+  it('refreshes through the read-only reconciliation endpoint and never calls a write action', async () => {
     const api = createApi(snapshot('SUBMITTED'))
 
     render(<SyntheticReportAttestationPanel api={api} />)
@@ -403,8 +409,63 @@ describe('SyntheticReportAttestationPanel', () => {
         '새 트랜잭션을 보내지 않고 서버와 온체인의 현재 상태를 다시 확인했습니다.',
       ),
     ).toHaveClass('is-success')
-    expect(api.load).toHaveBeenCalledTimes(2)
+    expect(api.load).toHaveBeenCalledTimes(1)
+    expect(api.reconcile).toHaveBeenCalledTimes(1)
     expect(api.submit).not.toHaveBeenCalled()
+    expect(api.review).not.toHaveBeenCalled()
+  })
+
+  it('polls GET after a concurrent reconciliation returns REVIEWING without repeating POST', async () => {
+    const reconciling: SyntheticReportAttestationSnapshot = {
+      capability,
+      fixture,
+      status: {
+        lifecycle: 'RECONCILIATION_REQUIRED',
+        failureCode: null,
+        reasonCode: 'RECEIPT_OR_POST_STATE_NOT_VERIFIED',
+        submissionConfirmed: true,
+        reviewConfirmed: false,
+        submissionEvidence: {
+          transactionHash: SUBMIT_TX,
+          attestationUID: SUBMIT_UID,
+        },
+        reviewEvidence: null,
+      },
+      verification: null,
+    }
+    const reviewing: SyntheticReportAttestationSnapshot = {
+      ...reconciling,
+      status: {
+        ...reconciling.status!,
+        lifecycle: 'REVIEWING',
+        reasonCode: null,
+      },
+    }
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(reconciling)
+      .mockResolvedValueOnce(snapshot('APPROVED'))
+    const api = createApi(reconciling, {
+      load,
+      reconcile: vi.fn(async () => reviewing),
+    })
+
+    render(
+      <SyntheticReportAttestationPanel
+        api={api}
+        pollIntervalMs={1}
+        pollTimeoutMs={100}
+      />,
+    )
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '현재 상태 새로고침',
+      }),
+    )
+
+    expect(await screen.findByText('USABLE')).toBeInTheDocument()
+    expect(api.reconcile).toHaveBeenCalledTimes(1)
+    expect(load).toHaveBeenCalledTimes(2)
     expect(api.review).not.toHaveBeenCalled()
   })
 

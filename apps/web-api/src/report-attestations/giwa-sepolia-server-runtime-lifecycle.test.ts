@@ -5,6 +5,10 @@ import type {
   ReportAttestationDeploymentConfig,
   ReportAttestationSyntheticTestnetConfig,
 } from '../config.js'
+import type {
+  GiwaSepoliaTrustedReviewDecisionSource,
+} from './giwa-sepolia-runtime-adapter.js'
+import { PostgresReportAttestationStore } from './postgres-store.js'
 
 const mocks = vi.hoisted(() => ({
   acquireLease: vi.fn(),
@@ -147,6 +151,89 @@ describe('GIWA Sepolia server runtime writer lease', () => {
     expect(mocks.leaseClose).toHaveBeenCalledOnce()
     expect(mocks.issuerDestroy).toHaveBeenCalledOnce()
     expect(mocks.reviewerDestroy).toHaveBeenCalledOnce()
+  })
+
+  it('rebuilds the authenticated decision from the immutable prepared record instead of current writer config', async () => {
+    const preparedRecordId = `ep_${'a'.repeat(64)}`
+    const reportId = `0x${'b'.repeat(64)}`
+    const commitment = `0x${'c'.repeat(64)}`
+    const derivationRuleDigest = `0x${'d'.repeat(64)}`
+    const submissionUID = `0x${'e'.repeat(64)}`
+    const lookup = vi
+      .spyOn(
+        PostgresReportAttestationStore.prototype,
+        'getByPreparedRecordId',
+      )
+      .mockResolvedValue({
+        databaseId: '00000000-0000-4000-8000-000000000028',
+        record: {
+          preparedRecordId,
+          contractReportId: reportId,
+          revision: 1,
+          commitment,
+          derivationRuleDigest,
+          desiredReviewOutcome: 'REJECT',
+          submission: {
+            status: 'CONFIRMED',
+            transactionHash: `0x${'f'.repeat(64)}`,
+            attestationUID: submissionUID,
+            reasonCode: null,
+          },
+        },
+      } as never)
+    const resources =
+      await createGiwaSepoliaReportAttestationServerRuntime({
+        pool,
+        deployment,
+        writer,
+      })
+
+    try {
+      const runtimeInput = mocks.loadRuntime.mock
+        .calls[0]?.[0] as {
+          reviewDecisionSource:
+            GiwaSepoliaTrustedReviewDecisionSource
+        }
+      await expect(
+        runtimeInput.reviewDecisionSource
+          .readAuthenticatedDecision({
+            preparedRecordId,
+            submissionUID:
+              submissionUID as `0x${string}`,
+            reportId: reportId as `0x${string}`,
+            revision: 1,
+            commitment: commitment as `0x${string}`,
+            evidenceSchemaDigest:
+              deployment.evidenceSchemaDigest as `0x${string}`,
+            derivationRuleDigest:
+              derivationRuleDigest as `0x${string}`,
+          }),
+      ).resolves.toEqual({
+        outcome: 'REJECT',
+        reasonCode: 'SYNTHETIC_POLICY_PASS',
+      })
+      await expect(
+        runtimeInput.reviewDecisionSource
+          .readAuthenticatedDecision({
+            preparedRecordId,
+            submissionUID:
+              `0x${'9'.repeat(64)}` as `0x${string}`,
+            reportId: reportId as `0x${string}`,
+            revision: 1,
+            commitment: commitment as `0x${string}`,
+            evidenceSchemaDigest:
+              deployment.evidenceSchemaDigest as `0x${string}`,
+            derivationRuleDigest:
+              derivationRuleDigest as `0x${string}`,
+          }),
+      ).rejects.toThrow(
+        'Persisted authenticated review decision is unavailable',
+      )
+      expect(lookup).toHaveBeenCalledWith(preparedRecordId)
+    } finally {
+      lookup.mockRestore()
+      await resources.close()
+    }
   })
 
   it('releases the lease when startup fails after acquisition', async () => {

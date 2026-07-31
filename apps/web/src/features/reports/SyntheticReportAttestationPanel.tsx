@@ -280,10 +280,22 @@ export function SyntheticReportAttestationPanel({
     setAction('refreshing')
     setMessage(undefined)
     try {
-      const current = await request(
-        (signal) => api.load(signal),
+      let current = await request(
+        (signal) => api.reconcile(signal),
         controller.signal,
       )
+      if (
+        current.status?.lifecycle === 'REVIEW_QUEUED' ||
+        current.status?.lifecycle === 'REVIEWING'
+      ) {
+        current = await poll(
+          current,
+          (polled) =>
+            polled.status?.lifecycle !== 'REVIEW_QUEUED' &&
+            polled.status?.lifecycle !== 'REVIEWING',
+          controller.signal,
+        )
+      }
       if (!mountedRef.current) return
       setSnapshot(current)
       setAction('idle')
@@ -339,11 +351,7 @@ export function SyntheticReportAttestationPanel({
     status?.submissionConfirmed === true &&
     (status.lifecycle === 'SUBMITTED' ||
       status.lifecycle === 'PENDING' ||
-      status.lifecycle === 'RETRY_REQUIRED' ||
-      (status.lifecycle === 'RECONCILIATION_REQUIRED' &&
-        status.reviewConfirmed === true &&
-        status.failureCode ===
-          'REVIEW_RECONCILIATION_FAILED')) &&
+      status.lifecycle === 'RETRY_REQUIRED') &&
     !reviewComplete &&
     !busy
   const phaseLabel =
