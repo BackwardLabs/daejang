@@ -943,13 +943,29 @@ const build = () => {
   symlinkSync(join(repositoryRoot, 'node_modules'), runtimeNodeModules, 'dir')
 }
 
+export const combinedJITConfigExpression = ({
+  socket,
+  artifactRoot,
+  artifactTemp,
+}) =>
+  [
+    '. as $item ireduce ({}; . * $item)',
+    `.server.listen = ${JSON.stringify(`unix://${socket}`)}`,
+    `.persistence.artifact.root = ${JSON.stringify(artifactRoot)}`,
+    `.persistence.artifact.temp = ${JSON.stringify(artifactTemp)}`,
+  ].join(' | ')
+
 const createCombinedJITConfig = () => {
   const output = join(configRoot, 'ethereum-optimism-mainnet.yaml')
   const result = spawnSync(
     process.env.YQ_BINARY ?? '/opt/homebrew/bin/yq',
     [
       'ea',
-      `. as $item ireduce ({}; . * $item) | .server.listen = "unix://${join(socketRoot, 'jit.sock')}"`,
+      combinedJITConfigExpression({
+        socket: join(socketRoot, 'jit.sock'),
+        artifactRoot: jitArtifactRoot,
+        artifactTemp: jitArtifactTemp,
+      }),
       join(jitRepository, 'configs', 'ethereum-mainnet.yaml'),
       join(jitRepository, 'configs', 'optimism-mainnet.yaml'),
     ],
