@@ -598,10 +598,14 @@ export const hostEVMPostingWorkerArgs = (
   artifacts,
   temporaryArtifacts,
   claimPolicy,
-  actionRuntimeCommit,
+  actionRuntimeRelease,
 ) => {
-  if (!/^[0-9a-f]{40}$/.test(actionRuntimeCommit)) {
-    throw new Error('A pinned DeFi Action runtime Git commit is required')
+  if (
+    actionRuntimeRelease?.repository !== 'BackwardLabs/DeFi-Label' ||
+    !/^[0-9a-f]{40}$/.test(actionRuntimeRelease?.commit) ||
+    !/^[0-9a-f]{64}$/.test(actionRuntimeRelease?.bundleSha256)
+  ) {
+    throw new Error('A verified DeFi Action runtime release coordinate is required')
   }
   return [
     '--mode',
@@ -612,8 +616,12 @@ export const hostEVMPostingWorkerArgs = (
     temporaryArtifacts,
     '--claim-policy',
     claimPolicy,
+    '--trusted-action-runtime-repository',
+    actionRuntimeRelease.repository,
     '--trusted-action-runtime-commit',
-    actionRuntimeCommit,
+    actionRuntimeRelease.commit,
+    '--trusted-action-runtime-bundle-sha256',
+    actionRuntimeRelease.bundleSha256,
   ]
 }
 
@@ -1165,6 +1173,73 @@ export const createActionRuntimeIdentity = (repository) => {
   }))
 }
 
+export const loadVerifiedActionRuntimeRelease = (
+  repository,
+  inspect = (command, args, options) => spawnSync(command, args, options),
+  read = readFileSync,
+) => {
+  const releaseRoot = join(repository, 'releases')
+  const files = {
+    bundle: join(releaseRoot, 'action-registry-v1.json'),
+    checksum: join(releaseRoot, 'action-registry-v1.json.sha256'),
+    receipt: join(releaseRoot, 'action-registry-v1.json.receipt.json'),
+    signature: join(releaseRoot, 'action-registry-v1.signature.json'),
+    publicKey: join(releaseRoot, 'action-registry-v1.public-key.pem'),
+  }
+  const verification = inspect(
+    process.env.GIWA_DEFI_LABEL_PYTHON ?? 'python3',
+    [
+      join(repository, 'scripts', 'registry.py'),
+      'verify-runtime-release',
+      '--bundle', files.bundle,
+      '--checksum', files.checksum,
+      '--receipt', files.receipt,
+      '--signature', files.signature,
+      '--public-key', files.publicKey,
+    ],
+    { cwd: repository, encoding: 'utf8' },
+  )
+  let verified
+  try {
+    verified = JSON.parse(verification.stdout ?? '')
+  } catch {
+    verified = null
+  }
+  if (verification.status !== 0 || verified?.valid !== true) {
+    throw new Error('DeFi Action runtime signed release verification failed')
+  }
+
+  const bundleContents = read(files.bundle)
+  const bundleDigest = sha256(bundleContents)
+  const bundle = JSON.parse(bundleContents.toString())
+  const receipt = JSON.parse(read(files.receipt, 'utf8'))
+  const checksum = read(files.checksum, 'utf8')
+  if (
+    bundle.schemaVersion !== 'defi-label.action-registry.v1' ||
+    bundle.registrySourceRepository !== 'BackwardLabs/DeFi-Label' ||
+    !/^[0-9a-f]{40}$/.test(bundle.registrySourceCommit) ||
+    receipt.registrySourceRepository !== bundle.registrySourceRepository ||
+    receipt.registrySourceCommit !== bundle.registrySourceCommit ||
+    receipt.bundleSha256 !== bundleDigest ||
+    checksum !== `${bundleDigest}\n`
+  ) {
+    throw new Error('DeFi Action runtime release coordinates are inconsistent')
+  }
+  const ancestry = inspect(
+    'git',
+    ['merge-base', '--is-ancestor', bundle.registrySourceCommit, 'HEAD'],
+    { cwd: repository, encoding: 'utf8' },
+  )
+  if (ancestry.status !== 0) {
+    throw new Error('DeFi Action runtime release source is not in the deployed checkout')
+  }
+  return {
+    repository: bundle.registrySourceRepository,
+    commit: bundle.registrySourceCommit,
+    bundleSha256: bundleDigest,
+  }
+}
+
 const decodePublicationTrustKey = (value) => {
   if (!value) throw new Error('DAEJANG_PUBLICATION_POLICY_TRUST_KEY is missing')
   const direct = Buffer.from(value, 'latin1')
@@ -1438,7 +1513,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
   // worker independently verifies their runtime coordinate. Pin both services
   // to the same clean revision on every start, including prebuilt restarts.
   assertCleanGitCheckout(deFiLabelRepository, 'DeFi Action runtime')
-  const actionRuntimeCommit = gitCommit(deFiLabelRepository)
+  const actionRuntimeRelease = loadVerifiedActionRuntimeRelease(deFiLabelRepository)
   if (buildArtifacts) build()
   for (const requiredArtifact of [
     jitBinary,
@@ -1677,7 +1752,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         jitArtifactRoot,
         jitArtifactTemp,
         evmPublicationClaimPolicy,
-        actionRuntimeCommit,
+        actionRuntimeRelease,
       )
       const evmPostingEnvironment = serviceEnvironment(
         [],
