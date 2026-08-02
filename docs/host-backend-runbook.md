@@ -233,6 +233,23 @@ PDF parser 프로세스는 항상 시작한다. production PDF 업로드를 켤 
 - `GIWA_EVM_INDEXER_ENV_FILE`
 - `PRIVATE_OBJECT_ENCRYPTION_KEY`
 - `PRIVATE_OBJECT_ENCRYPTION_KEY_ID`
+
+`GIWA_JIT_ARTIFACT_ROOT`와 `GIWA_JIT_ARTIFACT_TEMP`를 생략하면
+`GIWA_HOST_RUNTIME_ROOT/artifacts/jit/{root,tmp}`를 사용한다. 이 경로는 버전별 application
+checkout 밖에 있어야 한다. 이전 release 디렉터리의 `daejang-jit-data`를 새 release에
+연쇄 symlink하지 않는다. 기존 artifact가 있다면 digest 경로를 보존해 영속 runtime으로
+이관한 뒤 재시작한다.
+
+GIWA report attestation을 활성화한 운영 배포는 재시작 전에 검증된 contracts tarball을
+현재 application checkout에 설치해야 한다. `backend:restart`는 해당 runtime entry가
+없으면 실행 중인 서비스를 내리기 전에 실패한다.
+
+```bash
+npm run install:report-attestations:runtime -- \
+  --tarball /absolute/path/backward-labs-daejang-contracts.tgz \
+  --sha256 <verified-sha256>
+npm run backend:restart
+```
 - `PRIVATE_OBJECT_LEGACY_KEY_ID`
 - `PRIVATE_OBJECT_DECRYPTION_KEYS`
 

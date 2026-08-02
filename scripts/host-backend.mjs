@@ -96,14 +96,26 @@ const evmPublicationClaimPolicy = join(
   'evm-publication-claim-policy.json',
 )
 const taxdNoProfilesMarker = join(stateRoot, 'taxd.disabled-no-profiles')
-const jitArtifactRoot = resolve(
-  process.env.GIWA_JIT_ARTIFACT_ROOT ??
-    join(projectRoot, 'daejang-jit-data', 'artifacts'),
-)
-const jitArtifactTemp = resolve(
-  process.env.GIWA_JIT_ARTIFACT_TEMP ??
-    join(projectRoot, 'daejang-jit-data', 'tmp'),
-)
+export const resolveJITArtifactPaths = ({
+  runtime,
+  rootOverride,
+  tempOverride,
+}) => ({
+  root: resolve(
+    rootOverride ?? join(runtime, 'artifacts', 'jit', 'root'),
+  ),
+  temp: resolve(
+    tempOverride ?? join(runtime, 'artifacts', 'jit', 'tmp'),
+  ),
+})
+const {
+  root: jitArtifactRoot,
+  temp: jitArtifactTemp,
+} = resolveJITArtifactPaths({
+  runtime: runtimeRoot,
+  rootOverride: process.env.GIWA_JIT_ARTIFACT_ROOT,
+  tempOverride: process.env.GIWA_JIT_ARTIFACT_TEMP,
+})
 const binaryRoot = join(runtimeRoot, 'bin')
 const artifactRoot = join(runtimeRoot, 'artifacts')
 export const hostWebAPIRuntimePaths = (root) => ({
@@ -245,6 +257,8 @@ const ensureRuntimeDirectories = () => {
     join(artifactRoot, 'review', 'tmp'),
     join(artifactRoot, 'tax', 'root'),
     join(artifactRoot, 'tax', 'tmp'),
+    jitArtifactRoot,
+    jitArtifactTemp,
     join(runtimeRoot, 'quote-archive', 'upbit'),
     join(stateRoot, 'tax-claim-control'),
     join(stateRoot, 'tax-claim-control-state'),
@@ -1815,15 +1829,46 @@ const stop = async () => {
 const start = (options) => withOperationLock(() => startServices(options))
 
 export const runRestartOperation = async ({ prepare, pause, stop, start }) => {
-  prepare()
+  await prepare()
   pause()
   await stop()
   await start()
 }
 
+export const assertReportAttestationRuntimeInstalled = ({
+  enabled,
+  repository,
+  fileExists = existsSync,
+}) => {
+  if (!enabled) return
+  const entrypoint = join(
+    repository,
+    'node_modules',
+    '@backward-labs',
+    'daejang-contracts',
+    'dist',
+    'public',
+    'giwaSepoliaV1.js',
+  )
+  if (!fileExists(entrypoint)) {
+    throw new Error(
+      'GIWA report attestation runtime is missing; install the verified contracts tarball before restart',
+    )
+  }
+}
+
+const prepareRestart = () => {
+  ensureRuntimeDirectories()
+  loadRuntimeEnvironment()
+  assertReportAttestationRuntimeInstalled({
+    enabled: process.env.GIWA_REPORT_ATTESTATIONS_ENABLED === 'true',
+    repository: repositoryRoot,
+  })
+}
+
 const restart = () => withOperationLock(async () => {
   await runRestartOperation({
-    prepare: ensureRuntimeDirectories,
+    prepare: prepareRestart,
     pause: () => writeFileSync(pauseFile, 'paused\n', { mode: fileMode }),
     stop: stopServices,
     start: startServices,

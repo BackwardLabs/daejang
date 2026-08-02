@@ -18,6 +18,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
+  assertReportAttestationRuntimeInstalled,
   assertCleanGitCheckout,
   configureTaxUpbitQuoteRuntime,
   createRuntimeIndexerConfig,
@@ -47,6 +48,7 @@ import {
   finishSuperviseCommand,
   releaseProcessLock,
   resolvePostingRepository,
+  resolveJITArtifactPaths,
   runRestartOperation,
   runSignalShutdown,
   resolveHostRuntimeGroup,
@@ -60,6 +62,68 @@ import {
   taxBackfillArgs,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
+
+test('keeps JIT artifacts outside immutable application releases by default', () => {
+  assert.deepEqual(
+    resolveJITArtifactPaths({ runtime: '/runtime' }),
+    {
+      root: '/runtime/artifacts/jit/root',
+      temp: '/runtime/artifacts/jit/tmp',
+    },
+  )
+  assert.deepEqual(
+    resolveJITArtifactPaths({
+      runtime: '/runtime',
+      rootOverride: '/durable/jit/objects',
+      tempOverride: '/durable/jit/tmp',
+    }),
+    {
+      root: '/durable/jit/objects',
+      temp: '/durable/jit/tmp',
+    },
+  )
+})
+
+test('rejects an attestation-enabled restart before service shutdown when its runtime is missing', async () => {
+  assert.doesNotThrow(() =>
+    assertReportAttestationRuntimeInstalled({
+      enabled: false,
+      repository: '/release',
+      fileExists: () => false,
+    }),
+  )
+  assert.doesNotThrow(() =>
+    assertReportAttestationRuntimeInstalled({
+      enabled: true,
+      repository: '/release',
+      fileExists: (path) => path.endsWith('/giwaSepoliaV1.js'),
+    }),
+  )
+  assert.throws(
+    () =>
+      assertReportAttestationRuntimeInstalled({
+        enabled: true,
+        repository: '/release',
+        fileExists: () => false,
+      }),
+    /install the verified contracts tarball before restart/,
+  )
+
+  const events = []
+  await assert.rejects(
+    runRestartOperation({
+      prepare: async () => {
+        events.push('prepare')
+        throw new Error('preflight failed')
+      },
+      pause: () => events.push('pause'),
+      stop: async () => events.push('stop'),
+      start: async () => events.push('start'),
+    }),
+    /preflight failed/,
+  )
+  assert.deepEqual(events, ['prepare'])
+})
 
 test('rejects mutable semantic runtime checkouts before a production build', () => {
   assert.doesNotThrow(() =>
