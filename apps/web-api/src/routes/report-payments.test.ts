@@ -155,7 +155,7 @@ describe('actual report x402 payment route', () => {
     expect(required).toMatchObject({
       x402Version: 2,
       resource: {
-        description: '2027년 FINAL 세금 보고서',
+        description: '2027년 가상자산 세무 장부',
         mimeType: 'application/json',
       },
     })
