@@ -34,11 +34,22 @@ import {
   formatLedgerUnitPrice,
   parseLedgerAsset,
 } from './ledgerPresentation.ts'
+import { projectLedgerTransactions } from './ledgerProjection.ts'
 import './ledger.css'
 
 const statusLabel = (value: string) => value === 'RESOLVED' ? '완료' : value === 'PARTIAL' ? '일부 확인' : '검토 필요'
 const feeRoles = new Set(['FEE', 'GAS'])
 const sourceKindLabels = { CEX: '거래소', WALLET: '개인지갑', UNKNOWN: '출처 미확인' } as const
+
+const describeProjectedAction = (event: LedgerEventModel) => {
+  if ((event.projectedActions?.length ?? 0) > 1) {
+    return {
+      label: '복합 실행',
+      description: `확정 액션 ${event.projectedActions!.length}개`,
+    }
+  }
+  return describeLedgerAction(event.eventType, event.flowShape, event.postings, event.subtype)
+}
 
 const formatLedgerDateTime = (value: string) => new Date(value).toLocaleString('ko-KR', {
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -237,7 +248,7 @@ function LedgerExplorerDetail({
   lotLineage?: LedgerLotLineageModel
 }) {
   const source = describeLedgerSource(event.postings)
-  const action = describeLedgerAction(event.eventType, event.flowShape, event.postings, event.subtype)
+  const action = describeProjectedAction(event)
   const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
   const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
   const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
@@ -292,7 +303,10 @@ function LedgerExplorerDetail({
       <summary>검증용 원본 정보</summary>
       <dl>
         <div><dt>출처 식별자</dt><dd>{source.detail}</dd></div>
-        <div><dt>거래 식별자</dt><dd>{event.eventId}</dd></div>
+        <div><dt>거래 식별자</dt><dd>{event.transactionHash || event.eventId}</dd></div>
+        {event.actionProfileId ? <div><dt>확정 분류 규칙</dt><dd>{event.actionProfileId}{event.actionProfileVersion ? ` · ${event.actionProfileVersion}` : ''}</dd></div> : null}
+        {(event.projectedActions?.length ?? 0) > 1 ? <div><dt>확정 액션</dt><dd>{event.projectedActions!.map((item) => item.actionProfileId || item.subtype || item.eventType).join(' · ')}</dd></div> : null}
+        {event.sourceEvents && event.sourceEvents.length > 1 ? <div><dt>통합된 장부 근거</dt><dd>{event.sourceEvents.length}개 변경본</dd></div> : null}
         <div><dt>자산 식별자</dt><dd>{[...new Set(event.postings.map((posting) => posting.assetId))].join(' · ') || '없음'}</dd></div>
         <div><dt>현재 변경본</dt><dd>{event.revisionNumber}번 · {event.revisionId}</dd></div>
         <div><dt>해석 상태</dt><dd>{event.interpretationSupport}</dd></div>
@@ -355,7 +369,7 @@ export function LedgerPage() {
     void loadLedger(year, controller.signal)
       .then((ledger) => {
         if (ledgerGenerationRef.current !== generation) return
-        setEvents(ledger.items)
+        setEvents(projectLedgerTransactions(ledger.items))
         setLedgerStatus('ready')
       })
       .catch((error: unknown) => {
@@ -685,7 +699,7 @@ export function LedgerPage() {
                     const source = describeLedgerSource(event.postings)
                     const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
                     const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
-                    const action = describeLedgerAction(event.eventType, event.flowShape, event.postings, event.subtype)
+                    const action = describeProjectedAction(event)
                     const isOpen = event.eventId === selectedId
                     return <Fragment key={event.eventId}>
                       <tr

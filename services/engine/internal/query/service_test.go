@@ -175,6 +175,29 @@ func TestLedgerProjectionIncludesSafeTransferEndpointSummary(t *testing.T) {
 	}
 }
 
+func TestLedgerProjectionIncludesCanonicalTransactionProvenance(t *testing.T) {
+	at := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	reads := &fakeReadStore{ledger: []readmodelstore.LedgerEvent{{
+		EventID: "action", EffectiveAt: at,
+		ChainID: "10", TransactionHash: "0xabc", TransactionCoordinate: "EXACT",
+		ActionProofID: "proof-1", ActionProfileID: "aave-v3.supply",
+		ActionProfileVersion: "1.0.0", ActionBindingID: "binding-1",
+	}}}
+	service := &Service{Reads: reads}
+
+	ledger, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{Context: queryTestContext(), TaxYear: 2026, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := ledger.GetItems()[0]
+	if event.GetChainId() != "10" || event.GetTransactionHash() != "0xabc" ||
+		event.GetTransactionCoordinate() != "EXACT" || event.GetActionProofId() != "proof-1" ||
+		event.GetActionProfileId() != "aave-v3.supply" || event.GetActionProfileVersion() != "1.0.0" ||
+		event.GetActionBindingId() != "binding-1" {
+		t.Fatalf("canonical transaction provenance was not projected: %#v", event)
+	}
+}
+
 func TestLedgerProjectionIncludesPersistedAssetMetadata(t *testing.T) {
 	at := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
 	decimals := uint8(8)

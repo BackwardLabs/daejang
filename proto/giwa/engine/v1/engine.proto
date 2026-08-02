@@ -255,6 +255,13 @@ message LedgerEvent {
   repeated LedgerPosting postings = 9;
   LedgerTransferEndpoint transfer_endpoint = 10;
   string subtype = 11;
+  string chain_id = 12;
+  string transaction_hash = 13;
+  string transaction_coordinate = 14;
+  string action_proof_id = 15;
+  string action_profile_id = 16;
+  string action_profile_version = 17;
+  string action_binding_id = 18;
 }
 message ListLedgerEventsResponse { repeated LedgerEvent items = 1; }
 

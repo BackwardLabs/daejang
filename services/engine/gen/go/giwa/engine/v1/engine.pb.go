@@ -2193,6 +2193,13 @@ type LedgerEvent struct {
 	Postings              []*LedgerPosting        `protobuf:"bytes,9,rep,name=postings,proto3" json:"postings,omitempty"`
 	TransferEndpoint      *LedgerTransferEndpoint `protobuf:"bytes,10,opt,name=transfer_endpoint,json=transferEndpoint,proto3" json:"transfer_endpoint,omitempty"`
 	Subtype               string                  `protobuf:"bytes,11,opt,name=subtype,proto3" json:"subtype,omitempty"`
+	ChainId               string                  `protobuf:"bytes,12,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
+	TransactionHash       string                  `protobuf:"bytes,13,opt,name=transaction_hash,json=transactionHash,proto3" json:"transaction_hash,omitempty"`
+	TransactionCoordinate string                  `protobuf:"bytes,14,opt,name=transaction_coordinate,json=transactionCoordinate,proto3" json:"transaction_coordinate,omitempty"`
+	ActionProofId         string                  `protobuf:"bytes,15,opt,name=action_proof_id,json=actionProofId,proto3" json:"action_proof_id,omitempty"`
+	ActionProfileId       string                  `protobuf:"bytes,16,opt,name=action_profile_id,json=actionProfileId,proto3" json:"action_profile_id,omitempty"`
+	ActionProfileVersion  string                  `protobuf:"bytes,17,opt,name=action_profile_version,json=actionProfileVersion,proto3" json:"action_profile_version,omitempty"`
+	ActionBindingId       string                  `protobuf:"bytes,18,opt,name=action_binding_id,json=actionBindingId,proto3" json:"action_binding_id,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -2300,6 +2307,55 @@ func (x *LedgerEvent) GetTransferEndpoint() *LedgerTransferEndpoint {
 func (x *LedgerEvent) GetSubtype() string {
 	if x != nil {
 		return x.Subtype
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetChainId() string {
+	if x != nil {
+		return x.ChainId
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetTransactionHash() string {
+	if x != nil {
+		return x.TransactionHash
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetTransactionCoordinate() string {
+	if x != nil {
+		return x.TransactionCoordinate
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetActionProofId() string {
+	if x != nil {
+		return x.ActionProofId
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetActionProfileId() string {
+	if x != nil {
+		return x.ActionProfileId
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetActionProfileVersion() string {
+	if x != nil {
+		return x.ActionProfileVersion
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetActionBindingId() string {
+	if x != nil {
+		return x.ActionBindingId
 	}
 	return ""
 }
@@ -4643,7 +4699,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x10wallet_source_id\x18\x05 \x01(\tR\x0ewalletSourceId\x12)\n" +
 	"\x10chain_candidates\x18\x06 \x03(\tR\x0fchainCandidates\x12+\n" +
 	"\x11connection_status\x18\a \x01(\tR\x10connectionStatus\x12'\n" +
-	"\x0freview_required\x18\b \x01(\bR\x0ereviewRequired\"\xf0\x03\n" +
+	"\x0freview_required\x18\b \x01(\bR\x0ereviewRequired\"\xa3\x06\n" +
 	"\vLedgerEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1f\n" +
 	"\vrevision_id\x18\x02 \x01(\tR\n" +
@@ -4661,7 +4717,14 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\bpostings\x18\t \x03(\v2\x1d.giwa.engine.v1.LedgerPostingR\bpostings\x12S\n" +
 	"\x11transfer_endpoint\x18\n" +
 	" \x01(\v2&.giwa.engine.v1.LedgerTransferEndpointR\x10transferEndpoint\x12\x18\n" +
-	"\asubtype\x18\v \x01(\tR\asubtype\"M\n" +
+	"\asubtype\x18\v \x01(\tR\asubtype\x12\x19\n" +
+	"\bchain_id\x18\f \x01(\tR\achainId\x12)\n" +
+	"\x10transaction_hash\x18\r \x01(\tR\x0ftransactionHash\x125\n" +
+	"\x16transaction_coordinate\x18\x0e \x01(\tR\x15transactionCoordinate\x12&\n" +
+	"\x0faction_proof_id\x18\x0f \x01(\tR\ractionProofId\x12*\n" +
+	"\x11action_profile_id\x18\x10 \x01(\tR\x0factionProfileId\x124\n" +
+	"\x16action_profile_version\x18\x11 \x01(\tR\x14actionProfileVersion\x12*\n" +
+	"\x11action_binding_id\x18\x12 \x01(\tR\x0factionBindingId\"M\n" +
 	"\x18ListLedgerEventsResponse\x121\n" +
 	"\x05items\x18\x01 \x03(\v2\x1b.giwa.engine.v1.LedgerEventR\x05items\"\x91\x01\n" +
 	"\x19GetLedgerEventLotsRequest\x128\n" +
