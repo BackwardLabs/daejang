@@ -214,6 +214,22 @@ func (c *Client) AwaitTerminal(ctx context.Context, run worker.JITRun) (worker.J
 	}
 }
 
+func (c *Client) Retry(ctx context.Context, run worker.JITRun) (worker.JITRun, error) {
+	if strings.TrimSpace(run.ID) == "" {
+		return worker.JITRun{}, worker.NewJITFailure("JIT_RUN_INVALID", "JIT 재시도 실행 식별자가 비어 있습니다.", false, nil)
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, c.config.requestTimeout)
+	defer cancel()
+	response, err := c.jit.RetryJitRun(rpcCtx, &jitv1.RetryJitRunRequest{RunId: run.ID})
+	if err != nil {
+		return worker.JITRun{}, rpcFailure("JIT_RETRY_FAILED", "JIT 재시도 요청에 실패했습니다.", err)
+	}
+	if response.GetAccepted() == nil || strings.TrimSpace(response.GetAccepted().GetRunId()) == "" {
+		return worker.JITRun{}, worker.NewJITFailure("JIT_RETRY_INVALID_RESPONSE", "JIT 재시도 실행 식별자를 받지 못했습니다.", false, nil)
+	}
+	return worker.JITRun{ID: response.GetAccepted().GetRunId()}, nil
+}
+
 func (c *Client) getRun(ctx context.Context, runID string) (worker.JITTerminalResult, bool, error) {
 	rpcCtx, cancel := context.WithTimeout(ctx, c.config.requestTimeout)
 	defer cancel()

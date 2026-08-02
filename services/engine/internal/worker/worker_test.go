@@ -67,9 +67,11 @@ func (s fakeWalletStore) GetActiveWallet(context.Context, string, string) (Walle
 
 type fakeJIT struct {
 	started  int
+	retried  int
 	request  EVMJITRequest
 	terminal JITTerminalResult
 	startErr error
+	retryErr error
 	awaitErr error
 }
 
@@ -80,6 +82,14 @@ func (j *fakeJIT) Start(_ context.Context, request EVMJITRequest) (JITRun, error
 		return JITRun{}, j.startErr
 	}
 	return JITRun{ID: "jit-run-1"}, nil
+}
+
+func (j *fakeJIT) Retry(_ context.Context, _ JITRun) (JITRun, error) {
+	j.retried++
+	if j.retryErr != nil {
+		return JITRun{}, j.retryErr
+	}
+	return JITRun{ID: "jit-run-retry-1"}, nil
 }
 
 func (j *fakeJIT) AwaitTerminal(context.Context, JITRun) (JITTerminalResult, error) {
@@ -153,6 +163,29 @@ func TestEVMJobCompletesOnlyWithTerminalFragment(t *testing.T) {
 				t.Fatalf("inclusive DATE coverage was not preserved: %#v", jit.request)
 			}
 		})
+	}
+}
+
+func TestEVMJobRetriesOneFailedJITRevisionBeforeFailingTheSourceJob(t *testing.T) {
+	store := &recordingStore{}
+	jit := &fakeJIT{terminal: JITTerminalResult{State: "FAILED", FailureCode: "JIT_RUN_FAILED"}}
+	coverageStart := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	coverageEnd := time.Date(2027, 12, 31, 0, 0, 0, 0, time.UTC)
+	job := sourcejobstore.SyncJob{
+		ID: "job-1", SubjectID: "subject-1", SourceID: "wallet-1", SourceKind: "EVM_WALLET",
+		LeaseToken: "lease-1", Attempts: 1, RequestedCoverageStart: &coverageStart,
+		RequestedCoverageEnd: &coverageEnd, Trigger: "BACKFILL",
+	}
+	err := (Runner{
+		Store: store, Wallets: fakeWalletStore{value: WalletSource{ID: "wallet-1", Address: "0x0000000000000000000000000000000000000001", ChainIDs: []string{"eip155:1"}}},
+		EVMJIT: jit, ObjectRoot: t.TempDir(),
+	}).processEVM(context.Background(), job)
+	var failure *JITFailure
+	if !errors.As(err, &failure) || !failure.Retryable() || jit.retried != 1 || store.code != "" {
+		t.Fatalf("failed JIT revision was not left retryable: error=%v retries=%d failure=%q", err, jit.retried, store.code)
+	}
+	if len(store.progress) != 2 || store.progress[1].UpstreamJITRunID != "jit-run-retry-1" {
+		t.Fatalf("retry run was not persisted before releasing the source job: %#v", store.progress)
 	}
 }
 
@@ -244,6 +277,10 @@ func (j heartbeatJIT) Start(context.Context, EVMJITRequest) (JITRun, error) {
 	return JITRun{ID: "jit-run-heartbeat"}, nil
 }
 
+func (j heartbeatJIT) Retry(context.Context, JITRun) (JITRun, error) {
+	return JITRun{ID: "jit-run-heartbeat-retry"}, nil
+}
+
 func (j heartbeatJIT) AwaitTerminal(ctx context.Context, _ JITRun) (JITTerminalResult, error) {
 	if j.renewed != nil {
 		for range 2 {
@@ -319,6 +356,10 @@ type oneRenewJIT struct{ renewed <-chan struct{} }
 
 func (j oneRenewJIT) Start(context.Context, EVMJITRequest) (JITRun, error) {
 	return JITRun{ID: "jit-run-terminal-race"}, nil
+}
+
+func (j oneRenewJIT) Retry(context.Context, JITRun) (JITRun, error) {
+	return JITRun{ID: "jit-run-terminal-race-retry"}, nil
 }
 
 func (j oneRenewJIT) AwaitTerminal(ctx context.Context, _ JITRun) (JITTerminalResult, error) {

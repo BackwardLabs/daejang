@@ -50,13 +50,20 @@ func enqueueActionRuntimeReclassification(ctx context.Context, store reclassific
 		return 0, err
 	}
 	for index, target := range targets {
-		_, err := store.Enqueue(ctx, sourcejobstore.EnqueueParams{
+		params := sourcejobstore.EnqueueParams{
 			SubjectID: target.SubjectID, SourceKind: "EVM_WALLET", SourceID: target.SourceID,
 			RequestedCoverageStart: target.CoverageStart, RequestedCoverageEnd: target.CoverageEnd,
 			Trigger: "BACKFILL", IdempotencyKey: "action-runtime:" + runtimeID + ":" + target.SourceID,
-		})
+		}
+		job, err := store.Enqueue(ctx, params)
 		if err != nil {
 			return index, fmt.Errorf("enqueue action runtime reclassification for source %s: %w", target.SourceID, err)
+		}
+		if job.State == "FAILED" {
+			params.IdempotencyKey = "action-runtime-retry:" + runtimeID + ":" + job.ID
+			if _, err := store.Enqueue(ctx, params); err != nil {
+				return index, fmt.Errorf("retry failed action runtime reclassification job %s: %w", job.ID, err)
+			}
 		}
 	}
 	return len(targets), nil

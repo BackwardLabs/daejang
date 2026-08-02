@@ -1548,18 +1548,6 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       60_000,
     )
 
-    const actionRuntimeID = createActionRuntimeIdentity(deFiLabelRepository)
-    run(
-      join(binaryRoot, 'action-runtime-reclassify'),
-      [],
-      {
-        env: serviceEnvironment([], [], {
-          DAEJANG_SOURCE_DATABASE_URL: sourceURL,
-          DAEJANG_ACTION_RUNTIME_ID: actionRuntimeID,
-        }),
-      },
-    )
-
     const engineEnvironment = serviceEnvironment([], [], {
       ENGINE_LISTEN: `unix://${engineSocket}`,
       DAEJANG_SOURCE_DATABASE_URL: sourceURL,
@@ -1754,6 +1742,21 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       'Web API',
       webReady,
       30_000,
+    )
+
+    // Reclassification can immediately drive JIT, Posting, and ledger writes.
+    // Enqueue only after every downstream service is stable so a deployment
+    // restart cannot strand a deterministic runtime job in a failed state.
+    const actionRuntimeID = createActionRuntimeIdentity(deFiLabelRepository)
+    run(
+      join(binaryRoot, 'action-runtime-reclassify'),
+      [],
+      {
+        env: serviceEnvironment([], [], {
+          DAEJANG_SOURCE_DATABASE_URL: sourceURL,
+          DAEJANG_ACTION_RUNTIME_ID: actionRuntimeID,
+        }),
+      },
     )
 
     if (shutdownRequested) throw new Error('Backend shutdown was requested')
