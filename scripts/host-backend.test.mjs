@@ -735,13 +735,24 @@ test('requires a distinct signed JIT claim policy for the canonical EVM worker',
       '/runtime/jit-artifacts',
       '/runtime/jit-temp',
       '/runtime/evm-policy.json',
+      'b6b9ce8cfdb411f10e44fa74378c6eababd3eee4',
     ),
     [
       '--mode', 'canonical',
       '--artifact-root', '/runtime/jit-artifacts',
       '--artifact-temp', '/runtime/jit-temp',
       '--claim-policy', '/runtime/evm-policy.json',
+      '--trusted-action-runtime-commit', 'b6b9ce8cfdb411f10e44fa74378c6eababd3eee4',
     ],
+  )
+  assert.throws(
+    () => hostEVMPostingWorkerArgs(
+      '/runtime/jit-artifacts',
+      '/runtime/jit-temp',
+      '/runtime/evm-policy.json',
+      'not-a-commit',
+    ),
+    /pinned DeFi Action runtime Git commit is required/,
   )
   assert.deepEqual(
     hostEVMPostingWorkerEnvironment('public-key', 'event-url'),
