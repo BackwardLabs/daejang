@@ -159,7 +159,7 @@ test('rejects mutable semantic runtime checkouts before a production build', () 
   )
 })
 
-test('changes the action runtime identity only when executable source bytes change', () => {
+test('changes the action runtime identity when evaluation or evidence runtime bytes change', () => {
   const parent = mkdtempSync(join(tmpdir(), 'giwa-action-runtime-test-'))
   try {
     for (const [path, value] of [
@@ -171,13 +171,18 @@ test('changes the action runtime identity only when executable source bytes chan
       mkdirSync(dirname(join(parent, path)), { recursive: true })
       writeFileSync(join(parent, path), value)
     }
-    const first = createActionRuntimeIdentity(parent)
-    const second = createActionRuntimeIdentity(parent)
+    const jitExecutable = join(parent, 'jitd')
+    writeFileSync(jitExecutable, 'jit-v1')
+    const first = createActionRuntimeIdentity(parent, jitExecutable)
+    const second = createActionRuntimeIdentity(parent, jitExecutable)
     writeFileSync(join(parent, 'scripts', 'transaction_adapter.py'), 'adapter-v2')
-    const changed = createActionRuntimeIdentity(parent)
+    const changed = createActionRuntimeIdentity(parent, jitExecutable)
+    writeFileSync(jitExecutable, 'jit-v2')
+    const jitChanged = createActionRuntimeIdentity(parent, jitExecutable)
     assert.match(first, /^[0-9a-f]{64}$/)
     assert.equal(first, second)
     assert.notEqual(first, changed)
+    assert.notEqual(changed, jitChanged)
   } finally {
     rmSync(parent, { recursive: true, force: true })
   }
