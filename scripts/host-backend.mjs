@@ -598,16 +598,24 @@ export const hostEVMPostingWorkerArgs = (
   artifacts,
   temporaryArtifacts,
   claimPolicy,
-) => [
-  '--mode',
-  'canonical',
-  '--artifact-root',
-  artifacts,
-  '--artifact-temp',
-  temporaryArtifacts,
-  '--claim-policy',
-  claimPolicy,
-]
+  actionRuntimeCommit,
+) => {
+  if (!/^[0-9a-f]{40}$/.test(actionRuntimeCommit)) {
+    throw new Error('A pinned DeFi Action runtime Git commit is required')
+  }
+  return [
+    '--mode',
+    'canonical',
+    '--artifact-root',
+    artifacts,
+    '--artifact-temp',
+    temporaryArtifacts,
+    '--claim-policy',
+    claimPolicy,
+    '--trusted-action-runtime-commit',
+    actionRuntimeCommit,
+  ]
+}
 
 export const hostEVMPostingWorkerEnvironment = (trustKey, eventURL) => {
   if (!trustKey) {
@@ -1426,6 +1434,11 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     throw new Error('Backend services are already running; use backend:restart')
   assertExternalRuntimeRoot()
   ensureRuntimeDirectories()
+  // JIT evaluates profiles from this checkout while the canonical Posting
+  // worker independently verifies their runtime coordinate. Pin both services
+  // to the same clean revision on every start, including prebuilt restarts.
+  assertCleanGitCheckout(deFiLabelRepository, 'DeFi Action runtime')
+  const actionRuntimeCommit = gitCommit(deFiLabelRepository)
   if (buildArtifacts) build()
   for (const requiredArtifact of [
     jitBinary,
@@ -1664,6 +1677,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         jitArtifactRoot,
         jitArtifactTemp,
         evmPublicationClaimPolicy,
+        actionRuntimeCommit,
       )
       const evmPostingEnvironment = serviceEnvironment(
         [],
