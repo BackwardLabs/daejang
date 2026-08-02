@@ -554,8 +554,11 @@ describe('LedgerPage', () => {
       flowShape: 'EXCHANGE',
       postings: [{
         legId: 'leg-native',
-        accountId: 'wallet-1',
-        assetId: 'asset:eip155:10:native',
+        accountId: 'account:opaque-wallet',
+        accountKind: 'WALLET',
+        accountLocator: '0x16512376e2ea3c7b464cedeea3dce9b8a590fd80',
+        accountChainId: 'eip155:10',
+        assetId: 'asset:opaque-native',
         occurredAt: ledgerEvent.effectiveAt,
         direction: 'OUT',
         quantity: '200000000000000',
@@ -563,6 +566,9 @@ describe('LedgerPage', () => {
         fairValue: '',
         costBasis: '',
         denomination: '',
+        assetSymbol: 'ETH',
+        assetDecimals: 18,
+        hasAssetDecimals: true,
       }],
     }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -575,6 +581,7 @@ describe('LedgerPage', () => {
     render(<LedgerPage />)
 
     expect((await screen.findAllByText('Optimism')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('출처 확인 중')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /거래 상세 보기/ }))
 
