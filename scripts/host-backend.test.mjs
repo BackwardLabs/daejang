@@ -12,15 +12,17 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
+  assertCleanGitCheckout,
   configureTaxUpbitQuoteRuntime,
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
+  createActionRuntimeIdentity,
   createTaxProfiles,
   collectRuntimeShareEntries,
   cronAutostartEntries,
@@ -58,6 +60,47 @@ import {
   taxBackfillArgs,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
+
+test('rejects mutable semantic runtime checkouts before a production build', () => {
+  assert.doesNotThrow(() =>
+    assertCleanGitCheckout('/runtime', 'runtime', () => ({
+      status: 0,
+      stdout: '',
+    })),
+  )
+  assert.throws(
+    () =>
+      assertCleanGitCheckout('/runtime', 'runtime', () => ({
+        status: 0,
+        stdout: ' M scripts/transaction_adapter.py\n',
+      })),
+    /deploy a pinned clean checkout/,
+  )
+})
+
+test('changes the action runtime identity only when executable source bytes change', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'giwa-action-runtime-test-'))
+  try {
+    for (const [path, value] of [
+      ['releases/action-registry-v1.json', '{}'],
+      ['scripts/registry.py', 'registry'],
+      ['scripts/transaction_adapter.py', 'adapter'],
+      ['scripts/action_evaluator.py', 'evaluator'],
+    ]) {
+      mkdirSync(dirname(join(parent, path)), { recursive: true })
+      writeFileSync(join(parent, path), value)
+    }
+    const first = createActionRuntimeIdentity(parent)
+    const second = createActionRuntimeIdentity(parent)
+    writeFileSync(join(parent, 'scripts', 'transaction_adapter.py'), 'adapter-v2')
+    const changed = createActionRuntimeIdentity(parent)
+    assert.match(first, /^[0-9a-f]{64}$/)
+    assert.equal(first, second)
+    assert.notEqual(first, changed)
+  } finally {
+    rmSync(parent, { recursive: true, force: true })
+  }
+})
 
 test('stages PDF assets where the flattened host Web API runtime resolves them', () => {
   const runtime = hostWebAPIRuntimePaths('/srv/giwa-runtime')

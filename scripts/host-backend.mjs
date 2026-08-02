@@ -817,7 +817,29 @@ const databaseURL = (role, password) => {
   return url.toString()
 }
 
+export const assertCleanGitCheckout = (
+  repository,
+  label,
+  inspect = (command, args, options) => spawnSync(command, args, options),
+) => {
+  const result = inspect(
+    'git',
+    ['status', '--porcelain', '--untracked-files=no'],
+    { cwd: repository, encoding: 'utf8' },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Unable to inspect ${label} checkout: ${repository}`)
+  }
+  if (result.stdout.trim()) {
+    throw new Error(
+      `${label} checkout has uncommitted tracked changes; deploy a pinned clean checkout: ${repository}`,
+    )
+  }
+}
+
 const build = () => {
+  assertCleanGitCheckout(jitRepository, 'JIT engine')
+  assertCleanGitCheckout(deFiLabelRepository, 'DeFi Action runtime')
   run('npm', ['run', 'build', '--workspace', '@daejang/web-api'], {
     cwd: repositoryRoot,
     env: baseEnvironment(),
@@ -833,6 +855,10 @@ const build = () => {
     ['./cmd/engine-api', join(binaryRoot, 'engine-api')],
     ['./cmd/engine-healthcheck', join(binaryRoot, 'engine-healthcheck')],
     ['./cmd/sync-worker', join(binaryRoot, 'sync-worker')],
+    [
+      './cmd/action-runtime-reclassify',
+      join(binaryRoot, 'action-runtime-reclassify'),
+    ],
   ]) {
     run('go', ['build', '-o', output, command], {
       cwd: join(repositoryRoot, 'services', 'engine'),
@@ -1087,6 +1113,19 @@ const canonicalJSON = (value) => {
 }
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
+
+export const createActionRuntimeIdentity = (repository) => {
+  const files = [
+    'releases/action-registry-v1.json',
+    'scripts/registry.py',
+    'scripts/transaction_adapter.py',
+    'scripts/action_evaluator.py',
+  ].map((path) => ({ path, sha256: sha256(readFileSync(join(repository, path))) }))
+  return sha256(canonicalJSON({
+    schemaVersion: 'giwa.action-runtime-identity.v1',
+    files,
+  }))
+}
 
 const decodePublicationTrustKey = (value) => {
   if (!value) throw new Error('DAEJANG_PUBLICATION_POLICY_TRUST_KEY is missing')
@@ -1507,6 +1546,18 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       'multichain JIT',
       () => existsSync(jitSocket) ? unixReady(jitSocket) : Promise.resolve(false),
       60_000,
+    )
+
+    const actionRuntimeID = createActionRuntimeIdentity(deFiLabelRepository)
+    run(
+      join(binaryRoot, 'action-runtime-reclassify'),
+      [],
+      {
+        env: serviceEnvironment([], [], {
+          DAEJANG_SOURCE_DATABASE_URL: sourceURL,
+          DAEJANG_ACTION_RUNTIME_ID: actionRuntimeID,
+        }),
+      },
     )
 
     const engineEnvironment = serviceEnvironment([], [], {
