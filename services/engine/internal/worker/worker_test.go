@@ -65,6 +65,10 @@ func (s fakeWalletStore) GetActiveWallet(context.Context, string, string) (Walle
 	return s.value, s.value.ID != "", nil
 }
 
+func (s fakeWalletStore) GetWalletForActionRuntimeReplay(context.Context, string, string) (WalletSource, bool, error) {
+	return s.value, s.value.ID != "", nil
+}
+
 type fakeJIT struct {
 	started  int
 	retried  int
@@ -161,6 +165,73 @@ func TestEVMJobCompletesOnlyWithTerminalFragment(t *testing.T) {
 			}
 			if jit.request.CoverageStart.Format("2006-01-02") != "2027-01-01" || jit.request.CoverageEnd.Format("2006-01-02") != "2027-12-31" {
 				t.Fatalf("inclusive DATE coverage was not preserved: %#v", jit.request)
+			}
+		})
+	}
+}
+
+type recordingWalletStore struct {
+	active      WalletSource
+	replay      WalletSource
+	activeCalls int
+	replayCalls int
+}
+
+func (s *recordingWalletStore) GetActiveWallet(context.Context, string, string) (WalletSource, bool, error) {
+	s.activeCalls++
+	return s.active, s.active.ID != "", nil
+}
+
+func (s *recordingWalletStore) GetWalletForActionRuntimeReplay(context.Context, string, string) (WalletSource, bool, error) {
+	s.replayCalls++
+	return s.replay, s.replay.ID != "", nil
+}
+
+func TestActionRuntimeReplayUsesRetainedWalletWithoutOpeningNormalCollection(t *testing.T) {
+	coverageStart := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
+	coverageEnd := time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+	retained := WalletSource{
+		ID: "wallet-disconnected", Address: "0x1111111111111111111111111111111111111111",
+		ChainIDs: []string{"eip155:1", "eip155:10"},
+	}
+
+	for name, test := range map[string]struct {
+		trigger         string
+		key             string
+		wantActiveCalls int
+		wantReplayCalls int
+		wantCompleted   bool
+	}{
+		"signed runtime backfill": {
+			trigger: "BACKFILL", key: "action-runtime:runtime-1:wallet-disconnected",
+			wantReplayCalls: 1, wantCompleted: true,
+		},
+		"ordinary user collection": {
+			trigger: "USER_REQUEST", key: "action-runtime:runtime-1:wallet-disconnected",
+			wantActiveCalls: 1,
+		},
+		"generic backfill": {
+			trigger: "BACKFILL", key: "manual-replay",
+			wantActiveCalls: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wallets := &recordingWalletStore{replay: retained}
+			store := &recordingStore{}
+			jit := &fakeJIT{terminal: JITTerminalResult{State: "SUCCEEDED", FragmentID: "fragment-1"}}
+			job := sourcejobstore.SyncJob{
+				ID: "job-1", SubjectID: "subject-1", SourceID: retained.ID, SourceKind: "EVM_WALLET",
+				RequestedCoverageStart: &coverageStart, RequestedCoverageEnd: &coverageEnd,
+				Trigger: test.trigger, IdempotencyKey: test.key,
+			}
+			if err := (Runner{Store: store, Wallets: wallets, EVMJIT: jit}).processEVM(context.Background(), job); err != nil {
+				t.Fatal(err)
+			}
+			if wallets.activeCalls != test.wantActiveCalls || wallets.replayCalls != test.wantReplayCalls {
+				t.Fatalf("wrong wallet boundary used: active=%d replay=%d", wallets.activeCalls, wallets.replayCalls)
+			}
+			if store.completed != test.wantCompleted {
+				t.Fatalf("unexpected completion: completed=%v failure=%q", store.completed, store.code)
 			}
 		})
 	}

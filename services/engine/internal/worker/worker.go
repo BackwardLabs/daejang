@@ -31,6 +31,7 @@ type WalletSource struct {
 
 type WalletStore interface {
 	GetActiveWallet(context.Context, string, string) (WalletSource, bool, error)
+	GetWalletForActionRuntimeReplay(context.Context, string, string) (WalletSource, bool, error)
 }
 
 type EVMJITRequest struct {
@@ -241,7 +242,14 @@ func (r Runner) processEVM(ctx context.Context, job sourcejobstore.SyncJob) erro
 	if r.Wallets == nil || r.EVMJIT == nil {
 		return r.Store.Fail(ctx, job, "EVM_JIT_UNAVAILABLE", "EVM JIT 실행기가 구성되지 않았습니다.")
 	}
-	wallet, found, err := r.Wallets.GetActiveWallet(ctx, job.SubjectID, job.SourceID)
+	var wallet WalletSource
+	var found bool
+	var err error
+	if sourcejobstore.IsActionRuntimeReplay(job.Trigger, job.IdempotencyKey) {
+		wallet, found, err = r.Wallets.GetWalletForActionRuntimeReplay(ctx, job.SubjectID, job.SourceID)
+	} else {
+		wallet, found, err = r.Wallets.GetActiveWallet(ctx, job.SubjectID, job.SourceID)
+	}
 	if err != nil {
 		return err
 	}
