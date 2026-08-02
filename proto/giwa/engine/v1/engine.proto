@@ -238,6 +238,11 @@ message LedgerPosting {
   uint32 asset_decimals = 12;
   bool has_asset_decimals = 13;
   string asset_venue = 14;
+  string account_kind = 15;
+  string account_locator = 16;
+  string account_label = 17;
+  string account_chain_id = 18;
+  string account_venue = 19;
 }
 message LedgerTransferEndpoint {
   string resolution = 1;

@@ -201,8 +201,40 @@ export const parseLedgerAsset = (
 }
 
 export const describeLedgerSource = (
-  postings: Array<{ accountId: string; assetId: string }>,
+  postings: Array<{
+    accountId: string
+    accountKind?: string
+    accountLocator?: string
+    accountLabel?: string
+    accountChainId?: string
+    accountVenue?: string
+    assetId: string
+  }>,
 ): LedgerSourcePresentation => {
+  for (const posting of postings) {
+    if (posting.accountKind?.toUpperCase() === 'CEX' && posting.accountVenue) {
+      return {
+        kind: 'CEX',
+        label: formatVenue(posting.accountVenue),
+        detail: posting.accountLabel || posting.accountLocator || posting.accountId,
+      }
+    }
+  }
+  for (const posting of postings) {
+    const chainMatch = posting.accountChainId?.match(/^eip155:(\d+)$/i)
+    if (
+      chainMatch?.[1] &&
+      ['WALLET', 'POSITION'].includes(posting.accountKind?.toUpperCase() ?? '')
+    ) {
+      return {
+        kind: 'WALLET',
+        label: evmNetworkMetadata[chainMatch[1]]?.label ?? `EVM ${chainMatch[1]}`,
+        detail: posting.accountLabel || posting.accountLocator || posting.accountId,
+      }
+    }
+  }
+  // Compatibility fallbacks for persisted responses created before canonical
+  // account source metadata was added to the Engine contract.
   for (const posting of postings) {
     const cexAccountMatch = posting.accountId.match(/^cex-account:([^:]+):/i)
     if (cexAccountMatch?.[1]) {

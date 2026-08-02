@@ -120,10 +120,15 @@ func (s *Store) ListUnmaterializedPage(
 		SELECT observation.fragment_id,observation.origin_run_id,observation.origin_link_id,
 			observation.observation_id,observation.kind,observation.account_id,observation.asset_id,
 			observation.quantity,observation.occurred_at,
+			account.kind,account.locator,COALESCE(account.label,''),COALESCE(account.chain_id,''),COALESCE(account.venue,''),
 			COALESCE(asset.symbol,''),asset.decimals,COALESCE(asset.venue,''),
 			COALESCE(activity.activity_class,'UNSPECIFIED')
 		FROM current_observations AS observation
 		JOIN selected_records USING(fragment_id,origin_run_id,origin_link_id)
+		JOIN subject_evidence.account AS account
+		  ON account.subject_id=$1
+		 AND account.fragment_id=observation.fragment_id
+		 AND account.account_id=observation.account_id
 		LEFT JOIN subject_evidence.asset AS asset
 		  ON asset.subject_id=$1
 		 AND asset.fragment_id=observation.fragment_id
@@ -143,10 +148,11 @@ func (s *Store) ListUnmaterializedPage(
 	result := []readmodelstore.LedgerEvent{}
 	for rows.Next() {
 		var fragment, run, record, observationID, kind, accountID, assetID, quantity string
+		var accountKind, accountLocator, accountLabel, accountChainID, accountVenue string
 		var assetSymbol, assetVenue, activityClass string
 		var assetDecimals *int16
 		var occurredAt time.Time
-		if err := rows.Scan(&fragment, &run, &record, &observationID, &kind, &accountID, &assetID, &quantity, &occurredAt, &assetSymbol, &assetDecimals, &assetVenue, &activityClass); err != nil {
+		if err := rows.Scan(&fragment, &run, &record, &observationID, &kind, &accountID, &assetID, &quantity, &occurredAt, &accountKind, &accountLocator, &accountLabel, &accountChainID, &accountVenue, &assetSymbol, &assetDecimals, &assetVenue, &activityClass); err != nil {
 			return readmodelstore.LedgerEventPage{}, err
 		}
 		k := key{fragment, run, record}
@@ -173,7 +179,7 @@ func (s *Store) ListUnmaterializedPage(
 		if kind == "FEE" {
 			role = "FEE"
 		}
-		posting := readmodelstore.Posting{LegID: observationID, AccountID: accountID, AssetID: assetID, AssetSymbol: assetSymbol, AssetVenue: assetVenue, OccurredAt: occurredAt.UTC(), Direction: direction, Quantity: absolute, Role: role}
+		posting := readmodelstore.Posting{LegID: observationID, AccountID: accountID, AccountKind: accountKind, AccountLocator: accountLocator, AccountLabel: accountLabel, AccountChainID: accountChainID, AccountVenue: accountVenue, AssetID: assetID, AssetSymbol: assetSymbol, AssetVenue: assetVenue, OccurredAt: occurredAt.UTC(), Direction: direction, Quantity: absolute, Role: role}
 		if assetDecimals != nil {
 			decimals := uint8(*assetDecimals)
 			posting.AssetDecimals = &decimals
