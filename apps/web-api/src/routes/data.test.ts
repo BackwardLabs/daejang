@@ -47,7 +47,7 @@ const engineClient = (overrides: Partial<EngineDataClient> = {}): EngineDataClie
   getSyncJob: vi.fn(async () => ({})),
   listSyncJobs: vi.fn(async () => []),
   getDashboard: vi.fn(async () => ({})),
-  listLedgerEvents: vi.fn(async () => []),
+  listLedgerEvents: vi.fn(async () => ({ items: [], nextPageToken: '' })),
   getLedgerEventLots: vi.fn(async () => ({ runId: '', coverage: '', links: [] })),
   listReviews: vi.fn(async () => ({ items: [], nextPageToken: '' })),
   getReview: vi.fn(async () => ({ id: 'review-1' })),
@@ -585,6 +585,48 @@ describe('synchronous PDF import boundary', () => {
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()))
+})
+
+describe('ledger data routes', () => {
+  it('forwards the opaque ledger cursor and returns the next cursor', async () => {
+    const listLedgerEvents = vi.fn(async () => ({
+      items: [{ eventId: 'event:2' }],
+      nextPageToken: 'next-ledger-token',
+    }))
+    const app = await buildRouteApp(engineClient({ listLedgerEvents }))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/ledger?taxYear=2026&limit=25&cursor=prior-ledger-token',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      items: [{ eventId: 'event:2' }],
+      nextCursor: 'next-ledger-token',
+    })
+    expect(listLedgerEvents).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      userId,
+      sessionId: session.id,
+    }, 2026, 25, 'prior-ledger-token')
+  })
+
+  it('maps an invalid Engine ledger cursor to a client error', async () => {
+    const app = await buildRouteApp(engineClient({
+      listLedgerEvents: vi.fn(async () => {
+        throw new EngineRpcError(grpcStatus.INVALID_ARGUMENT, 'invalid page token')
+      }),
+    }))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/ledger?taxYear=2026&cursor=invalid-but-shaped',
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({
+      error: { code: 'INVALID_LEDGER_CURSOR' },
+    })
+  })
 })
 
 describe('review data routes', () => {

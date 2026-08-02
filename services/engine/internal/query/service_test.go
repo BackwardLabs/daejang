@@ -24,27 +24,36 @@ import (
 const queryTestSubjectID = "11111111-1111-4111-8111-111111111111"
 
 type fakeReadStore struct {
-	page        readmodelstore.OpenReviewPage
-	dashboard   readmodelstore.Dashboard
-	ledger      []readmodelstore.LedgerEvent
-	lastSubject string
-	lastCursor  *readmodelstore.OpenReviewCursor
-	lastLimit   int32
+	page             readmodelstore.OpenReviewPage
+	ledgerPage       readmodelstore.LedgerEventPage
+	dashboard        readmodelstore.Dashboard
+	ledger           []readmodelstore.LedgerEvent
+	lastSubject      string
+	lastCursor       *readmodelstore.OpenReviewCursor
+	lastLimit        int32
+	lastLedgerCursor *readmodelstore.LedgerEventCursor
+	lastLedgerLimit  int32
 }
 
 type fakeObservationReadStore struct {
-	count     int64
-	events    []readmodelstore.LedgerEvent
-	err       error
-	lastLimit int32
+	count      int64
+	events     []readmodelstore.LedgerEvent
+	page       readmodelstore.LedgerEventPage
+	err        error
+	lastLimit  int32
+	lastCursor *readmodelstore.LedgerEventCursor
 }
 
 func (f *fakeObservationReadStore) CountUnmaterialized(context.Context, string, int32) (int64, error) {
 	return f.count, f.err
 }
-func (f *fakeObservationReadStore) ListUnmaterialized(_ context.Context, _ string, _ int32, limit int32) ([]readmodelstore.LedgerEvent, error) {
+func (f *fakeObservationReadStore) ListUnmaterializedPage(_ context.Context, _ string, _ int32, cursor *readmodelstore.LedgerEventCursor, limit int32) (readmodelstore.LedgerEventPage, error) {
 	f.lastLimit = limit
-	return f.events, f.err
+	f.lastCursor = cursor
+	if f.page.Events != nil || f.page.HasMore || f.page.Next != nil {
+		return f.page, f.err
+	}
+	return readmodelstore.LedgerEventPage{Events: f.events}, f.err
 }
 
 type fakeLotStore struct {
@@ -93,6 +102,97 @@ func TestObservationReadProjectionMergesBeforeApplyingLedgerLimit(t *testing.T) 
 	}
 	if observations.lastLimit != 1 || len(ledger.GetItems()) != 1 || ledger.GetItems()[0].GetEventId() != "observation" {
 		t.Fatalf("ledger limit was applied before merge: limit=%d response=%#v", observations.lastLimit, ledger)
+	}
+	if ledger.GetNextPageToken() == "" {
+		t.Fatal("unconsumed canonical event did not produce a continuation token")
+	}
+	ledger, err = service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{
+		Context: queryTestContext(), TaxYear: 2026, Limit: 1, PageToken: ledger.GetNextPageToken(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.GetItems()) != 1 || ledger.GetItems()[0].GetEventId() != "materialized" || ledger.GetNextPageToken() != "" {
+		t.Fatalf("continuation did not return the unconsumed canonical event: %#v", ledger)
+	}
+}
+
+func TestLedgerPageTokenKeepsIndependentStreamCursors(t *testing.T) {
+	at := time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+	reads := &fakeReadStore{ledgerPage: readmodelstore.LedgerEventPage{
+		Events: []readmodelstore.LedgerEvent{{EventID: "canonical", EffectiveAt: at, PageOrderKey: "canonical"}},
+	}}
+	observations := &fakeObservationReadStore{page: readmodelstore.LedgerEventPage{
+		Events: []readmodelstore.LedgerEvent{{EventID: "observation", EffectiveAt: at, PageOrderKey: `["fragment","run","record"]`}},
+	}}
+	service := &Service{Reads: reads, Observations: observations}
+
+	first, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{
+		Context: queryTestContext(), TaxYear: 2026, Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.GetItems()) != 1 || first.GetItems()[0].GetEventId() != "canonical" || first.GetNextPageToken() == "" {
+		t.Fatalf("canonical tie-break page is invalid: %#v", first)
+	}
+
+	reads.ledgerPage = readmodelstore.LedgerEventPage{}
+	second, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{
+		Context: queryTestContext(), TaxYear: 2026, Limit: 1, PageToken: first.GetNextPageToken(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.GetItems()) != 1 || second.GetItems()[0].GetEventId() != "observation" {
+		t.Fatalf("observation stream was skipped after a canonical tie: %#v", second)
+	}
+	if observations.lastCursor != nil {
+		t.Fatalf("unconsumed observation cursor advanced prematurely: %#v", observations.lastCursor)
+	}
+}
+
+func TestListLedgerEventsRejectsInvalidPageInputBeforeDatabaseQuery(t *testing.T) {
+	for name, request := range map[string]*enginev1.ListLedgerEventsRequest{
+		"invalid token":   {Context: queryTestContext(), TaxYear: 2026, PageToken: "not-base64!"},
+		"oversized limit": {Context: queryTestContext(), TaxYear: 2026, Limit: 201},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reads := &fakeReadStore{}
+			service := &Service{Reads: reads}
+			_, err := service.ListLedgerEvents(context.Background(), request)
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("status=%s, want INVALID_ARGUMENT: %v", status.Code(err), err)
+			}
+			if reads.lastLedgerLimit != 0 {
+				t.Fatalf("database was queried for invalid input: %#v", reads)
+			}
+		})
+	}
+}
+
+func TestListLedgerEventsRejectsPageTokenFromAnotherTaxYear(t *testing.T) {
+	at := time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)
+	reads := &fakeReadStore{ledgerPage: readmodelstore.LedgerEventPage{
+		Events:  []readmodelstore.LedgerEvent{{EventID: "canonical", EffectiveAt: at}},
+		HasMore: true,
+	}}
+	service := &Service{Reads: reads}
+	first, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{
+		Context: queryTestContext(), TaxYear: 2026, Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads.lastLedgerLimit = 0
+	_, err = service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{
+		Context: queryTestContext(), TaxYear: 2025, Limit: 1, PageToken: first.GetNextPageToken(),
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("status=%s, want INVALID_ARGUMENT: %v", status.Code(err), err)
+	}
+	if reads.lastLedgerLimit != 0 {
+		t.Fatal("database was queried with a cursor from another tax year")
 	}
 }
 
@@ -250,8 +350,13 @@ func (f *fakeReadStore) Dashboard(context.Context, string, int32) (readmodelstor
 	return f.dashboard, nil
 }
 
-func (f *fakeReadStore) ListLedgerEvents(context.Context, string, int32, int32) ([]readmodelstore.LedgerEvent, error) {
-	return f.ledger, nil
+func (f *fakeReadStore) ListLedgerEventsPage(_ context.Context, _ string, _ int32, cursor *readmodelstore.LedgerEventCursor, limit int32) (readmodelstore.LedgerEventPage, error) {
+	f.lastLedgerCursor = cursor
+	f.lastLedgerLimit = limit
+	if f.ledgerPage.Events != nil || f.ledgerPage.HasMore || f.ledgerPage.Next != nil {
+		return f.ledgerPage, nil
+	}
+	return readmodelstore.LedgerEventPage{Events: f.ledger}, nil
 }
 
 func TestObservationReadProjectionAugmentsDashboardAndLedgerWithoutReplacingMaterializedEvents(t *testing.T) {

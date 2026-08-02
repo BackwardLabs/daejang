@@ -1873,10 +1873,12 @@ func (x *GetDashboardResponse) GetDashboard() *Dashboard {
 }
 
 type ListLedgerEventsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Context       *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	TaxYear       int32                  `protobuf:"varint,2,opt,name=tax_year,json=taxYear,proto3" json:"tax_year,omitempty"`
-	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Context *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	TaxYear int32                  `protobuf:"varint,2,opt,name=tax_year,json=taxYear,proto3" json:"tax_year,omitempty"`
+	Limit   int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	// Opaque continuation token returned by the previous response.
+	PageToken     string `protobuf:"bytes,4,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1930,6 +1932,13 @@ func (x *ListLedgerEventsRequest) GetLimit() int32 {
 		return x.Limit
 	}
 	return 0
+}
+
+func (x *ListLedgerEventsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
 }
 
 type LedgerPosting struct {
@@ -2363,6 +2372,7 @@ func (x *LedgerEvent) GetActionBindingId() string {
 type ListLedgerEventsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Items         []*LedgerEvent         `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	NextPageToken string                 `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2402,6 +2412,13 @@ func (x *ListLedgerEventsResponse) GetItems() []*LedgerEvent {
 		return x.Items
 	}
 	return nil
+}
+
+func (x *ListLedgerEventsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
 }
 
 type GetLedgerEventLotsRequest struct {
@@ -4663,11 +4680,13 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x0flast_sync_state\x18\x06 \x01(\tR\rlastSyncState\x12K\n" +
 	"\x14last_sync_updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x11lastSyncUpdatedAt\"O\n" +
 	"\x14GetDashboardResponse\x127\n" +
-	"\tdashboard\x18\x01 \x01(\v2\x19.giwa.engine.v1.DashboardR\tdashboard\"\x84\x01\n" +
+	"\tdashboard\x18\x01 \x01(\v2\x19.giwa.engine.v1.DashboardR\tdashboard\"\xa3\x01\n" +
 	"\x17ListLedgerEventsRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x19\n" +
 	"\btax_year\x18\x02 \x01(\x05R\ataxYear\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\x05R\x05limit\"\xe6\x03\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x04 \x01(\tR\tpageToken\"\xe6\x03\n" +
 	"\rLedgerPosting\x12\x15\n" +
 	"\x06leg_id\x18\x01 \x01(\tR\x05legId\x12\x1d\n" +
 	"\n" +
@@ -4724,9 +4743,10 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x0faction_proof_id\x18\x0f \x01(\tR\ractionProofId\x12*\n" +
 	"\x11action_profile_id\x18\x10 \x01(\tR\x0factionProfileId\x124\n" +
 	"\x16action_profile_version\x18\x11 \x01(\tR\x14actionProfileVersion\x12*\n" +
-	"\x11action_binding_id\x18\x12 \x01(\tR\x0factionBindingId\"M\n" +
+	"\x11action_binding_id\x18\x12 \x01(\tR\x0factionBindingId\"u\n" +
 	"\x18ListLedgerEventsResponse\x121\n" +
-	"\x05items\x18\x01 \x03(\v2\x1b.giwa.engine.v1.LedgerEventR\x05items\"\x91\x01\n" +
+	"\x05items\x18\x01 \x03(\v2\x1b.giwa.engine.v1.LedgerEventR\x05items\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x91\x01\n" +
 	"\x19GetLedgerEventLotsRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x19\n" +
 	"\bevent_id\x18\x02 \x01(\tR\aeventId\x12\x1f\n" +

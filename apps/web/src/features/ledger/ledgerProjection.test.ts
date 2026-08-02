@@ -123,4 +123,32 @@ describe('ledger transaction projection', () => {
       'profile-b',
     ])
   })
+
+  it('preserves repeated equal-value legs while collapsing duplicate event projections', () => {
+    const shared = {
+      chainId: '10',
+      transactionHash: '0xrepeated',
+      transactionCoordinate: 'EXACT',
+    }
+    const result = projectLedgerTransactions([
+      event('proof', {
+        ...shared,
+        actionProofId: 'proof-1',
+        postings: [posting('proof-principal', 'PRINCIPAL')],
+      }),
+      event('objective', {
+        ...shared,
+        postings: [
+          posting('objective-principal-1', 'PRINCIPAL'),
+          posting('objective-principal-2', 'PRINCIPAL'),
+        ],
+      }),
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.postings.map(({ legId }) => legId)).toEqual([
+      'objective-principal-1',
+      'objective-principal-2',
+    ])
+  })
 })

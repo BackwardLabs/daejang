@@ -156,10 +156,20 @@ export type LedgerLotLineageModel = {
 
 export const loadDashboard = (taxYear: string, signal?: AbortSignal) =>
   requestApi<{ dashboard: DashboardModel }>(`/dashboard?taxYear=${taxYear}`, { signal })
-export const loadLedger = (taxYear: string, signal?: AbortSignal) =>
-  requestApi<{ items: LedgerEventModel[] }>(`/ledger?taxYear=${taxYear}`, { signal })
-export const loadActivities = (taxYear: string, signal?: AbortSignal) =>
-  requestApi<{ items: LedgerEventModel[] }>(`/activities?taxYear=${taxYear}`, { signal })
+export const loadLedger = (taxYear: string, options: { cursor?: string; signal?: AbortSignal } = {}) => {
+  const cursor = options.cursor ? `&cursor=${encodeURIComponent(options.cursor)}` : ''
+  return requestApi<{ items: LedgerEventModel[]; nextCursor?: string }>(
+    `/ledger?taxYear=${taxYear}${cursor}`,
+    { signal: options.signal },
+  )
+}
+export const loadActivities = (taxYear: string, options: { cursor?: string; signal?: AbortSignal } = {}) => {
+  const cursor = options.cursor ? `&cursor=${encodeURIComponent(options.cursor)}` : ''
+  return requestApi<{ items: LedgerEventModel[]; nextCursor?: string }>(
+    `/activities?taxYear=${taxYear}${cursor}`,
+    { signal: options.signal },
+  )
+}
 export const loadLedgerEventLots = (eventId: string, revisionId: string, signal?: AbortSignal) =>
   requestApi<LedgerLotLineageModel>(
     `/ledger/lots?eventId=${encodeURIComponent(eventId)}&revisionId=${encodeURIComponent(revisionId)}`,

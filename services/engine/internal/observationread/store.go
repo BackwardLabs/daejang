@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -66,14 +67,55 @@ func (s *Store) CountUnmaterialized(ctx context.Context, subjectID string, taxYe
 }
 
 func (s *Store) ListUnmaterialized(ctx context.Context, subjectID string, taxYear, limit int32) ([]readmodelstore.LedgerEvent, error) {
+	page, err := s.ListUnmaterializedPage(ctx, subjectID, taxYear, nil, limit)
+	if err != nil {
+		return nil, err
+	}
+	return page.Events, nil
+}
+
+// ListUnmaterializedPage pages source observations by their durable source
+// coordinates. PageOrderKey remains internal to the merge layer; the public
+// event ID stays the existing content-derived identifier.
+func (s *Store) ListUnmaterializedPage(
+	ctx context.Context,
+	subjectID string,
+	taxYear int32,
+	after *readmodelstore.LedgerEventCursor,
+	limit int32,
+) (readmodelstore.LedgerEventPage, error) {
 	if subjectID == "" || taxYear < 2009 || limit < 1 || limit > 200 {
-		return nil, errors.New("valid subject, tax year, and limit are required")
+		return readmodelstore.LedgerEventPage{}, errors.New("valid subject, tax year, and limit are required")
+	}
+	var afterOccurredAt *time.Time
+	afterFragmentID, afterRunID, afterRecordID := "", "", ""
+	if after != nil {
+		if after.EffectiveAt.IsZero() {
+			return readmodelstore.LedgerEventPage{}, errors.New("observation cursor requires effective time and order key")
+		}
+		coordinates, err := decodeOrderKey(after.OrderKey)
+		if err != nil {
+			return readmodelstore.LedgerEventPage{}, err
+		}
+		cursorTime := after.EffectiveAt.UTC()
+		afterOccurredAt = &cursorTime
+		afterFragmentID, afterRunID, afterRecordID = coordinates[0], coordinates[1], coordinates[2]
 	}
 	rows, err := s.db.Query(ctx, currentObservationsSQL+`
 		, selected_records AS (
 			SELECT fragment_id,origin_run_id,origin_link_id,max(occurred_at) AS occurred_at
-			FROM current_observations GROUP BY fragment_id,origin_run_id,origin_link_id
-			ORDER BY occurred_at DESC,fragment_id,origin_run_id,origin_link_id LIMIT $3
+			FROM current_observations
+			GROUP BY fragment_id,origin_run_id,origin_link_id
+			HAVING (
+				$3::timestamptz IS NULL
+				OR max(occurred_at) < $3
+				OR (
+					max(occurred_at) = $3
+					AND (fragment_id,origin_run_id,origin_link_id) > ($4,$5,$6)
+				)
+			)
+			ORDER BY occurred_at DESC,fragment_id,origin_run_id,origin_link_id
+			LIMIT $7
 		)
 		SELECT observation.fragment_id,observation.origin_run_id,observation.origin_link_id,
 			observation.observation_id,observation.kind,observation.account_id,observation.asset_id,
@@ -90,9 +132,10 @@ func (s *Store) ListUnmaterialized(ctx context.Context, subjectID string, taxYea
 		  ON activity.subject_id=$1
 		 AND activity.fragment_id=observation.fragment_id
 		 AND activity.observation_id=observation.observation_id
-		ORDER BY selected_records.occurred_at DESC,observation.fragment_id,observation.origin_run_id,observation.origin_link_id,observation.local_index`, subjectID, taxYear, limit)
+		ORDER BY selected_records.occurred_at DESC,observation.fragment_id,observation.origin_run_id,observation.origin_link_id,observation.local_index`,
+		subjectID, taxYear, afterOccurredAt, afterFragmentID, afterRunID, afterRecordID, limit+1)
 	if err != nil {
-		return nil, fmt.Errorf("list unmaterialized observations: %w", err)
+		return readmodelstore.LedgerEventPage{}, fmt.Errorf("list unmaterialized observations: %w", err)
 	}
 	defer rows.Close()
 	type key struct{ fragment, run, record string }
@@ -104,7 +147,7 @@ func (s *Store) ListUnmaterialized(ctx context.Context, subjectID string, taxYea
 		var assetDecimals *int16
 		var occurredAt time.Time
 		if err := rows.Scan(&fragment, &run, &record, &observationID, &kind, &accountID, &assetID, &quantity, &occurredAt, &assetSymbol, &assetDecimals, &assetVenue, &activityClass); err != nil {
-			return nil, err
+			return readmodelstore.LedgerEventPage{}, err
 		}
 		k := key{fragment, run, record}
 		position, exists := index[k]
@@ -113,7 +156,12 @@ func (s *Store) ListUnmaterialized(ctx context.Context, subjectID string, taxYea
 			id := "observation-event:" + digest(fragment + "\x00" + run + "\x00" + record)[:32]
 			position = len(result)
 			index[k] = position
-			result = append(result, readmodelstore.LedgerEvent{EventID: id, RevisionID: id + ":v1", RevisionNumber: 1, EventType: eventType, FlowShape: flowShape, Subtype: activityClass, Resolution: "PARTIAL", InterpretationSupport: "OBSERVATION_ONLY", EffectiveAt: occurredAt.UTC()})
+			result = append(result, readmodelstore.LedgerEvent{
+				EventID: id, RevisionID: id + ":v1", RevisionNumber: 1,
+				EventType: eventType, FlowShape: flowShape, Subtype: activityClass,
+				Resolution: "PARTIAL", InterpretationSupport: "OBSERVATION_ONLY",
+				EffectiveAt: occurredAt.UTC(), PageOrderKey: encodeOrderKey(fragment, run, record),
+			})
 		}
 		direction := "IN"
 		absolute := quantity
@@ -132,7 +180,33 @@ func (s *Store) ListUnmaterialized(ctx context.Context, subjectID string, taxYea
 		}
 		result[position].Postings = append(result[position].Postings, posting)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return readmodelstore.LedgerEventPage{}, err
+	}
+	hasMore := len(result) > int(limit)
+	if hasMore {
+		result = result[:limit]
+	}
+	page := readmodelstore.LedgerEventPage{Events: result, HasMore: hasMore}
+	if hasMore {
+		last := result[len(result)-1]
+		page.Next = &readmodelstore.LedgerEventCursor{EffectiveAt: last.EffectiveAt, OrderKey: last.PageOrderKey}
+	}
+	return page, nil
+}
+
+func encodeOrderKey(fragmentID, runID, recordID string) string {
+	value, _ := json.Marshal([3]string{fragmentID, runID, recordID})
+	return string(value)
+}
+
+func decodeOrderKey(value string) ([3]string, error) {
+	var result [3]string
+	if strings.TrimSpace(value) == "" || json.Unmarshal([]byte(value), &result) != nil ||
+		result[0] == "" || result[1] == "" || result[2] == "" {
+		return result, errors.New("observation cursor has an invalid order key")
+	}
+	return result, nil
 }
 
 const currentObservationsSQL = `

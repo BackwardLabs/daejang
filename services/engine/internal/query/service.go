@@ -30,7 +30,7 @@ import (
 
 type ReadStore interface {
 	Dashboard(context.Context, string, int32) (readmodelstore.Dashboard, error)
-	ListLedgerEvents(context.Context, string, int32, int32) ([]readmodelstore.LedgerEvent, error)
+	ListLedgerEventsPage(context.Context, string, int32, *readmodelstore.LedgerEventCursor, int32) (readmodelstore.LedgerEventPage, error)
 	ListOpenReviewsPage(context.Context, string, *readmodelstore.OpenReviewCursor, int32) (readmodelstore.OpenReviewPage, error)
 }
 type LotStore interface {
@@ -41,7 +41,7 @@ type ReportStore interface {
 }
 type ObservationReadStore interface {
 	CountUnmaterialized(context.Context, string, int32) (int64, error)
-	ListUnmaterialized(context.Context, string, int32, int32) ([]readmodelstore.LedgerEvent, error)
+	ListUnmaterializedPage(context.Context, string, int32, *readmodelstore.LedgerEventCursor, int32) (readmodelstore.LedgerEventPage, error)
 }
 type TaxReportStore interface {
 	GetCurrentReportForYear(context.Context, string, int) (taxreportstore.CurrentReportDetail, bool, error)
@@ -100,22 +100,33 @@ func (s *Service) ListLedgerEvents(ctx context.Context, req *enginev1.ListLedger
 	if limit == 0 {
 		limit = 100
 	}
-	values, err := s.Reads.ListLedgerEvents(ctx, subject, req.GetTaxYear(), limit)
+	if limit < 1 || limit > 200 {
+		return nil, status.Error(codes.InvalidArgument, "ledger page limit must be between 1 and 200")
+	}
+	state, err := decodeLedgerPageToken(req.GetPageToken(), subject, req.GetTaxYear())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "ledger page token is invalid")
+	}
+	canonicalPage := readmodelstore.LedgerEventPage{}
+	if !state.Canonical.Exhausted {
+		canonicalPage, err = s.Reads.ListLedgerEventsPage(ctx, subject, req.GetTaxYear(), state.Canonical.Cursor, limit)
+	}
 	if err != nil {
 		return nil, status.Error(codes.Internal, "ledger query failed")
 	}
+	observationPage := readmodelstore.LedgerEventPage{}
 	if s.Observations != nil {
-		fallback, observationErr := s.Observations.ListUnmaterialized(ctx, subject, req.GetTaxYear(), limit)
-		if observationErr != nil {
-			log.Printf("observation ledger projection failed: %v", observationErr)
-			return nil, status.Error(codes.Internal, "observation ledger query failed")
+		if !state.Observation.Exhausted {
+			observationPage, err = s.Observations.ListUnmaterializedPage(ctx, subject, req.GetTaxYear(), state.Observation.Cursor, limit)
+			if err != nil {
+				log.Printf("observation ledger projection failed: %v", err)
+				return nil, status.Error(codes.Internal, "observation ledger query failed")
+			}
 		}
-		values = append(values, fallback...)
-		sort.SliceStable(values, func(i, j int) bool { return values[i].EffectiveAt.After(values[j].EffectiveAt) })
-		if len(values) > int(limit) {
-			values = values[:limit]
-		}
+	} else {
+		state.Observation.Exhausted = true
 	}
+	values, nextState := mergeLedgerPages(state, canonicalPage, observationPage, int(limit))
 	items := make([]*enginev1.LedgerEvent, 0, len(values))
 	for _, v := range values {
 		event := &enginev1.LedgerEvent{
@@ -158,7 +169,198 @@ func (s *Service) ListLedgerEvents(ctx context.Context, req *enginev1.ListLedger
 		}
 		items = append(items, event)
 	}
-	return &enginev1.ListLedgerEventsResponse{Items: items}, nil
+	nextPageToken := ""
+	if !nextState.Canonical.Exhausted || !nextState.Observation.Exhausted {
+		nextPageToken, err = encodeLedgerPageToken(nextState, subject, req.GetTaxYear())
+		if err != nil {
+			return nil, status.Error(codes.Internal, "ledger page token encoding failed")
+		}
+	}
+	return &enginev1.ListLedgerEventsResponse{Items: items, NextPageToken: nextPageToken}, nil
+}
+
+type ledgerStreamState struct {
+	Cursor    *readmodelstore.LedgerEventCursor
+	Exhausted bool
+}
+
+type ledgerMergeState struct {
+	Canonical   ledgerStreamState
+	Observation ledgerStreamState
+}
+
+type ledgerCandidate struct {
+	event     readmodelstore.LedgerEvent
+	canonical bool
+}
+
+func mergeLedgerPages(
+	state ledgerMergeState,
+	canonicalPage readmodelstore.LedgerEventPage,
+	observationPage readmodelstore.LedgerEventPage,
+	limit int,
+) ([]readmodelstore.LedgerEvent, ledgerMergeState) {
+	candidates := make([]ledgerCandidate, 0, len(canonicalPage.Events)+len(observationPage.Events))
+	for _, event := range canonicalPage.Events {
+		candidates = append(candidates, ledgerCandidate{event: event, canonical: true})
+	}
+	for _, event := range observationPage.Events {
+		candidates = append(candidates, ledgerCandidate{event: event})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left, right := candidates[i], candidates[j]
+		if !left.event.EffectiveAt.Equal(right.event.EffectiveAt) {
+			return left.event.EffectiveAt.After(right.event.EffectiveAt)
+		}
+		if left.canonical != right.canonical {
+			return left.canonical
+		}
+		return false
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	result := make([]readmodelstore.LedgerEvent, 0, len(candidates))
+	canonicalConsumed, observationConsumed := 0, 0
+	for _, candidate := range candidates {
+		result = append(result, candidate.event)
+		cursor := &readmodelstore.LedgerEventCursor{
+			EffectiveAt: candidate.event.EffectiveAt,
+			OrderKey:    candidate.event.PageOrderKey,
+		}
+		if cursor.OrderKey == "" {
+			cursor.OrderKey = candidate.event.EventID
+		}
+		if candidate.canonical {
+			state.Canonical.Cursor = cursor
+			canonicalConsumed++
+		} else {
+			state.Observation.Cursor = cursor
+			observationConsumed++
+		}
+	}
+	if !state.Canonical.Exhausted {
+		state.Canonical.Exhausted = canonicalConsumed == len(canonicalPage.Events) && !canonicalPage.HasMore
+	}
+	if !state.Observation.Exhausted {
+		state.Observation.Exhausted = observationConsumed == len(observationPage.Events) && !observationPage.HasMore
+	}
+	return result, state
+}
+
+type ledgerCursorToken struct {
+	EffectiveAt string `json:"effectiveAt,omitempty"`
+	OrderKey    string `json:"orderKey,omitempty"`
+	Exhausted   bool   `json:"exhausted,omitempty"`
+}
+
+type ledgerPageToken struct {
+	Version     int               `json:"v"`
+	Scope       string            `json:"scope"`
+	TaxYear     int32             `json:"taxYear"`
+	Canonical   ledgerCursorToken `json:"canonical"`
+	Observation ledgerCursorToken `json:"observation"`
+}
+
+func encodeLedgerPageToken(state ledgerMergeState, subject string, taxYear int32) (string, error) {
+	canonical, err := encodeLedgerCursorToken(state.Canonical)
+	if err != nil {
+		return "", err
+	}
+	observation, err := encodeLedgerCursorToken(state.Observation)
+	if err != nil {
+		return "", err
+	}
+	value, err := json.Marshal(ledgerPageToken{
+		Version: 1, Scope: ledgerPageScope(subject), TaxYear: taxYear,
+		Canonical: canonical, Observation: observation,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal ledger page cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+func encodeLedgerCursorToken(state ledgerStreamState) (ledgerCursorToken, error) {
+	result := ledgerCursorToken{Exhausted: state.Exhausted}
+	if state.Cursor == nil {
+		return result, nil
+	}
+	if state.Cursor.EffectiveAt.IsZero() || !validLedgerOrderKey(state.Cursor.OrderKey) {
+		return ledgerCursorToken{}, fmt.Errorf("ledger stream cursor is incomplete")
+	}
+	result.EffectiveAt = state.Cursor.EffectiveAt.UTC().Format(time.RFC3339Nano)
+	result.OrderKey = state.Cursor.OrderKey
+	return result, nil
+}
+
+func decodeLedgerPageToken(token, subject string, taxYear int32) (ledgerMergeState, error) {
+	if token == "" {
+		return ledgerMergeState{}, nil
+	}
+	if strings.TrimSpace(token) != token || len(token) > 4096 {
+		return ledgerMergeState{}, fmt.Errorf("ledger page token has an invalid shape")
+	}
+	value, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return ledgerMergeState{}, fmt.Errorf("decode ledger page token: %w", err)
+	}
+	var parsed ledgerPageToken
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&parsed); err != nil {
+		return ledgerMergeState{}, fmt.Errorf("unmarshal ledger page token: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return ledgerMergeState{}, fmt.Errorf("ledger page token contains trailing data")
+	}
+	if parsed.Version != 1 {
+		return ledgerMergeState{}, fmt.Errorf("ledger page token version is unsupported")
+	}
+	if parsed.Scope != ledgerPageScope(subject) || parsed.TaxYear != taxYear {
+		return ledgerMergeState{}, fmt.Errorf("ledger page token scope does not match the request")
+	}
+	canonical, err := decodeLedgerCursorToken(parsed.Canonical)
+	if err != nil {
+		return ledgerMergeState{}, err
+	}
+	observation, err := decodeLedgerCursorToken(parsed.Observation)
+	if err != nil {
+		return ledgerMergeState{}, err
+	}
+	return ledgerMergeState{Canonical: canonical, Observation: observation}, nil
+}
+
+func ledgerPageScope(subject string) string {
+	digest := sha256.Sum256([]byte(subject))
+	return base64.RawURLEncoding.EncodeToString(digest[:16])
+}
+
+func decodeLedgerCursorToken(token ledgerCursorToken) (ledgerStreamState, error) {
+	result := ledgerStreamState{Exhausted: token.Exhausted}
+	if token.EffectiveAt == "" && token.OrderKey == "" {
+		return result, nil
+	}
+	if token.EffectiveAt == "" || !validLedgerOrderKey(token.OrderKey) {
+		return ledgerStreamState{}, fmt.Errorf("ledger stream cursor is incomplete")
+	}
+	effectiveAt, err := time.Parse(time.RFC3339Nano, token.EffectiveAt)
+	if err != nil || effectiveAt.IsZero() {
+		return ledgerStreamState{}, fmt.Errorf("ledger stream cursor time is invalid")
+	}
+	result.Cursor = &readmodelstore.LedgerEventCursor{EffectiveAt: effectiveAt.UTC(), OrderKey: token.OrderKey}
+	return result, nil
+}
+
+func validLedgerOrderKey(value string) bool {
+	if strings.TrimSpace(value) == "" || value != strings.TrimSpace(value) ||
+		!utf8.ValidString(value) || len(utf16.Encode([]rune(value))) > 1024 {
+		return false
+	}
+	return strings.IndexFunc(value, func(r rune) bool {
+		return r < 0x20 || r == 0x7f
+	}) == -1
 }
 
 func (s *Service) GetLedgerEventLots(ctx context.Context, req *enginev1.GetLedgerEventLotsRequest) (*enginev1.GetLedgerEventLotsResponse, error) {

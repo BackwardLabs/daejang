@@ -35,18 +35,32 @@ const postingKey = (posting: LedgerPostingModel) => [
 ].join('\u0000')
 
 const mergePostings = (events: LedgerEventModel[]) => {
-  const seen = new Set<string>()
-  const postings: LedgerPostingModel[] = []
+  const groups = new Map<string, Map<string, LedgerPostingModel[]>>()
 
   for (const event of events) {
     for (const posting of event.postings) {
       const key = postingKey(posting)
-      if (seen.has(key)) continue
-      seen.add(key)
-      postings.push(posting)
+      let byEvent = groups.get(key)
+      if (!byEvent) {
+        byEvent = new Map()
+        groups.set(key, byEvent)
+      }
+      const eventPostings = byEvent.get(event.eventId) ?? []
+      if (!eventPostings.some(({ legId }) => legId === posting.legId)) {
+        eventPostings.push(posting)
+      }
+      byEvent.set(event.eventId, eventPostings)
     }
   }
 
+  const postings: LedgerPostingModel[] = []
+  for (const byEvent of groups.values()) {
+    let selected: LedgerPostingModel[] = []
+    for (const eventPostings of byEvent.values()) {
+      if (eventPostings.length > selected.length) selected = eventPostings
+    }
+    postings.push(...selected)
+  }
   return postings
 }
 

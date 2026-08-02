@@ -73,7 +73,7 @@ export function DashboardPage() {
     try {
       const [dashboardResult, ledgerResult] = await Promise.all([
         loadDashboard(year, signal),
-        loadLedger(year, signal),
+        loadLedger(year, { signal }),
       ])
       setDashboard(dashboardResult.dashboard)
       setEvents(ledgerResult.items)
