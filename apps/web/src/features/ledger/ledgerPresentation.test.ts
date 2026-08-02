@@ -193,6 +193,24 @@ describe('ledger posting presentation', () => {
 
   it('keeps legacy durable identifier source fallbacks', () => {
     expect(describeLedgerSource([{
+      accountId: 'account:opaque',
+      accountKind: 'WALLET',
+      accountLocator: '0x16512376e2ea3c7b464cedeea3dce9b8a590fd80',
+      accountChainId: 'eip155:10',
+      assetId: 'asset:b98a9a42167be432',
+    }])).toEqual({
+      kind: 'WALLET',
+      label: 'Optimism',
+      detail: '0x16512376e2ea3c7b464cedeea3dce9b8a590fd80',
+    })
+    expect(describeLedgerSource([{
+      accountId: 'account:opaque',
+      accountKind: 'CEX',
+      accountLabel: 'Upbit 거래내역서',
+      accountVenue: 'UPBIT',
+      assetId: 'asset:8e88e0032d7a1a7a',
+    }])).toEqual({ kind: 'CEX', label: 'Upbit', detail: 'Upbit 거래내역서' })
+    expect(describeLedgerSource([{
       accountId: 'account-upbit',
       assetId: 'cex-document-asset:upbit:decimal8:krw',
     }])).toEqual({ kind: 'CEX', label: 'Upbit', detail: 'account-upbit' })

@@ -33,6 +33,12 @@ export type LedgerTransferEndpointPresentation = {
 }
 
 export type LedgerValuePosting = {
+  accountId?: string
+  accountKind?: string
+  accountLocator?: string
+  accountLabel?: string
+  accountChainId?: string
+  accountVenue?: string
   assetId: string
   assetSymbol?: string
   assetDecimals?: number
@@ -129,6 +135,12 @@ const describeChainCandidate = (value: string) => {
   return evmNetworkMetadata[match[1]]?.label ?? `EVM ${match[1]}`
 }
 
+const describeAccountChain = (value: string) => {
+  const match = value.match(/^(?:eip155:)?(\d+)$/i)
+  if (!match?.[1]) return value
+  return evmNetworkMetadata[match[1]]?.label ?? `EVM ${match[1]}`
+}
+
 const formatVenue = (value: string) =>
   value ? `${value.slice(0, 1).toUpperCase()}${value.slice(1).toLowerCase()}` : ''
 
@@ -202,7 +214,7 @@ export const parseLedgerAsset = (
 
 export const describeLedgerSource = (
   postings: Array<{
-    accountId: string
+    accountId?: string
     accountKind?: string
     accountLocator?: string
     accountLabel?: string
@@ -212,36 +224,30 @@ export const describeLedgerSource = (
   }>,
 ): LedgerSourcePresentation => {
   for (const posting of postings) {
-    if (posting.accountKind?.toUpperCase() === 'CEX' && posting.accountVenue) {
+    const kind = posting.accountKind?.toUpperCase()
+    if (kind === 'CEX') {
+      const venue = formatVenue(posting.accountVenue ?? '')
       return {
         kind: 'CEX',
-        label: formatVenue(posting.accountVenue),
-        detail: posting.accountLabel || posting.accountLocator || posting.accountId,
+        label: venue || posting.accountLabel || '거래소',
+        detail: posting.accountLabel || posting.accountLocator || posting.accountId || '거래소 계정',
       }
     }
-  }
-  for (const posting of postings) {
-    const chainMatch = posting.accountChainId?.match(/^eip155:(\d+)$/i)
-    if (
-      chainMatch?.[1] &&
-      ['WALLET', 'POSITION'].includes(posting.accountKind?.toUpperCase() ?? '')
-    ) {
+    if (kind === 'WALLET' || kind === 'POSITION') {
       return {
         kind: 'WALLET',
-        label: evmNetworkMetadata[chainMatch[1]]?.label ?? `EVM ${chainMatch[1]}`,
-        detail: posting.accountLabel || posting.accountLocator || posting.accountId,
+        label: posting.accountChainId ? describeAccountChain(posting.accountChainId) : '개인지갑',
+        detail: posting.accountLabel || posting.accountLocator || posting.accountId || '개인지갑',
       }
     }
   }
-  // Compatibility fallbacks for persisted responses created before canonical
-  // account source metadata was added to the Engine contract.
   for (const posting of postings) {
-    const cexAccountMatch = posting.accountId.match(/^cex-account:([^:]+):/i)
+    const cexAccountMatch = posting.accountId?.match(/^cex-account:([^:]+):/i)
     if (cexAccountMatch?.[1]) {
       return {
         kind: 'CEX',
         label: formatVenue(cexAccountMatch[1]),
-        detail: posting.accountId,
+        detail: posting.accountId ?? '거래소 계정',
       }
     }
   }
