@@ -1,4 +1,4 @@
-import { Fragment, type FormEvent, useEffect, useRef, useState } from 'react'
+import { Fragment, type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import { ApiClientError } from '../../api/client.ts'
@@ -328,7 +328,10 @@ export function LedgerPage() {
   const [year, setYear] = useState<AppYear>(
     () => loadAppPreferences().year,
   )
-  const [events, setEvents] = useState<LedgerEventModel[]>([])
+  const [ledgerEvents, setLedgerEvents] = useState<LedgerEventModel[]>([])
+  const events = useMemo(() => projectLedgerTransactions(ledgerEvents), [ledgerEvents])
+  const [ledgerCursor, setLedgerCursor] = useState<string>()
+  const [ledgerPageStatus, setLedgerPageStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const ledgerGenerationRef = useRef(0)
   const [reviews, setReviews] = useState<ReviewModel[]>([])
   const [reviewCursor, setReviewCursor] = useState<string>()
@@ -364,12 +367,15 @@ export function LedgerPage() {
     const controller = new AbortController()
     const generation = ++ledgerGenerationRef.current
     setLedgerStatus('loading')
-    setEvents([])
+    setLedgerEvents([])
+    setLedgerCursor(undefined)
+    setLedgerPageStatus('idle')
     setSelectedId(undefined)
-    void loadLedger(year, controller.signal)
+    void loadLedger(year, { signal: controller.signal })
       .then((ledger) => {
         if (ledgerGenerationRef.current !== generation) return
-        setEvents(projectLedgerTransactions(ledger.items))
+        setLedgerEvents(ledger.items)
+        setLedgerCursor(ledger.nextCursor)
         setLedgerStatus('ready')
       })
       .catch((error: unknown) => {
@@ -515,6 +521,27 @@ export function LedgerPage() {
       setReviewPageStatus('idle')
     } catch {
       if (reviewListGenerationRef.current === generation) setReviewPageStatus('error')
+    }
+  }
+
+  const loadMoreLedger = async () => {
+    if (!ledgerCursor || ledgerPageStatus === 'loading') return
+    const generation = ledgerGenerationRef.current
+    setLedgerPageStatus('loading')
+    try {
+      const page = await loadLedger(year, { cursor: ledgerCursor })
+      if (ledgerGenerationRef.current !== generation) return
+      setLedgerEvents((current) => {
+        const seen = new Set(current.map((event) => `${event.eventId}\u0000${event.revisionId}`))
+        return [
+          ...current,
+          ...page.items.filter((event) => !seen.has(`${event.eventId}\u0000${event.revisionId}`)),
+        ]
+      })
+      setLedgerCursor(page.nextCursor)
+      setLedgerPageStatus('idle')
+    } catch {
+      if (ledgerGenerationRef.current === generation) setLedgerPageStatus('error')
     }
   }
 
@@ -729,6 +756,19 @@ export function LedgerPage() {
                   })}</tbody>
                 </table>
               </div>
+              {ledgerCursor ? <div className="ledger-pagination">
+                <button
+                  type="button"
+                  disabled={ledgerPageStatus === 'loading'}
+                  onClick={() => void loadMoreLedger()}
+                >
+                  {ledgerPageStatus === 'loading'
+                    ? '거래 불러오는 중…'
+                    : ledgerPageStatus === 'error'
+                      ? '다시 불러오기'
+                      : '이전 거래 더 보기'}
+                </button>
+              </div> : null}
             </section>
           )
         ) : null}

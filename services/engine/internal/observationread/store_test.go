@@ -7,8 +7,37 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BackwardLabs/daejang-db/pkg/readmodelstore"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestObservationOrderKeyRoundTrip(t *testing.T) {
+	want := [3]string{"fragment:1", "run:1", "record:1"}
+	got, err := decodeOrderKey(encodeOrderKey(want[0], want[1], want[2]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("decoded order key = %#v, want %#v", got, want)
+	}
+}
+
+func TestListUnmaterializedPageRejectsMalformedCursorBeforeQuery(t *testing.T) {
+	store := &Store{}
+	_, err := store.ListUnmaterializedPage(
+		context.Background(),
+		"subject:1",
+		2026,
+		&readmodelstore.LedgerEventCursor{
+			EffectiveAt: time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
+			OrderKey:    `["fragment:1","run:1"]`,
+		},
+		100,
+	)
+	if err == nil || !strings.Contains(err.Error(), "invalid order key") {
+		t.Fatalf("malformed cursor error = %v", err)
+	}
+}
 
 func TestClassifyCEXObservationRecords(t *testing.T) {
 	tests := []struct {
@@ -139,9 +168,23 @@ func TestStoreExternalDatabase(t *testing.T) {
 	if count == 0 {
 		t.Fatal("published observations were not visible through the read projection")
 	}
-	events, err := runtime.Store.ListUnmaterialized(context.Background(), subjectID, 2025, 200)
-	if err != nil {
-		t.Fatal(err)
+	var events []readmodelstore.LedgerEvent
+	var cursor *readmodelstore.LedgerEventCursor
+	for {
+		page, pageErr := runtime.Store.ListUnmaterializedPage(
+			context.Background(), subjectID, 2025, cursor, 200,
+		)
+		if pageErr != nil {
+			t.Fatal(pageErr)
+		}
+		events = append(events, page.Events...)
+		if !page.HasMore {
+			break
+		}
+		if page.Next == nil || int64(len(events)) > count {
+			t.Fatalf("invalid observation continuation: events=%d count=%d page=%#v", len(events), count, page)
+		}
+		cursor = page.Next
 	}
 	if int64(len(events)) != count {
 		t.Fatalf("listed events = %d, counted records = %d", len(events), count)

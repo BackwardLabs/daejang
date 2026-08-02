@@ -40,7 +40,10 @@ export type EngineDataClient = {
   getSyncJob(context: SourceRequestContext, jobId: string): Promise<Record<string, unknown>>
   listSyncJobs(context: SourceRequestContext, limit?: number): Promise<Array<Record<string, unknown>>>
   getDashboard(context: SourceRequestContext, taxYear: number): Promise<Record<string, unknown>>
-  listLedgerEvents(context: SourceRequestContext, taxYear: number, limit?: number): Promise<Array<Record<string, unknown>>>
+  listLedgerEvents(context: SourceRequestContext, taxYear: number, limit?: number, pageToken?: string): Promise<{
+    items: Array<Record<string, unknown>>
+    nextPageToken: string
+  }>
   getLedgerEventLots(context: SourceRequestContext, eventId: string, revisionId: string): Promise<{
     runId: string
     coverage: string
@@ -127,6 +130,13 @@ const mapReviewEngineError = (error: unknown): never => {
 const mapReviewListError = (error: unknown): never => {
   if (error instanceof EngineRpcError && error.grpcCode === grpcStatus.INVALID_ARGUMENT) {
     throw new ApiError(400, 'INVALID_REVIEW_CURSOR', '검토 목록 위치 값이 유효하지 않습니다.')
+  }
+  throw error
+}
+
+const mapLedgerListError = (error: unknown): never => {
+  if (error instanceof EngineRpcError && error.grpcCode === grpcStatus.INVALID_ARGUMENT) {
+    throw new ApiError(400, 'INVALID_LEDGER_CURSOR', '장부 목록 위치 값이 유효하지 않습니다.')
   }
   throw error
 }
@@ -619,12 +629,29 @@ export const registerDataRoutes = async (
   app.get<{ Querystring: { taxYear: number } }>('/api/v1/dashboard', { schema: { querystring: taxYearQuery } },
     async (request) => ({ dashboard: await engine.getDashboard(contextFor(request), Number(request.query.taxYear)) }))
 
-  const listEvents = async (request: { id: string; authSession: SessionRecord | undefined; query: { taxYear: number; limit?: number } }) => ({
-    items: await engine.listLedgerEvents(contextFor(request), Number(request.query.taxYear), Number(request.query.limit ?? 100)),
-  })
-  const eventQuery = { ...taxYearQuery, properties: { ...taxYearQuery.properties, limit: { type: 'integer', minimum: 1, maximum: 200 } } } as const
-  app.get<{ Querystring: { taxYear: number; limit?: number } }>('/api/v1/activities', { schema: { querystring: eventQuery } }, listEvents)
-  app.get<{ Querystring: { taxYear: number; limit?: number } }>('/api/v1/ledger', { schema: { querystring: eventQuery } }, listEvents)
+  const listEvents = async (request: { id: string; authSession: SessionRecord | undefined; query: { taxYear: number; limit?: number; cursor?: string } }) => {
+    try {
+      const page = await engine.listLedgerEvents(
+        contextFor(request),
+        Number(request.query.taxYear),
+        Number(request.query.limit ?? 100),
+        request.query.cursor ?? '',
+      )
+      return {
+        items: page.items,
+        ...(page.nextPageToken ? { nextCursor: page.nextPageToken } : {}),
+      }
+    } catch (error) {
+      return mapLedgerListError(error)
+    }
+  }
+  const eventQuery = { ...taxYearQuery, properties: {
+    ...taxYearQuery.properties,
+    limit: { type: 'integer', minimum: 1, maximum: 200 },
+    cursor: { type: 'string', minLength: 1, maxLength: 4096 },
+  } } as const
+  app.get<{ Querystring: { taxYear: number; limit?: number; cursor?: string } }>('/api/v1/activities', { schema: { querystring: eventQuery } }, listEvents)
+  app.get<{ Querystring: { taxYear: number; limit?: number; cursor?: string } }>('/api/v1/ledger', { schema: { querystring: eventQuery } }, listEvents)
 
   const lotQuery = {
     type: 'object', additionalProperties: false, required: ['eventId', 'revisionId'],

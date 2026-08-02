@@ -216,7 +216,13 @@ message Dashboard {
 }
 message GetDashboardResponse { Dashboard dashboard = 1; }
 
-message ListLedgerEventsRequest { RequestContext context = 1; int32 tax_year = 2; int32 limit = 3; }
+message ListLedgerEventsRequest {
+  RequestContext context = 1;
+  int32 tax_year = 2;
+  int32 limit = 3;
+  // Opaque continuation token returned by the previous response.
+  string page_token = 4;
+}
 message LedgerPosting {
   string leg_id = 1;
   string account_id = 2;
@@ -263,7 +269,10 @@ message LedgerEvent {
   string action_profile_version = 17;
   string action_binding_id = 18;
 }
-message ListLedgerEventsResponse { repeated LedgerEvent items = 1; }
+message ListLedgerEventsResponse {
+  repeated LedgerEvent items = 1;
+  string next_page_token = 2;
+}
 
 message GetLedgerEventLotsRequest {
   RequestContext context = 1;

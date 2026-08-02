@@ -349,9 +349,14 @@ export class EngineMtlsClient
     return normalizeProtoValue(response.dashboard) as Record<string, unknown>
   }
 
-  async listLedgerEvents(context: SourceRequestContext, taxYear: number, limit = 100) {
-    const response = await this.#unaryOn(this.#queryClient, 'listLedgerEvents', { context: requestContext(context), taxYear, limit }) as { items: Array<Record<string, unknown>> }
-    return normalizeProtoValue(response.items) as Array<Record<string, unknown>>
+  async listLedgerEvents(context: SourceRequestContext, taxYear: number, limit = 100, pageToken = '') {
+    const response = await this.#unaryOn(this.#queryClient, 'listLedgerEvents', {
+      context: requestContext(context), taxYear, limit, pageToken,
+    }) as { items: Array<Record<string, unknown>>; nextPageToken: string }
+    return {
+      items: normalizeProtoValue(response.items) as Array<Record<string, unknown>>,
+      nextPageToken: response.nextPageToken,
+    }
   }
 
   async getLedgerEventLots(context: SourceRequestContext, eventId: string, revisionId: string) {
