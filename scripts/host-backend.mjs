@@ -874,7 +874,14 @@ const build = () => {
     cwd: repositoryRoot,
     env: baseEnvironment(),
   })
-  run('go', ['build', '-o', managedJITBinary, './cmd/jitd'], {
+  run('go', [
+    'build',
+    '-trimpath',
+    '-buildvcs=false',
+    '-o',
+    managedJITBinary,
+    './cmd/jitd',
+  ], {
     cwd: jitRepository,
     env: {
       ...baseEnvironment(),
@@ -1160,7 +1167,10 @@ const canonicalJSON = (value) => {
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 
-export const createActionRuntimeIdentity = (repository) => {
+export const createActionRuntimeIdentity = (repository, jitExecutable) => {
+  if (!jitExecutable) {
+    throw new Error('The pinned JIT executable is required for runtime identity')
+  }
   const files = [
     'releases/action-registry-v1.json',
     'scripts/registry.py',
@@ -1168,8 +1178,11 @@ export const createActionRuntimeIdentity = (repository) => {
     'scripts/action_evaluator.py',
   ].map((path) => ({ path, sha256: sha256(readFileSync(join(repository, path))) }))
   return sha256(canonicalJSON({
-    schemaVersion: 'giwa.action-runtime-identity.v1',
+    schemaVersion: 'giwa.action-runtime-identity.v2',
     files,
+    // Action evaluation consumes evidence emitted by this exact executable.
+    // Rotating either side must enqueue a new immutable wallet generation.
+    jitExecutableSha256: sha256(readFileSync(jitExecutable)),
   }))
 }
 
@@ -1866,7 +1879,10 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     // Reclassification can immediately drive JIT, Posting, and ledger writes.
     // Enqueue only after every downstream service is stable so a deployment
     // restart cannot strand a deterministic runtime job in a failed state.
-    const actionRuntimeID = createActionRuntimeIdentity(deFiLabelRepository)
+    const actionRuntimeID = createActionRuntimeIdentity(
+      deFiLabelRepository,
+      managedJITBinary,
+    )
     run(
       join(binaryRoot, 'action-runtime-reclassify'),
       [],
