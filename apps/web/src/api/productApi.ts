@@ -50,6 +50,24 @@ export type LedgerEventModel = {
   effectiveAt: string
   postings: LedgerPostingModel[]
   transferEndpoint?: LedgerTransferEndpointModel
+  chainId?: string
+  transactionHash?: string
+  transactionCoordinate?: string
+  actionProofId?: string
+  actionProfileId?: string
+  actionProfileVersion?: string
+  actionBindingId?: string
+  projectionKey?: string
+  sourceEvents?: Array<{ eventId: string; revisionId: string }>
+  projectedActions?: Array<{
+    eventId: string
+    eventType: string
+    flowShape: string
+    subtype?: string
+    actionProofId: string
+    actionProfileId?: string
+    actionProfileVersion?: string
+  }>
 }
 
 export type ReviewModel = {
