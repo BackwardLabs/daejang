@@ -125,9 +125,20 @@ func (s *Store) Get(ctx context.Context, subjectID, jitRunID, fragmentID string)
 
 	var postingCount int64
 	if err := s.ledger.QueryRow(ctx, `
-		SELECT count(DISTINCT (event_id,revision_id,leg_id))
-		FROM ledger.posting_observation
-		WHERE subject_id=$1 AND observation_fragment_id=$2`, subjectID, fragmentID).Scan(&postingCount); err != nil {
+		WITH source_events AS (
+			SELECT DISTINCT event_id
+			FROM ledger.posting_observation
+			WHERE subject_id=$1 AND observation_fragment_id=$2
+		)
+		SELECT count(DISTINCT (posting.event_id,posting.revision_id,posting.leg_id))
+		FROM source_events
+		JOIN ledger.interpreted_event AS event
+		  ON event.subject_id=$1
+		 AND event.event_id=source_events.event_id
+		JOIN ledger.asset_posting AS posting
+		  ON posting.subject_id=event.subject_id
+		 AND posting.event_id=event.event_id
+		 AND posting.revision_id=event.current_revision_id`, subjectID, fragmentID).Scan(&postingCount); err != nil {
 		return Snapshot{}, fmt.Errorf("count materialized Posting rows: %w", err)
 	}
 	if postingCount == 0 {

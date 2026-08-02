@@ -3,6 +3,7 @@ package materializationread
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -29,10 +30,12 @@ func (r fakeRow) Scan(dest ...any) error {
 }
 
 type fakeQueryer struct {
-	rows []fakeRow
+	rows    []fakeRow
+	queries []string
 }
 
-func (q *fakeQueryer) QueryRow(context.Context, string, ...any) pgx.Row {
+func (q *fakeQueryer) QueryRow(_ context.Context, query string, _ ...any) pgx.Row {
+	q.queries = append(q.queries, query)
 	if len(q.rows) == 0 {
 		return fakeRow{err: errors.New("unexpected query")}
 	}
@@ -90,13 +93,17 @@ func TestGetDistinguishesPublishedWithAndWithoutPostingRows(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			ledger := &fakeQueryer{rows: []fakeRow{{values: []any{test.count}}}}
 			store := &Store{
 				evidence: &fakeQueryer{rows: []fakeRow{{values: []any{"PUBLISHED", ""}}}},
-				ledger:   &fakeQueryer{rows: []fakeRow{{values: []any{test.count}}}},
+				ledger:   ledger,
 			}
 			got, err := store.Get(context.Background(), "subject", "run", "fragment")
 			if err != nil || got.State != test.want || got.PostingCount != test.count {
 				t.Fatalf("unexpected result: %#v err=%v", got, err)
+			}
+			if len(ledger.queries) != 1 || !strings.Contains(ledger.queries[0], "event.current_revision_id") {
+				t.Fatalf("materialization count must read only current Event revisions: %q", ledger.queries)
 			}
 		})
 	}
