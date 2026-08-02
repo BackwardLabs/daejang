@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import {
   assertReportAttestationRuntimeInstalled,
   assertCleanGitCheckout,
+  combinedJITConfigExpression,
   configureTaxUpbitQuoteRuntime,
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
@@ -81,6 +82,21 @@ test('keeps JIT artifacts outside immutable application releases by default', ()
       root: '/durable/jit/objects',
       temp: '/durable/jit/tmp',
     },
+  )
+})
+
+test('writes JIT artifacts to the same durable paths consumed by posting', () => {
+  const paths = resolveJITArtifactPaths({ runtime: '/runtime with spaces' })
+  assert.equal(
+    combinedJITConfigExpression({
+      socket: '/private/tmp/giwa/jit.sock',
+      artifactRoot: paths.root,
+      artifactTemp: paths.temp,
+    }),
+    '. as $item ireduce ({}; . * $item) | ' +
+      '.server.listen = "unix:///private/tmp/giwa/jit.sock" | ' +
+      '.persistence.artifact.root = "/runtime with spaces/artifacts/jit/root" | ' +
+      '.persistence.artifact.temp = "/runtime with spaces/artifacts/jit/tmp"',
   )
 })
 
