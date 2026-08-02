@@ -87,6 +87,7 @@ func (e *JITFailure) Retryable() bool { return e.retryable }
 
 type EVMJITOrchestrator interface {
 	Start(context.Context, EVMJITRequest) (JITRun, error)
+	Retry(context.Context, JITRun) (JITRun, error)
 	AwaitTerminal(context.Context, JITRun) (JITTerminalResult, error)
 }
 
@@ -276,6 +277,22 @@ func (r Runner) processEVM(ctx context.Context, job sourcejobstore.SyncJob) erro
 		return r.handleJITError(ctx, job, err)
 	}
 	if terminal.State != "SUCCEEDED" {
+		if job.Attempts == 1 {
+			retried, retryErr := r.EVMJIT.Retry(ctx, run)
+			if retryErr != nil {
+				return r.handleJITError(ctx, job, retryErr)
+			}
+			if strings.TrimSpace(retried.ID) == "" {
+				return r.Store.Fail(ctx, job, "JIT_RETRY_INVALID", "JIT 재시도 실행 식별자가 비어 있습니다.")
+			}
+			job, err = r.Store.UpdateProgress(ctx, job, sourcejobstore.Progress{
+				Phase: "PUBLISH", UpstreamJITRunID: retried.ID, ExpectedVersion: job.ProgressVersion,
+			})
+			if err != nil {
+				return err
+			}
+			return NewJITFailure("JIT_RUN_RETRIED", "실패한 JIT 실행을 새 revision으로 다시 시도합니다.", true, nil)
+		}
 		code := strings.TrimSpace(terminal.FailureCode)
 		if code == "" {
 			code = "JIT_RUN_FAILED"

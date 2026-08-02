@@ -28,7 +28,15 @@ type recordingJITServer struct {
 	mu           sync.Mutex
 	materialized []*jitv1.MaterializeAccountSelectionRequest
 	started      *jitv1.StartJitRunRequest
+	retried      *jitv1.RetryJitRunRequest
 	getCalls     int
+}
+
+func (s *recordingJITServer) RetryJitRun(_ context.Context, request *jitv1.RetryJitRunRequest) (*jitv1.RetryJitRunResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retried = request
+	return &jitv1.RetryJitRunResponse{Accepted: &jitv1.StartJitRunAccepted{RunId: "jit-run-retry-1", State: "ACCEPTED"}}, nil
 }
 
 func (s *recordingJITServer) MaterializeAccountSelection(_ context.Context, request *jitv1.MaterializeAccountSelectionRequest) (*jitv1.MaterializeAccountSelectionResponse, error) {
@@ -38,6 +46,27 @@ func (s *recordingJITServer) MaterializeAccountSelection(_ context.Context, requ
 	return &jitv1.MaterializeAccountSelectionResponse{Selection: &jitv1.AccountCandidateSelectionRef{
 		SelectionId: "selection-1", SelectionDigest: strings.Repeat("a", 64), LogicalCandidateCount: 3,
 	}}, nil
+}
+
+func TestClientRetriesFailedRunThroughTheCanonicalJITRPC(t *testing.T) {
+	server := &recordingJITServer{}
+	connection := newTestConnection(t, server)
+	client, err := New(
+		jitv1.NewCandidateQueryServiceClient(connection), jitv1.NewJitEngineServiceClient(connection),
+		testConfig(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retried, err := client.Retry(context.Background(), worker.JITRun{ID: "jit-run-failed"})
+	if err != nil || retried.ID != "jit-run-retry-1" {
+		t.Fatalf("unexpected retry result: run=%#v error=%v", retried, err)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.retried == nil || server.retried.GetRunId() != "jit-run-failed" {
+		t.Fatalf("retry RPC did not preserve the failed run coordinate: %#v", server.retried)
+	}
 }
 
 func (s *recordingJITServer) StartJitRun(_ context.Context, request *jitv1.StartJitRunRequest) (*jitv1.StartJitRunResponse, error) {

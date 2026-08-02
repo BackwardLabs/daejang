@@ -11,6 +11,7 @@ import (
 type recordingReclassificationStore struct {
 	targets []sourcejobstore.ActionRuntimeReclassificationTarget
 	params  []sourcejobstore.EnqueueParams
+	jobs    []sourcejobstore.SyncJob
 }
 
 func (s *recordingReclassificationStore) ListActionRuntimeReclassificationTargets(context.Context) ([]sourcejobstore.ActionRuntimeReclassificationTarget, error) {
@@ -19,6 +20,11 @@ func (s *recordingReclassificationStore) ListActionRuntimeReclassificationTarget
 
 func (s *recordingReclassificationStore) Enqueue(_ context.Context, params sourcejobstore.EnqueueParams) (sourcejobstore.SyncJob, error) {
 	s.params = append(s.params, params)
+	if len(s.jobs) > 0 {
+		job := s.jobs[0]
+		s.jobs = s.jobs[1:]
+		return job, nil
+	}
 	return sourcejobstore.SyncJob{}, nil
 }
 
@@ -39,6 +45,27 @@ func TestEnqueueActionRuntimeReclassificationPreservesCoverageAndIsRuntimeIdempo
 		value.RequestedCoverageEnd != store.targets[0].CoverageEnd ||
 		value.IdempotencyKey != "action-runtime:"+runtimeID+":"+store.targets[0].SourceID {
 		t.Fatalf("reclassification changed the target contract: %#v", value)
+	}
+}
+
+func TestEnqueueActionRuntimeReclassificationRetriesAnExistingFailedJob(t *testing.T) {
+	runtimeID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	store := &recordingReclassificationStore{
+		targets: []sourcejobstore.ActionRuntimeReclassificationTarget{{
+			SubjectID: "00000000-0000-4000-8000-000000000001",
+			SourceID:  "00000000-0000-4000-8000-000000000002",
+		}},
+		jobs: []sourcejobstore.SyncJob{{
+			ID: "00000000-0000-4000-8000-000000000003", State: "FAILED",
+		}},
+	}
+	count, err := enqueueActionRuntimeReclassification(context.Background(), store, runtimeID)
+	if err != nil || count != 1 || len(store.params) != 2 {
+		t.Fatalf("unexpected retry result: count=%d params=%#v error=%v", count, store.params, err)
+	}
+	want := "action-runtime-retry:" + runtimeID + ":00000000-0000-4000-8000-000000000003"
+	if store.params[1].IdempotencyKey != want || store.params[1].Trigger != "BACKFILL" {
+		t.Fatalf("failed runtime job was not retried deterministically: %#v", store.params[1])
 	}
 }
 
