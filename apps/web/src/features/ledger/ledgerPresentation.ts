@@ -261,6 +261,12 @@ export const describeLedgerAction = (
   if (subtype === 'FIAT_WITHDRAWAL') {
     return { label: '원화 출금', description: '본인 원화 출금' }
   }
+  if (subtype === 'LENDING_SUPPLY') {
+    return { label: '자산 공급', description: '대출 포지션 증가' }
+  }
+  if (subtype === 'LENDING_WITHDRAW') {
+    return { label: '자산 회수', description: '대출 포지션 감소' }
+  }
   const description = describeFlowShape(flowShape)
   if (flowShape === 'DEPOSIT_INTEREST') return { label: '예치금 이용료', description }
   if (flowShape === 'AIRDROP') return { label: '에어드롭', description }

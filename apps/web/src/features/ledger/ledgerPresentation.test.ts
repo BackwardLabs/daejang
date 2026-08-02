@@ -148,6 +148,12 @@ describe('ledger posting presentation', () => {
     expect(describeLedgerAction('TRANSFER', 'EXTERNAL_IN', [{ direction: 'IN' }], 'FIAT_DEPOSIT')).toEqual({
       label: '원화 입금', description: '본인 원화 입금',
     })
+    expect(describeLedgerAction('STAKE', 'POSITION_CHANGE', [], 'LENDING_SUPPLY')).toEqual({
+      label: '자산 공급', description: '대출 포지션 증가',
+    })
+    expect(describeLedgerAction('STAKE', 'POSITION_CHANGE', [], 'LENDING_WITHDRAW')).toEqual({
+      label: '자산 회수', description: '대출 포지션 감소',
+    })
   })
 
   it('uses material posting direction when a transfer flow shape is incomplete', () => {
