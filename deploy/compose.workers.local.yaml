@@ -1,0 +1,99 @@
+# Use with daejang-db/compose.yaml from an owned clone. This file never
+# references production DBs, runtime directories, or deployment credentials.
+services:
+  taxd:
+    profiles: ["tax"]
+    build:
+      context: ${DAEJANG_TAX_ENGINE_DIR:?Set DAEJANG_TAX_ENGINE_DIR to an owned daejang-tax-engine clone}
+      dockerfile: Dockerfile
+      secrets:
+        - source: github_token
+          target: github_token
+    image: daejang-taxd:local
+    env_file:
+      - ${DAEJANG_WORKERS_RUNTIME_ENV_FILE:?Set DAEJANG_WORKERS_RUNTIME_ENV_FILE to a test-only runtime env file}
+    environment:
+      DAEJANG_DATABASE_URL: postgres://daejang_tax_app:${DAEJANG_TAX_APP_PASSWORD:-daejang-tax-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+      DAEJANG_ARTIFACT_ROOT: /var/lib/daejang/artifacts
+      DAEJANG_ARTIFACT_TEMP: /var/lib/daejang/artifacts.tmp
+      DAEJANG_TAXD_HEALTH_ADDRESS: 0.0.0.0:8080
+      DAEJANG_TAXD_CLAIM_CONTROL_DIR: /run/daejang/tax/claims
+      DAEJANG_TAXD_CLAIM_CONTROL_STATE_DIR: /var/lib/daejang/tax-state/claim-control
+      DAEJANG_TAXD_CLAIM_RECEIPT_DIR: /var/lib/daejang/tax-state/claim-receipts
+    ports:
+      - 127.0.0.1:${DAEJANG_TAXD_PORT:-18080}:8080
+    volumes:
+      - local-artifacts:/var/lib/daejang
+      - local-tax-state:/var/lib/daejang/tax-state
+      - ${DAEJANG_LOCAL_RUNTIME_DIR:?Set DAEJANG_LOCAL_RUNTIME_DIR to a test-only runtime directory}/tax:/run/daejang/tax:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  posting-source:
+    profiles: ["source"]
+    build:
+      context: ${DAEJANG_POSTING_SERVICE_DIR:?Set DAEJANG_POSTING_SERVICE_DIR to an owned daejang-posting-service clone}
+      dockerfile: Dockerfile
+      secrets:
+        - source: github_token
+          target: github_token
+    image: daejang-posting-service:local
+    env_file:
+      - ${DAEJANG_WORKERS_RUNTIME_ENV_FILE:?Set DAEJANG_WORKERS_RUNTIME_ENV_FILE to a test-only runtime env file}
+    environment:
+      DAEJANG_POSTING_DATABASE_URL: postgres://daejang_event_app:${DAEJANG_EVENT_APP_PASSWORD:-daejang-event-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+      DAEJANG_POSTING_ARTIFACT_DATABASE_URL: postgres://daejang_source_app:${DAEJANG_SOURCE_APP_PASSWORD:-daejang-source-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+    command:
+      - --artifact-root
+      - /var/lib/daejang/artifacts
+      - --artifact-temp
+      - /var/lib/daejang/artifacts.tmp
+      - --service-root
+      - /app
+      - --claim-policy
+      - /run/daejang/source/source-publication-claim-policy.json
+    volumes:
+      - local-artifacts:/var/lib/daejang
+      - ${DAEJANG_LOCAL_RUNTIME_DIR:?Set DAEJANG_LOCAL_RUNTIME_DIR to a test-only runtime directory}/source:/run/daejang/source:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  posting-evm:
+    profiles: ["evm"]
+    build:
+      context: ${DAEJANG_POSTING_SERVICE_DIR:?Set DAEJANG_POSTING_SERVICE_DIR to an owned daejang-posting-service clone}
+      dockerfile: Dockerfile
+      secrets:
+        - source: github_token
+          target: github_token
+    image: daejang-posting-service:local
+    env_file:
+      - ${DAEJANG_WORKERS_RUNTIME_ENV_FILE:?Set DAEJANG_WORKERS_RUNTIME_ENV_FILE to a test-only runtime env file}
+    environment:
+      DAEJANG_POSTING_DATABASE_URL: postgres://daejang_event_app:${DAEJANG_EVENT_APP_PASSWORD:-daejang-event-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+    entrypoint: ["/usr/local/bin/evm-posting-worker"]
+    command:
+      - --mode
+      - canonical
+      - --artifact-root
+      - /var/lib/daejang/artifacts
+      - --artifact-temp
+      - /var/lib/daejang/artifacts.tmp
+      - --claim-policy
+      - /run/daejang/evm/evm-publication-claim-policy.json
+    volumes:
+      - local-artifacts:/var/lib/daejang
+      - ${DAEJANG_LOCAL_RUNTIME_DIR:?Set DAEJANG_LOCAL_RUNTIME_DIR to a test-only runtime directory}/evm:/run/daejang/evm:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+secrets:
+  github_token:
+    environment: DAEJANG_GITHUB_TOKEN
+
+volumes:
+  local-artifacts:
+  local-tax-state:

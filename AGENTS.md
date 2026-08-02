@@ -14,6 +14,8 @@
 
 - 프로젝트 개요와 실행 방법: [README.md](README.md)
 - 이슈, Linear 브랜치, PR 및 리뷰 방식: [CONTRIBUTING.md](CONTRIBUTING.md)
+- 개인 workspace, 격리 Docker 검증과 image digest release 절차: [docs/release-image-flow.md](docs/release-image-flow.md)
+- `wiimdy` OS 사용자로 Daejang GitHub 작업을 수행할 때만 `/Users/Shared/Projects/01_Daejang/AGENTS.local.md`를 먼저 읽습니다. 다른 사용자·다른 프로젝트에는 적용하지 않습니다.
 - 템플릿 초기 설정: [TEMPLATE_SETUP.md](TEMPLATE_SETUP.md)
 - 이슈 및 PR 입력 형식: `.github/`
 
@@ -51,6 +53,12 @@
 - 버그 수정에는 가능하면 실패를 재현하는 테스트 또는 검증 절차를 포함합니다.
 - 실행할 수 없는 검사가 있으면 생략하지 말고 이유와 미검증 범위를 결과에 명시합니다.
 - 코드, 테스트, 문서와 PR 설명이 서로 일치할 때 작업을 완료합니다.
+
+## 공통 컨테이너·release 경계
+
+- 공용 checkout이 아닌 자신의 clone에서만 변경·빌드·개발 실행을 합니다.
+- 서비스·worker·migration 영향이 있으면 PR 전 격리 Docker/DB 검증을 실행하거나, 실행할 수 없는 이유와 위험을 PR에 기록합니다.
+- 운영 DB·secret·Supervisor/launchd runtime은 검증에 사용하지 않으며, main 병합 뒤 검증한 image digest만 배포 후보로 취급합니다.
 
 ## GitHub 및 Linear
 
