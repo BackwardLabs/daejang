@@ -13,6 +13,11 @@ export type DashboardModel = {
 export type LedgerPostingModel = {
   legId: string
   accountId: string
+  accountKind?: string
+  accountLocator?: string
+  accountLabel?: string
+  accountChainId?: string
+  accountVenue?: string
   assetId: string
   occurredAt: string
   direction: string

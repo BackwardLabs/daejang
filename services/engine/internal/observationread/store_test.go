@@ -69,6 +69,22 @@ func TestClassifyCEXObservationRecords(t *testing.T) {
 	}
 }
 
+func TestObservationProjectionReadsCanonicalAccountSourceMetadata(t *testing.T) {
+	source, err := os.ReadFile("store.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"account.kind,account.locator,COALESCE(account.label,''),COALESCE(account.chain_id,''),COALESCE(account.venue,'')",
+		"JOIN subject_evidence.account AS account",
+		"account.account_id=observation.account_id",
+	} {
+		if !strings.Contains(string(source), expected) {
+			t.Fatalf("observation projection does not read canonical account source metadata: missing %q", expected)
+		}
+	}
+}
+
 func TestStoreExternalDatabaseExcludesMaterializedObservation(t *testing.T) {
 	databaseURL := os.Getenv("DAEJANG_OBSERVATION_READ_TEST_OWNER_DATABASE_URL")
 	subjectID := os.Getenv("DAEJANG_OBSERVATION_READ_TEST_SUBJECT_ID")

@@ -1957,6 +1957,11 @@ type LedgerPosting struct {
 	AssetDecimals    uint32                 `protobuf:"varint,12,opt,name=asset_decimals,json=assetDecimals,proto3" json:"asset_decimals,omitempty"`
 	HasAssetDecimals bool                   `protobuf:"varint,13,opt,name=has_asset_decimals,json=hasAssetDecimals,proto3" json:"has_asset_decimals,omitempty"`
 	AssetVenue       string                 `protobuf:"bytes,14,opt,name=asset_venue,json=assetVenue,proto3" json:"asset_venue,omitempty"`
+	AccountKind      string                 `protobuf:"bytes,15,opt,name=account_kind,json=accountKind,proto3" json:"account_kind,omitempty"`
+	AccountLocator   string                 `protobuf:"bytes,16,opt,name=account_locator,json=accountLocator,proto3" json:"account_locator,omitempty"`
+	AccountLabel     string                 `protobuf:"bytes,17,opt,name=account_label,json=accountLabel,proto3" json:"account_label,omitempty"`
+	AccountChainId   string                 `protobuf:"bytes,18,opt,name=account_chain_id,json=accountChainId,proto3" json:"account_chain_id,omitempty"`
+	AccountVenue     string                 `protobuf:"bytes,19,opt,name=account_venue,json=accountVenue,proto3" json:"account_venue,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -2085,6 +2090,41 @@ func (x *LedgerPosting) GetHasAssetDecimals() bool {
 func (x *LedgerPosting) GetAssetVenue() string {
 	if x != nil {
 		return x.AssetVenue
+	}
+	return ""
+}
+
+func (x *LedgerPosting) GetAccountKind() string {
+	if x != nil {
+		return x.AccountKind
+	}
+	return ""
+}
+
+func (x *LedgerPosting) GetAccountLocator() string {
+	if x != nil {
+		return x.AccountLocator
+	}
+	return ""
+}
+
+func (x *LedgerPosting) GetAccountLabel() string {
+	if x != nil {
+		return x.AccountLabel
+	}
+	return ""
+}
+
+func (x *LedgerPosting) GetAccountChainId() string {
+	if x != nil {
+		return x.AccountChainId
+	}
+	return ""
+}
+
+func (x *LedgerPosting) GetAccountVenue() string {
+	if x != nil {
+		return x.AccountVenue
 	}
 	return ""
 }
@@ -4686,7 +4726,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\btax_year\x18\x02 \x01(\x05R\ataxYear\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x04 \x01(\tR\tpageToken\"\xe6\x03\n" +
+	"page_token\x18\x04 \x01(\tR\tpageToken\"\xa6\x05\n" +
 	"\rLedgerPosting\x12\x15\n" +
 	"\x06leg_id\x18\x01 \x01(\tR\x05legId\x12\x1d\n" +
 	"\n" +
@@ -4707,7 +4747,12 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x0easset_decimals\x18\f \x01(\rR\rassetDecimals\x12,\n" +
 	"\x12has_asset_decimals\x18\r \x01(\bR\x10hasAssetDecimals\x12\x1f\n" +
 	"\vasset_venue\x18\x0e \x01(\tR\n" +
-	"assetVenue\"\xb8\x02\n" +
+	"assetVenue\x12!\n" +
+	"\faccount_kind\x18\x0f \x01(\tR\vaccountKind\x12'\n" +
+	"\x0faccount_locator\x18\x10 \x01(\tR\x0eaccountLocator\x12#\n" +
+	"\raccount_label\x18\x11 \x01(\tR\faccountLabel\x12(\n" +
+	"\x10account_chain_id\x18\x12 \x01(\tR\x0eaccountChainId\x12#\n" +
+	"\raccount_venue\x18\x13 \x01(\tR\faccountVenue\"\xb8\x02\n" +
 	"\x16LedgerTransferEndpoint\x12\x1e\n" +
 	"\n" +
 	"resolution\x18\x01 \x01(\tR\n" +

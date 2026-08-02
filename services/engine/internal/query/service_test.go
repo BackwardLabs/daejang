@@ -321,6 +321,31 @@ func TestLedgerProjectionIncludesPersistedAssetMetadata(t *testing.T) {
 	}
 }
 
+func TestLedgerProjectionIncludesCanonicalAccountSourceMetadata(t *testing.T) {
+	at := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	reads := &fakeReadStore{ledger: []readmodelstore.LedgerEvent{{
+		EventID: "wallet-transfer", EffectiveAt: at,
+		Postings: []readmodelstore.Posting{{
+			LegID: "leg-wallet", AccountID: "wallet-account-opaque",
+			AccountKind: "WALLET", AccountLocator: "0x16512376e2ea3c7b464cedeea3dce9b8a590fd80",
+			AccountLabel: "Main wallet", AccountChainID: "eip155:10",
+			AssetID: "asset:opaque", OccurredAt: at, Direction: "IN", Quantity: "1", Role: "PRINCIPAL",
+		}},
+	}}}
+	service := &Service{Reads: reads}
+
+	ledger, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{Context: queryTestContext(), TaxYear: 2026, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	posting := ledger.GetItems()[0].GetPostings()[0]
+	if posting.GetAccountKind() != "WALLET" ||
+		posting.GetAccountLocator() != "0x16512376e2ea3c7b464cedeea3dce9b8a590fd80" ||
+		posting.GetAccountLabel() != "Main wallet" || posting.GetAccountChainId() != "eip155:10" {
+		t.Fatalf("account source metadata was not projected: %#v", posting)
+	}
+}
+
 func (f *fakeTaxReportStore) GetCurrentReportForYear(_ context.Context, subject string, taxYear int) (taxreportstore.CurrentReportDetail, bool, error) {
 	f.lastSubject, f.lastTaxYear = subject, taxYear
 	return f.current, f.found, f.err

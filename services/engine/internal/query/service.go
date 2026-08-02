@@ -160,7 +160,7 @@ func (s *Service) ListLedgerEvents(ctx context.Context, req *enginev1.ListLedger
 			}
 		}
 		for _, p := range v.Postings {
-			posting := &enginev1.LedgerPosting{LegId: p.LegID, AccountId: p.AccountID, AssetId: p.AssetID, OccurredAt: timestamppb.New(p.OccurredAt), Direction: p.Direction, Quantity: p.Quantity, Role: p.Role, FairValue: p.FairValue, CostBasis: p.CostBasis, Denomination: p.Denomination, AssetSymbol: p.AssetSymbol, AssetVenue: p.AssetVenue}
+			posting := &enginev1.LedgerPosting{LegId: p.LegID, AccountId: p.AccountID, AssetId: p.AssetID, OccurredAt: timestamppb.New(p.OccurredAt), Direction: p.Direction, Quantity: p.Quantity, Role: p.Role, FairValue: p.FairValue, CostBasis: p.CostBasis, Denomination: p.Denomination, AssetSymbol: p.AssetSymbol, AssetVenue: p.AssetVenue, AccountKind: p.AccountKind, AccountLocator: p.AccountLocator, AccountLabel: p.AccountLabel, AccountChainId: p.AccountChainID, AccountVenue: p.AccountVenue}
 			if p.AssetDecimals != nil {
 				posting.AssetDecimals = uint32(*p.AssetDecimals)
 				posting.HasAssetDecimals = true

@@ -170,7 +170,28 @@ describe('ledger posting presentation', () => {
     })
   })
 
-  it('derives a visible source only from durable posting identifiers', () => {
+  it('uses canonical account metadata before legacy identifier fallbacks', () => {
+    expect(describeLedgerSource([{
+      accountId: 'wallet-account-opaque',
+      accountKind: 'WALLET',
+      accountLocator: '0x16512376e2ea3c7b464cedeea3dce9b8a590fd80',
+      accountChainId: 'eip155:10',
+      assetId: 'asset:b98a3b1dc3dcc0b641b6bbbf83e43c46',
+    }])).toEqual({
+      kind: 'WALLET',
+      label: 'Optimism',
+      detail: '0x16512376e2ea3c7b464cedeea3dce9b8a590fd80',
+    })
+    expect(describeLedgerSource([{
+      accountId: 'cex-account-opaque',
+      accountKind: 'CEX',
+      accountLabel: '내 업비트 계정',
+      accountVenue: 'upbit',
+      assetId: 'asset:6670292a58173d65082662cf59c430e5',
+    }])).toEqual({ kind: 'CEX', label: 'Upbit', detail: '내 업비트 계정' })
+  })
+
+  it('keeps legacy durable identifier source fallbacks', () => {
     expect(describeLedgerSource([{
       accountId: 'account-upbit',
       assetId: 'cex-document-asset:upbit:decimal8:krw',
