@@ -1167,9 +1167,13 @@ const canonicalJSON = (value) => {
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 
-export const createActionRuntimeIdentity = (repository, jitExecutable) => {
-  if (!jitExecutable) {
-    throw new Error('The pinned JIT executable is required for runtime identity')
+export const createActionRuntimeIdentity = (
+  repository,
+  jitExecutable,
+  postingExecutable,
+) => {
+  if (!jitExecutable || !postingExecutable) {
+    throw new Error('The pinned JIT and EVM Posting executables are required for runtime identity')
   }
   const files = [
     'releases/action-registry-v1.json',
@@ -1178,11 +1182,15 @@ export const createActionRuntimeIdentity = (repository, jitExecutable) => {
     'scripts/action_evaluator.py',
   ].map((path) => ({ path, sha256: sha256(readFileSync(join(repository, path))) }))
   return sha256(canonicalJSON({
-    schemaVersion: 'giwa.action-runtime-identity.v2',
+    schemaVersion: 'giwa.action-runtime-identity.v3',
     files,
     // Action evaluation consumes evidence emitted by this exact executable.
     // Rotating either side must enqueue a new immutable wallet generation.
     jitExecutableSha256: sha256(readFileSync(jitExecutable)),
+    // Canonical Event identity and revision convergence are writer behavior.
+    // A writer upgrade must replay existing wallet sources even when the
+    // registry and JIT evidence bytes themselves did not change.
+    postingExecutableSha256: sha256(readFileSync(postingExecutable)),
   }))
 }
 
@@ -1882,6 +1890,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     const actionRuntimeID = createActionRuntimeIdentity(
       deFiLabelRepository,
       managedJITBinary,
+      join(binaryRoot, 'evm-posting-worker'),
     )
     run(
       join(binaryRoot, 'action-runtime-reclassify'),
