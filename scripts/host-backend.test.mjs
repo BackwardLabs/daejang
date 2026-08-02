@@ -41,6 +41,7 @@ import {
   hostWebAPIEngineEnvironment,
   handoffSupervisorAfterSignal,
   loadTaxActionRegistryRuntime,
+  loadVerifiedActionRuntimeRelease,
   launchdServiceDomains,
   normalizeMultichainSnapshotIds,
   pauseForSignalShutdown,
@@ -180,6 +181,57 @@ test('changes the action runtime identity only when executable source bytes chan
   } finally {
     rmSync(parent, { recursive: true, force: true })
   }
+})
+
+test('derives the canonical Posting trust coordinate from one verified signed release', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'giwa-action-release-test-'))
+  try {
+    const releaseRoot = join(parent, 'releases')
+    mkdirSync(join(parent, 'scripts'), { recursive: true })
+    mkdirSync(releaseRoot, { recursive: true })
+    const commit = '1'.repeat(40)
+    const bundle = JSON.stringify({
+      schemaVersion: 'defi-label.action-registry.v1',
+      registrySourceRepository: 'BackwardLabs/DeFi-Label',
+      registrySourceCommit: commit,
+    })
+    const bundleSha256 = createHash('sha256').update(bundle).digest('hex')
+    writeFileSync(join(releaseRoot, 'action-registry-v1.json'), bundle)
+    writeFileSync(join(releaseRoot, 'action-registry-v1.json.sha256'), `${bundleSha256}\n`)
+    writeFileSync(join(releaseRoot, 'action-registry-v1.json.receipt.json'), JSON.stringify({
+      bundleSha256,
+      registrySourceRepository: 'BackwardLabs/DeFi-Label',
+      registrySourceCommit: commit,
+    }))
+
+    const calls = []
+    const runtime = loadVerifiedActionRuntimeRelease(parent, (command, args) => {
+      calls.push([command, args])
+      return command === 'git'
+        ? { status: 0, stdout: '' }
+        : { status: 0, stdout: '{"valid": true}\n' }
+    })
+
+    assert.deepEqual(runtime, {
+      repository: 'BackwardLabs/DeFi-Label',
+      commit,
+      bundleSha256,
+    })
+    assert.equal(calls[0][1][1], 'verify-runtime-release')
+    assert.deepEqual(calls[1], ['git', ['merge-base', '--is-ancestor', commit, 'HEAD']])
+  } finally {
+    rmSync(parent, { recursive: true, force: true })
+  }
+})
+
+test('fails closed when the Action runtime signed release is not valid', () => {
+  assert.throws(
+    () => loadVerifiedActionRuntimeRelease('/runtime', () => ({
+      status: 0,
+      stdout: '{"valid": false}\n',
+    })),
+    /signed release verification failed/,
+  )
 })
 
 test('stages PDF assets where the flattened host Web API runtime resolves them', () => {
@@ -735,14 +787,20 @@ test('requires a distinct signed JIT claim policy for the canonical EVM worker',
       '/runtime/jit-artifacts',
       '/runtime/jit-temp',
       '/runtime/evm-policy.json',
-      'b6b9ce8cfdb411f10e44fa74378c6eababd3eee4',
+      {
+        repository: 'BackwardLabs/DeFi-Label',
+        commit: 'b6b9ce8cfdb411f10e44fa74378c6eababd3eee4',
+        bundleSha256: 'a'.repeat(64),
+      },
     ),
     [
       '--mode', 'canonical',
       '--artifact-root', '/runtime/jit-artifacts',
       '--artifact-temp', '/runtime/jit-temp',
       '--claim-policy', '/runtime/evm-policy.json',
+      '--trusted-action-runtime-repository', 'BackwardLabs/DeFi-Label',
       '--trusted-action-runtime-commit', 'b6b9ce8cfdb411f10e44fa74378c6eababd3eee4',
+      '--trusted-action-runtime-bundle-sha256', 'a'.repeat(64),
     ],
   )
   assert.throws(
@@ -750,9 +808,13 @@ test('requires a distinct signed JIT claim policy for the canonical EVM worker',
       '/runtime/jit-artifacts',
       '/runtime/jit-temp',
       '/runtime/evm-policy.json',
-      'not-a-commit',
+      {
+        repository: 'BackwardLabs/DeFi-Label',
+        commit: 'not-a-commit',
+        bundleSha256: 'a'.repeat(64),
+      },
     ),
-    /pinned DeFi Action runtime Git commit is required/,
+    /verified DeFi Action runtime release coordinate is required/,
   )
   assert.deepEqual(
     hostEVMPostingWorkerEnvironment('public-key', 'event-url'),
