@@ -78,6 +78,11 @@ export function bootstrapSession({ retry = false } = {}) {
 
   const startRevision = revision
   const controller = new AbortController()
+  // Keep the cleanup capability with the request. Test environments can tear
+  // down their Window before a superseded bootstrap settles, and looking up
+  // `window` again in finally would turn that harmless late settlement into an
+  // unhandled rejection.
+  const clearSessionTimeout = window.clearTimeout.bind(window)
   const timeout = window.setTimeout(
     () => controller.abort(),
     sessionCheckTimeoutMs,
@@ -126,7 +131,7 @@ export function bootstrapSession({ retry = false } = {}) {
       return sessionSnapshot
     })
     .finally(() => {
-      window.clearTimeout(timeout)
+      clearSessionTimeout(timeout)
       if (bootstrapPromise === request) bootstrapPromise = undefined
     })
 
