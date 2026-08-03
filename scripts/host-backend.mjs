@@ -932,7 +932,14 @@ const build = () => {
       },
     })
   }
-  run('go', ['build', '-o', join(binaryRoot, 'evm-posting-worker'), './cmd/evm-posting-worker'], {
+  run('go', [
+    'build',
+    '-trimpath',
+    '-buildvcs=false',
+    '-o',
+    join(binaryRoot, 'evm-posting-worker'),
+    './cmd/evm-posting-worker',
+  ], {
     cwd: postingRepository,
     env: {
       ...baseEnvironment(),
