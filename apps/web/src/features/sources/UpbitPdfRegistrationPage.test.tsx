@@ -127,11 +127,13 @@ describe('UpbitPdfRegistrationPage', () => {
         name: 'Upbit 데이터 소스를 등록했어요',
       }),
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', {
-        name: 'Upbit 데이터 소스를 등록했어요',
-      }),
-    ).toHaveFocus()
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', {
+          name: 'Upbit 데이터 소스를 등록했어요',
+        }),
+      ).toHaveFocus()
+    })
     expect(screen.getByText('등록 완료 · 검토 필요')).toBeInTheDocument()
     expect(screen.getByText('12건 확인 · 0건 반영')).toBeInTheDocument()
     expect(

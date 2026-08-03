@@ -72,6 +72,7 @@ export type LedgerEventModel = {
     actionProofId: string
     actionProfileId?: string
     actionProfileVersion?: string
+    actionBindingId?: string
   }>
 }
 

@@ -17,12 +17,13 @@ const transactionKey = (event: LedgerEventModel) => {
 
 const representativeScore = (event: LedgerEventModel) => {
   const proofScore = event.actionProofId ? 1_000_000 : 0
+  const canonicalActionScore = event.eventId.startsWith('event-action:') ? 10_000 : 0
   const resolutionScore = event.resolution === 'RESOLVED' ? 100_000 : 0
   const materialScore = event.postings.filter((posting) =>
     materialPostingRoles.has(posting.role),
   ).length * 100
 
-  return proofScore + resolutionScore + materialScore + event.postings.length
+  return proofScore + canonicalActionScore + resolutionScore + materialScore + event.postings.length
 }
 
 const postingKey = (posting: LedgerPostingModel) => [
@@ -33,6 +34,49 @@ const postingKey = (posting: LedgerPostingModel) => [
   posting.role,
   posting.occurredAt,
 ].join('\u0000')
+
+const actionSemanticKey = (event: LedgerEventModel) => [
+  event.actionProfileId ?? '',
+  event.actionBindingId ?? '',
+  event.eventType,
+  event.flowShape,
+  event.subtype ?? '',
+  ...event.postings.map(postingKey).sort(),
+].join('\u0001')
+
+const isCanonicalActionEvent = (event: LedgerEventModel) =>
+  event.eventId.startsWith('event-action:')
+
+const projectActions = (ranked: LedgerEventModel[]) => {
+  const proofEvents = ranked.filter(({ actionProofId }) => actionProofId)
+  const canonicalSemanticKeys = new Set(
+    proofEvents.filter(isCanonicalActionEvent).map(actionSemanticKey),
+  )
+  const seenProofs = new Set<string>()
+  const seenLegacySemantics = new Set<string>()
+
+  return proofEvents
+    .filter((event) => {
+      const semanticKey = actionSemanticKey(event)
+      if (isCanonicalActionEvent(event)) return true
+      if (canonicalSemanticKeys.has(semanticKey)) return false
+      if (seenProofs.has(event.actionProofId!)) return false
+      seenProofs.add(event.actionProofId!)
+      if (seenLegacySemantics.has(semanticKey)) return false
+      seenLegacySemantics.add(semanticKey)
+      return true
+    })
+    .map((event) => ({
+      eventId: event.eventId,
+      eventType: event.eventType,
+      flowShape: event.flowShape,
+      subtype: event.subtype,
+      actionProofId: event.actionProofId!,
+      actionProfileId: event.actionProfileId,
+      actionProfileVersion: event.actionProfileVersion,
+      actionBindingId: event.actionBindingId,
+    }))
+}
 
 const mergePostings = (events: LedgerEventModel[]) => {
   const groups = new Map<string, Map<string, LedgerPostingModel[]>>()
@@ -90,20 +134,7 @@ export const projectLedgerTransactions = (events: LedgerEventModel[]) => {
       projectionKey,
       postings: mergePostings(ranked),
       sourceEvents: ranked.map(({ eventId, revisionId }) => ({ eventId, revisionId })),
-      projectedActions: ranked
-        .filter(({ actionProofId }) => actionProofId)
-        .filter((event, index, proofEvents) =>
-          proofEvents.findIndex(({ actionProofId }) => actionProofId === event.actionProofId) === index,
-        )
-        .map((event) => ({
-          eventId: event.eventId,
-          eventType: event.eventType,
-          flowShape: event.flowShape,
-          subtype: event.subtype,
-          actionProofId: event.actionProofId!,
-          actionProfileId: event.actionProfileId,
-          actionProfileVersion: event.actionProfileVersion,
-        })),
+      projectedActions: projectActions(ranked),
     })
   }
 

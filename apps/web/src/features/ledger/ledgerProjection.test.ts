@@ -124,6 +124,57 @@ describe('ledger transaction projection', () => {
     ])
   })
 
+  it('migrates replay-generation duplicates to the canonical Action event', () => {
+    const shared = {
+      chainId: '10',
+      transactionHash: '0xmigrated',
+      transactionCoordinate: 'EXACT',
+      eventType: 'STAKE',
+      flowShape: 'POSITION_CHANGE',
+      subtype: 'LENDING_SUPPLY',
+      resolution: 'RESOLVED',
+      actionProfileId: 'aave-v3.supply',
+      actionProfileVersion: '1.0.0',
+      actionBindingId: 'aave-pool-optimism',
+      postings: [posting('principal', 'PRINCIPAL')],
+    }
+    const result = projectLedgerTransactions([
+      event('event-legacy-generation-1', { ...shared, actionProofId: 'proof-generation-1' }),
+      event('event-legacy-generation-2', { ...shared, actionProofId: 'proof-generation-2' }),
+      event(`event-action:${'a'.repeat(64)}`, { ...shared, actionProofId: 'proof-canonical' }),
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.projectedActions).toEqual([expect.objectContaining({
+      eventId: `event-action:${'a'.repeat(64)}`,
+      actionProofId: 'proof-canonical',
+      actionProfileId: 'aave-v3.supply',
+      actionBindingId: 'aave-pool-optimism',
+    })])
+    expect(result[0]?.sourceEvents).toHaveLength(3)
+  })
+
+  it('preserves distinct canonical actions even when their economic signatures match', () => {
+    const shared = {
+      chainId: '10',
+      transactionHash: '0xidentical-actions',
+      transactionCoordinate: 'EXACT',
+      resolution: 'RESOLVED',
+      actionProfileId: 'profile-a',
+      actionBindingId: 'binding-a',
+      postings: [posting('principal', 'PRINCIPAL')],
+    }
+    const result = projectLedgerTransactions([
+      event(`event-action:${'a'.repeat(64)}`, { ...shared, actionProofId: 'proof-a' }),
+      event(`event-action:${'b'.repeat(64)}`, { ...shared, actionProofId: 'proof-b' }),
+    ])
+
+    expect(result[0]?.projectedActions?.map(({ actionProofId }) => actionProofId)).toEqual([
+      'proof-a',
+      'proof-b',
+    ])
+  })
+
   it('preserves repeated equal-value legs while collapsing duplicate event projections', () => {
     const shared = {
       chainId: '10',
