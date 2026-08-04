@@ -78,6 +78,17 @@ const ledgerEvent = {
   postings: [],
 }
 
+const dashboardResponse = (transactionCount: number, openReviewCount: number) => jsonResponse({
+  dashboard: {
+    sourceCount: 2,
+    transactionCount,
+    openReviewCount,
+    completedCount: Math.max(transactionCount - openReviewCount, 0),
+    exceptionCount: openReviewCount,
+    lastSyncState: 'SUCCEEDED',
+  },
+})
+
 afterEach(() => {
   window.localStorage.clear()
   vi.unstubAllGlobals()
@@ -165,8 +176,8 @@ describe('LedgerPage', () => {
     expect(screen.getAllByText('Upbit').length).toBeGreaterThan(0)
     expect(screen.getByText('장부 확정')).toBeInTheDocument()
     expect(screen.getAllByText('평가 완료').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('들어옴').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('나감').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('증가').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('감소').length).toBeGreaterThan(0)
     expect(screen.getAllByText('매수·매도·입출금의 본체가 되는 자산 변동')).toHaveLength(2)
     expect(screen.getByText('거래소나 서비스에 지불한 처리 비용')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: '당시 취득·처분 금액' })).toBeInTheDocument()
@@ -382,6 +393,7 @@ describe('LedgerPage', () => {
     }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(1, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [sourceEvent] })
       if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
@@ -593,7 +605,11 @@ describe('LedgerPage', () => {
   })
 
   it('shows the real empty state when the API has no events', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items: [] })))
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 0)
+      return jsonResponse({ items: [] })
+    }))
     render(<LedgerPage />)
     const emptyHeading = await screen.findByRole('heading', {
       name: '아직 처리된 거래가 없습니다',
@@ -648,10 +664,27 @@ describe('LedgerPage', () => {
     expect(screen.getByRole('button', { name: '검토 필요 —' })).toBeInTheDocument()
   })
 
+  it('shows selected-year totals instead of the first loaded page lengths', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(141, 37)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent], nextCursor: 'page-2' })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [reviewSummary], nextCursor: 'review-page-2' })
+      if (url.endsWith('/reviews/review-1')) return jsonResponse({ review: reviewDetail })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect(await screen.findByRole('button', { name: '전체 거래 141건' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '검토 필요 37건' })).toBeInTheDocument()
+  })
+
   it('keeps a healthy ledger visible when the Review list fails', async () => {
     let reviewListReads = 0
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(1, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent] })
       if (url.endsWith('/reviews')) {
         reviewListReads++
@@ -668,7 +701,7 @@ describe('LedgerPage', () => {
     fireEvent.click(ledgerDetailButton)
     expect(screen.getByText('event-2027')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '검토 필요 —' }))
+    fireEvent.click(screen.getByRole('button', { name: '검토 필요 1건' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('검토 목록을 불러오지 못했습니다')
     fireEvent.click(screen.getByRole('button', { name: '검토 다시 불러오기' }))
     expect(await screen.findByRole('button', { name: /거래 유형 확인 필요/ })).toBeInTheDocument()
@@ -680,6 +713,7 @@ describe('LedgerPage', () => {
   it('keeps a healthy Review surface usable when the ledger fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
       if (url.includes('/ledger?')) {
         return jsonResponse({ error: { code: 'ENGINE_UNAVAILABLE', message: 'ledger unavailable' } }, 503)
       }
@@ -746,6 +780,7 @@ describe('LedgerPage', () => {
 
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(1, 1)
       if (url.includes(`/ledger?taxYear=${initialYear}`)) return oldLedger
       if (url.includes(`/ledger?taxYear=${nextYear}`)) return jsonResponse({ items: [nextEvent] })
       if (url.endsWith('/reviews') && !init?.method) {
@@ -788,6 +823,7 @@ describe('LedgerPage', () => {
     let resolutionBody: Record<string, unknown> | undefined
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
       if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
@@ -836,6 +872,7 @@ describe('LedgerPage', () => {
     const reviewRequests: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 2)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
       if (url.endsWith('/reviews') && !init?.method) {
         reviewRequests.push(url)
@@ -852,7 +889,7 @@ describe('LedgerPage', () => {
     }))
 
     render(<LedgerPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 2건' }))
     fireEvent.click(await screen.findByRole('button', { name: '검토 더 보기' }))
 
     expect(await screen.findByRole('button', { name: /추가 정보 필요/ })).toBeInTheDocument()
@@ -869,6 +906,7 @@ describe('LedgerPage', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
       if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) {
@@ -911,6 +949,7 @@ describe('LedgerPage', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 2)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
       if (url.endsWith('/reviews') && !init?.method) {
         return jsonResponse({ items: [reviewSummary, secondReviewSummary] })
@@ -954,6 +993,7 @@ describe('LedgerPage', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 2)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
       if (url.endsWith('/reviews') && !init?.method) {
         return jsonResponse({ items: [reviewSummary, secondReviewSummary] })
@@ -1009,6 +1049,7 @@ describe('LedgerPage', () => {
     const resolutionBodies: Array<Record<string, unknown>> = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
       if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })

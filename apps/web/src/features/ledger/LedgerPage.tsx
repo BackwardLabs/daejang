@@ -3,11 +3,13 @@ import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import { ApiClientError } from '../../api/client.ts'
 import {
+  loadDashboard,
   loadLedger,
   loadLedgerEventLots,
   loadReview,
   loadReviews,
   resolveReview,
+  type DashboardModel,
   type LedgerEventModel,
   type LedgerLotLineageModel,
   type LedgerLotLinkModel,
@@ -40,6 +42,12 @@ import './ledger.css'
 const statusLabel = (value: string) => value === 'RESOLVED' ? '완료' : value === 'PARTIAL' ? '일부 확인' : '검토 필요'
 const feeRoles = new Set(['FEE', 'GAS'])
 const sourceKindLabels = { CEX: '거래소', WALLET: '개인지갑', UNKNOWN: '출처 미확인' } as const
+
+const formatMetricCount = (value: number | string | undefined) => {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return `${value}건`
+  if (typeof value === 'string' && /^\d+$/.test(value)) return `${value}건`
+  return '—'
+}
 
 const describeProjectedAction = (event: LedgerEventModel) => {
   if ((event.projectedActions?.length ?? 0) > 1) {
@@ -119,7 +127,7 @@ function LedgerPostingRow({
     <td>
       <span className="ledger-posting-value ledger-posting-direction" data-direction={posting.direction}>
         <strong>{describePostingDirection(posting.direction)}</strong>
-        <small>{posting.direction === 'IN' ? '자산 증가' : posting.direction === 'OUT' ? '자산 감소' : '확인 필요'}</small>
+        <small>{posting.direction === 'IN' ? '보유 수량 증가' : posting.direction === 'OUT' ? '보유 수량 감소' : '확인 필요'}</small>
       </span>
     </td>
     <td>
@@ -357,6 +365,8 @@ export function LedgerPage() {
   const [view, setView] = useState<'ledger' | 'review'>('ledger')
   const [ledgerStatus, setLedgerStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [ledgerReloadKey, setLedgerReloadKey] = useState(0)
+  const [metrics, setMetrics] = useState<DashboardModel>()
+  const [metricsStatus, setMetricsStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   function handleYearChange(nextYear: AppYear) {
     setYear(nextYear)
@@ -383,6 +393,27 @@ export function LedgerPage() {
           ledgerGenerationRef.current === generation &&
           !(error instanceof DOMException && error.name === 'AbortError')
         ) setLedgerStatus('error')
+      })
+    return () => controller.abort()
+  }, [ledgerReloadKey, year])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setMetrics(undefined)
+    setMetricsStatus('loading')
+    void loadDashboard(year, controller.signal)
+      .then(({ dashboard }) => {
+        if (!dashboard) {
+          setMetricsStatus('error')
+          return
+        }
+        setMetrics(dashboard)
+        setMetricsStatus('ready')
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setMetricsStatus('error')
+        }
       })
     return () => controller.abort()
   }, [ledgerReloadKey, year])
@@ -486,8 +517,12 @@ export function LedgerPage() {
   const selectedOption = reviewDetail?.options.find((option) => option.code === resolutionCode)
   const resolutionBusy = resolutionStatus === 'submitting' || resolutionStatus === 'refreshing'
   const resolutionBlocked = resolutionStatus === 'reanalyze'
-  const ledgerCount = ledgerStatus === 'ready' ? `${events.length}건` : '—'
-  const reviewCount = reviewStatus === 'ready' ? `${reviews.length}건` : '—'
+  const ledgerCount = metricsStatus === 'ready'
+    ? formatMetricCount(metrics?.transactionCount)
+    : '—'
+  const reviewCount = metricsStatus === 'ready'
+    ? formatMetricCount(metrics?.openReviewCount)
+    : '—'
 
   const selectReview = (reviewId: string) => {
     selectedReviewIdRef.current = reviewId
