@@ -21,7 +21,10 @@ import type {
   WalletSource,
   WalletSourceRegistry,
 } from '../sources/wallet-source-store.js'
-import type { TaxReportModelReader } from '../tax-report/model-reader.js'
+import type {
+  TaxEvidencePackReader,
+  TaxReportModelReader,
+} from '../tax-report/model-reader.js'
 import { EngineRpcError } from './rpc-error.js'
 
 const protoPath = process.env.ENGINE_PROTO_PATH ?? fileURLToPath(
@@ -115,6 +118,7 @@ type QueryServiceClient = Client & {
   getCurrentTaxReport: UnaryMethod
   listTaxReportHistory: UnaryMethod
   getTaxReportModel: UnaryMethod
+  getTaxEvidencePack: UnaryMethod
 }
 type ReviewServiceClient = Client & {
   getReview: UnaryMethod
@@ -185,7 +189,7 @@ const requestContext = (value: SourceRequestContext) => ({
 })
 
 export class EngineMtlsClient
-  implements WalletSourceRegistry, TaxReportModelReader
+  implements WalletSourceRegistry, TaxReportModelReader, TaxEvidencePackReader
 {
   readonly durable = true
   readonly upbitPdfImportSupported: boolean
@@ -435,6 +439,31 @@ export class EngineMtlsClient
     const response = await this.#unaryOn(
       this.#queryClient,
       'getTaxReportModel',
+      {
+        context: requestContext(context),
+        reportId,
+      },
+    ) as {
+      reportId: string
+      artifactDigest: string
+      mediaType: string
+      canonicalJson: Uint8Array
+    }
+    return {
+      reportId: response.reportId,
+      artifactDigest: response.artifactDigest,
+      mediaType: response.mediaType,
+      canonicalJson: response.canonicalJson,
+    }
+  }
+
+  async getTaxEvidencePack(
+    context: SourceRequestContext,
+    reportId: string,
+  ) {
+    const response = await this.#unaryOn(
+      this.#queryClient,
+      'getTaxEvidencePack',
       {
         context: requestContext(context),
         reportId,

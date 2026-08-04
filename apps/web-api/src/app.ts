@@ -41,6 +41,7 @@ import { registerSourceRoutes } from './routes/sources.js'
 import { registerDataRoutes, type EngineDataClient } from './routes/data.js'
 import { registerTaxReportArtifactRoutes } from './routes/tax-report-artifacts.js'
 import { registerTaxReportDetailRoutes } from './routes/tax-report-detail.js'
+import { registerTaxReportEvidenceRoutes } from './routes/tax-report-evidence.js'
 import { registerTaxReportRoutes } from './routes/tax-reports.js'
 import { registerReportPaymentRoutes } from './routes/report-payments.js'
 import { registerSecurityPolicy } from './security.js'
@@ -75,7 +76,10 @@ import {
   type WalletSourceStore,
 } from './sources/wallet-source-store.js'
 import type { TaxReportReader } from './tax-report/types.js'
-import type { TaxReportModelReader } from './tax-report/model-reader.js'
+import type {
+  TaxEvidencePackReader,
+  TaxReportModelReader,
+} from './tax-report/model-reader.js'
 import { UnavailableWalletSourceStore } from './sources/unavailable-wallet-source-store.js'
 import type { ReportPaymentFacilitator } from './report-payment/facilitator.js'
 import type { ReportPaymentStore } from './report-payment/types.js'
@@ -99,6 +103,7 @@ type BuildAppOptions = {
   engineDataClient?: EngineDataClient
   taxReportReader?: TaxReportReader
   taxReportModelReader?: TaxReportModelReader
+  taxEvidencePackReader?: TaxEvidencePackReader
   reportPaymentTaxReportReader?: ReportPaymentTaxReportReader
   reportPaymentStore?: ReportPaymentStore
   reportPaymentFacilitator?: ReportPaymentFacilitator
@@ -212,6 +217,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   ) {
     throw new Error(
       'A durable TaxReportModelReader is required in production',
+    )
+  }
+  if (
+    config.runtimeMode === 'production' &&
+    options.taxEvidencePackReader &&
+    options.taxEvidencePackReader.durable !== true
+  ) {
+    throw new Error(
+      'A durable TaxEvidencePackReader is required in production',
     )
   }
   if (
@@ -536,6 +550,11 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
       })
       await registerTaxReportArtifactRoutes(protectedApp, {
         reader: options.taxReportModelReader,
+      })
+    }
+    if (options.taxEvidencePackReader) {
+      await registerTaxReportEvidenceRoutes(protectedApp, {
+        reader: options.taxEvidencePackReader,
       })
     }
     await registerReportPaymentRoutes(protectedApp, {

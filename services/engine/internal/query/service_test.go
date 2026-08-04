@@ -83,11 +83,13 @@ type fakeTaxReportStore struct {
 
 type fakeTaxReportArtifactStore struct {
 	object      artifactstore.Object
+	objects     map[string]artifactstore.Object
 	found       bool
 	err         error
 	lastSubject string
 	lastReport  string
 	lastDigest  string
+	digests     []string
 }
 
 func TestObservationReadProjectionMergesBeforeApplyingLedgerLimit(t *testing.T) {
@@ -368,6 +370,11 @@ func (f *fakeTaxReportArtifactStore) GetTaxReportArtifact(
 	digest string,
 ) (artifactstore.Object, bool, error) {
 	f.lastSubject, f.lastReport, f.lastDigest = subject, reportID, digest
+	f.digests = append(f.digests, digest)
+	if f.objects != nil {
+		object, found := f.objects[digest]
+		return object, found, f.err
+	}
 	return f.object, f.found, f.err
 }
 
@@ -426,29 +433,62 @@ func taxReportModelFixture(t *testing.T) (taxreportstore.StoredReport, []byte) {
 	report := taxreportstore.StoredReport{
 		SubjectID: queryTestSubjectID,
 		Report: taxreportstore.Report{
-			ID:                 "tax-report:" + strings.Repeat("a", 64),
-			ResidentID:         "resident-1",
-			TaxYear:            2027,
-			InputDigest:        strings.Repeat("1", 64),
-			SchemaDigest:       strings.Repeat("2", 64),
-			EvidencePackDigest: strings.Repeat("3", 64),
+			ID:                  "tax-report:" + strings.Repeat("a", 64),
+			ResidentID:          "resident-1",
+			TaxYear:             2027,
+			TaxInventoryRunID:   "tax-inventory-run-1",
+			TaxEstimateID:       "tax-estimate-1",
+			LotRunID:            "lot-run-1",
+			InputDigest:         strings.Repeat("1", 64),
+			SchemaDigest:        strings.Repeat("2", 64),
+			DenominationAssetID: "asset-krw-upbit",
+			EvidencePackDigest:  strings.Repeat("3", 64),
+			Policy: taxreportstore.Producer{
+				Name: "giwa-korea-tax-policy", Version: "2027.1", ArtifactDigest: strings.Repeat("4", 64),
+			},
+			Engine: taxreportstore.Producer{
+				Name: "giwa-tax-engine", Version: "1.0.0", ArtifactDigest: strings.Repeat("5", 64),
+			},
+			IssuedAt: time.Date(2028, 1, 10, 0, 0, 0, 0, time.UTC),
 		},
 	}
+	value := taxReportModelJSON(t, report, "generation-1")
+	report.ReportArtifactDigest = digestBytes(value)
+	return report, value
+}
+
+func taxReportModelJSON(
+	t *testing.T,
+	report taxreportstore.StoredReport,
+	generationID string,
+) []byte {
+	t.Helper()
 	value, err := json.Marshal(map[string]any{
-		"schemaVersion":      taxReportModelSchemaV1,
-		"reportId":           report.ID,
-		"inputDigest":        report.InputDigest,
-		"subjectId":          report.SubjectID,
-		"residentId":         report.ResidentID,
-		"taxYear":            report.TaxYear,
-		"schemaDigest":       report.SchemaDigest,
-		"evidencePackDigest": report.EvidencePackDigest,
+		"schemaVersion":       taxReportModelSchemaV1,
+		"reportId":            report.ID,
+		"inputDigest":         report.InputDigest,
+		"subjectId":           report.SubjectID,
+		"residentId":          report.ResidentID,
+		"taxYear":             report.TaxYear,
+		"taxInventoryRunId":   report.TaxInventoryRunID,
+		"taxEstimateId":       report.TaxEstimateID,
+		"lotRunId":            report.LotRunID,
+		"generationId":        generationID,
+		"schemaDigest":        report.SchemaDigest,
+		"denominationAssetId": report.DenominationAssetID,
+		"evidencePackDigest":  report.EvidencePackDigest,
+		"policy": map[string]any{
+			"name": report.Policy.Name, "version": report.Policy.Version, "artifactDigest": report.Policy.ArtifactDigest,
+		},
+		"engine": map[string]any{
+			"name": report.Engine.Name, "version": report.Engine.Version, "artifactDigest": report.Engine.ArtifactDigest,
+		},
+		"issuedAt": report.IssuedAt.Format(time.RFC3339Nano),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	report.ReportArtifactDigest = digestBytes(value)
-	return report, value
+	return value
 }
 
 func digestBytes(value []byte) string {
@@ -463,6 +503,91 @@ func taxReportArtifact(report taxreportstore.StoredReport, value []byte) artifac
 		MediaType:    taxReportModelMediaType,
 		PrivacyClass: artifactstore.PrivacySubjectPrivate,
 	}
+}
+
+func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, []byte) {
+	t.Helper()
+	report := taxreportstore.StoredReport{
+		SubjectID: queryTestSubjectID,
+		Report: taxreportstore.Report{
+			ID:                  "tax-report:" + strings.Repeat("b", 64),
+			ResidentID:          "resident-1",
+			TaxYear:             2027,
+			TaxInventoryRunID:   "tax-inventory-run-1",
+			TaxEstimateID:       "tax-estimate-1",
+			LotRunID:            "lot-run-1",
+			InputDigest:         strings.Repeat("1", 64),
+			SchemaDigest:        strings.Repeat("2", 64),
+			DenominationAssetID: "asset-krw-upbit",
+			Policy: taxreportstore.Producer{
+				Name: "giwa-korea-tax-policy", Version: "2027.1", ArtifactDigest: strings.Repeat("4", 64),
+			},
+			Engine: taxreportstore.Producer{
+				Name: "giwa-tax-engine", Version: "1.0.0", ArtifactDigest: strings.Repeat("5", 64),
+			},
+			IssuedAt: time.Date(2028, 1, 10, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	value, err := json.Marshal(map[string]any{
+		"schemaVersion":     taxEvidencePackSchemaV1,
+		"manifestId":        expectedTaxEvidencePackManifestID(report),
+		"reportId":          report.ID,
+		"subjectId":         report.SubjectID,
+		"residentId":        report.ResidentID,
+		"taxYear":           report.TaxYear,
+		"taxInventoryRunId": report.TaxInventoryRunID,
+		"taxEstimateId":     report.TaxEstimateID,
+		"lotRunId":          report.LotRunID,
+		"generationId":      "generation-1",
+		"schemaDigest":      report.SchemaDigest,
+		"artifactRoots":     []any{},
+		"evidenceCoordinates": []any{
+			map[string]any{"kind": "POSTING", "eventId": "event-1", "revisionId": "revision-1", "legId": "leg-1"},
+		},
+		"policy": map[string]any{
+			"name": report.Policy.Name, "version": report.Policy.Version, "artifactDigest": report.Policy.ArtifactDigest,
+		},
+		"engine": map[string]any{
+			"name": report.Engine.Name, "version": report.Engine.Version, "artifactDigest": report.Engine.ArtifactDigest,
+		},
+		"issuedAt": report.IssuedAt.Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report.EvidencePackDigest = digestBytes(value)
+	reportModel := taxReportModelJSON(t, report, "generation-1")
+	report.ReportArtifactDigest = digestBytes(reportModel)
+	return report, reportModel, value
+}
+
+func taxEvidencePackArtifact(report taxreportstore.StoredReport, value []byte) artifactstore.Object {
+	return artifactstore.Object{
+		Ref:          artifactstore.Ref{Algorithm: "sha256", Digest: report.EvidencePackDigest},
+		Bytes:        value,
+		MediaType:    taxEvidencePackMediaType,
+		PrivacyClass: artifactstore.PrivacySubjectPrivate,
+	}
+}
+
+func mutateTaxEvidencePack(
+	t *testing.T,
+	report taxreportstore.StoredReport,
+	canonicalJSON []byte,
+	mutate func(map[string]any),
+) (taxreportstore.StoredReport, artifactstore.Object) {
+	t.Helper()
+	var pack map[string]any
+	if err := json.Unmarshal(canonicalJSON, &pack); err != nil {
+		t.Fatal(err)
+	}
+	mutate(pack)
+	mutated, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report.EvidencePackDigest = digestBytes(mutated)
+	return report, taxEvidencePackArtifact(report, mutated)
 }
 
 func TestListReviewsReturnsAndConsumesOpaqueKeysetCursor(t *testing.T) {
@@ -692,6 +817,257 @@ func TestGetTaxReportModelReturnsExactSubjectScopedCanonicalArtifact(t *testing.
 	}
 }
 
+func TestGetTaxReportModelAcceptsPostgresTimestampPrecision(t *testing.T) {
+	report, _ := taxReportModelFixture(t)
+	artifactIssuedAt := time.Date(2028, 1, 10, 0, 0, 0, 123456789, time.UTC)
+	report.IssuedAt = artifactIssuedAt
+	canonicalJSON := taxReportModelJSON(t, report, "generation-1")
+	report.ReportArtifactDigest = digestBytes(canonicalJSON)
+	// pgx persists timestamptz at PostgreSQL's microsecond precision.
+	report.IssuedAt = artifactIssuedAt.Truncate(time.Microsecond)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{
+			object: taxReportArtifact(report, canonicalJSON),
+			found:  true,
+		},
+	}
+
+	if _, err := service.GetTaxReportModel(
+		context.Background(),
+		&enginev1.GetTaxReportModelRequest{
+			Context: queryTestContext(), ReportId: report.ID,
+		},
+	); err != nil {
+		t.Fatalf("PostgreSQL timestamp precision was rejected: %v", err)
+	}
+}
+
+func TestGetTaxEvidencePackReturnsExactSubjectScopedCanonicalArtifact(t *testing.T) {
+	report, reportModelJSON, canonicalJSON := taxEvidencePackFixture(t)
+	reports := &fakeTaxReportStore{report: report, reportFound: true}
+	artifacts := &fakeTaxReportArtifactStore{
+		objects: map[string]artifactstore.Object{
+			report.EvidencePackDigest:   taxEvidencePackArtifact(report, canonicalJSON),
+			report.ReportArtifactDigest: taxReportArtifact(report, reportModelJSON),
+		},
+	}
+	service := &Service{TaxReports: reports, TaxReportArtifacts: artifacts}
+
+	response, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reports.lastSubject != queryTestSubjectID || reports.lastReport != report.ID {
+		t.Fatalf("report lookup escaped actor scope: %#v", reports)
+	}
+	if artifacts.lastSubject != queryTestSubjectID || artifacts.lastReport != report.ID {
+		t.Fatalf("artifact lookups escaped actor scope: %#v", artifacts)
+	}
+	if len(artifacts.digests) != 2 ||
+		artifacts.digests[0] != report.EvidencePackDigest ||
+		artifacts.digests[1] != report.ReportArtifactDigest {
+		t.Fatalf("evidence and report model lookups were not exact: %#v", artifacts.digests)
+	}
+	if response.GetReportId() != report.ID ||
+		response.GetArtifactDigest() != report.EvidencePackDigest ||
+		response.GetMediaType() != taxEvidencePackMediaType ||
+		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
+		t.Fatalf("unexpected exact evidence pack response: %#v", response)
+	}
+}
+
+func TestGetTaxEvidencePackFailsClosedOnIdentityMismatch(t *testing.T) {
+	baseReport, _, canonicalJSON := taxEvidencePackFixture(t)
+	for name, mutate := range map[string]func(map[string]any){
+		"subject": func(pack map[string]any) {
+			pack["subjectId"] = "22222222-2222-4222-8222-222222222222"
+		},
+		"manifest": func(pack map[string]any) {
+			pack["manifestId"] = "tax-evidence-pack:" + strings.Repeat("0", 64)
+		},
+		"generation": func(pack map[string]any) {
+			pack["generationId"] = ""
+		},
+		"policy": func(pack map[string]any) {
+			pack["policy"].(map[string]any)["version"] = "different-policy"
+		},
+		"engine": func(pack map[string]any) {
+			pack["engine"].(map[string]any)["artifactDigest"] = strings.Repeat("6", 64)
+		},
+		"issued time": func(pack map[string]any) {
+			pack["issuedAt"] = "2028-01-11T00:00:00Z"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			report, object := mutateTaxEvidencePack(t, baseReport, canonicalJSON, mutate)
+			service := &Service{
+				TaxReports:         &fakeTaxReportStore{report: report, reportFound: true},
+				TaxReportArtifacts: &fakeTaxReportArtifactStore{object: object, found: true},
+			}
+
+			_, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+				Context: queryTestContext(), ReportId: report.ID,
+			})
+			if status.Code(err) != codes.DataLoss {
+				t.Fatalf("status=%s, want DATA_LOSS: %v", status.Code(err), err)
+			}
+		})
+	}
+}
+
+func TestGetTaxEvidencePackRejectsNonCanonicalReportID(t *testing.T) {
+	service := &Service{
+		TaxReports:         &fakeTaxReportStore{},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{},
+	}
+	for _, reportID := range []string{
+		"report-1",
+		"tax-report:ABCDEF",
+		"tax-report:" + strings.Repeat("A", 64),
+		"tax-report:" + strings.Repeat("a", 63),
+	} {
+		_, err := service.GetTaxEvidencePack(
+			context.Background(),
+			&enginev1.GetTaxEvidencePackRequest{
+				Context: queryTestContext(), ReportId: reportID,
+			},
+		)
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf(
+				"report ID %q status=%s, want INVALID_ARGUMENT: %v",
+				reportID,
+				status.Code(err),
+				err,
+			)
+		}
+	}
+}
+
+func TestGetTaxEvidencePackHidesMissingAndCrossSubjectArtifacts(t *testing.T) {
+	report, _, canonicalJSON := taxEvidencePackFixture(t)
+	for name, testCase := range map[string]struct {
+		reports   *fakeTaxReportStore
+		artifacts *fakeTaxReportArtifactStore
+	}{
+		"other subject report is absent": {
+			reports:   &fakeTaxReportStore{reportFound: false},
+			artifacts: &fakeTaxReportArtifactStore{},
+		},
+		"published artifact is absent": {
+			reports: &fakeTaxReportStore{report: report, reportFound: true},
+			artifacts: &fakeTaxReportArtifactStore{
+				object: taxEvidencePackArtifact(report, canonicalJSON),
+				found:  false,
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service := &Service{TaxReports: testCase.reports, TaxReportArtifacts: testCase.artifacts}
+			_, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+				Context: queryTestContext(), ReportId: report.ID,
+			})
+			if status.Code(err) != codes.NotFound {
+				t.Fatalf("status=%s, want NOT_FOUND: %v", status.Code(err), err)
+			}
+			if testCase.reports.lastSubject != queryTestSubjectID {
+				t.Fatalf("report lookup escaped actor scope: %#v", testCase.reports)
+			}
+		})
+	}
+}
+
+func TestGetTaxEvidencePackFailsClosedOnArtifactMismatch(t *testing.T) {
+	baseReport, _, canonicalJSON := taxEvidencePackFixture(t)
+	for name, mutate := range map[string]func(*artifactstore.Object){
+		"digest": func(object *artifactstore.Object) {
+			object.Bytes = append(append([]byte(nil), object.Bytes...), ' ')
+		},
+		"reference": func(object *artifactstore.Object) {
+			object.Ref.Digest = strings.Repeat("0", 64)
+		},
+		"media type": func(object *artifactstore.Object) {
+			object.MediaType = taxReportModelMediaType
+		},
+		"privacy": func(object *artifactstore.Object) {
+			object.PrivacyClass = artifactstore.PrivacyPublicChain
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			object := taxEvidencePackArtifact(baseReport, canonicalJSON)
+			mutate(&object)
+			service := &Service{
+				TaxReports:         &fakeTaxReportStore{report: baseReport, reportFound: true},
+				TaxReportArtifacts: &fakeTaxReportArtifactStore{object: object, found: true},
+			}
+			_, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+				Context: queryTestContext(), ReportId: baseReport.ID,
+			})
+			if status.Code(err) != codes.DataLoss {
+				t.Fatalf("status=%s, want DATA_LOSS: %v", status.Code(err), err)
+			}
+		})
+	}
+}
+
+func TestGetTaxEvidencePackRejectsOversizedArtifactBeforeJSONDecode(t *testing.T) {
+	report, _, _ := taxEvidencePackFixture(t)
+	oversized := bytes.Repeat([]byte{'x'}, maxTaxReportArtifactBytes+1)
+	report.EvidencePackDigest = digestBytes(oversized)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{
+			object: taxEvidencePackArtifact(report, oversized),
+			found:  true,
+		},
+	}
+	_, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("status=%s, want RESOURCE_EXHAUSTED: %v", status.Code(err), err)
+	}
+}
+
+func TestGetTaxEvidencePackFailsClosedWhenReportModelIsMissing(t *testing.T) {
+	report, _, canonicalJSON := taxEvidencePackFixture(t)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{objects: map[string]artifactstore.Object{
+			report.EvidencePackDigest: taxEvidencePackArtifact(report, canonicalJSON),
+		}},
+	}
+
+	_, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if status.Code(err) != codes.DataLoss {
+		t.Fatalf("status=%s, want DATA_LOSS: %v", status.Code(err), err)
+	}
+}
+
+func TestGetTaxEvidencePackFailsClosedOnReportModelGenerationMismatch(t *testing.T) {
+	report, _, canonicalJSON := taxEvidencePackFixture(t)
+	reportModelJSON := taxReportModelJSON(t, report, "generation-2")
+	report.ReportArtifactDigest = digestBytes(reportModelJSON)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{objects: map[string]artifactstore.Object{
+			report.EvidencePackDigest:   taxEvidencePackArtifact(report, canonicalJSON),
+			report.ReportArtifactDigest: taxReportArtifact(report, reportModelJSON),
+		}},
+	}
+
+	_, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if status.Code(err) != codes.DataLoss {
+		t.Fatalf("status=%s, want DATA_LOSS: %v", status.Code(err), err)
+	}
+}
+
 func TestGetTaxReportModelRejectsNonCanonicalReportID(t *testing.T) {
 	service := &Service{
 		TaxReports:         &fakeTaxReportStore{},
@@ -794,9 +1170,67 @@ func TestGetTaxReportModelFailsClosedOnArtifactMismatch(t *testing.T) {
 	}
 }
 
+func TestGetTaxReportModelFailsClosedOnStoredIdentityMismatch(t *testing.T) {
+	baseReport, canonicalJSON := taxReportModelFixture(t)
+	for name, mutate := range map[string]func(map[string]any){
+		"tax inventory run": func(model map[string]any) {
+			model["taxInventoryRunId"] = "other-tax-inventory-run"
+		},
+		"tax estimate": func(model map[string]any) {
+			model["taxEstimateId"] = "other-tax-estimate"
+		},
+		"lot run": func(model map[string]any) {
+			model["lotRunId"] = "other-lot-run"
+		},
+		"generation": func(model map[string]any) {
+			model["generationId"] = ""
+		},
+		"denomination": func(model map[string]any) {
+			model["denominationAssetId"] = "asset-usd"
+		},
+		"policy": func(model map[string]any) {
+			model["policy"].(map[string]any)["version"] = "different-policy"
+		},
+		"engine": func(model map[string]any) {
+			model["engine"].(map[string]any)["artifactDigest"] = strings.Repeat("6", 64)
+		},
+		"issued time": func(model map[string]any) {
+			model["issuedAt"] = "2028-01-11T00:00:00Z"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var model map[string]any
+			if err := json.Unmarshal(canonicalJSON, &model); err != nil {
+				t.Fatal(err)
+			}
+			mutate(model)
+			mutated, err := json.Marshal(model)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := baseReport
+			report.ReportArtifactDigest = digestBytes(mutated)
+			service := &Service{
+				TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+				TaxReportArtifacts: &fakeTaxReportArtifactStore{
+					object: taxReportArtifact(report, mutated),
+					found:  true,
+				},
+			}
+
+			_, err = service.GetTaxReportModel(context.Background(), &enginev1.GetTaxReportModelRequest{
+				Context: queryTestContext(), ReportId: report.ID,
+			})
+			if status.Code(err) != codes.DataLoss {
+				t.Fatalf("status=%s, want DATA_LOSS: %v", status.Code(err), err)
+			}
+		})
+	}
+}
+
 func TestGetTaxReportModelRejectsOversizedArtifactBeforeJSONDecode(t *testing.T) {
 	report, _ := taxReportModelFixture(t)
-	oversized := bytes.Repeat([]byte{'x'}, maxTaxReportModelBytes+1)
+	oversized := bytes.Repeat([]byte{'x'}, maxTaxReportArtifactBytes+1)
 	report.ReportArtifactDigest = digestBytes(oversized)
 	service := &Service{
 		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
