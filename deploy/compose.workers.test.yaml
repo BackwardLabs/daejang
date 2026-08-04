@@ -1,0 +1,52 @@
+# Disposable local testnet. Use together with an owned daejang-db checkout's
+# compose.yaml; all PostgreSQL data belongs to the selected Compose project.
+services:
+  posting-tests:
+    profiles: ["test"]
+    build:
+      context: ${DAEJANG_POSTING_SERVICE_DIR:?Set DAEJANG_POSTING_SERVICE_DIR to an owned daejang-posting-service clone}
+      dockerfile: Dockerfile
+      target: test
+      secrets:
+        - source: github_token
+          target: github_token
+    image: daejang-posting-service:test
+    environment:
+      DAEJANG_DB_TEST_POSTGRES_URL: postgres://${POSTGRES_USER:-daejang_owner}:${POSTGRES_PASSWORD:-daejang-owner-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+      DAEJANG_DB_TEST_EVENT_APP_URL: postgres://daejang_event_app:${DAEJANG_EVENT_APP_PASSWORD:-daejang-event-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  tax-tests:
+    profiles: ["test"]
+    build:
+      context: ${DAEJANG_TAX_ENGINE_DIR:?Set DAEJANG_TAX_ENGINE_DIR to an owned daejang-tax-engine clone}
+      dockerfile: Dockerfile
+      target: test
+      secrets:
+        - source: github_token
+          target: github_token
+    image: daejang-taxd:test
+    environment:
+      # The test suite seeds JIT/evidence rows and checks cross-role contracts.
+      # It therefore uses the disposable database owner only; taxd's runtime
+      # Compose service continues to use daejang_tax_app.
+      DAEJANG_TAX_ENGINE_TEST_POSTGRES_URL: postgres://${POSTGRES_USER:-daejang_owner}:${POSTGRES_PASSWORD:-daejang-owner-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+      DAEJANG_TAX_ENGINE_TEST_POSTGRES_SEED_URL: postgres://${POSTGRES_USER:-daejang_owner}:${POSTGRES_PASSWORD:-daejang-owner-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+      DAEJANG_TAX_STORAGE_TEST_DATABASE_URL: postgres://${POSTGRES_USER:-daejang_owner}:${POSTGRES_PASSWORD:-daejang-owner-local-only}@postgres:5432/${POSTGRES_DB:-daejang}?sslmode=disable
+    depends_on:
+      posting-tests:
+        condition: service_completed_successfully
+
+  test-gate:
+    profiles: ["test"]
+    image: alpine:3.23
+    command: ["true"]
+    depends_on:
+      tax-tests:
+        condition: service_completed_successfully
+
+secrets:
+  github_token:
+    environment: DAEJANG_GITHUB_TOKEN

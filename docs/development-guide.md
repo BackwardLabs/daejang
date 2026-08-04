@@ -62,7 +62,7 @@ sequenceDiagram
   end
 ```
 
-현재 저장소에는 GitHub Actions workflow가 없다. 따라서 위 sequence의 검증은 로컬 실행 결과를 기준으로 하며, 자동 CI가 실행된 것처럼 PR에 표시하지 않는다.
+현재 `.github/workflows/ci.yml`은 PR과 `main`에서 Node quality, Engine quality와 production Compose 렌더링을 실행한다. 이 CI는 실행된 결과만 PR에서 인용하며, 아직 release image publish 또는 전체 서비스 통합 테스트를 수행하지 않는다. 서비스·migration 변경의 격리 Docker 검증과 main 병합 뒤 image digest 통합 검증은 [컨테이너 통합 검증과 release image 흐름](release-image-flow.md)을 따른다.
 
 ## 4. 작업 시작 전
 
@@ -270,4 +270,5 @@ git branch -d "<병합된 브랜치명>"
 - [프로젝트 개요와 실행 방법](../README.md)
 - [기여 정책](../CONTRIBUTING.md)
 - [코딩 에이전트 지침](../AGENTS.md)
+- [컨테이너 통합 검증과 release image 흐름](release-image-flow.md)
 - [웹 앱 기술 명세](00-web-app-technical-spec.md)
