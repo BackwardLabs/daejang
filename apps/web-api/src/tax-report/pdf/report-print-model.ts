@@ -35,6 +35,33 @@ export type ReportPrintProducerV1 = {
   artifactDigest: string
 }
 
+export type ReportPrintCalculationRateV1 = {
+  numerator: string
+  denominator: string
+}
+
+export type ReportPrintCalculationRuleV1 = {
+  poolScope: 'ADDRESS' | 'RESIDENT_TAX_YEAR_TAX_ASSET'
+  costMethods: ReadonlyArray<
+    'MOVING_AVERAGE' | 'FIFO' | 'ANNUAL_TOTAL_AVERAGE'
+  >
+  basicDeductionAmount: string
+  deductionUsedAmount?: string
+  nationalRate: ReportPrintCalculationRateV1
+  localRate: ReportPrintCalculationRateV1
+  taxRounding: 'FLOOR'
+  basisAllocationRounding:
+    | ''
+    | 'FLOOR_EXCEPT_EXHAUSTED_LAYER'
+    | 'CUMULATIVE_FLOOR_ANNUAL_POOL'
+    | 'MIXED'
+}
+
+export type ReportPrintCalculationContractV1 =
+  | 'ANNUAL_TOTAL_AVERAGE'
+  | 'LEGACY'
+  | 'UNSUPPORTED'
+
 export type ReportPrintDisposalV1 = {
   movementId: string
   eventId: string
@@ -70,6 +97,7 @@ export type ReportPrintExcludedConversionV1 = {
 export type ReportPrintLimitationV1 = {
   code: string
   reason: string
+  taxAddressId?: string
   taxAssetId?: string
   movementId?: string
   reviewId?: string
@@ -90,6 +118,7 @@ export type ReportPrintModelV1 = {
   inputDigest: string
   evidencePackDigest: string
   taxYear: number
+  taxYearCloseStatus: 'CLOSED' | 'UNVERIFIED'
   finality: 'FINAL' | 'PROVISIONAL'
   status: 'FINAL' | 'PARTIAL'
   filingStatus: 'READY' | 'BLOCKED'
@@ -102,6 +131,8 @@ export type ReportPrintModelV1 = {
     nationalTax: ReportPrintAmountV1
     localTax: ReportPrintAmountV1
     totalTax: ReportPrintAmountV1
+    calculationRule?: ReportPrintCalculationRuleV1
+    calculationContract?: ReportPrintCalculationContractV1
   }
   totals: {
     grossProceeds: ReportPrintAmountV1
@@ -130,6 +161,29 @@ const printAmount = (value: PublicAmount): ReportPrintAmountV1 =>
     ? { status: 'KNOWN', amount: value.amount }
     : { status: 'UNKNOWN' }
 
+const printCalculationRule = (
+  value: NonNullable<
+    PublicTaxReportDetail['summary']['calculationRule']
+  >,
+): ReportPrintCalculationRuleV1 => ({
+  poolScope: value.poolScope,
+  costMethods: value.costMethods.map((method) => method),
+  basicDeductionAmount: value.basicDeductionAmount,
+  ...(value.deductionUsedAmount == null
+    ? {}
+    : { deductionUsedAmount: value.deductionUsedAmount }),
+  nationalRate: {
+    numerator: value.nationalRate.numerator,
+    denominator: value.nationalRate.denominator,
+  },
+  localRate: {
+    numerator: value.localRate.numerator,
+    denominator: value.localRate.denominator,
+  },
+  taxRounding: value.taxRounding,
+  basisAllocationRounding: value.basisAllocationRounding,
+})
+
 /**
  * 인증된 public detail projection에서 PDF가 허용한 필드만 다시 고릅니다.
  * 구조적 타입 호환이나 object spread를 사용하지 않아, public model에 추후
@@ -144,6 +198,7 @@ export const createReportPrintModel = (
   inputDigest: report.inputDigest,
   evidencePackDigest: report.evidencePackDigest,
   taxYear: report.taxYear,
+  taxYearCloseStatus: report.taxYearCloseStatus,
   finality: report.finality,
   status: report.status,
   filingStatus: report.filingStatus,
@@ -161,6 +216,18 @@ export const createReportPrintModel = (
     nationalTax: printAmount(report.summary.nationalTax),
     localTax: printAmount(report.summary.localTax),
     totalTax: printAmount(report.summary.totalTax),
+    ...(report.summary.calculationRule == null
+      ? {}
+      : {
+          calculationRule: printCalculationRule(
+            report.summary.calculationRule,
+          ),
+        }),
+    ...(report.summary.calculationContract == null
+      ? {}
+      : {
+          calculationContract: report.summary.calculationContract,
+        }),
   },
   totals: {
     grossProceeds: printAmount(report.totals.grossProceeds),
@@ -211,6 +278,9 @@ export const createReportPrintModel = (
   limitations: report.limitations.map((row) => ({
     code: row.code,
     reason: row.reason,
+    ...(row.taxAddressId === null
+      ? {}
+      : { taxAddressId: row.taxAddressId }),
     ...(row.taxAssetId === null ? {} : { taxAssetId: row.taxAssetId }),
     ...(row.movementId === null ? {} : { movementId: row.movementId }),
     ...(row.reviewId === null ? {} : { reviewId: row.reviewId }),

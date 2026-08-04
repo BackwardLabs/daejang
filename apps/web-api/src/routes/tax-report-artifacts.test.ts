@@ -200,7 +200,10 @@ describe('tax report PDF artifact route', () => {
     })
     expect(rendered).toMatchObject({
       reportId: REPORT_ID,
-      summary: { totalTax: { status: 'UNKNOWN' } },
+      summary: {
+        totalTax: { status: 'UNKNOWN' },
+        calculationContract: 'UNSUPPORTED',
+      },
       disposals: [
         {
           ancillaryExpense: { status: 'KNOWN', amount: '0' },
@@ -218,6 +221,46 @@ describe('tax report PDF artifact route', () => {
     expect(rendered).not.toHaveProperty('residentId')
     expect(rendered).not.toHaveProperty('publication')
     expect(rendered).not.toHaveProperty('payment')
+    expect(rendered?.summary).not.toHaveProperty('calculationRule')
+  })
+
+  it('allowlists the Tax Engine calculation rule for the PDF', async () => {
+    reader.value = artifactFor({
+      ...canonicalModel,
+      summary: {
+        ...canonicalModel.summary,
+        calculationRule: {
+          poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+          costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+          basicDeductionAmount: '2500000',
+          deductionUsedAmount: '1250000',
+          nationalRate: { numerator: '20', denominator: '100' },
+          localRate: { numerator: '2', denominator: '100' },
+          taxRounding: 'FLOOR',
+          basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+        },
+      },
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}/artifacts/pdf`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(rendered?.summary).toMatchObject({
+      calculationContract: 'ANNUAL_TOTAL_AVERAGE',
+      calculationRule: {
+        poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+        costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+        basicDeductionAmount: '2500000',
+        deductionUsedAmount: '1250000',
+        nationalRate: { numerator: '20', denominator: '100' },
+        localRate: { numerator: '2', denominator: '100' },
+        taxRounding: 'FLOOR',
+        basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+      },
+    })
   })
 
   it('renders a 2026 policy simulation PDF without adding simulation fields to the print model', async () => {

@@ -36,10 +36,20 @@ const mergeRevisions = (
   ...currentReports: Array<TaxReportModel | null>
 ) => {
   const revisions = new Map<string, TaxReportModel>()
-  for (const report of [...currentReports, ...history]) {
+  // History currently carries pointerVersion=0 because pointerVersion belongs to
+  // the current pointer, not to an intrinsic historical revision. Insert current
+  // pointers last so their authoritative pointer version wins for duplicate IDs.
+  for (const report of [...history, ...currentReports]) {
     if (report) revisions.set(report.reportId, report)
   }
   return [...revisions.values()].sort(newestFirst)
+}
+
+const revisionLabel = (report: TaxReportModel, isCurrent: boolean) => {
+  if (!isCurrent && String(report.pointerVersion) === '0') {
+    return '이전 발행본'
+  }
+  return `revision ${String(report.pointerVersion)}`
 }
 
 const loadOptionalCurrent = async (
@@ -91,13 +101,7 @@ export function ReportWorkspacePage() {
       loadTaxReportHistory(year, controller.signal),
     ])
       .then(([finalResult, provisionalResult, historyResult]) => {
-        if (
-          finalResult.status === 'rejected' &&
-          provisionalResult.status === 'rejected' &&
-          historyResult.status === 'rejected'
-        ) {
-          throw finalResult.reason
-        }
+        if (controller.signal.aborted) return
         const finalReport =
           finalResult.status === 'fulfilled' ? finalResult.value : null
         const provisionalReport =
@@ -118,6 +122,14 @@ export function ReportWorkspacePage() {
           finalReport,
           provisionalReport,
         )
+        const rejectedResult = [
+          finalResult,
+          provisionalResult,
+          historyResult,
+        ].find((result) => result.status === 'rejected')
+        if (availableRevisions.length === 0 && rejectedResult) {
+          throw rejectedResult.reason
+        }
 
         setCurrentReport(latestCurrent)
         setRevisions(availableRevisions)
@@ -127,7 +139,10 @@ export function ReportWorkspacePage() {
         setTaxStatus('ready')
       })
       .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        if (
+          !controller.signal.aborted &&
+          !(error instanceof DOMException && error.name === 'AbortError')
+        ) {
           setTaxStatus('error')
         }
       })
@@ -147,11 +162,15 @@ export function ReportWorkspacePage() {
     setDetailStatus('loading')
     void loadTaxReportDetail(selectedReportId, controller.signal)
       .then((result) => {
+        if (controller.signal.aborted) return
         setReportDetail(result.report)
         setDetailStatus('ready')
       })
       .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') {
+        if (
+          controller.signal.aborted ||
+          (error instanceof DOMException && error.name === 'AbortError')
+        ) {
           return
         }
         setDetailStatus(
@@ -266,7 +285,7 @@ export function ReportWorkspacePage() {
                     >
                       <span>
                         <strong>
-                          revision {String(report.pointerVersion)}
+                          {revisionLabel(report, isCurrent)}
                           {isCurrent ? <em>현재</em> : null}
                         </strong>
                         <small>
@@ -300,7 +319,13 @@ export function ReportWorkspacePage() {
           {detailStatus === 'ready' && reportDetail ? (
             <TaxReportDetail
               report={reportDetail}
-              pointerVersion={selectedReport?.pointerVersion}
+              pointerVersion={
+                selectedReport &&
+                (selectedReport.reportId === currentReport?.reportId ||
+                  String(selectedReport.pointerVersion) !== '0')
+                  ? selectedReport.pointerVersion
+                  : undefined
+              }
               isCurrent={selectedReportId === currentReport?.reportId}
             />
           ) : null}
