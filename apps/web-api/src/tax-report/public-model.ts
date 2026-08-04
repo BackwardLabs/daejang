@@ -1093,10 +1093,21 @@ const publicCalculationRule = (
 const calculationContract = (
   value: CanonicalCalculationRuleV1 | undefined,
   denominationAssetId: string,
+  disposals: readonly CanonicalDisposalRowV1[],
+  transfers: readonly CanonicalTransferRowV1[],
 ): PublicCalculationContract => {
   // A pre-extension V1 artifact proves that the rule was not recorded, not
   // which historical cost method produced it.
   if (value === undefined) return 'UNSUPPORTED'
+  const declaredMethods = new Set<string>(value.costMethods)
+  const rowsMatchDeclaredMethods =
+    disposals.every((row) => declaredMethods.has(row.costMethod)) &&
+    transfers.every(
+      (row) =>
+        declaredMethods.has(row.fromCostMethod) &&
+        declaredMethods.has(row.toCostMethod),
+    )
+  if (!rowsMatchDeclaredMethods) return 'UNSUPPORTED'
   if (
     value.poolScope === 'RESIDENT_TAX_YEAR_TAX_ASSET' &&
     value.costMethods.length === 1 &&
@@ -1218,6 +1229,8 @@ const publicProjection = (
       calculationContract: calculationContract(
         model.summary.calculationRule,
         model.denominationAssetId,
+        model.disposals,
+        model.transfers,
       ),
     },
     totals: {

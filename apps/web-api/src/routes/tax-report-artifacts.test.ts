@@ -227,6 +227,11 @@ describe('tax report PDF artifact route', () => {
   it('allowlists the Tax Engine calculation rule for the PDF', async () => {
     reader.value = artifactFor({
       ...canonicalModel,
+      disposals: canonicalModel.disposals.map((row) => ({
+        ...row,
+        costMethod: 'ANNUAL_TOTAL_AVERAGE',
+        rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+      })),
       summary: {
         ...canonicalModel.summary,
         calculationRule: {

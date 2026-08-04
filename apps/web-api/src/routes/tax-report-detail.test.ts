@@ -345,6 +345,16 @@ describe('canonical tax report detail route', () => {
     const annualModel = structuredClone(
       canonicalModel,
     ) as unknown as CanonicalTaxReportModelV1
+    annualModel.disposals = annualModel.disposals.map((row) => ({
+      ...row,
+      costMethod: 'ANNUAL_TOTAL_AVERAGE',
+      rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }))
+    annualModel.transfers = annualModel.transfers.map((row) => ({
+      ...row,
+      fromCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+      toCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+    }))
     annualModel.summary.calculationRule = {
       poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
       costMethods: ['ANNUAL_TOTAL_AVERAGE'],
@@ -379,11 +389,49 @@ describe('canonical tax report detail route', () => {
     })
   })
 
+  it('does not approve an annual rule that conflicts with row cost methods', async () => {
+    const conflictingModel = structuredClone(
+      canonicalModel,
+    ) as unknown as CanonicalTaxReportModelV1
+    conflictingModel.summary.calculationRule = {
+      poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+      costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+      basicDeductionAmount: '2500000',
+      nationalRate: { numerator: '20', denominator: '100' },
+      localRate: { numerator: '2', denominator: '100' },
+      taxRounding: 'FLOOR',
+      basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }
+    reader.value = artifactFor(conflictingModel)
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}`,
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().report.summary.calculationContract).toBe(
+      'UNSUPPORTED',
+    )
+  })
+
   it('does not approve the annual contract when the KRW deduction uses the wrong atomic scale', async () => {
     const annualModel = structuredClone(
       canonicalModel,
     ) as unknown as CanonicalTaxReportModelV1
     annualModel.denominationAssetId = 'asset-krw-upbit'
+    annualModel.disposals = annualModel.disposals.map((row) => ({
+      ...row,
+      costMethod: 'ANNUAL_TOTAL_AVERAGE',
+      rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }))
+    annualModel.transfers = annualModel.transfers.map((row) => ({
+      ...row,
+      fromCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+      toCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+    }))
     annualModel.summary.calculationRule = {
       poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
       costMethods: ['ANNUAL_TOTAL_AVERAGE'],
