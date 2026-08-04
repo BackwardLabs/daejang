@@ -1108,6 +1108,23 @@ const calculationContract = (
         declaredMethods.has(row.toCostMethod),
     )
   if (!rowsMatchDeclaredMethods) return 'UNSUPPORTED'
+  const allocationRoundingMatches = (
+    expected:
+      | 'FLOOR_EXCEPT_EXHAUSTED_LAYER'
+      | 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+  ) => {
+    const hasKnownBasis = disposals.some(
+      (row) => row.basis.status === 'KNOWN',
+    )
+    return (
+      disposals.every((row) =>
+        row.basis.status === 'KNOWN'
+          ? row.rounding === expected
+          : row.rounding === undefined,
+      ) &&
+      value.basisAllocationRounding === (hasKnownBasis ? expected : '')
+    )
+  }
   if (
     value.poolScope === 'RESIDENT_TAX_YEAR_TAX_ASSET' &&
     value.costMethods.length === 1 &&
@@ -1119,9 +1136,7 @@ const calculationContract = (
     value.localRate.numerator === '2' &&
     value.localRate.denominator === '100' &&
     value.taxRounding === 'FLOOR' &&
-    (value.basisAllocationRounding === '' ||
-      value.basisAllocationRounding ===
-        'CUMULATIVE_FLOOR_ANNUAL_POOL')
+    allocationRoundingMatches('CUMULATIVE_FLOOR_ANNUAL_POOL')
   ) {
     return 'ANNUAL_TOTAL_AVERAGE'
   }
@@ -1130,10 +1145,7 @@ const calculationContract = (
     value.costMethods.every(
       (method) => method === 'MOVING_AVERAGE' || method === 'FIFO',
     ) &&
-    (value.basisAllocationRounding === '' ||
-      value.basisAllocationRounding ===
-        'FLOOR_EXCEPT_EXHAUSTED_LAYER' ||
-      value.basisAllocationRounding === 'MIXED')
+    allocationRoundingMatches('FLOOR_EXCEPT_EXHAUSTED_LAYER')
   ) {
     return 'LEGACY'
   }

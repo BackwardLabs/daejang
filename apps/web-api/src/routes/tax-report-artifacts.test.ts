@@ -229,6 +229,7 @@ describe('tax report PDF artifact route', () => {
       ...canonicalModel,
       disposals: canonicalModel.disposals.map((row) => ({
         ...row,
+        basis: { amount: '1000', status: 'KNOWN' },
         costMethod: 'ANNUAL_TOTAL_AVERAGE',
         rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
       })),
