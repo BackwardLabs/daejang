@@ -35,6 +35,7 @@ import {
   hostEVMPostingWorkerArgs,
   hostEVMPostingWorkerEnvironment,
   hostActiveServiceOrder,
+  hostTaxDBMigrationVersion,
   isPrivateRuntimePath,
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
@@ -64,6 +65,17 @@ import {
   taxBackfillArgs,
   tryAcquireProcessLock,
 } from './host-backend.mjs'
+
+test('pins taxd to the current required database migration', () => {
+  assert.equal(hostTaxDBMigrationVersion, '70')
+  assert.match(
+    readFileSync(
+      new URL('../deploy/workers.runtime.env.example', import.meta.url),
+      'utf8',
+    ),
+    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=70$/mu,
+  )
+})
 
 test('keeps JIT artifacts outside immutable application releases by default', () => {
   assert.deepEqual(
