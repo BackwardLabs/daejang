@@ -96,8 +96,8 @@ describe('ledger posting presentation', () => {
   })
 
   it('explains posting directions and roles in product language', () => {
-    expect(describePostingDirection('IN')).toBe('들어옴')
-    expect(describePostingDirection('OUT')).toBe('나감')
+    expect(describePostingDirection('IN')).toBe('증가')
+    expect(describePostingDirection('OUT')).toBe('감소')
     expect(describePostingRole('PRINCIPAL')).toMatchObject({ label: '주 거래' })
     expect(describePostingRole('FEE')).toMatchObject({ label: '거래 수수료' })
     expect(describeFlowShape('EXCHANGE')).toBe('자산 교환')

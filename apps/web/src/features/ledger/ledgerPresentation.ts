@@ -83,8 +83,8 @@ const postingRoles: Record<string, LedgerPostingRolePresentation> = {
 }
 
 const directionLabels: Record<string, string> = {
-  IN: '들어옴',
-  OUT: '나감',
+  IN: '증가',
+  OUT: '감소',
 }
 
 const flowShapeLabels: Record<string, string> = {

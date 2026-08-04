@@ -530,6 +530,17 @@ describe('authentication flows', () => {
     })
     fireEvent.click(screen.getByRole('link', { name: '고객지원' }))
     expect(screen.getByRole('heading', { name: '고객지원' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '채널로 문의하기' })).toHaveAttribute(
+      'href',
+      'https://pf.kakao.com/_LxkNfX',
+    )
+    expect(screen.getByRole('link', { name: 'backwardlabs@gmail.com' })).toHaveAttribute(
+      'href',
+      'mailto:backwardlabs@gmail.com',
+    )
+    expect(
+      screen.queryByText('개인키, 시드 문구, 주민등록번호와 인증번호는 보내지 마세요'),
+    ).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '서비스로 돌아가기' }))
     await openSignupMethodsFromLanding()

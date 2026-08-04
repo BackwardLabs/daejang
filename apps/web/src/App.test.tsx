@@ -63,23 +63,23 @@ describe('App', () => {
     render(<App />)
 
     const firstQuestion = screen.getByRole('button', {
-      name: '어떤 데이터를 연결할 수 있나요?',
+      name: '기존 계정이 있다고 표시되는 이유는 무엇인가요?',
     })
     const secondQuestion = screen.getByRole('button', {
-      name: 'API 키나 개인키가 필요한가요?',
+      name: '본인확인이 계속 실패해요',
     })
 
     fireEvent.click(firstQuestion)
     expect(
-      screen.getByText(/거래소에서 발급한 거래내역서와/),
+      screen.getByText(/같은 본인확인 정보나/),
     ).toBeInTheDocument()
 
     fireEvent.click(secondQuestion)
     expect(
-      screen.queryByText(/거래소에서 발급한 거래내역서와/),
+      screen.queryByText(/같은 본인확인 정보나/),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByText(/API Key·Secret, 개인키, 시드 문구는/),
+      screen.getByText(/이름과 휴대전화 명의를/),
     ).toBeInTheDocument()
   })
 })

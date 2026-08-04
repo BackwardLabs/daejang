@@ -1299,8 +1299,7 @@
   font-size: 12px;
 }
 
-.support-contact article a,
-.support-contact__pending {
+.support-contact article a {
   display: inline-flex;
   align-items: center;
   width: fit-content;
@@ -1309,20 +1308,6 @@
   color: var(--auth-accent-deep);
   font-size: 12px;
   font-weight: 600;
-}
-
-.support-contact__pending {
-  color: var(--auth-muted);
-}
-
-.support-security-note {
-  margin-top: 18px;
-  padding: 14px;
-  border-radius: 8px;
-  color: #92400e;
-  background: #fff7ed;
-  font-size: 12px;
-  line-height: 19px;
 }
 
 .public-not-found {
