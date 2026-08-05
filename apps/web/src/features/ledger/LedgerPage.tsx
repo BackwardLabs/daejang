@@ -166,7 +166,6 @@ type ReviewCardPresentation = {
 }
 
 const presentReviewCard = (
-  review: ReviewModel,
   detail: ReviewDetailModel | undefined,
   event: LedgerEventModel | undefined,
 ): ReviewCardPresentation => {
@@ -223,7 +222,7 @@ function ReviewListCard({
   onRequestDetail: (reviewId: string) => void
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const presentation = presentReviewCard(review, detail, event)
+  const presentation = presentReviewCard(detail, event)
 
   useEffect(() => {
     if (detail || event || typeof IntersectionObserver === 'undefined' || !buttonRef.current) return
