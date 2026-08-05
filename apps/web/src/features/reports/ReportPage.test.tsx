@@ -967,4 +967,35 @@ describe('ReportPage', () => {
       ),
     ).toBe(true)
   })
+
+  it('keeps a 2025 history report readable during an older API rollout', async () => {
+    saveAppPreferences({ currency: 'KRW', year: '2025' })
+    const legacyDetail = {
+      ...detailReport,
+      taxYear: 2025,
+      taxYearCloseStatus: undefined,
+      summary: {
+        ...detailReport.summary,
+        calculationContract: undefined,
+        calculationRule: undefined,
+      },
+    }
+    const historyReport = { ...partialTaxReport, taxYear: 2025 }
+    stubReportRequests({
+      taxYear: 2025,
+      provisionalCurrentStatus: 404,
+      history: [historyReport],
+      detail: legacyDetail,
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(
+      await screen.findByRole('heading', { name: '장부 계산 요약' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('연간 마감 미확인')).toBeInTheDocument()
+    expect(
+      screen.getByText('이 발행본만으로 계산 계약 확인 불가'),
+    ).toBeInTheDocument()
+  })
 })

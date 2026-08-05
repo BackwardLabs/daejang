@@ -216,6 +216,33 @@ export type TaxReportDetailModel = {
   transfers: TaxReportTransferModel[]
 }
 
+type CompatibleTaxReportDetailModel = Omit<
+  TaxReportDetailModel,
+  'summary' | 'taxYearCloseStatus'
+> & {
+  summary: Omit<
+    TaxReportDetailModel['summary'],
+    'calculationContract' | 'calculationRule'
+  > & {
+    calculationContract?: TaxReportDetailModel['summary']['calculationContract']
+    calculationRule?: TaxReportCalculationRuleModel | null
+  }
+  taxYearCloseStatus?: TaxReportDetailModel['taxYearCloseStatus']
+}
+
+const normalizeTaxReportDetail = (
+  report: CompatibleTaxReportDetailModel,
+): TaxReportDetailModel => ({
+  ...report,
+  summary: {
+    ...report.summary,
+    calculationContract:
+      report.summary.calculationContract ?? 'UNSUPPORTED',
+    calculationRule: report.summary.calculationRule ?? null,
+  },
+  taxYearCloseStatus: report.taxYearCloseStatus ?? 'UNVERIFIED',
+})
+
 export const loadCurrentTaxReport = (
   taxYear: string,
   finality: 'FINAL' | 'PROVISIONAL',
@@ -234,13 +261,17 @@ export const loadTaxReportHistory = (
   { signal },
 )
 
-export const loadTaxReportDetail = (
+export const loadTaxReportDetail = async (
   reportId: string,
   signal?: AbortSignal,
-) => requestApi<{ report: TaxReportDetailModel }>(
-  `/tax-reports/${encodeURIComponent(reportId)}`,
-  { signal },
-)
+) => {
+  const response = await requestApi<{ report: CompatibleTaxReportDetailModel }>(
+    `/tax-reports/${encodeURIComponent(reportId)}`,
+    { signal },
+  )
+
+  return { report: normalizeTaxReportDetail(response.report) }
+}
 
 export const loadTaxReportEvidence = (
   reportId: string,

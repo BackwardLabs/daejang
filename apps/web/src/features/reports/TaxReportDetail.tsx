@@ -317,11 +317,14 @@ export function TaxReportDetail({
     report.limitations.length === 0 &&
     !unknownAmounts
   const finality = finalityPresentation[report.finality]
-  const taxYearClose = taxYearClosePresentation[report.taxYearCloseStatus]
+  const taxYearClose =
+    taxYearClosePresentation[report.taxYearCloseStatus] ??
+    taxYearClosePresentation.UNVERIFIED
   const resultStatus = resultStatusPresentation[report.status]
   const filingStatus = filingStatusPresentation[report.filingStatus]
   const calculationContract =
-    calculationContractPresentation[report.summary.calculationContract]
+    calculationContractPresentation[report.summary.calculationContract] ??
+    calculationContractPresentation.UNSUPPORTED
   const evidenceKindCounts =
     activeTab === 'trace'
       ? evidencePack?.evidenceCoordinates.reduce<Record<string, number>>(
