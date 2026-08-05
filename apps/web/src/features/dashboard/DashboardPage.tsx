@@ -15,7 +15,6 @@ import {
 import {
   describeLedgerAction,
   describeLedgerSource,
-  describePostingDirection,
   formatLedgerMoney,
   formatLedgerQuantity,
   formatUserFacingAssetSymbol,
@@ -158,7 +157,13 @@ export function DashboardPage() {
   ] as const
   const monthlyCounts = monthLabels.map((_, month) => events.filter((event) => new Date(event.effectiveAt).getUTCMonth() === month).length)
   const maxMonth = Math.max(...monthlyCounts, 1)
-  const recentTransactions = events.slice(0, 6)
+  const recentTransactions = [...events]
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.effectiveAt)
+      const rightTime = Date.parse(right.effectiveAt)
+      return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0)
+    })
+    .slice(0, 6)
   const now = new Date()
   const selectedYearNumber = Number(selectedYear)
   const isFutureMonth = (month: number) => selectedYearNumber > now.getFullYear()
@@ -193,7 +198,7 @@ export function DashboardPage() {
                   ? '불러오는 중…'
                   : '새로고침'}
               </button>
-              <AppLink href="/sources" className="dashboard-action dashboard-action--secondary">
+              <AppLink href="/sources/new" className="dashboard-action dashboard-action--secondary">
                 데이터 소스 추가
               </AppLink>
               <AppLink href="/reports" className="dashboard-action dashboard-action--primary">
@@ -241,8 +246,8 @@ export function DashboardPage() {
               </p>
             ) : (
               <p>
-                <strong>{openReviewCount}건</strong>의 거래가 검토를 기다리고
-                있습니다. 근거를 연결하면 신고 준비도가 올라갑니다.
+                <strong>{openReviewCount}건</strong>의 검토 항목이 남아 있습니다.
+                거래별 사유와 근거를 확인해 주세요.
               </p>
             )}
             {status === 'ready' && openReviewCount > 0 ? (
@@ -327,8 +332,8 @@ export function DashboardPage() {
                   <li>
                     <span>
                       <strong>
-                        확인이 필요한 거래가 {openReviewCount.toLocaleString()}건
-                        있습니다
+                        확인이 필요한 검토 항목이{' '}
+                        {openReviewCount.toLocaleString()}건 있습니다
                       </strong>
                       <small>
                         거래 장부에서 사유와 근거를 확인해 주세요.
@@ -352,19 +357,15 @@ export function DashboardPage() {
 
           <section className="dashboard-recent" aria-labelledby="dashboard-recent-title">
             <header>
-              <div>
-                <h2 id="dashboard-recent-title">최근 거래</h2>
-                <p>{selectedYear}년 최신 {recentTransactions.length}건</p>
-              </div>
+              <h2 id="dashboard-recent-title">최근 거래</h2>
               <AppLink href="/ledger">전체 장부 보기 →</AppLink>
             </header>
             <div className="dashboard-table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th scope="col">일시</th>
                     <th scope="col">거래</th>
-                    <th scope="col">자산 변화</th>
+                    <th scope="col">금액</th>
                     <th scope="col">상태</th>
                   </tr>
                 </thead>
@@ -384,7 +385,6 @@ export function DashboardPage() {
                           transaction.postings,
                         )
                       : '—'
-                    const additionalAssetCount = Math.max(0, materialPostings.length - 1)
                     const action = describeLedgerAction(
                       transaction.eventType,
                       transaction.flowShape,
@@ -394,35 +394,29 @@ export function DashboardPage() {
                     const source = describeLedgerSource(transaction.postings)
                     return <tr key={transaction.eventId}>
                       <td>
-                        <time dateTime={transaction.effectiveAt}>
-                          {new Date(transaction.effectiveAt).toLocaleDateString('ko-KR')}
-                          <small>{new Date(transaction.effectiveAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</small>
-                        </time>
-                      </td>
-                      <td>
                         <span className="dashboard-transaction">
-                          <strong>{action.label}</strong>
-                          <small>{source.label}</small>
-                        </span>
-                      </td>
-                      <td>
-                        <span className="dashboard-asset-change" title={posting?.assetId}>
-                          <strong>{quantity}{asset?.decimals !== undefined ? ` ${displayAssetSymbol}` : ''}</strong>
+                          <strong>{source.label} · {action.label}</strong>
                           <small>
-                            {posting ? describePostingDirection(posting.direction) : '자산 확인 필요'}
-                            {additionalAssetCount > 0 ? ` · 외 ${additionalAssetCount}개` : ''}
-                            {fairValue !== '—' ? ` · ${fairValue}` : ''}
+                            <time dateTime={transaction.effectiveAt}>
+                              {new Date(transaction.effectiveAt).toLocaleDateString('ko-KR')}
+                            </time>
                           </small>
                         </span>
                       </td>
                       <td>
+                        <span className="dashboard-asset-change">
+                          <strong>{quantity}{asset?.decimals !== undefined ? ` ${displayAssetSymbol}` : ''}</strong>
+                          <small>{fairValue !== '—' ? fairValue : '환산 금액 없음'}</small>
+                        </span>
+                      </td>
+                      <td>
                         <span className={`dashboard-status dashboard-status--${transaction.resolution === 'RESOLVED' ? 'complete' : 'review'}`}>
-                          {transaction.resolution === 'RESOLVED' ? '완료' : '일부 확인'}
+                          {transaction.resolution === 'RESOLVED' ? '완료' : '확인 필요'}
                         </span>
                       </td>
                     </tr>
                   })}
-                  {status === 'ready' && recentTransactions.length === 0 ? <tr><td colSpan={4}>이 조회 연도에 처리된 거래가 없습니다.</td></tr> : null}
+                  {status === 'ready' && recentTransactions.length === 0 ? <tr><td colSpan={3}>이 조회 연도에 처리된 거래가 없습니다.</td></tr> : null}
                 </tbody>
               </table>
             </div>

@@ -22,7 +22,6 @@ export function SourceMethodIntroPage({
 
   return (
     <SourceFlowLayout
-      badge={{ label: method.intro.badge, tone: method.tone }}
       description={method.intro.subtitle}
       eyebrow={method.intro.eyebrow}
       title={methodId === 'upbit-pdf' ? 'Upbit PDF 등록' : 'EVM Wallet 연결'}
@@ -71,7 +70,7 @@ export function SourceMethodIntroPage({
               </AppLink>
             ) : (
               <span className="source-primary-action" aria-disabled="true">
-                Upbit PDF 등록 불가
+                준비 중
               </span>
             )}
             <AppLink href="/sources/new">
@@ -106,11 +105,9 @@ export function SourceMethodIntroPage({
 
       {!registrationEnabled ? (
         <p className="source-api-notice" role="alert">
-          현재는 안전한 Upbit 문서 처리 경로가 활성화되지 않아 PDF 등록을 받을 수 없습니다.
+          현재는 안전한 Upbit 문서 처리 경로를 준비하고 있습니다.
         </p>
       ) : null}
-
-      <p className="source-footer-note">{method.intro.footer}</p>
     </SourceFlowLayout>
   )
 }

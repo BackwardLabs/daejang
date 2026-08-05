@@ -658,6 +658,7 @@ export function LedgerPage() {
   const [resolutionNote, setResolutionNote] = useState('')
   const [resolutionStatus, setResolutionStatus] = useState<'idle' | 'submitting' | 'refreshing' | 'success' | 'error' | 'stale' | 'stale-error' | 'conflict' | 'reanalyze'>('idle')
   const [resolutionIntentKey, setResolutionIntentKey] = useState<string>()
+  const [reviewCompletion, setReviewCompletion] = useState<string>()
   const [view, setView] = useState<'ledger' | 'review'>('ledger')
   const [ledgerStatus, setLedgerStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [ledgerReloadKey, setLedgerReloadKey] = useState(0)
@@ -786,6 +787,7 @@ export function LedgerPage() {
     setReviewStatus('loading')
     setReviewPageStatus('idle')
     setReviewNavigation({ status: 'idle' })
+    setReviewCompletion(undefined)
     setReviews([])
     setReviewCursor(undefined)
     reviewPreviewByIdRef.current = {}
@@ -851,6 +853,14 @@ export function LedgerPage() {
     return () => controller.abort()
   }, [cacheReviewDetail, selectedReviewId])
 
+  useEffect(() => {
+    if (!reviewCompletion || selectedReviewId || reviews.length === 0) return
+    const nextReviewId = reviews.find((review) => review.status === 'OPEN')?.id
+    if (!nextReviewId) return
+    selectedReviewIdRef.current = nextReviewId
+    setSelectedReviewId(nextReviewId)
+  }, [reviewCompletion, reviews, selectedReviewId])
+
   const selectedOption = reviewDetail?.options.find((option) => option.code === resolutionCode)
   const resolutionBusy = resolutionStatus === 'submitting' || resolutionStatus === 'refreshing'
   const resolutionBlocked = resolutionStatus === 'reanalyze'
@@ -862,6 +872,7 @@ export function LedgerPage() {
     : '—'
 
   const selectReview = (reviewId: string) => {
+    setReviewCompletion(undefined)
     selectedReviewIdRef.current = reviewId
     setSelectedReviewId(reviewId)
   }
@@ -967,16 +978,34 @@ export function LedgerPage() {
         resolutionNote,
         intentKey,
       })
+      const submittedSelectionIsCurrent = (
+        selectedReviewIdRef.current === submittedReviewId &&
+        reviewDetailGenerationRef.current === submittedGeneration
+      )
+
+      if (result.review.status !== 'OPEN') {
+        setReviews((current) => current.filter((review) => (
+          review.id !== result.review.id && review.status === 'OPEN'
+        )))
+        setLedgerReloadKey((current) => current + 1)
+        if (!submittedSelectionIsCurrent) return
+        setReviewCompletion(describeReviewResolution(result.review))
+        selectedReviewIdRef.current = undefined
+        setSelectedReviewId(undefined)
+        setReviewDetail(undefined)
+        setResolutionStatus('success')
+        setResolutionIntentKey(undefined)
+        return
+      }
+
+      if (!submittedSelectionIsCurrent) return
+
       setReviews((current) => current.map((review) => review.id === result.review.id ? {
         ...review,
         revisionId: result.review.revisionId,
         pointerVersion: result.review.pointerVersion,
         status: result.review.status,
       } : review))
-      if (
-        selectedReviewIdRef.current !== submittedReviewId ||
-        reviewDetailGenerationRef.current !== submittedGeneration
-      ) return
       setReviewDetail(result.review)
       cacheReviewDetail(result.review)
       setResolutionStatus('success')
@@ -1102,7 +1131,7 @@ export function LedgerPage() {
               <header className="ledger-explorer__heading">
                 <div className="ledger-explorer__summary">
                   <h2>거래</h2>
-                  <span>표시 {filteredEvents.length}건 · 장부 반영 {filteredEvents.reduce((count, item) => count + item.event.postings.length, 0)}건</span>
+                  <span>표시 {filteredEvents.length}건 · 장부 항목 {filteredEvents.reduce((count, item) => count + item.event.postings.length, 0)}개</span>
                 </div>
                 <div className="ledger-explorer__toolbar">
                   <div className="ledger-source-filter" role="group" aria-label="거래 출처 필터">
@@ -1180,8 +1209,10 @@ export function LedgerPage() {
         ) : null}
 
         {reviewStatus === 'ready' && view === 'review' ? (
-          reviews.length === 0 ? <section className="ledger-state-card ledger-state-card--empty"><h2>열린 검토가 없습니다</h2><p>추가 확인이 필요한 거래가 생기면 사유와 근거가 여기에 표시됩니다</p></section> :
-          <section className="ledger-review-browser" aria-label="열린 검토">
+          <>
+            {reviewCompletion ? <ReviewCompletionNotice resolution={reviewCompletion} /> : null}
+            {reviews.length === 0 ? <section className="ledger-state-card ledger-state-card--empty"><h2>열린 검토가 없습니다</h2><p>추가 확인이 필요한 거래가 생기면 사유와 근거가 여기에 표시됩니다</p></section> :
+            <section className="ledger-review-browser" aria-label="열린 검토">
             <div className="ledger-review-browser__list" tabIndex={0} aria-label="검토 항목 목록">
               {reviews.map((review) => {
                 const event = events.find((candidate) => candidate.eventId === review.executionId)
@@ -1259,7 +1290,8 @@ export function LedgerPage() {
                 <ReviewTechnicalDetails review={reviewDetail} />
               </article> : null}
             </div>
-          </section>
+            </section>}
+          </>
         ) : null}
       </main>
     </div>

@@ -832,7 +832,6 @@ function UpbitPdfRegistrationFlow({
 
   return (
     <SourceFlowLayout
-      badge={{ label: `${currentStep} / 3`, tone: 'upbit' }}
       description={pageCopy.description}
       eyebrow="DATA SOURCES · UPBIT"
       title={pageCopy.title}
@@ -897,9 +896,6 @@ function UpbitPdfRegistrationFlow({
         ) : null}
       </div>
 
-      <p className="source-footer-note">
-        PDF 파일·본문·파일명은 브라우저 저장소나 URL에 남기지 않습니다.
-      </p>
     </SourceFlowLayout>
   )
 }
@@ -918,13 +914,12 @@ export function UpbitPdfRegistrationPage({
   if (!enabled) {
     return (
       <SourceFlowLayout
-        badge={{ label: '등록 불가', tone: 'upbit' }}
-        description="현재는 Upbit PDF 등록을 받을 수 없습니다."
+        description="현재는 Upbit PDF 등록을 준비하고 있습니다."
         eyebrow="DATA SOURCES · UPBIT"
         title="Upbit PDF 등록"
       >
         <p className="source-api-notice" role="alert">
-          안전한 문서 처리 경로가 활성화된 뒤 등록할 수 있습니다. 파일은 선택하거나 전송하지 않았습니다.
+          안전한 문서 처리 경로가 활성화된 뒤 등록할 수 있습니다.
         </p>
         <AppLink href="/sources/new">
           <span aria-hidden="true">←</span> 연결 방식 다시 선택

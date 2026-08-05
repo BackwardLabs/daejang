@@ -49,7 +49,7 @@ describe('DashboardPage', () => {
     ).toHaveAttribute('data-state', 'complete')
     expect(screen.getByRole('link', { name: '데이터 소스 추가' })).toHaveAttribute(
       'href',
-      '/sources',
+      '/sources/new',
     )
     expect(screen.getByRole('link', { name: '보고서 보기' })).toHaveClass(
       'dashboard-action--primary',
@@ -248,11 +248,11 @@ describe('DashboardPage', () => {
     render(<DashboardPage />)
 
     expect(
-      await screen.findByText('확인이 필요한 거래가 1건 있습니다'),
+      await screen.findByText('확인이 필요한 검토 항목이 1건 있습니다'),
     ).toBeInTheDocument()
     expect(screen.getByText('1.25 USDT')).toBeInTheDocument()
-    expect(screen.getByText('Upbit')).toBeInTheDocument()
-    expect(screen.getByText('증가')).toBeInTheDocument()
+    expect(screen.getByText('Upbit · 입금')).toBeInTheDocument()
+    expect(screen.getByText('환산 금액 없음')).toBeInTheDocument()
     expect(
       screen.queryByText('cex-document-asset:upbit:decimal8:usdt'),
     ).not.toBeInTheDocument()
@@ -308,23 +308,41 @@ describe('DashboardPage', () => {
         },
       ],
     }
+    const events = Array.from({ length: 7 }, (_, index) => ({
+      ...event,
+      eventId: `event-upbit-trade-${index + 1}`,
+      revisionId: `revision-upbit-trade-${index + 1}`,
+      effectiveAt: `2025-11-${String(24 - index).padStart(2, '0')}T23:11:35Z`,
+      postings: event.postings.map((posting) => ({
+        ...posting,
+        legId: `${posting.legId}-${index + 1}`,
+        ...(index === 6 && posting.legId === 'leg-usdt'
+          ? {
+              assetId: 'asset-btc-upbit',
+              assetSymbol: 'BTC',
+              quantity: '100000000',
+            }
+          : {}),
+      })),
+    }))
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('/dashboard')) return new Response(JSON.stringify({ dashboard: { sourceCount: 2, transactionCount: 1, openReviewCount: 0, completedCount: 1, exceptionCount: 0, lastSyncState: 'SUCCEEDED' } }), { status: 200, headers: { 'content-type': 'application/json' } })
-      if (url.includes('/ledger?')) return new Response(JSON.stringify({ items: [event] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/dashboard')) return new Response(JSON.stringify({ dashboard: { sourceCount: 2, transactionCount: 7, openReviewCount: 0, completedCount: 7, exceptionCount: 0, lastSyncState: 'SUCCEEDED' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/ledger?')) return new Response(JSON.stringify({ items: [...events].reverse() }), { status: 200, headers: { 'content-type': 'application/json' } })
       return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
     }))
 
     render(<DashboardPage />)
 
-    expect(await screen.findByText('1,801.08722461 USDT')).toBeInTheDocument()
-    expect(screen.getByText('Upbit')).toBeInTheDocument()
-    expect(screen.getByText(/증가 · 외 1개 · 2,701,901\.16 KRW/)).toBeInTheDocument()
-    expect(screen.getByText('완료')).toBeInTheDocument()
-    expect(screen.getByTitle('11월 거래 1건')).toHaveTextContent('1건')
+    expect(await screen.findAllByText('1,801.08722461 USDT')).toHaveLength(6)
+    expect(screen.getAllByText('Upbit · 거래')).toHaveLength(6)
+    expect(screen.getAllByText('2,701,901.16 KRW')).toHaveLength(6)
+    expect(screen.getAllByText('완료')).toHaveLength(6)
+    expect(screen.getByTitle('11월 거래 7건')).toHaveTextContent('7건')
+    expect(screen.queryByText(/BTC/)).not.toBeInTheDocument()
     expect(screen.queryByText('asset-usdt-upbit')).not.toBeInTheDocument()
     expect(screen.queryByText('FULL')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('columnheader')).toHaveLength(4)
+    expect(screen.getAllByRole('columnheader')).toHaveLength(3)
   })
 
   it('replaces spam-like token labels in the dashboard while keeping normal values visible', async () => {

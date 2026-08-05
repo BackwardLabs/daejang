@@ -27,8 +27,8 @@ describe('ProductPage', () => {
     expect(screen.queryByText('Upbit')).not.toBeInTheDocument()
     expect(screen.queryByText(/0x8f/)).not.toBeInTheDocument()
     expect(
-      screen.getByText(/현재 사용 중인 브라우저에 저장되며/),
-    ).toBeInTheDocument()
+      screen.queryByText(/현재 사용 중인 브라우저에 저장되며/),
+    ).not.toBeInTheDocument()
     expect(
       screen.getByRole('option', {
         name: 'USD · 미국 달러 (환율 변환 준비 중)',

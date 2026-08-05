@@ -265,6 +265,73 @@
   word-break: keep-all;
 }
 
+.wallet-help-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wallet-help-list li {
+  display: grid;
+  gap: 3px;
+  padding: 13px 0;
+  border-top: 1px solid var(--source-line);
+}
+
+.wallet-help-list li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.wallet-help-list li:last-child {
+  padding-bottom: 0;
+}
+
+.wallet-help-list strong {
+  color: var(--source-ink);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.wallet-help-list span {
+  color: var(--source-muted);
+  font-size: 11px;
+  line-height: 18px;
+  word-break: keep-all;
+}
+
+.wallet-help-list--numbered {
+  counter-reset: wallet-help-step;
+}
+
+.wallet-help-list--numbered li {
+  position: relative;
+  padding-left: 34px;
+  counter-increment: wallet-help-step;
+}
+
+.wallet-help-list--numbered li::before {
+  position: absolute;
+  top: 13px;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--source-line);
+  border-radius: 50%;
+  color: var(--source-muted);
+  font-size: 10px;
+  font-weight: 700;
+  content: counter(wallet-help-step);
+}
+
+.wallet-help-list--numbered li:first-child::before {
+  top: 0;
+}
+
 .wallet-safety-list,
 .wallet-flow-numbered-list,
 .wallet-completion-list {
@@ -503,7 +570,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) repeat(2, minmax(120px, 0.7fr));
   overflow: hidden;
-  margin-bottom: 22px;
+  margin-bottom: 18px;
   border: 1px solid var(--source-line);
   border-radius: 14px;
 }
@@ -537,17 +604,19 @@
 }
 
 .wallet-period-panel {
+  margin-top: 16px;
   padding: 20px;
-  border-radius: 14px;
-  background: var(--source-surface);
+  border: 1px solid var(--source-line);
+  border-radius: 12px;
+  background: #fff;
 }
 
 .wallet-network-panel {
   margin: 0;
   padding: 20px;
-  border: 0;
-  border-radius: 14px;
-  background: var(--source-surface);
+  border: 1px solid var(--source-line);
+  border-radius: 12px;
+  background: #fff;
 }
 
 .wallet-network-panel legend {
@@ -585,7 +654,7 @@
 
 .wallet-network-options label:has(input:checked) {
   border-color: var(--source-evm);
-  background: var(--source-evm-soft);
+  background: #fffaf7;
 }
 
 .wallet-network-options input {
@@ -596,7 +665,7 @@
 
 .wallet-period-panel__heading {
   display: flex;
-  align-items: end;
+  align-items: start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
@@ -613,6 +682,11 @@
   color: var(--source-muted);
   font-size: 11px;
   line-height: 18px;
+}
+
+.wallet-period-panel__sync {
+  max-width: 230px;
+  text-align: right;
 }
 
 .wallet-period-mode {
@@ -748,10 +822,7 @@
 }
 
 .wallet-completion {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
+  display: block;
 }
 
 .wallet-completion__icon {

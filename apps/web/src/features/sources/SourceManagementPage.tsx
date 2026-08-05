@@ -272,6 +272,26 @@ function createNetworkUpdateIntentKey(sourceId: string) {
   return `source-networks:${sourceId}:${suffix}`
 }
 
+function getActiveWalletChainIds(
+  source: Extract<SourceApiModel, { type: 'EVM_WALLET' }>,
+) {
+  return source.chainScopes
+    .filter((scope) => scope.status === 'ACTIVE')
+    .map((scope) => scope.chainId)
+    .sort()
+}
+
+function haveSameChainIds(left: string[], right: string[]) {
+  if (left.length !== right.length) return false
+  const sortedLeft = [...left].sort()
+  const sortedRight = [...right].sort()
+  return sortedLeft.every((chainId, index) => chainId === sortedRight[index])
+}
+
+function isSyncJobActive(job: SyncJobApiModel | undefined) {
+  return job?.state === 'QUEUED' || job?.state === 'RUNNING'
+}
+
 export function SourceManagementPage() {
   const [sources, setSources] = useState<SourceApiModel[]>([])
   const [jobs, setJobs] = useState<SyncJobApiModel[]>([])
@@ -293,6 +313,7 @@ export function SourceManagementPage() {
   }>()
   const retryIntentKeys = useRef(new Map<string, string>())
   const retryWatchControllers = useRef(new Map<string, AbortController>())
+  const networkUpdateInFlight = useRef(new Set<string>())
   const activeSources = sources.filter((source) => source.status === 'ACTIVE')
   const sourceCountText =
     status === 'ready'
@@ -311,6 +332,33 @@ export function SourceManagementPage() {
         setSources(sourceResult.items)
         setJobs(jobResult.items)
         setStatus('ready')
+
+        sourceResult.items.forEach((source) => {
+          const latestJob = findLatestSyncJob(jobResult.items, source.id)
+          if (!latestJob || !isSyncJobActive(latestJob)) return
+
+          const watchKey = `initial:${source.id}`
+          const watchController = new AbortController()
+          retryWatchControllers.current.set(watchKey, watchController)
+          void watchSyncJob({
+            jobId: latestJob.id,
+            signal: watchController.signal,
+            waitForLedger: true,
+            onUpdate: (snapshot) => {
+              setJobs((current) =>
+                current.map((candidate) =>
+                  candidate.id === snapshot.id
+                    ? { ...candidate, ...snapshot }
+                    : candidate,
+                ),
+              )
+            },
+          })
+            .catch(() => undefined)
+            .finally(() => {
+              retryWatchControllers.current.delete(watchKey)
+            })
+        })
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === 'AbortError')) {
@@ -369,6 +417,15 @@ export function SourceManagementPage() {
     source: Extract<SourceApiModel, { type: 'EVM_WALLET' }>,
     latestJob: SyncJobApiModel | undefined,
   ) {
+    const savedChainIds = getActiveWalletChainIds(source)
+    if (
+      networkUpdateInFlight.current.has(source.id) ||
+      isSyncJobActive(latestJob) ||
+      haveSameChainIds(savedChainIds, networkDraft)
+    ) {
+      return
+    }
+
     if (networkDraft.length === 0) {
       setNetworkUpdateMessage({
         sourceId: source.id,
@@ -378,6 +435,7 @@ export function SourceManagementPage() {
       return
     }
 
+    networkUpdateInFlight.current.add(source.id)
     setUpdatingNetworksId(source.id)
     setNetworkUpdateMessage(undefined)
     const controller = new AbortController()
@@ -395,6 +453,7 @@ export function SourceManagementPage() {
       )
     } catch {
       controller.abort()
+      networkUpdateInFlight.current.delete(source.id)
       setNetworkUpdateMessage({
         sourceId: source.id,
         tone: 'error',
@@ -454,6 +513,7 @@ export function SourceManagementPage() {
         text: '수집 네트워크는 저장했지만 새 수집을 시작하지 못했습니다. 잠시 후 다시 수집해 주세요.',
       })
     } finally {
+      networkUpdateInFlight.current.delete(source.id)
       setUpdatingNetworksId(undefined)
     }
   }
@@ -557,6 +617,14 @@ export function SourceManagementPage() {
         <section className="source-list" aria-label="등록된 데이터 소스">
           {activeSources.map((source) => {
             const latestJob = findLatestSyncJob(jobs, source.id)
+            const activeJob = isSyncJobActive(latestJob)
+            const savedChainIds =
+              source.type === 'EVM_WALLET'
+                ? getActiveWalletChainIds(source)
+                : []
+            const networkDraftChanged =
+              source.type === 'EVM_WALLET' &&
+              !haveSameChainIds(savedChainIds, networkDraft)
             const isExpanded =
               latestJob?.state === 'FAILED' &&
               expandedJobId === latestJob.id
@@ -656,33 +724,89 @@ export function SourceManagementPage() {
                 </div>
                 {source.type === 'EVM_WALLET' &&
                 editingNetworksId === source.id ? (
-                  <section className="source-network-editor" aria-label="수집 네트워크 관리">
-                    <div>
-                      <h3>이 주소에서 수집할 네트워크</h3>
-                      <p>지갑을 다시 연결하거나 네트워크를 전환할 필요가 없습니다.</p>
+                  <section
+                    className="source-network-editor"
+                    aria-label="수집 네트워크 관리"
+                  >
+                    <header className="source-network-editor__header">
+                      <div>
+                        <span className="source-network-editor__eyebrow">
+                          수집 설정
+                        </span>
+                        <h3>수집 네트워크</h3>
+                        <p>이 주소에서 거래를 확인할 네트워크를 선택합니다.</p>
+                      </div>
+                      <dl className="source-network-editor__status">
+                        <div>
+                          <dt>최근 상태</dt>
+                          <dd>
+                            {latestJob
+                              ? jobStatusLabel[latestJob.state]
+                              : '수집 기록 없음'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>처리한 거래</dt>
+                          <dd>
+                            {latestJob
+                              ? `${String(latestJob.processedRecords)}건`
+                              : '—'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>마지막 업데이트</dt>
+                          <dd>
+                            {latestJob
+                              ? formatJobTimestamp(latestJob.updatedAt)
+                              : '—'}
+                          </dd>
+                        </div>
+                      </dl>
+                    </header>
+                    <div className="source-network-editor__body">
+                      <fieldset disabled={Boolean(activeJob)}>
+                        <legend>수집 대상</legend>
+                        <div className="source-network-editor__options">
+                          {evmWalletNetworkMetadata.map((network) => (
+                            <label key={network.chainId}>
+                              <input
+                                type="checkbox"
+                                checked={networkDraft.includes(network.chainId)}
+                                disabled={
+                                  updatingNetworksId === source.id ||
+                                  Boolean(activeJob)
+                                }
+                                onChange={(event) => {
+                                  const checked = event.currentTarget.checked
+                                  setNetworkDraft((current) =>
+                                    checked
+                                      ? [...current, network.chainId]
+                                      : current.filter(
+                                          (chainId) =>
+                                            chainId !== network.chainId,
+                                        ),
+                                  )
+                                }}
+                              />
+                              <span>{network.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                      <div className="source-network-editor__guidance">
+                        {activeJob ? (
+                          <p role="status">
+                            현재 수집이 진행 중입니다. 완료된 뒤 네트워크 설정을
+                            변경할 수 있습니다.
+                          </p>
+                        ) : networkDraftChanged ? (
+                          <p>저장하면 기존 조회 기간으로 새 수집을 시작합니다.</p>
+                        ) : (
+                          <p>현재 저장된 설정과 같습니다.</p>
+                        )}
+                      </div>
                     </div>
-                    <fieldset>
-                      <legend className="sr-only">수집 네트워크</legend>
-                      {evmWalletNetworkMetadata.map((network) => (
-                        <label key={network.chainId}>
-                          <input
-                            type="checkbox"
-                            checked={networkDraft.includes(network.chainId)}
-                            disabled={updatingNetworksId === source.id}
-                            onChange={(event) => {
-                              const checked = event.currentTarget.checked
-                              setNetworkDraft((current) =>
-                                checked
-                                  ? [...current, network.chainId]
-                                  : current.filter((chainId) => chainId !== network.chainId),
-                              )
-                            }}
-                          />
-                          {network.label}
-                        </label>
-                      ))}
-                    </fieldset>
-                    <div className="source-network-editor__actions">
+                    <footer className="source-network-editor__actions">
                       <button
                         type="button"
                         onClick={() => setEditingNetworksId(undefined)}
@@ -691,12 +815,23 @@ export function SourceManagementPage() {
                       </button>
                       <button
                         type="button"
-                        disabled={updatingNetworksId === source.id}
+                        disabled={
+                          updatingNetworksId === source.id ||
+                          networkDraft.length === 0 ||
+                          !networkDraftChanged ||
+                          Boolean(activeJob)
+                        }
                         onClick={() => void handleNetworkUpdate(source, latestJob)}
                       >
-                        {updatingNetworksId === source.id ? '저장 중…' : '저장하고 수집'}
+                        {updatingNetworksId === source.id
+                          ? '저장 중…'
+                          : activeJob
+                            ? '수집 진행 중'
+                            : networkDraftChanged
+                              ? '설정 저장 후 수집'
+                              : '변경사항 없음'}
                       </button>
-                    </div>
+                    </footer>
                   </section>
                 ) : null}
                 {networkUpdateMessage?.sourceId === source.id ? (

@@ -81,8 +81,7 @@ describe('EvmWalletConnectionPage', () => {
   it('shows every supported EVM network before connecting a wallet', () => {
     render(<EvmWalletConnectionPage {...withTestFixtures()} />)
 
-    expect(screen.getByText('Ethereum')).toBeInTheDocument()
-    expect(screen.getByText('Optimism')).toBeInTheDocument()
+    expect(screen.getByText('Ethereum, Optimism')).toBeInTheDocument()
     expect(screen.queryByText('GIWA Sepolia')).not.toBeInTheDocument()
   })
 
@@ -130,7 +129,7 @@ describe('EvmWalletConnectionPage', () => {
     await screen.findByRole('heading', { name: '지갑 소유권 확인' })
     expect(screen.getByText('0x1234…5678 · Ethereum')).toBeInTheDocument()
     expect(screen.queryByText(connectedWallet.address)).not.toBeInTheDocument()
-    expect(screen.getByText('가스비 없음')).toBeInTheDocument()
+    expect(screen.getByText(/가스비 없음/)).toBeInTheDocument()
     expect(screen.getByText(/거래 승인 없음/)).toBeInTheDocument()
     expect(screen.getByText(/자산 이동 권한 없음/)).toBeInTheDocument()
 
@@ -148,8 +147,8 @@ describe('EvmWalletConnectionPage', () => {
     ).toBeInTheDocument()
     expect(screen.queryByText(/최근 90일/)).not.toBeInTheDocument()
     expect(screen.queryByText(/매일 자동/)).not.toBeInTheDocument()
-    expect(screen.getByText('공개 지갑 주소를 서비스에 저장')).toBeInTheDocument()
-    expect(screen.getByText(/개인키나 서명 권한은 저장하지 않습니다/)).toBeInTheDocument()
+    expect(screen.getByText('원본 금융 데이터는 공개 체인에 기록하지 않음')).toBeInTheDocument()
+    expect(screen.getByText('공개 지갑 주소는 거래 조회에만 사용합니다.')).toBeInTheDocument()
     expect(screen.queryByText('사용자 지갑 주소를 기록하지 않음')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '연결 완료' }))

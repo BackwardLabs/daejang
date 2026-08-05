@@ -1,22 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SourceManagementPage } from './SourceManagementPage.tsx'
 import { SourceMethodIntroPage } from './SourceMethodIntroPage.tsx'
 import { SourceTypeSelectionPage } from './SourceTypeSelectionPage.tsx'
-
-vi.mock('./ReownEvmWalletConnectionRoute.tsx', () => ({
-  ReownEvmWalletConnectionRoute: ({
-    pendingView,
-  }: {
-    pendingView?: ReactNode
-  }) => (
-    <>
-      {pendingView}
-      <div role="dialog" aria-label="Reown 지갑 연결" />
-    </>
-  ),
-}))
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -677,7 +663,9 @@ describe('source flow pages', () => {
     fireEvent.click(await screen.findByRole('button', { name: '수집 네트워크 관리' }))
     expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Optimism' }))
-    fireEvent.click(screen.getByRole('button', { name: '저장하고 수집' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: '설정 저장 후 수집' }),
+    )
 
     expect(await screen.findByRole('status')).toHaveTextContent(
       '수집 네트워크를 저장하고 같은 기간의 새 수집을 시작했습니다.',
@@ -701,6 +689,175 @@ describe('source flow pages', () => {
     )
   })
 
+  it('does not save or start collection when the wallet network selection is unchanged', async () => {
+    const source = {
+      id: '77777777-7777-4777-8777-777777777777',
+      type: 'EVM_WALLET',
+      address: '0x239000000000000000000000000000000000f2b2',
+      accountType: 'EOA',
+      verificationChainId: 'eip155:1',
+      verifiedAt: '2027-01-01T00:00:00.000Z',
+      label: '세무 지갑',
+      status: 'ACTIVE',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:00:00.000Z',
+      chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+    }
+    const existingJob = {
+      id: '88888888-8888-4888-8888-888888888888',
+      sourceId: source.id,
+      sourceKind: 'EVM_WALLET',
+      state: 'SUCCEEDED',
+      phase: 'COMPLETE',
+      attempts: 1,
+      processedRecords: 4,
+      requestedCoverageStart: '2026-07-28',
+      requestedCoverageEnd: '2026-07-28',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:05:00.000Z',
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/sources') {
+        return new Response(JSON.stringify({ items: [source] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === '/api/v1/jobs') {
+        return new Response(JSON.stringify({ items: [existingJob] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SourceManagementPage />)
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: '수집 네트워크 관리' }),
+    )
+    expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
+    expect(screen.getByText('현재 저장된 설정과 같습니다.')).toBeInTheDocument()
+
+    const saveButton = screen.getByRole('button', { name: '변경사항 없음' })
+    expect(saveButton).toBeDisabled()
+    fireEvent.click(saveButton)
+
+    expect(
+      fetchMock.mock.calls.some(
+        ([input]) =>
+          String(input) === `/api/v1/sources/${source.id}/chains`,
+      ),
+    ).toBe(false)
+    expect(
+      fetchMock.mock.calls.some(
+        ([input]) => String(input) === '/api/v1/syncs',
+      ),
+    ).toBe(false)
+  })
+
+  it.each(['RUNNING', 'QUEUED'] as const)(
+    'blocks wallet network changes while the latest collection is %s',
+    async (state) => {
+      const source = {
+        id: '99999999-9999-4999-8999-999999999999',
+        type: 'EVM_WALLET',
+        address: '0x239000000000000000000000000000000000f2b2',
+        accountType: 'EOA',
+        verificationChainId: 'eip155:1',
+        verifiedAt: '2027-01-01T00:00:00.000Z',
+        label: '세무 지갑',
+        status: 'ACTIVE',
+        createdAt: '2027-01-01T00:00:00.000Z',
+        updatedAt: '2027-01-01T00:00:00.000Z',
+        chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+      }
+      const activeJob = {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        sourceId: source.id,
+        sourceKind: 'EVM_WALLET',
+        state,
+        phase: state,
+        attempts: 1,
+        processedRecords: 2,
+        requestedCoverageStart: '2026-07-28',
+        requestedCoverageEnd: '2026-07-28',
+        createdAt: '2027-01-01T00:00:00.000Z',
+        updatedAt: '2027-01-01T00:05:00.000Z',
+      }
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/api/v1/sources') {
+          return new Response(JSON.stringify({ items: [source] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        if (url === '/api/v1/jobs') {
+          return new Response(JSON.stringify({ items: [activeJob] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        if (url === `/api/v1/jobs/${activeJob.id}`) {
+          return new Response(JSON.stringify({ job: activeJob }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { unmount } = render(<SourceManagementPage />)
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: '수집 네트워크 관리' }),
+      )
+      const editor = screen.getByRole('region', {
+        name: '수집 네트워크 관리',
+      })
+      const ethereum = within(editor).getByRole('checkbox', {
+        name: 'Ethereum',
+      })
+      const optimism = within(editor).getByRole('checkbox', {
+        name: 'Optimism',
+      })
+
+      expect(ethereum).toBeChecked()
+      expect(ethereum).toBeDisabled()
+      expect(optimism).not.toBeChecked()
+      expect(optimism).toBeDisabled()
+      expect(within(editor).getByRole('status')).toHaveTextContent(
+        '현재 수집이 진행 중입니다. 완료된 뒤 네트워크 설정을 변경할 수 있습니다.',
+      )
+
+      const saveButton = within(editor).getByRole('button', {
+        name: '수집 진행 중',
+      })
+      expect(saveButton).toBeDisabled()
+      fireEvent.click(saveButton)
+
+      expect(optimism).not.toBeChecked()
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) =>
+            String(input) === `/api/v1/sources/${source.id}/chains`,
+        ),
+      ).toBe(false)
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) => String(input) === '/api/v1/syncs',
+        ),
+      ).toBe(false)
+
+      unmount()
+    },
+  )
+
   it('keeps Upbit PDF disabled when the safe import path is unavailable', () => {
     render(<SourceTypeSelectionPage />)
 
@@ -716,19 +873,19 @@ describe('source flow pages', () => {
     ).toBeInTheDocument()
     expect(screen.queryByText('지원 방식')).not.toBeInTheDocument()
     expect(
-      screen.getByText(
+      screen.queryByText(
         '두 방식 모두 수집 범위를 확인한 뒤 최초 수집 작업을 시작합니다.',
       ),
-    ).toHaveClass('source-footer-note--after-methods')
+    ).not.toBeInTheDocument()
     expect(
-      within(methods).getByText('Upbit PDF 등록 불가'),
+      within(methods).getByText('준비 중'),
     ).toHaveAttribute('aria-disabled', 'true')
     expect(
       within(methods).queryByRole('link', { name: 'Upbit PDF 선택' }),
     ).not.toBeInTheDocument()
     expect(
-      within(methods).getByRole('button', { name: 'EVM Wallet 선택' }),
-    ).toBeEnabled()
+      within(methods).getByRole('link', { name: 'EVM Wallet 선택' }),
+    ).toHaveAttribute('href', '/sources/new/wallet')
     expect(
       within(methods).getByText('암호화되지 않은 PDF 지원'),
     ).toBeInTheDocument()
@@ -737,26 +894,22 @@ describe('source flow pages', () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        'Upbit는 PDF 업로드, EVM은 브라우저 지갑의 읽기 전용 연결 방식으로 등록합니다.',
+        'Upbit는 거래내역서 등록, EVM은 브라우저 지갑의 읽기 전용 연결 방식으로 등록합니다.',
       ),
     ).toBeInTheDocument()
+    expect(screen.queryByText('PDF 업로드')).not.toBeInTheDocument()
   })
 
-  it('opens Reown directly without leaving the source type selection route', async () => {
+  it('routes EVM selection to the explicit wallet selection page', () => {
     window.history.pushState({}, '', '/sources/new')
     render(<SourceTypeSelectionPage />)
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'EVM Wallet 선택' }),
-    )
-
     expect(
-      await screen.findByRole('dialog', { name: 'Reown 지갑 연결' }),
-    ).toBeInTheDocument()
-    expect(window.location.pathname).toBe('/sources/new')
+      screen.getByRole('link', { name: 'EVM Wallet 선택' }),
+    ).toHaveAttribute('href', '/sources/new/wallet')
     expect(
-      screen.getByRole('heading', { name: '데이터 소스 추가' }),
-    ).toBeInTheDocument()
+      screen.queryByRole('dialog', { name: 'Reown 지갑 연결' }),
+    ).not.toBeInTheDocument()
   })
 
   it('explains the Upbit PDF flow without linking to a disabled registration path', () => {
@@ -777,17 +930,18 @@ describe('source flow pages', () => {
     expect(screen.queryByText(/PDF 비밀번호/)).not.toBeInTheDocument()
 
     expect(
-      screen.getByText('Upbit PDF 등록 불가'),
+      screen.getByText('준비 중'),
     ).toHaveAttribute('aria-disabled', 'true')
     expect(
       screen.queryByRole('link', { name: 'PDF 등록 시작' }),
     ).not.toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent(
-      '현재는 안전한 Upbit 문서 처리 경로가 활성화되지 않아 PDF 등록을 받을 수 없습니다.',
+      '현재는 안전한 Upbit 문서 처리 경로를 준비하고 있습니다.',
     )
     expect(
       screen.getByRole('link', { name: '연결 방식 다시 선택' }),
     ).toHaveAttribute('href', '/sources/new')
+    expect(screen.queryByText('PDF 업로드')).not.toBeInTheDocument()
   })
 
   it('uses readable dark text for the enabled Upbit PDF registration action', async () => {

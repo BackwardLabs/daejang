@@ -31,6 +31,7 @@ import {
 import {
   createSyncJob,
   createWalletChallenge,
+  listSources,
   registerWalletSource,
   watchSyncJob,
 } from './sourceApi.ts'
@@ -65,16 +66,70 @@ function isUserRejection(error: unknown) {
   )
 }
 
-function waitForEvmConnection(
+function readCurrentEvmConnection() {
+  const caipAddress = reownAppKit?.getCaipAddress('eip155')
+  if (!caipAddress) return null
+
+  const [, chainId, address] = caipAddress.split(':')
+  if (!chainId || !address) return null
+
+  return {
+    address,
+    chainId: toEvmCaipChainId(chainId),
+  }
+}
+
+function waitForExplicitEvmConnection(
   signal: AbortSignal,
-  cancelWhenModalCloses = false,
+  openWalletPicker: () => Promise<unknown>,
 ) {
   return new Promise<{ address: string; chainId: string }>((resolve, reject) => {
     const startedAt = Date.now()
+    let intervalId = 0
+    let modalOpened = false
+    let unsubscribeEvents: (() => void) | undefined
     let unsubscribeState: (() => void) | undefined
+    let walletSelected = false
+
+    unsubscribeEvents = reownAppKit?.subscribeEvents((state) => {
+      if (state.data.event === 'SELECT_WALLET') {
+        walletSelected = true
+        return
+      }
+
+      if (!modalOpened || state.data.event !== 'CONNECT_SUCCESS') return
+
+      const connection = readCurrentEvmConnection()
+      if (connection) {
+        finish()
+        resolve(connection)
+      }
+    })
+
+    unsubscribeState = reownAppKit?.subscribeState((state) => {
+      if (state.open) {
+        modalOpened = true
+        return
+      }
+
+      if (!modalOpened) return
+
+      if (walletSelected) {
+        const connection = readCurrentEvmConnection()
+        if (connection) {
+          finish()
+          resolve(connection)
+          return
+        }
+      }
+
+      finish()
+      reject({ code: 4001 })
+    })
 
     function finish() {
       window.clearInterval(intervalId)
+      unsubscribeEvents?.()
       unsubscribeState?.()
       signal.removeEventListener('abort', handleAbort)
     }
@@ -84,36 +139,36 @@ function waitForEvmConnection(
       reject(new DOMException('Wallet connection aborted.', 'AbortError'))
     }
 
-    const intervalId = window.setInterval(() => {
-      const caipAddress = reownAppKit?.getCaipAddress('eip155')
-      const chainId = reownAppKit?.getChainId()
-
-      if (caipAddress && chainId !== undefined) {
-        const address = caipAddress.split(':').at(-1)
-        if (address) {
-          finish()
-          resolve({ address, chainId: toEvmCaipChainId(chainId) })
-          return
-        }
-      }
-
+    intervalId = window.setInterval(() => {
       if (Date.now() - startedAt >= 120_000) {
         finish()
         reject(new Error('Wallet connection timed out.'))
       }
-    }, 100)
-
-    if (cancelWhenModalCloses) {
-      unsubscribeState = reownAppKit?.subscribeState((state) => {
-        if (!state.open && !reownAppKit?.getCaipAddress('eip155')) {
-          finish()
-          reject({ code: 4001 })
-        }
-      })
-    }
+    }, 250)
 
     signal.addEventListener('abort', handleAbort, { once: true })
+    if (signal.aborted) {
+      handleAbort()
+      return
+    }
+
+    void openWalletPicker().catch((error: unknown) => {
+      finish()
+      reject(error)
+    })
   })
+}
+
+async function isActiveWalletSource(address: string, signal: AbortSignal) {
+  const normalizedAddress = address.trim().toLowerCase()
+  const { items } = await listSources(signal)
+
+  return items.some(
+    (source) =>
+      source.type === 'EVM_WALLET' &&
+      source.status === 'ACTIVE' &&
+      source.address.trim().toLowerCase() === normalizedAddress,
+  )
 }
 
 function getDirectWalletName(provider: EvmWalletProviderId) {
@@ -128,6 +183,7 @@ function getDirectWalletName(provider: EvmWalletProviderId) {
 
 type ReownRouteProps = {
   launchImmediately?: boolean
+  onAlreadyConnected?: () => void
   onLaunchFailed?: (result: ConnectWalletResult) => void
   onExitRequested?: () => void
   pendingView?: ReactNode
@@ -172,6 +228,7 @@ function MissingReownConfigurationRoute({
 
 function ConfiguredReownRoute({
   launchImmediately = false,
+  onAlreadyConnected,
   onExitRequested,
   onLaunchFailed,
   pendingView,
@@ -183,22 +240,38 @@ function ConfiguredReownRoute({
   )
   const pendingSignatures = useRef(new Map<string, string>())
   const pendingSourceIds = useRef(new Map<string, string>())
+  const duplicateWalletAttempt = useRef(false)
 
   const connectWallet = useCallback<ConnectWallet>(
     async ({ provider, signal }) => {
       try {
+        duplicateWalletAttempt.current = false
         const directWalletName = getDirectWalletName(provider)
+        let connection: { address: string; chainId: string }
 
         if (directWalletName) {
           await walletButton.connect(directWalletName)
+          const directConnection = readCurrentEvmConnection()
+          if (!directConnection) {
+            return {
+              error: { code: 'CONNECTION_FAILED' },
+              ok: false,
+            }
+          }
+          connection = directConnection
         } else {
-          await open({ namespace: 'eip155', view: 'Connect' })
+          connection = await waitForExplicitEvmConnection(signal, () =>
+            open({ namespace: 'eip155', view: 'Connect' }),
+          )
         }
 
-        const connection = await waitForEvmConnection(
-          signal,
-          directWalletName === null,
-        )
+        if (await isActiveWalletSource(connection.address, signal)) {
+          duplicateWalletAttempt.current = true
+          return {
+            error: { code: 'SOURCE_ALREADY_CONNECTED' },
+            ok: false,
+          }
+        }
 
         const network = getEvmWalletNetwork(connection.chainId)
         if (!network) {
@@ -351,9 +424,14 @@ function ConfiguredReownRoute({
         setInitialConnectionComplete(true)
         return
       }
+      if (duplicateWalletAttempt.current) {
+        duplicateWalletAttempt.current = false
+        onAlreadyConnected?.()
+        return
+      }
       onLaunchFailed?.(result)
     },
-    [onLaunchFailed],
+    [onAlreadyConnected, onLaunchFailed],
   )
 
   return (
