@@ -328,11 +328,18 @@ export function SourceManagementPage() {
   async function handleDisconnect(sourceId: string) {
     setDisconnectingId(sourceId)
     try {
-      const disconnected = await disconnectWalletSource(sourceId)
+      await disconnectWalletSource(sourceId)
       setSources((current) =>
-        current.map((source) =>
-          source.id === disconnected.id ? disconnected : source,
-        ),
+        current.filter((source) => source.id !== sourceId),
+      )
+      setJobs((current) =>
+        current.filter((job) => job.sourceId !== sourceId),
+      )
+      setEditingNetworksId((current) =>
+        current === sourceId ? undefined : current,
+      )
+      setNetworkUpdateMessage((current) =>
+        current?.sourceId === sourceId ? undefined : current,
       )
     } catch {
       setStatus('error')
@@ -545,9 +552,9 @@ export function SourceManagementPage() {
         </section>
       ) : null}
 
-      {status === 'ready' && sources.length > 0 ? (
+      {status === 'ready' && activeSources.length > 0 ? (
         <section className="source-list" aria-label="등록된 데이터 소스">
-          {sources.map((source) => {
+          {activeSources.map((source) => {
             const latestJob = findLatestSyncJob(jobs, source.id)
             const isExpanded =
               latestJob?.state === 'FAILED' &&
@@ -784,7 +791,7 @@ export function SourceManagementPage() {
         </section>
       ) : null}
 
-      {status === 'ready' && sources.length === 0 ? (
+      {status === 'ready' && activeSources.length === 0 ? (
         <section
           className="source-empty-state"
           aria-labelledby="source-empty-title"

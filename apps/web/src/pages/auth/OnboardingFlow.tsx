@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import {
   createEmailAccount,
   getCurrentLegalDocuments,
+  orderSocialProviders,
   sendEmailCode,
   startSocialAuth,
   submitSignupConsents,
@@ -266,8 +267,8 @@ function MethodScreen({
   signupMethods: SignupMethods
   totalSteps: number
 }) {
-  const socialProviders = signupMethods.oauthProviders.filter(
-    (provider) => provider in providerInfo,
+  const socialProviders = orderSocialProviders(
+    signupMethods.oauthProviders.filter((provider) => provider in providerInfo),
   )
   const hasSocialProvider = socialProviders.length > 0
   const socialRedirectStartedRef = useRef(false)

@@ -130,6 +130,11 @@ body:has(.source-page) {
   transform: translateY(-1px);
 }
 
+.source-primary-action--dark-text,
+.source-primary-action--dark-text:hover {
+  color: var(--source-ink);
+}
+
 .source-primary-action:disabled,
 .source-primary-action[aria-disabled="true"] {
   border-color: #d8d5cf;
@@ -242,6 +247,10 @@ body:has(.source-page) {
   font-size: 11px;
   line-height: 18px;
   text-align: center;
+}
+
+.source-footer-note--after-methods {
+  margin-top: 36px;
 }
 
 .source-state-card {
@@ -695,7 +704,6 @@ body:has(.source-page) {
 .source-mvp-guide {
   display: flex;
   align-items: center;
-  gap: 12px;
   min-height: 62px;
   margin-bottom: 20px;
   padding: 12px 18px;
@@ -704,19 +712,6 @@ body:has(.source-page) {
   background: var(--source-surface);
   font-size: 12px;
   line-height: 19px;
-}
-
-.source-mvp-guide strong {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 23px;
-  border-radius: 999px;
-  color: #fff;
-  background: var(--source-ink);
-  font-size: 10px;
-  letter-spacing: 0.05em;
 }
 
 .source-method-grid {

@@ -1,6 +1,19 @@
 export type SocialProvider = 'kakao' | 'naver' | 'google'
 export type AuthIntent = 'signup' | 'login'
 
+export const socialProviderOrder = [
+  'kakao',
+  'naver',
+  'google',
+] as const satisfies readonly SocialProvider[]
+
+export function orderSocialProviders(
+  providers: readonly SocialProvider[],
+): SocialProvider[] {
+  const enabledProviders = new Set(providers)
+  return socialProviderOrder.filter((provider) => enabledProviders.has(provider))
+}
+
 export type SignupMethods = {
   email: boolean
   oauthProviders: SocialProvider[]
@@ -213,7 +226,7 @@ export function startSocialAuth(provider: SocialProvider, intent: AuthIntent) {
   window.location.assign(buildSocialAuthStartUrl(provider, intent))
 }
 
-const socialProviders = new Set<SocialProvider>(['kakao', 'naver', 'google'])
+const socialProviders = new Set<SocialProvider>(socialProviderOrder)
 
 function parseAuthCapabilities(value: unknown): AuthCapabilities {
   if (!value || typeof value !== 'object') {
