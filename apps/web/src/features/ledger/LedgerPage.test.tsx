@@ -5,7 +5,11 @@ import {
   appPreferencesStorageKey,
   loadAppPreferences,
 } from '../../preferences/appPreferences.ts'
-import { formatReviewQuantity, LedgerPage } from './LedgerPage.tsx'
+import {
+  formatReviewDisplayQuantity,
+  formatReviewQuantity,
+  LedgerPage,
+} from './LedgerPage.tsx'
 
 const jsonResponse = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -110,6 +114,53 @@ describe('LedgerPage', () => {
       '9007199254740993 (단위 확인 필요)',
     )
     expect(formatReviewQuantity('-1', 18)).toBe('-0.000000000000000001')
+    expect(formatReviewDisplayQuantity({
+      ...reviewDetail.observations[0]!,
+      domain: 'CEX',
+      kind: 'WITHDRAWAL',
+      assetSymbol: 'KRW',
+      assetLocator: 'cex://upbit/document-asset/krw',
+      assetDecimals: 0,
+      hasAssetDecimals: false,
+      quantity: '-5000000',
+    })).toBe('-5,000,000 KRW')
+  })
+
+  it('identifies an Upbit withdrawal and formats its KRW amount for review', async () => {
+    const cexReviewDetail = {
+      ...reviewDetail,
+      observations: [{
+        ...reviewDetail.observations[0]!,
+        domain: 'CEX',
+        kind: 'WITHDRAWAL',
+        nativeId: 'upbit-withdrawal-1',
+        accountLocator: 'cex://upbit/account/primary',
+        accountLabel: '',
+        accountChainId: '',
+        assetSymbol: 'KRW',
+        assetLocator: 'cex://upbit/document-asset/krw',
+        assetDecimals: 0,
+        hasAssetDecimals: false,
+        quantity: '-5000000',
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [] })
+      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: cexReviewDetail })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
+
+    expect(await screen.findByRole('heading', { name: 'Upbit · 출금' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Upbit · 출금/ })).toHaveTextContent('-5,000,000 KRW')
+    expect(screen.getAllByText('-5,000,000 KRW')).toHaveLength(2)
+    const rawQuantity = screen.getByText('-5000000')
+    expect(rawQuantity.closest('details')).not.toHaveAttribute('open')
   })
 
   it('shows parsed CEX assets, decimal quantities, and posting role explanations', async () => {
@@ -465,8 +516,8 @@ describe('LedgerPage', () => {
     expect(screen.getByText('송신자·수신자 확인 필요')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '검토하러 가기' }))
 
-    expect(await screen.findByRole('heading', { name: '추가 정보 필요' })).toBeInTheDocument()
-    expect(screen.getByText('review-2')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })).toBeInTheDocument()
+    expect(await screen.findByText(/1번 · revision-b1/)).toBeInTheDocument()
     expect(reviewRequests).toHaveLength(2)
   })
 
@@ -604,6 +655,104 @@ describe('LedgerPage', () => {
     expect(screen.getAllByText('0.0002 ETH')).toHaveLength(2)
   })
 
+  it('filters ledger rows by CEX and EVM source while preserving transaction numbers', async () => {
+    const cexEvent = {
+      ...ledgerEvent,
+      eventId: 'cex-event',
+      revisionId: 'cex-revision',
+      postings: [{
+        legId: 'cex-leg',
+        accountId: 'account-upbit',
+        assetId: 'cex-document-asset:upbit:decimal8:krw',
+        occurredAt: ledgerEvent.effectiveAt,
+        direction: 'IN',
+        quantity: '100000000',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: '',
+      }],
+    }
+    const walletEvent = {
+      ...ledgerEvent,
+      eventId: 'wallet-event',
+      revisionId: 'wallet-revision',
+      effectiveAt: '2027-01-02T00:00:00.000Z',
+      postings: [{
+        legId: 'wallet-leg',
+        accountId: 'wallet-account',
+        accountKind: 'WALLET',
+        accountLocator: '0x1234',
+        accountChainId: 'eip155:10',
+        assetId: 'asset:eth',
+        occurredAt: '2027-01-02T00:00:00.000Z',
+        direction: 'IN',
+        quantity: '1',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: '',
+        assetSymbol: 'ETH',
+        assetDecimals: 18,
+        hasAssetDecimals: true,
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [walletEvent, cexEvent] })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect((await screen.findAllByText('Optimism')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Upbit').length).toBeGreaterThan(0)
+    expect(screen.getByText('No. 1')).toBeInTheDocument()
+    expect(screen.getByText('No. 2')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '거래소 · CEX' }))
+    expect(screen.getAllByText('Upbit').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Optimism')).not.toBeInTheDocument()
+    expect(screen.getByText('No. 2')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '지갑 · EVM' }))
+    expect(screen.getAllByText('Optimism').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Upbit')).not.toBeInTheDocument()
+    expect(screen.getByText('No. 1')).toBeInTheDocument()
+  })
+
+  it('paginates ledger rows from the header without rendering the old bottom control', async () => {
+    const ledgerItems = Array.from({ length: 21 }, (_, index) => ({
+      ...ledgerEvent,
+      eventId: `event-${String(index + 1).padStart(2, '0')}`,
+      revisionId: `revision-${String(index + 1).padStart(2, '0')}`,
+      effectiveAt: `2027-01-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+    }))
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: ledgerItems })
+      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect(await screen.findByText('No. 1')).toBeInTheDocument()
+    expect(screen.getByText('No. 20')).toBeInTheDocument()
+    expect(screen.queryByText('No. 21')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '이전 거래 더 보기' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '다음 거래 페이지' }))
+
+    expect(screen.getByText('No. 21')).toBeInTheDocument()
+    expect(screen.queryByText('No. 20')).not.toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: '거래 페이지' })).toHaveTextContent('2 / 2')
+
+    fireEvent.click(screen.getByRole('button', { name: '이전 거래 페이지' }))
+    expect(screen.getByText('No. 1')).toBeInTheDocument()
+  })
+
   it('shows the real empty state when the API has no events', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -731,7 +880,7 @@ describe('LedgerPage', () => {
     expect(ledgerError).toHaveTextContent('장부를 불러오지 못했습니다')
 
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    expect(await screen.findByRole('heading', { name: '거래 유형 확인 필요' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })).toBeInTheDocument()
     expect(screen.queryByText('장부를 불러오지 못했습니다')).not.toBeInTheDocument()
   })
 
@@ -846,8 +995,8 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    expect(await screen.findByRole('heading', { name: '거래 유형 확인 필요' })).toBeInTheDocument()
-    expect(screen.getByText('1.25 ETH')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })).toBeInTheDocument()
+    expect(screen.getAllByText('1.25 ETH')).toHaveLength(2)
     const reasonCode = screen.getByText('UNKNOWN_TRANSACTION')
     expect(reasonCode.closest('details')).not.toHaveAttribute('open')
     const nativeId = screen.getByText('0xabc123')
@@ -890,6 +1039,7 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 2건' }))
+    expect(screen.getByLabelText('검토 항목 목록')).toHaveAttribute('tabindex', '0')
     fireEvent.click(await screen.findByRole('button', { name: '검토 더 보기' }))
 
     expect(await screen.findByRole('button', { name: /추가 정보 필요/ })).toBeInTheDocument()
@@ -923,7 +1073,7 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    await screen.findByRole('heading', { name: '거래 유형 확인 필요' })
+    await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
 
     const refreshButton = await screen.findByRole('button', { name: '최신 응답 불러오는 중…' })
@@ -962,10 +1112,10 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 2건' }))
-    await screen.findByRole('heading', { name: '거래 유형 확인 필요' })
+    await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
     fireEvent.click(screen.getByRole('button', { name: /추가 정보 필요/ }))
-    expect(await screen.findByRole('heading', { name: '추가 정보 필요' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })).toBeInTheDocument()
 
     completeResolution?.(jsonResponse({
       review: {
@@ -980,7 +1130,7 @@ describe('LedgerPage', () => {
     }, 201))
 
     await waitFor(() => expect(screen.getByText('review-2')).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: '추가 정보 필요' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })).toBeInTheDocument()
     expect(screen.queryByText('review-1')).not.toBeInTheDocument()
   })
 
@@ -1017,10 +1167,10 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 2건' }))
-    await screen.findByRole('heading', { name: '거래 유형 확인 필요' })
+    await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
     fireEvent.click(screen.getByRole('button', { name: /추가 정보 필요/ }))
-    await screen.findByRole('heading', { name: '추가 정보 필요' })
+    await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })
     fireEvent.click(screen.getByRole('button', { name: /거래 유형 확인 필요/ }))
     expect(await screen.findByText(/1번 · revision-a2/)).toBeInTheDocument()
 
@@ -1075,7 +1225,7 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
     fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
-    await screen.findByRole('heading', { name: '거래 유형 확인 필요' })
+    await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('같은 요청으로 다시 시도')
 
