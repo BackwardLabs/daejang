@@ -35,6 +35,7 @@ import {
   formatLedgerMoney,
   formatLedgerQuantity,
   formatLedgerUnitPrice,
+  formatUserFacingAssetSymbol,
   parseLedgerAsset,
 } from './ledgerPresentation.ts'
 import { projectLedgerTransactions } from './ledgerProjection.ts'
@@ -113,7 +114,7 @@ export const formatReviewDisplayQuantity = (observation: ReviewObservationModel)
   const displayQuantity = observation.assetSymbol?.toUpperCase() === 'KRW'
     ? quantity.replace(' (단위 확인 필요)', '')
     : quantity
-  return `${formatGroupedCanonicalQuantity(displayQuantity)}${observation.assetSymbol ? ` ${observation.assetSymbol}` : ''}`
+  return `${formatGroupedCanonicalQuantity(displayQuantity)}${observation.assetSymbol ? ` ${formatUserFacingAssetSymbol(observation.assetSymbol)}` : ''}`
 }
 
 const formatReviewSource = (observation: ReviewObservationModel) => {
@@ -165,6 +166,8 @@ type ReviewCardPresentation = {
   occurredAt?: string
 }
 
+type ReviewPreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
+
 const presentReviewCard = (
   detail: ReviewDetailModel | undefined,
   event: LedgerEventModel | undefined,
@@ -193,14 +196,14 @@ const presentReviewCard = (
       title: `${source.label} · ${action.label}`,
       sourceType: sourceKindLabels[source.kind],
       amount: material && asset
-        ? `${formatLedgerQuantity(material.quantity, asset.decimals)}${asset.decimals !== undefined ? ` ${asset.symbol}` : ''}`
+        ? `${formatLedgerQuantity(material.quantity, asset.decimals)}${asset.decimals !== undefined ? ` ${formatUserFacingAssetSymbol(asset.symbol)}` : ''}`
         : undefined,
       occurredAt: event.effectiveAt,
     }
   }
   return {
-    title: '거래 정보를 불러오는 중입니다',
-    sourceType: '출처 확인 중',
+    title: '원본 거래를 확인하지 못했습니다',
+    sourceType: '원본 조회 실패',
   }
 }
 
@@ -210,6 +213,7 @@ function ReviewListCard({
   event,
   selected,
   occurredAt,
+  previewStatus,
   onSelect,
   onRequestDetail,
 }: {
@@ -218,11 +222,16 @@ function ReviewListCard({
   event?: LedgerEventModel
   selected: boolean
   occurredAt?: string
+  previewStatus: ReviewPreviewStatus
   onSelect: (reviewId: string) => void
   onRequestDetail: (reviewId: string) => void
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const presentation = presentReviewCard(detail, event)
+  const isPreviewPending = !detail && !event && previewStatus !== 'error'
+  const reviewStateLabel = review.reasonCodes[0]
+    ? describeReviewReason(review.reasonCodes[0])
+    : statusLabel(review.status)
 
   useEffect(() => {
     if (detail || event || typeof IntersectionObserver === 'undefined' || !buttonRef.current) return
@@ -239,20 +248,32 @@ function ReviewListCard({
   return <button
     ref={buttonRef}
     type="button"
-    className={selected ? 'is-selected' : undefined}
+    className={[selected ? 'is-selected' : '', isPreviewPending ? 'is-loading' : ''].filter(Boolean).join(' ') || undefined}
+    aria-busy={isPreviewPending}
+    aria-label={isPreviewPending ? `거래 요약을 불러오는 중 · ${reviewStateLabel}` : undefined}
     onClick={() => onSelect(review.id)}
     onFocus={() => onRequestDetail(review.id)}
     onMouseEnter={() => onRequestDetail(review.id)}
   >
-    <span className="ledger-review-card__body">
-      <small className="ledger-review-card__source">{presentation.sourceType}</small>
-      <strong>{presentation.title}</strong>
-      <small>{[presentation.amount, displayedAt ? formatLedgerDateTime(displayedAt) : undefined].filter(Boolean).join(' · ') || '거래 정보를 불러오는 중입니다'}</small>
-    </span>
-    <span className="ledger-review-card__state">
-      {review.reasonCodes[0] ? <small>{describeReviewReason(review.reasonCodes[0])}</small> : null}
-      <b>{statusLabel(review.status)}</b>
-    </span>
+    {isPreviewPending ? <>
+      <span className="ledger-review-card__body ledger-review-card__skeleton" aria-hidden="true">
+        <i /><i /><i />
+      </span>
+      <span className="ledger-review-card__state">
+        {review.reasonCodes[0] ? <small>{reviewStateLabel}</small> : null}
+        <b>{statusLabel(review.status)}</b>
+      </span>
+    </> : <>
+      <span className="ledger-review-card__body">
+        <small className="ledger-review-card__source">{presentation.sourceType}</small>
+        <strong>{presentation.title}</strong>
+        <small>{[presentation.amount, displayedAt ? formatLedgerDateTime(displayedAt) : undefined].filter(Boolean).join(' · ') || '거래 시각을 확인하지 못했습니다'}</small>
+      </span>
+      <span className="ledger-review-card__state">
+        {review.reasonCodes[0] ? <small>{reviewStateLabel}</small> : null}
+        <b>{statusLabel(review.status)}</b>
+      </span>
+    </>}
   </button>
 }
 
@@ -276,7 +297,7 @@ function ReviewObservationEvidence({ observation }: { observation: ReviewObserva
     <dl className="ledger-review-evidence__readable">
       <div><dt>거래 시각</dt><dd>{occurredAt}</dd></div>
       <div><dt>계정·지갑</dt><dd title={source.account}>{account}</dd></div>
-      <div><dt>자산</dt><dd>{observation.assetSymbol || '자산 정보 없음'}</dd></div>
+      <div><dt>자산</dt><dd>{formatUserFacingAssetSymbol(observation.assetSymbol)}</dd></div>
       <div><dt>거래 유형</dt><dd>{formatReviewKind(observation)}</dd></div>
     </dl>
     <details className="ledger-review-technical">
@@ -364,10 +385,11 @@ function LedgerPostingRow({
   )
   const role = describePostingRole(posting.role)
   const quantity = formatLedgerQuantity(posting.quantity, asset.decimals)
+  const displaySymbol = formatUserFacingAssetSymbol(asset.symbol)
   return <tr>
     <td>
       <span className="ledger-posting-value">
-        <strong>{asset.symbol}</strong>
+        <strong>{displaySymbol}</strong>
         {asset.metadata ? <small>{asset.metadata}</small> : null}
       </span>
     </td>
@@ -379,7 +401,7 @@ function LedgerPostingRow({
     </td>
     <td>
       <span className="ledger-posting-value ledger-posting-quantity">
-        <strong>{quantity}{asset.decimals !== undefined ? ` ${asset.symbol}` : ''}</strong>
+        <strong>{quantity}{asset.decimals !== undefined ? ` ${displaySymbol}` : ''}</strong>
       </span>
     </td>
     <td>
@@ -411,7 +433,7 @@ function LedgerLotLinks({
     posting.hasAssetDecimals ? posting.assetDecimals : undefined,
     posting.assetVenue,
   )
-  const unit = asset.decimals !== undefined ? ` ${asset.symbol}` : ''
+  const unit = asset.decimals !== undefined ? ` ${formatUserFacingAssetSymbol(asset.symbol)}` : ''
   const quantityOf = (value: string) => `${formatLedgerQuantity(value, asset.decimals)}${unit}`
   const basisOf = (link: LedgerLotLinkModel) => link.basisStatus === 'KNOWN' && link.basisAmount
     ? `취득원가 ${formatLedgerMoney(link.basisAmount, link.basisDenomination, postings)}`
@@ -455,10 +477,11 @@ function LedgerMovementList({ postings }: { postings: LedgerPostingModel[] }) {
         posting.assetVenue,
       )
       const quantity = formatLedgerQuantity(posting.quantity, asset.decimals)
+      const displaySymbol = formatUserFacingAssetSymbol(asset.symbol)
       return <span key={posting.legId} className="ledger-explorer__movement" data-direction={posting.direction}>
         <b>{describePostingDirection(posting.direction)}</b>
-        <strong>{quantity}{asset.decimals !== undefined ? ` ${asset.symbol}` : ''}</strong>
-        {asset.decimals === undefined ? <small>{asset.symbol}</small> : null}
+        <strong>{quantity}{asset.decimals !== undefined ? ` ${displaySymbol}` : ''}</strong>
+        {asset.decimals === undefined ? <small>{displaySymbol}</small> : null}
       </span>
     })}
   </span>
@@ -467,16 +490,22 @@ function LedgerMovementList({ postings }: { postings: LedgerPostingModel[] }) {
 function LedgerStatusBadges({ event }: { event: LedgerEventModel }) {
   const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
   const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
+  const ledgerState = event.postings.length
+    ? event.resolution === 'RESOLVED' ? '장부 반영 완료' : '장부 일부 반영'
+    : '장부 미반영'
+  const valuationState = valued.length === material.length && material.length > 0
+    ? '평가 완료'
+    : valued.length > 0 ? '일부 평가' : '평가 대기'
+  const label = event.resolution === 'RESOLVED'
+    ? '처리 완료'
+    : event.resolution === 'PARTIAL' ? '일부 확인' : '검토 필요'
   return <span className="ledger-explorer__badges">
-    <b className="is-primary" data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}>{statusLabel(event.resolution)}</b>
-    {event.postings.length
-      ? <b className="is-secondary" data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}>{event.resolution === 'RESOLVED' ? '장부 확정' : '장부 일부 반영'}</b>
-      : <b className="is-secondary" data-tone="neutral">장부 미반영</b>}
-    {valued.length === material.length && material.length > 0
-      ? <b className="is-secondary" data-tone="success">평가 완료</b>
-      : valued.length > 0
-        ? <b className="is-secondary" data-tone="warning">일부 평가</b>
-        : <b className="is-secondary" data-tone="neutral">평가 대기</b>}
+    <b
+      className="is-primary"
+      data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}
+      title={`${ledgerState} · ${valuationState}`}
+      aria-label={`${label}. ${ledgerState}. ${valuationState}`}
+    >{label}</b>
   </span>
 }
 
@@ -612,6 +641,7 @@ export function LedgerPage() {
   const reviewListGenerationRef = useRef(0)
   const [reviewOccurredAtById, setReviewOccurredAtById] = useState<Record<string, string>>({})
   const [reviewPreviewById, setReviewPreviewById] = useState<Record<string, ReviewDetailModel>>({})
+  const [reviewPreviewStatusById, setReviewPreviewStatusById] = useState<Record<string, ReviewPreviewStatus>>({})
   const reviewPreviewByIdRef = useRef<Record<string, ReviewDetailModel>>({})
   const reviewPreviewLoadingRef = useRef(new Set<string>())
   const [reviewNavigation, setReviewNavigation] = useState<{ eventId?: string; status: 'idle' | 'loading' | 'error' }>({ status: 'idle' })
@@ -642,6 +672,9 @@ export function LedgerPage() {
     setReviewPreviewById((current) => current[review.id] === review
       ? current
       : { ...current, [review.id]: review })
+    setReviewPreviewStatusById((current) => current[review.id] === 'ready'
+      ? current
+      : { ...current, [review.id]: 'ready' })
     const occurredAt = review.observations
       .map((observation) => observation.occurredAt)
       .filter((value): value is string => Boolean(value))
@@ -661,11 +694,16 @@ export function LedgerPage() {
     ) return
     const generation = reviewListGenerationRef.current
     reviewPreviewLoadingRef.current.add(reviewId)
+    setReviewPreviewStatusById((current) => ({ ...current, [reviewId]: 'loading' }))
     void loadReview(reviewId)
       .then(({ review }) => {
         if (reviewListGenerationRef.current === generation) cacheReviewDetail(review)
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (reviewListGenerationRef.current === generation) {
+          setReviewPreviewStatusById((current) => ({ ...current, [reviewId]: 'error' }))
+        }
+      })
       .finally(() => reviewPreviewLoadingRef.current.delete(reviewId))
   }, [cacheReviewDetail])
 
@@ -753,6 +791,7 @@ export function LedgerPage() {
     reviewPreviewByIdRef.current = {}
     reviewPreviewLoadingRef.current.clear()
     setReviewPreviewById({})
+    setReviewPreviewStatusById({})
     setReviewOccurredAtById({})
     selectedReviewIdRef.current = undefined
     setSelectedReviewId(undefined)
@@ -804,7 +843,10 @@ export function LedgerPage() {
           selectedReviewIdRef.current === selectedReviewId &&
           reviewDetailGenerationRef.current === generation &&
           !(error instanceof DOMException && error.name === 'AbortError')
-        ) setReviewDetailStatus('error')
+        ) {
+          setReviewDetailStatus('error')
+          setReviewPreviewStatusById((current) => ({ ...current, [selectedReviewId]: 'error' }))
+        }
       })
     return () => controller.abort()
   }, [cacheReviewDetail, selectedReviewId])
@@ -1150,6 +1192,7 @@ export function LedgerPage() {
                   event={event}
                   selected={review.id === selectedReviewId}
                   occurredAt={reviewOccurredAtById[review.id]}
+                  previewStatus={reviewPreviewStatusById[review.id] ?? (reviewPreviewById[review.id] || event ? 'ready' : 'idle')}
                   onSelect={selectReview}
                   onRequestDetail={requestReviewPreview}
                 />

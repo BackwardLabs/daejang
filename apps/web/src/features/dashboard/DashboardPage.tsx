@@ -14,8 +14,11 @@ import {
 } from '../../preferences/appPreferences.ts'
 import {
   describeLedgerAction,
+  describeLedgerSource,
+  describePostingDirection,
   formatLedgerMoney,
   formatLedgerQuantity,
+  formatUserFacingAssetSymbol,
   parseLedgerAsset,
 } from '../ledger/ledgerPresentation.ts'
 import './dashboard.css'
@@ -37,15 +40,6 @@ const monthLabels = [
 
 const count = (value: string | number | undefined) => Number(value ?? 0)
 const feeRoles = new Set(['FEE', 'GAS'])
-
-const describeInterpretationSupport = (support: string) => {
-  if (support === 'FULL') return '근거 확인 완료'
-  if (support === 'SUPPORTED') return '근거 연결됨'
-  if (support === 'PARTIAL') return '일부 근거 연결'
-  if (support === 'DETECTED_ONLY') return '기본 거래 확인'
-  if (support === 'OBSERVATION_ONLY') return '원본 근거만 확인'
-  return '근거 확인 중'
-}
 
 const postingAsset = (posting: LedgerEventModel['postings'][number]) =>
   parseLedgerAsset(
@@ -165,6 +159,10 @@ export function DashboardPage() {
   const monthlyCounts = monthLabels.map((_, month) => events.filter((event) => new Date(event.effectiveAt).getUTCMonth() === month).length)
   const maxMonth = Math.max(...monthlyCounts, 1)
   const recentTransactions = events.slice(0, 6)
+  const now = new Date()
+  const selectedYearNumber = Number(selectedYear)
+  const isFutureMonth = (month: number) => selectedYearNumber > now.getFullYear()
+    || (selectedYearNumber === now.getFullYear() && month > now.getMonth())
 
   return (
     <div className="dashboard-page product-shell">
@@ -195,11 +193,11 @@ export function DashboardPage() {
                   ? '불러오는 중…'
                   : '새로고침'}
               </button>
-              <AppLink href="/reports" className="dashboard-action dashboard-action--outline">
-                보고서 보기
+              <AppLink href="/sources" className="dashboard-action dashboard-action--secondary">
+                데이터 소스 추가
               </AppLink>
-              <AppLink href="/sources" className="dashboard-action dashboard-action--primary">
-                거래 추가
+              <AppLink href="/reports" className="dashboard-action dashboard-action--primary">
+                보고서 보기
               </AppLink>
             </div>
           </section>
@@ -282,15 +280,22 @@ export function DashboardPage() {
                 </div>
               </header>
               <div className="dashboard-chart" aria-label={`${selectedYear}년 월별 거래 흐름`}>
-                {monthlyCounts.map((value, index) => (
-                  <div key={monthLabels[index]}>
+                {monthlyCounts.map((value, index) => {
+                  const futureMonth = isFutureMonth(index)
+                  const description = futureMonth
+                    ? `${monthLabels[index]} 아직 집계 기간 전`
+                    : `${monthLabels[index]} 거래 ${value.toLocaleString()}건`
+                  return <div key={monthLabels[index]} title={description}>
+                    <strong className="dashboard-chart__value">
+                      {futureMonth ? '예정' : `${value.toLocaleString()}건`}
+                    </strong>
                     <i
-                      className={value > 0 ? 'is-current' : undefined}
-                      style={{ height: `${Math.max(4, Math.round(value / maxMonth * 100))}%` }}
+                      className={futureMonth ? 'is-future' : value > 0 ? 'is-current' : undefined}
+                      style={{ height: futureMonth ? '2px' : `${Math.max(4, Math.round(value / maxMonth * 100))}%` }}
                     />
                     <span>{monthLabels[index]}</span>
                   </div>
-                ))}
+                })}
               </div>
             </article>
 
@@ -347,25 +352,20 @@ export function DashboardPage() {
 
           <section className="dashboard-recent" aria-labelledby="dashboard-recent-title">
             <header>
-              <h2 id="dashboard-recent-title">최근 거래</h2>
-              <div aria-label="거래 필터">
-                <button type="button">전체 자산</button>
-                <button type="button">전체 상태</button>
-                <button type="button">{selectedYear}.01.01–12.31</button>
-                <button type="button">필터</button>
+              <div>
+                <h2 id="dashboard-recent-title">최근 거래</h2>
+                <p>{selectedYear}년 최신 {recentTransactions.length}건</p>
               </div>
+              <AppLink href="/ledger">전체 장부 보기 →</AppLink>
             </header>
             <div className="dashboard-table-scroll">
               <table>
                 <thead>
                   <tr>
                     <th scope="col">일시</th>
-                    <th scope="col">유형</th>
-                    <th scope="col">자산</th>
-                    <th scope="col">수량</th>
-                    <th scope="col">평가액</th>
+                    <th scope="col">거래</th>
+                    <th scope="col">자산 변화</th>
                     <th scope="col">상태</th>
-                    <th scope="col">근거</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -373,6 +373,7 @@ export function DashboardPage() {
                     const materialPostings = transaction.postings.filter((posting) => !feeRoles.has(posting.role))
                     const posting = materialPostings[0] ?? transaction.postings[0]
                     const asset = posting ? postingAsset(posting) : undefined
+                    const displayAssetSymbol = formatUserFacingAssetSymbol(asset?.symbol)
                     const quantity = posting && asset
                       ? formatLedgerQuantity(posting.quantity, asset.decimals)
                       : '—'
@@ -390,31 +391,38 @@ export function DashboardPage() {
                       transaction.postings,
                       transaction.subtype,
                     )
+                    const source = describeLedgerSource(transaction.postings)
                     return <tr key={transaction.eventId}>
-                      <td>{new Date(transaction.effectiveAt).toLocaleString('ko-KR')}</td>
-                      <td>{action.label}</td>
                       <td>
-                        <span className="dashboard-asset" title={posting?.assetId}>
-                          <strong>{asset?.symbol ?? '—'}</strong>
-                          {additionalAssetCount > 0 ? <small>외 {additionalAssetCount}개 자산</small> : null}
+                        <time dateTime={transaction.effectiveAt}>
+                          {new Date(transaction.effectiveAt).toLocaleDateString('ko-KR')}
+                          <small>{new Date(transaction.effectiveAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</small>
+                        </time>
+                      </td>
+                      <td>
+                        <span className="dashboard-transaction">
+                          <strong>{action.label}</strong>
+                          <small>{source.label}</small>
                         </span>
                       </td>
                       <td>
-                        <span className="dashboard-quantity">
-                          <strong>{quantity}{asset?.decimals !== undefined ? ` ${asset.symbol}` : ''}</strong>
-                          {posting ? <small data-direction={posting.direction}>{posting.direction}</small> : null}
+                        <span className="dashboard-asset-change" title={posting?.assetId}>
+                          <strong>{quantity}{asset?.decimals !== undefined ? ` ${displayAssetSymbol}` : ''}</strong>
+                          <small>
+                            {posting ? describePostingDirection(posting.direction) : '자산 확인 필요'}
+                            {additionalAssetCount > 0 ? ` · 외 ${additionalAssetCount}개` : ''}
+                            {fairValue !== '—' ? ` · ${fairValue}` : ''}
+                          </small>
                         </span>
                       </td>
-                      <td><strong>{fairValue}</strong></td>
                       <td>
                         <span className={`dashboard-status dashboard-status--${transaction.resolution === 'RESOLVED' ? 'complete' : 'review'}`}>
                           {transaction.resolution === 'RESOLVED' ? '완료' : '일부 확인'}
                         </span>
                       </td>
-                      <td>{describeInterpretationSupport(transaction.interpretationSupport)}</td>
                     </tr>
                   })}
-                  {status === 'ready' && recentTransactions.length === 0 ? <tr><td colSpan={7}>이 조회 연도에 처리된 거래가 없습니다.</td></tr> : null}
+                  {status === 'ready' && recentTransactions.length === 0 ? <tr><td colSpan={4}>이 조회 연도에 처리된 거래가 없습니다.</td></tr> : null}
                 </tbody>
               </table>
             </div>

@@ -170,6 +170,26 @@ describe('LedgerPage', () => {
     expect(rawQuantity.closest('details')).not.toHaveAttribute('open')
   })
 
+  it('shows an explicit review preview error instead of an indefinite loading label', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (url.endsWith('/reviews/review-1') && !init?.method) {
+        return jsonResponse({ error: { code: 'REVIEW_UNAVAILABLE' } }, 503)
+      }
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
+
+    expect(await screen.findByText('원본 거래를 확인하지 못했습니다')).toBeInTheDocument()
+    expect(screen.getByText('원본 조회 실패')).toBeInTheDocument()
+    expect(screen.queryByText('거래 정보를 불러오는 중입니다')).not.toBeInTheDocument()
+  })
+
   it('shows parsed CEX assets, decimal quantities, and posting role explanations', async () => {
     const cexEvent = {
       ...ledgerEvent,
@@ -232,8 +252,8 @@ describe('LedgerPage', () => {
     expect(screen.getAllByText('27.016 KRW')).toHaveLength(3)
     expect(screen.getAllByText('Upbit · 소수점 8자리')).toHaveLength(3)
     expect(screen.getAllByText('Upbit').length).toBeGreaterThan(0)
-    expect(screen.getByText('장부 확정')).toBeInTheDocument()
-    expect(screen.getAllByText('평가 완료').length).toBeGreaterThan(0)
+    expect(screen.getByText('처리 완료')).toBeInTheDocument()
+    expect(screen.getByLabelText(/처리 완료.*평가 완료/)).toBeInTheDocument()
     expect(screen.getAllByText('증가').length).toBeGreaterThan(0)
     expect(screen.getAllByText('감소').length).toBeGreaterThan(0)
     expect(screen.getAllByText('매수·매도·입출금의 본체가 되는 자산 변동')).toHaveLength(2)
@@ -658,7 +678,7 @@ describe('LedgerPage', () => {
     expect(screen.queryByRole('list', { name: '거래 처리 계보' })).not.toBeInTheDocument()
     expect(screen.queryByText('ActionProof')).not.toBeInTheDocument()
     expect(screen.queryByText('거래소 자료 해석')).not.toBeInTheDocument()
-    expect(screen.getByText('장부 확정')).toBeInTheDocument()
+    expect(screen.getByText('처리 완료')).toBeInTheDocument()
     expect(screen.getAllByText('0.0002 ETH')).toHaveLength(2)
   })
 

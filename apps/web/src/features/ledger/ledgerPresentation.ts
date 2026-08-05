@@ -1,6 +1,17 @@
 const integerQuantityPattern = /^-?\d+$/
 const decimalScalePattern = /^decimal(\d+)$/i
 const integerGroupPattern = /\B(?=(\d{3})+(?!\d))/g
+const domainLikeAssetPattern = /(?:https?:\/\/|www\.|(?:[a-z0-9-]+\.)+(?:club|com|net|org|xyz|io|site|top)\b)/i
+const pictographicAssetPattern = /\p{Extended_Pictographic}/u
+
+export const formatUserFacingAssetSymbol = (value?: string) => {
+  const symbol = value?.trim()
+  if (!symbol) return '자산 확인 필요'
+  if (domainLikeAssetPattern.test(symbol) || pictographicAssetPattern.test(symbol)) {
+    return '미확인 토큰(스팸 의심)'
+  }
+  return symbol
+}
 
 export type LedgerAssetPresentation = {
   symbol: string

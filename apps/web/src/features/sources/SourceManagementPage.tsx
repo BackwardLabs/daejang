@@ -245,7 +245,8 @@ function SourceJobStatus({
 }
 
 function maskAddress(address: string) {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`
+  const normalizedAddress = address.replace(/^0[×X]/, '0x')
+  return `${normalizedAddress.slice(0, 6)}…${normalizedAddress.slice(-4)}`
 }
 
 function formatJobTimestamp(value: string) {
