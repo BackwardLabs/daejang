@@ -73,6 +73,7 @@ export type EvmWalletConnectionError = {
   code:
     | 'CONNECTION_FAILED'
     | 'CONNECTION_REJECTED'
+    | 'SOURCE_ALREADY_CONNECTED'
     | 'PROVIDER_UNAVAILABLE'
   requestId?: string
 }

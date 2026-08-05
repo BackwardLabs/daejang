@@ -241,6 +241,7 @@ describe('LedgerPage', () => {
 
     render(<LedgerPage />)
 
+    expect(await screen.findByText('표시 1건 · 장부 항목 3개')).toBeInTheDocument()
     expect(await screen.findAllByText('1,801.08722461 USDT')).toHaveLength(1)
     expect(screen.getAllByText('27.016 KRW')).toHaveLength(1)
     expect(screen.queryByRole('heading', { name: '자산 변동과 세무 입력' })).not.toBeInTheDocument()
@@ -997,9 +998,13 @@ describe('LedgerPage', () => {
   it('submits the current revision and shows durable resolution completion', async () => {
     vi.stubGlobal('crypto', { randomUUID: () => '00000000-0000-4000-8000-000000000099' })
     let resolutionBody: Record<string, unknown> | undefined
+    let dashboardReads = 0
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
+      if (url.includes('/dashboard?')) {
+        dashboardReads++
+        return dashboardResponse(0, dashboardReads === 1 ? 1 : 0)
+      }
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
       if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
@@ -1036,6 +1041,11 @@ describe('LedgerPage', () => {
 
     expect(await screen.findByText('검토 처리 완료')).toBeInTheDocument()
     expect(screen.getByText('‘개인 거래’ 항목으로 장부에 반영했습니다')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '열린 검토가 없습니다' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('검토 항목 목록')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /거래 유형 확인 필요/ })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '검토 필요 0건' })).toBeInTheDocument()
+    expect(dashboardReads).toBe(2)
     await waitFor(() => expect(resolutionBody).toMatchObject({
       expectedRevisionId: 'revision-1',
       expectedPointerVersion: '3',
@@ -1043,6 +1053,53 @@ describe('LedgerPage', () => {
       resolutionNote: '사용자가 개인 거래로 확인',
       intentKey: '00000000-0000-4000-8000-000000000099',
     }))
+  })
+
+  it('keeps reviews loaded while a resolution request is still in flight', async () => {
+    vi.stubGlobal('crypto', { randomUUID: () => '00000000-0000-4000-8000-000000000105' })
+    let completeResolution: ((response: Response) => void) | undefined
+    const pendingResolution = new Promise<Response>((resolve) => {
+      completeResolution = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url) && !init?.method) {
+        return jsonResponse({ items: [reviewSummary], nextCursor: 'page-2' })
+      }
+      if (isReviewListRequest(url, 'page-2') && !init?.method) {
+        return jsonResponse({ items: [secondReviewSummary] })
+      }
+      if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
+      if (url.endsWith('/reviews/review-2') && !init?.method) return jsonResponse({ review: secondReviewDetail })
+      if (url.endsWith('/reviews/review-1/resolutions') && init?.method === 'POST') return pendingResolution
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '검토 필요 1건' }))
+    await screen.findByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })
+    fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
+    fireEvent.click(screen.getByRole('button', { name: '검토 더 보기' }))
+    expect(await screen.findByRole('button', { name: /추가 정보 필요/ })).toBeInTheDocument()
+
+    completeResolution?.(jsonResponse({
+      review: {
+        ...reviewDetail,
+        revisionId: 'revision-2',
+        revisionNumber: 2,
+        pointerVersion: '4',
+        status: 'RESOLVED',
+        resolutionCode: 'PERSONAL',
+      },
+      replayed: false,
+    }, 201))
+
+    expect(await screen.findByText('검토 처리 완료')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /거래 유형 확인 필요/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /추가 정보 필요/ })).toBeInTheDocument()
+    expect(await screen.findByText('review-2')).toBeInTheDocument()
   })
 
   it('loads every open review through the opaque next cursor', async () => {
@@ -1159,6 +1216,7 @@ describe('LedgerPage', () => {
 
     await waitFor(() => expect(screen.getByText('review-2')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Ethereum 지갑 · 자산 이동' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /거래 유형 확인 필요/ })).not.toBeInTheDocument()
     expect(screen.queryByText('review-1')).not.toBeInTheDocument()
   })
 

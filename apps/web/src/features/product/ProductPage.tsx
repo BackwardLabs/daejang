@@ -90,10 +90,6 @@ export function ProductPage({ kind: _kind }: { kind: ProductPageKind }) {
                 </option>
               </select>
             </label>
-            <p className="product-settings-note">
-              이 설정은 현재 사용 중인 브라우저에 저장되며 다른 기기에는
-              자동으로 적용되지 않습니다.
-            </p>
             <div className="product-settings-actions">
               <button type="submit">설정 저장</button>
               {saveStatus === 'saved' ? (

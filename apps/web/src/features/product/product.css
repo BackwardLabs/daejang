@@ -165,17 +165,6 @@
   background: #fff;
 }
 
-.product-settings-note {
-  margin: 2px 0 0;
-  padding: 14px 16px;
-  border-radius: 10px;
-  color: var(--product-text-secondary, #6e6a65);
-  background: var(--product-subtle, #f7f7f6);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.6;
-}
-
 .product-settings-actions {
   display: flex;
   align-items: center;

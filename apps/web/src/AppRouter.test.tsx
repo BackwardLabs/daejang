@@ -541,6 +541,7 @@ describe('AppRouter', () => {
     ['/sources/new', '데이터 소스 추가'],
     ['/sources/new/upbit', 'Upbit PDF 등록'],
     ['/sources/new/upbit/upload', 'Upbit PDF 등록'],
+    ['/sources/new/wallet', 'EVM Wallet 연결'],
   ])('renders the source flow page at %s', async (path, heading) => {
     window.history.pushState({}, '', path)
 
@@ -551,36 +552,31 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
-  it('keeps source selection visible when the Reown project ID is not configured', async () => {
+  it('opens the EVM wallet flow from source selection', async () => {
     window.history.pushState({}, '', '/sources/new')
 
     render(<AppRouter />)
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'EVM Wallet 선택' }),
+      await screen.findByRole('link', { name: 'EVM Wallet 선택' }),
     )
 
     expect(
-      await screen.findByRole('alert', undefined, { timeout: 3_000 }),
-    ).toHaveTextContent(
-      '지갑 연결이 취소되었거나 모듈을 열지 못했습니다. 다시 선택해 주세요.',
-    )
-    expect(
-      screen.getByRole('heading', { name: '데이터 소스 추가' }),
+      await screen.findByRole('heading', { name: 'EVM Wallet 연결' }),
     ).toBeInTheDocument()
-    expect(window.location.pathname).toBe('/sources/new')
+    expect(window.location.pathname).toBe('/sources/new/wallet')
   })
 
-  it('replaces legacy wallet paths with the source type selection route', async () => {
+  it('replaces the legacy wallet connect path with the wallet route', async () => {
     window.history.pushState({}, '', '/sources/new/wallet/connect')
 
     render(<AppRouter />)
 
     expect(
-      await screen.findByRole('heading', { name: '데이터 소스 추가' }),
+      await screen.findByRole('heading', { name: 'EVM Wallet 연결' }),
     ).toBeInTheDocument()
     await waitFor(() => {
-      expect(window.location.pathname).toBe('/sources/new')
+      expect(window.location.pathname).toBe('/sources/new/wallet')
     })
   })
 

@@ -7,10 +7,8 @@ import {
   type RefObject,
 } from 'react'
 import pdfStepComplete from '../../assets/sources/pdf-step-complete.svg'
-import registrationComplete from '../../assets/sources/registration-complete.svg'
 import coinbaseLogo from '../../assets/sources/wallet/coinbase.svg'
 import metamaskLogo from '../../assets/sources/wallet/metamask.svg'
-import noMark from '../../assets/sources/wallet/no-mark.svg'
 import otherWalletsIcon from '../../assets/sources/wallet/other-wallets.svg'
 import rabbyLogo from '../../assets/sources/wallet/rabby.svg'
 import stepActive from '../../assets/sources/wallet/step-active.svg'
@@ -87,6 +85,10 @@ const connectionErrorCopy: Record<
     body: '지갑에서 연결 요청을 취소했습니다. 준비가 되면 같은 지갑으로 다시 연결할 수 있습니다.',
     title: '지갑 연결이 취소되었어요',
   },
+  SOURCE_ALREADY_CONNECTED: {
+    body: '연결된 데이터 소스에서 현재 수집 상태와 네트워크 설정을 확인할 수 있습니다.',
+    title: '이미 연결된 지갑입니다',
+  },
   PROVIDER_UNAVAILABLE: {
     body: '선택한 지갑을 이 브라우저에서 찾을 수 없습니다. 지갑을 설치하거나 다른 연결 방식을 선택해 주세요.',
     title: '선택한 지갑을 사용할 수 없어요',
@@ -120,7 +122,7 @@ const completionErrorCopy: Record<
   { body: string; title: string }
 > = {
   BACKFILL_FAILED: {
-    body: '지갑 연결 정보는 유지됩니다. 잠시 후 같은 수집 범위로 최초 backfill을 다시 시작해 주세요.',
+    body: '지갑 연결 정보는 유지됩니다. 잠시 후 같은 범위로 최초 수집을 다시 시작해 주세요.',
     title: '최초 수집을 시작하지 못했어요',
   },
   CHAIN_SCOPE_INVALID: {
@@ -214,6 +216,7 @@ function FlowAlert({
         ? completionErrorCopy[error.code]
         : error.code === 'CONNECTION_FAILED' ||
             error.code === 'CONNECTION_REJECTED' ||
+            error.code === 'SOURCE_ALREADY_CONNECTED' ||
             error.code === 'PROVIDER_UNAVAILABLE'
           ? connectionErrorCopy[error.code]
           : signatureErrorCopy[error.code]
@@ -233,33 +236,27 @@ function FlowAlert({
 
 function SafetyAside() {
   return (
-    <aside className="wallet-flow-aside" aria-label="EVM Wallet 연결 안전 기준">
+    <aside className="wallet-flow-aside" aria-label="EVM Wallet 연결 안내">
       <section className="wallet-flow-aside__card">
-        <h2>수집하지 않는 정보</h2>
-        <ul className="wallet-safety-list">
-          {['private key', 'seed phrase', '쓰기 권한', '출금 권한'].map(
-            (label) => (
-              <li key={label}>
-                <img src={noMark} alt="" />
-                <span>{label}</span>
-              </li>
-            ),
-          )}
+        <h2>연결 전 확인</h2>
+        <ul className="wallet-help-list">
+          <li>
+            <strong>읽기 전용 연결</strong>
+            <span>공개된 지갑 주소와 거래만 조회합니다.</span>
+          </li>
+          <li>
+            <strong>자산 이동 불가</strong>
+            <span>개인키, 시드 문구, 쓰기·출금 권한을 요청하지 않습니다.</span>
+          </li>
+          <li>
+            <strong>지원 네트워크</strong>
+            <span>
+              {evmWalletNetworkMetadata
+                .map((network) => network.label)
+                .join(', ')}
+            </span>
+          </li>
         </ul>
-        <div className="wallet-read-only-note" role="note">
-          <strong>READ ONLY</strong>
-          <span>공개 체인 데이터 조회만 허용</span>
-        </div>
-      </section>
-
-      <section className="wallet-flow-aside__card wallet-flow-aside__card--subtle">
-        <h2>현재 지원 범위</h2>
-        <p>EVM 호환 공개 주소를 기준으로 연결합니다.</p>
-        <div className="wallet-supported-chains">
-          {evmWalletNetworkMetadata.map((network) => (
-            <span key={network.chainId}>{network.label}</span>
-          ))}
-        </div>
       </section>
     </aside>
   )
@@ -267,33 +264,23 @@ function SafetyAside() {
 
 function SignatureAside() {
   return (
-    <aside className="wallet-flow-aside" aria-label="지갑 서명 안전 기준">
+    <aside className="wallet-flow-aside" aria-label="지갑 서명 안내">
       <section className="wallet-flow-aside__card">
-        <h2>수집하지 않는 정보</h2>
-        <ul className="wallet-safety-list">
-          {['private key', 'seed phrase', '쓰기 권한', '출금 권한'].map(
-            (label) => (
-              <li key={label}>
-                <img src={noMark} alt="" />
-                <span>{label}</span>
-              </li>
-            ),
-          )}
+        <h2>서명으로 확인하는 것</h2>
+        <ul className="wallet-help-list">
+          <li>
+            <strong>지갑 소유권</strong>
+            <span>현재 연결한 주소를 제어할 수 있는지만 확인합니다.</span>
+          </li>
+          <li>
+            <strong>거래가 아닌 메시지 서명</strong>
+            <span>가스비가 들지 않고 자산 이동도 발생하지 않습니다.</span>
+          </li>
+          <li>
+            <strong>권한 저장 안 함</strong>
+            <span>서명 후에도 쓰기·출금 권한을 보관하지 않습니다.</span>
+          </li>
         </ul>
-        <div className="wallet-read-only-note" role="note">
-          <strong>READ ONLY</strong>
-          <span>공개 체인 데이터 조회만 허용</span>
-        </div>
-      </section>
-
-      <section className="wallet-flow-aside__card wallet-flow-aside__card--subtle">
-        <span className="wallet-flow-aside__eyebrow">SIGNATURE</span>
-        <h2>서명 안내</h2>
-        <p>오프체인 메시지 서명으로 지갑 소유권만 확인합니다.</p>
-        <div className="wallet-supported-chains">
-          <span>가스비 없음</span>
-          <span>거래 아님</span>
-        </div>
       </section>
     </aside>
   )
@@ -542,42 +529,23 @@ function PeriodFieldError({
 
 function BackfillAside() {
   return (
-    <aside className="wallet-flow-aside" aria-label="최초 수집 처리 기준">
+    <aside className="wallet-flow-aside" aria-label="최초 수집 안내">
       <section className="wallet-flow-aside__card">
-        <span className="wallet-flow-aside__eyebrow">INITIAL BACKFILL</span>
-        <h2>현재 수집 방식</h2>
-        <ol className="wallet-flow-numbered-list">
+        <h2>처음 연결하면</h2>
+        <ol className="wallet-help-list wallet-help-list--numbered">
           <li>
-            <span>01</span>
-            <div>
-              <strong>사용자가 선택한 전체 기간</strong>
-              <p>선택 범위를 한 건의 수집 요청으로 처리합니다.</p>
-            </div>
+            <strong>선택한 기간을 한 번 수집</strong>
+            <span>저장한 범위를 하나의 작업으로 처리합니다.</span>
           </li>
           <li>
-            <span>02</span>
-            <div>
-              <strong>작업 상태 확인</strong>
-              <p>요청한 작업의 대기·처리·완료 상태를 확인합니다.</p>
-            </div>
+            <strong>진행 상태를 소스 관리에서 확인</strong>
+            <span>대기·처리·완료 상태와 처리 건수를 보여줍니다.</span>
+          </li>
+          <li>
+            <strong>원본 금융 데이터는 공개 체인에 기록하지 않음</strong>
+            <span>공개 지갑 주소는 거래 조회에만 사용합니다.</span>
           </li>
         </ol>
-        <div className="wallet-flow-order-end">종료 · 선택 범위 전체 확인</div>
-      </section>
-
-      <section className="wallet-flow-aside__card wallet-flow-aside__card--subtle">
-        <span className="wallet-flow-aside__eyebrow">ONCHAIN PRIVACY</span>
-        <h2>온체인 기록 원칙</h2>
-        <ul className="wallet-completion-list">
-          <li>
-            <strong>거래 원문을 기록하지 않음</strong>
-            <span>GIWA 공개 체인에 원본 금융 데이터를 남기지 않습니다.</span>
-          </li>
-          <li>
-            <strong>공개 지갑 주소를 서비스에 저장</strong>
-            <span>공개 체인 거래 수집에만 사용하며 개인키나 서명 권한은 저장하지 않습니다.</span>
-          </li>
-        </ul>
       </section>
     </aside>
   )
@@ -683,7 +651,7 @@ function ScopeStep({
           <header className="wallet-period-panel__heading">
             <div>
               <h3 id="wallet-period-title">수집 기간</h3>
-              <p>현재 검증된 JIT 수집 기간을 사용합니다.</p>
+              <p>현재 서비스에서 지원하는 최초 수집 기간입니다.</p>
             </div>
             <span className="wallet-period-panel__sync">
               동기화 · 사용자 요청 시 선택 범위 수집
@@ -852,54 +820,28 @@ function CompletionAside({
   syncStatus: 'BACKFILLING' | 'REGISTERED'
 }) {
   return (
-    <aside className="wallet-flow-aside" aria-label="현재 수집과 데이터 관리">
+    <aside className="wallet-flow-aside" aria-label="연결 이후 안내">
       <section className="wallet-flow-aside__card">
-        <span className="wallet-flow-aside__eyebrow">
-          {syncStatus === 'BACKFILLING' ? 'ONGOING SYNC' : 'NEXT STEP'}
-        </span>
-        <h2>{syncStatus === 'BACKFILLING' ? '현재 수집' : '수집 준비 상태'}</h2>
-        <ul className="wallet-completion-list">
+        <h2>{syncStatus === 'BACKFILLING' ? '수집 진행 안내' : '연결 이후 안내'}</h2>
+        <ul className="wallet-help-list">
           {syncStatus === 'BACKFILLING' ? (
             <>
               <li>
-                <strong>현재 요청</strong>
-                <span>사용자가 선택한 전체 기간을 한 건의 작업으로 처리합니다.</span>
+                <strong>진행 상태</strong>
+                <span>소스 관리에서 처리 건수와 최신 상태를 확인할 수 있습니다.</span>
               </li>
               <li>
-                <strong>상태 확인</strong>
-                <span>대시보드에서 현재 수집 작업 상태를 확인할 수 있습니다.</span>
+                <strong>연결 해제</strong>
+                <span>새 수집을 중단하며 이미 만든 장부 데이터는 별도로 관리합니다.</span>
               </li>
             </>
           ) : (
             <li>
-              <strong>지갑 소스 등록 완료</strong>
-              <span>처리 엔진 연동 전까지 거래 수집은 시작되지 않습니다.</span>
+              <strong>지갑 등록 완료</strong>
+              <span>연결된 소스에서 저장한 범위와 상태를 확인할 수 있습니다.</span>
             </li>
           )}
         </ul>
-      </section>
-
-      <section className="wallet-flow-aside__card wallet-flow-aside__card--subtle">
-        <span className="wallet-flow-aside__eyebrow">DATA MANAGEMENT</span>
-        <h2>연결과 데이터 관리</h2>
-        <ul className="wallet-completion-list">
-          <li>
-            <strong>로그아웃</strong>
-            <span>로그인 세션만 종료합니다.</span>
-          </li>
-          <li>
-            <strong>연결 해제</strong>
-            <span>이후 신규 API 호출을 중단합니다.</span>
-          </li>
-          <li>
-            <strong>데이터 삭제</strong>
-            <span>저장된 거래 데이터를 별도로 삭제합니다.</span>
-          </li>
-        </ul>
-        <div className="wallet-disconnect-note">
-          <strong>연결 해제</strong>
-          <span>신규 호출 없음 · 기존 거래 데이터는 삭제 전까지 보존</span>
-        </div>
       </section>
     </aside>
   )
@@ -944,10 +886,6 @@ function CompletionStep({
     <div className="wallet-flow-grid">
       <section className="wallet-flow-card" aria-labelledby="wallet-complete-title">
         <div className="wallet-completion">
-          <span className="wallet-completion__icon">
-            <img src={registrationComplete} alt="" />
-            <span aria-hidden="true">✓</span>
-          </span>
           <div>
             <h2 id="wallet-complete-title" tabIndex={-1}>
               지갑 연결이 완료됐어요
@@ -1019,11 +957,6 @@ function CompletionStep({
             <span aria-hidden="true">→</span>
           </AppLink>
         </div>
-        <p className="source-footer-note">
-          {isBackfilling
-            ? '페이지를 닫아도 backfill은 계속됩니다.'
-            : '등록한 지갑은 데이터 소스 관리에서 확인할 수 있습니다.'}
-        </p>
       </section>
 
       <CompletionAside syncStatus={syncStatus} />
@@ -1036,7 +969,7 @@ function getPageCopy(state: EvmWalletFlowState) {
     return {
       description:
         state.status === 'BACKFILLING'
-          ? '지갑이 연결되고 최초 backfill이 시작됐습니다.'
+          ? '지갑이 연결되고 최초 거래 수집이 시작됐습니다.'
           : '지갑 소유권 확인과 데이터 소스 등록을 완료했습니다.',
       title: 'EVM Wallet 연결 완료',
     }
@@ -1355,7 +1288,6 @@ export function EvmWalletConnectionPage({
 
   return (
     <SourceFlowLayout
-      badge={{ label: `${currentStep} / 3`, tone: 'evm' }}
       description={pageCopy.description}
       eyebrow="DATA SOURCES · EVM"
       title={pageCopy.title}
@@ -1446,11 +1378,6 @@ export function EvmWalletConnectionPage({
         ) : null}
       </div>
 
-      <p className="source-footer-note">
-        private key·seed phrase·쓰기·출금 권한은 요청하거나 저장하지
-        않습니다. 공개 지갑 주소는 사용자가 선택한 체인의 거래 수집을 위해
-        서비스 DB에 저장합니다.
-      </p>
     </SourceFlowLayout>
   )
 }

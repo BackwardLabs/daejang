@@ -63,7 +63,7 @@ describe('UpbitPdfRegistrationPage', () => {
     )
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      '파일은 선택하거나 전송하지 않았습니다.',
+      '안전한 문서 처리 경로가 활성화된 뒤 등록할 수 있습니다.',
     )
     expect(
       screen.queryByLabelText('Upbit 거래내역서 PDF 선택'),

@@ -13,10 +13,8 @@ export type SourceMethodDefinition = {
   href: `/${string}`
   id: SourceMethodId
   intro: {
-    badge: string
     description: string
     eyebrow: string
-    footer: string
     noticeBody: string
     noticeTitle: string
     standardsLabel: string
@@ -39,7 +37,7 @@ export const sourceMethodDefinitions: Record<
   SourceMethodDefinition
 > = {
   'upbit-pdf': {
-    badge: 'PDF 업로드',
+    badge: '거래소 문서',
     bullets: [
       'Upbit 거래내역서 PDF만 필수',
       '암호화되지 않은 PDF 지원',
@@ -50,12 +48,9 @@ export const sourceMethodDefinitions: Record<
     href: '/sources/new/upbit',
     id: 'upbit-pdf',
     intro: {
-      badge: 'PDF 업로드',
       description:
         '지원되는 Upbit 거래내역서 PDF만 등록합니다. 입출금 증명서나 별도 자산 자료는 필수가 아닙니다.',
       eyebrow: 'DATA SOURCES · UPBIT',
-      footer:
-        '소스 등록이 끝나면 조회 기간과 문서 포함 기간을 확인한 뒤 수집을 시작합니다.',
       noticeBody:
         'Upbit PDF는 자동 동기화되지 않습니다. 이후 거래가 생기면 최신 거래내역서를 다시 업로드하세요.',
       noticeTitle: '새 거래는 새 PDF로 갱신합니다',
@@ -96,12 +91,9 @@ export const sourceMethodDefinitions: Record<
     href: '/sources/new/wallet',
     id: 'evm-wallet',
     intro: {
-      badge: '읽기 전용',
       description:
         '지갑 소유권을 확인한 뒤 과세연도 또는 직접 조회 기간을 선택합니다.',
       eyebrow: 'DATA SOURCES · EVM',
-      footer:
-        '연결을 해제하면 이후 신규 수집을 중단하고 기존 기록은 유지합니다.',
       noticeBody:
         'private key·seed phrase·쓰기·출금 권한을 요구하거나 저장하지 않습니다. 소유권 확인은 가스비가 없는 오프체인 메시지 서명으로만 진행합니다.',
       noticeTitle: '자산 이동 권한은 수집하지 않습니다',
