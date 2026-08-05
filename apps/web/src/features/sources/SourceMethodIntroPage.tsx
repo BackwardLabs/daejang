@@ -58,7 +58,9 @@ export function SourceMethodIntroPage({
           <div className="source-intro-actions">
             {registrationEnabled ? (
               <AppLink
-                className="source-primary-action"
+                className={`source-primary-action${
+                  isUpbitPdf ? ' source-primary-action--dark-text' : ''
+                }`}
                 href={
                   isUpbitPdf
                     ? '/sources/new/upbit/upload'
