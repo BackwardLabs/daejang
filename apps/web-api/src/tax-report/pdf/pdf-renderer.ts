@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit'
 
 import type {
   ReportPrintAmountV1,
+  ReportPrintCalculationRateV1,
   ReportPrintModelV1,
 } from './report-print-model.js'
 
@@ -71,7 +72,7 @@ export const formatReportAmount = (
   amount: ReportPrintAmountV1,
   denominationAssetId: string,
 ) => {
-  if (amount.status !== 'KNOWN') return '—'
+  if (amount.status !== 'KNOWN') return '미확정(0원이 아님)'
   const presentation = reportDenominations[denominationAssetId]
   if (presentation) {
     return `${formatAtomicAmount(
@@ -86,6 +87,222 @@ const shortId = (value: string) => value.length <= 28
   ? value
   : `${value.slice(0, 12)}…${value.slice(-12)}`
 
+export const formatCostMethod = (value: string) => {
+  switch (value) {
+    case 'ANNUAL_TOTAL_AVERAGE':
+      return '연간 총평균법 (ANNUAL_TOTAL_AVERAGE)'
+    case 'MOVING_AVERAGE':
+      return '이동평균법 (MOVING_AVERAGE)'
+    case 'FIFO':
+      return '선입선출법 (FIFO)'
+    default:
+      return value
+  }
+}
+
+const formatPoolScope = (value: string) => {
+  switch (value) {
+    case 'RESIDENT_TAX_YEAR_TAX_ASSET':
+      return '거주자 × 과세연도 × 과세자산'
+    case 'ADDRESS':
+      return '주소별'
+    default:
+      return value
+  }
+}
+
+const formatCalculationContract = (value: string) => {
+  switch (value) {
+    case 'ANNUAL_TOTAL_AVERAGE':
+      return '원가 방식: 연간 총평균법 (ANNUAL_TOTAL_AVERAGE)'
+    case 'LEGACY':
+      return '원가 방식: 기존 주소별 방식 (LEGACY)'
+    case 'UNSUPPORTED':
+      return '원가 방식 확인 불가 (UNSUPPORTED)'
+    default:
+      return value
+  }
+}
+
+const formatRate = (value: ReportPrintCalculationRateV1) =>
+  value.denominator === '100'
+    ? `${value.numerator}% (${value.numerator}/${value.denominator})`
+    : `${value.numerator}/${value.denominator}`
+
+const formatRounding = (value: string) => {
+  switch (value) {
+    case 'FLOOR':
+      return '절사 (FLOOR)'
+    case 'FLOOR_EXCEPT_EXHAUSTED_LAYER':
+      return '소진 원가층 제외 절사 (FLOOR_EXCEPT_EXHAUSTED_LAYER)'
+    case 'CUMULATIVE_FLOOR_ANNUAL_POOL':
+      return '연간 총평균 누적 배분 절사 (CUMULATIVE_FLOOR_ANNUAL_POOL)'
+    case 'MIXED':
+      return '복수 반올림 규칙 (MIXED)'
+    default:
+      return value
+  }
+}
+
+const hasUnknownReportAmounts = (model: ReportPrintModelV1) => [
+  model.summary.gainLoss,
+  model.summary.taxableBase,
+  model.summary.nationalTax,
+  model.summary.localTax,
+  model.summary.totalTax,
+  ...Object.values(model.totals),
+  ...model.assetSummaries.flatMap((asset) => [
+    asset.grossProceeds,
+    asset.acquisitionCost,
+    asset.ancillaryExpense,
+    asset.gainLoss,
+  ]),
+  ...model.disposals.flatMap((disposal) => [
+    disposal.grossProceeds,
+    disposal.basis,
+    disposal.ancillaryExpense,
+    disposal.gainLoss,
+  ]),
+  ...model.transfers.map((transfer) => transfer.basis),
+].some((amount) => amount.status === 'UNKNOWN')
+
+export const reportDocumentPresentation = (model: ReportPrintModelV1) => {
+  const filingReady =
+    model.taxYear >= 2027 &&
+    model.taxYearCloseStatus === 'CLOSED' &&
+    model.finality === 'FINAL' &&
+    model.status === 'FINAL' &&
+    model.filingStatus === 'READY' &&
+    model.summary.calculationContract === 'ANNUAL_TOTAL_AVERAGE' &&
+    model.summary.calculationRule?.deductionUsedAmount !== undefined &&
+    model.counts.limitations === 0 &&
+    model.limitations.length === 0 &&
+    !hasUnknownReportAmounts(model)
+
+  if (filingReady) {
+    return {
+      kind: '신고 준비 자료',
+      title: `${model.taxYear}년 가상자산 신고 준비 자료`,
+      description:
+        'Tax Engine에서 확정 계산과 차단 항목 없음을 판정한 자료입니다. 원화 단위와 세액 적합성은 별도 검토가 필요하며, 실제 신고 제출 또는 세무서 접수 완료를 뜻하지 않습니다.',
+    } as const
+  }
+  if (model.taxYear < 2027) {
+    return {
+      kind: '정책 시뮬레이션 검토 자료',
+      title: `${model.taxYear}년 가상자산 정책 시뮬레이션 검토 자료`,
+      description:
+        '과세 시행 전 정책을 기준으로 계산한 검토 자료입니다. 원화 단위와 세액 적합성은 별도 검토가 필요하며, 실제 신고 제출 또는 세무서 접수 완료를 뜻하지 않습니다.',
+    } as const
+  }
+  if (model.summary.calculationContract !== 'ANNUAL_TOTAL_AVERAGE') {
+    return {
+      kind: '검토 자료',
+      title: `${model.taxYear}년 가상자산 세금 계산 검토 자료`,
+      description:
+        '총평균법 원가 방식이 확인되지 않아 검토가 필요한 자료입니다. 원화 단위와 세액 적합성은 별도 검토가 필요하며, 실제 신고 제출 또는 세무서 접수 완료를 뜻하지 않습니다.',
+    } as const
+  }
+  return {
+    kind: '검토 자료',
+    title: `${model.taxYear}년 가상자산 세금 계산 검토 자료`,
+    description:
+      '잠정 계산, 미확정 금액 또는 보완할 항목이 있는 검토 자료입니다. 신고에 사용하기 전에 제한사항과 원화 단위·세액 적합성을 별도로 확인해야 합니다.',
+  } as const
+}
+
+const finalityLabel = (value: ReportPrintModelV1['finality']) =>
+  value === 'FINAL'
+    ? 'FINAL · 평가 입력 확정'
+    : 'PROVISIONAL · 평가 입력 잠정'
+
+const taxYearCloseLabel = (
+  value: ReportPrintModelV1['taxYearCloseStatus'],
+) => value === 'CLOSED'
+  ? 'CLOSED · 연간 입력 마감 확인'
+  : 'UNVERIFIED · 연간 입력 마감 미확인'
+
+const reportStatusLabel = (value: ReportPrintModelV1['status']) =>
+  value === 'FINAL'
+    ? 'FINAL · 계산 항목 확정'
+    : 'PARTIAL · 일부 계산 항목 미확정'
+
+const filingStatusLabel = (value: ReportPrintModelV1['filingStatus']) =>
+  value === 'READY'
+    ? 'READY · 엔진상 차단 항목 없음'
+    : 'BLOCKED · 엔진상 차단 항목 있음'
+
+export const reportStatusKeyValues = (
+  model: ReportPrintModelV1,
+): Array<readonly [string, string]> => {
+  const presentation = reportDocumentPresentation(model)
+  return [
+    ['평가 입력', finalityLabel(model.finality)],
+    ['연간 마감', taxYearCloseLabel(model.taxYearCloseStatus)],
+    ['결과 완결성', reportStatusLabel(model.status)],
+    ['신고 준비 상태', filingStatusLabel(model.filingStatus)],
+    ['현재 용도', presentation.kind],
+    ['제한사항', `${model.limitations.length}건`],
+    ['별도 확인', '원화 단위와 세액 적합성'],
+  ]
+}
+
+type CalculationSource = Pick<
+  ReportPrintModelV1,
+  'summary' | 'denominationAssetId'
+>
+
+export const reportCalculationKeyValues = (
+  model: CalculationSource,
+): Array<readonly [string, string]> => {
+  const rows: Array<readonly [string, string]> = []
+  if (model.summary.calculationContract !== undefined) {
+    rows.push([
+      '원가 방식 판정',
+      formatCalculationContract(model.summary.calculationContract),
+    ])
+  }
+  if (model.summary.calculationRule === undefined) return rows
+
+  const rule = model.summary.calculationRule
+  rows.push(
+    ['계산 범위', formatPoolScope(rule.poolScope)],
+    [
+      '취득원가 계산 방식',
+      rule.costMethods.map(formatCostMethod).join(', ') ||
+        '제공된 방식 없음',
+    ],
+    [
+      '기본공제',
+      formatReportAmount(
+        { status: 'KNOWN', amount: rule.basicDeductionAmount },
+        model.denominationAssetId,
+      ),
+    ],
+  )
+  if (rule.deductionUsedAmount !== undefined) {
+    rows.push([
+      '실제 적용 공제',
+      formatReportAmount(
+        { status: 'KNOWN', amount: rule.deductionUsedAmount },
+        model.denominationAssetId,
+      ),
+    ])
+  }
+  rows.push(
+    ['국세율', formatRate(rule.nationalRate)],
+    ['지방세율', formatRate(rule.localRate)],
+    ['세액 반올림', formatRounding(rule.taxRounding)],
+  )
+  if (rule.basisAllocationRounding !== '') {
+    rows.push([
+      '취득원가 배분 반올림',
+      formatRounding(rule.basisAllocationRounding),
+    ])
+  }
+  return rows
+}
+
 const asDate = (value: string) => {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.valueOf())) {
@@ -99,7 +316,8 @@ export async function renderTaxReportPdf(
   options: RenderOptions,
 ): Promise<Buffer> {
   const issuedAt = asDate(model.issuedAt)
-  const documentTitle = `${model.taxYear}년 가상자산 세무 장부`
+  const presentation = reportDocumentPresentation(model)
+  const documentTitle = presentation.title
   const rendererVersion = options.rendererVersion ?? '1'
   const doc = new PDFDocument({
     autoFirstPage: false,
@@ -108,7 +326,7 @@ export async function renderTaxReportPdf(
     info: {
       Title: documentTitle,
       Author: 'Daejang',
-      Subject: `Immutable tax report ${model.reportId}`,
+      Subject: `Tax calculation reference ${model.reportId}`,
       Creator: 'Daejang',
       Producer: `daejang-tax-report-pdf/${rendererVersion}`,
       CreationDate: issuedAt,
@@ -304,13 +522,17 @@ export async function renderTaxReportPdf(
 
   addPage()
   doc.fillColor(colors.accent).fontSize(9)
-    .text('TAX LEDGER', page.marginX, doc.y)
+    .text(presentation.kind, page.marginX, doc.y)
   doc.moveDown(0.65)
   doc.fillColor(colors.ink).fontSize(25)
     .text(documentTitle, {
       width: contentWidth,
     })
-  doc.moveDown(0.3)
+  doc.moveDown(0.45)
+  doc.fillColor(colors.muted).fontSize(9)
+    .text(presentation.description, page.marginX, doc.y, {
+      width: contentWidth,
+    })
   doc.moveDown(1)
 
   drawKeyValues([
@@ -319,6 +541,12 @@ export async function renderTaxReportPdf(
     ['Report model digest', model.reportModelDigest],
     ['생성 시각', model.issuedAt],
   ])
+
+  sectionTitle(
+    '자료 상태',
+    '아래 값은 Tax Engine의 계산 상태입니다. 법적·제품 최종 승인이나 신고 완료를 뜻하지 않습니다.',
+  )
+  drawKeyValues(reportStatusKeyValues(model))
 
   sectionTitle('장부 계산 요약')
   drawKeyValues([
@@ -330,11 +558,40 @@ export async function renderTaxReportPdf(
 
   sectionTitle('세금 추정 요약')
   drawKeyValues([
+    ['연간 손익', formatReportAmount(model.summary.gainLoss, model.denominationAssetId)],
     ['과세표준', formatReportAmount(model.summary.taxableBase, model.denominationAssetId)],
     ['국세', formatReportAmount(model.summary.nationalTax, model.denominationAssetId)],
     ['지방세', formatReportAmount(model.summary.localTax, model.denominationAssetId)],
     ['예상 총 세액', formatReportAmount(model.summary.totalTax, model.denominationAssetId)],
   ])
+
+  drawTable({
+    title: '검토·보완할 항목',
+    emptyLabel: '확인된 제한사항이 없습니다.',
+    columns: [
+      { header: '코드', width: 112 },
+      { header: '설명', width: 236 },
+      { header: '영향 대상', width: 163 },
+    ],
+    rows: model.limitations.map((row) => {
+      const targets = [
+        row.taxAssetId === undefined ? undefined : `자산 ${row.taxAssetId}`,
+        row.taxAddressId === undefined
+          ? undefined
+          : `주소 ${shortId(row.taxAddressId)}`,
+        row.movementId === undefined
+          ? undefined
+          : `Movement ${shortId(row.movementId)}`,
+        row.reviewId === undefined
+          ? undefined
+          : `Review ${shortId(row.reviewId)}`,
+        row.reviewRevisionId === undefined
+          ? undefined
+          : `Review revision ${shortId(row.reviewRevisionId)}`,
+      ].filter((value): value is string => value !== undefined)
+      return [row.code, row.reason, targets.join('\n') || '전체 계산']
+    }),
+  })
 
   drawTable({
     title: '자산별 계산 요약',
@@ -374,7 +631,7 @@ export async function renderTaxReportPdf(
       formatReportAmount(row.basis, model.denominationAssetId),
       formatReportAmount(row.ancillaryExpense, model.denominationAssetId),
       formatReportAmount(row.gainLoss, model.denominationAssetId),
-      `${row.costMethod}\n${shortId(row.movementId)}`,
+      `${formatCostMethod(row.costMethod)}\n${shortId(row.movementId)}`,
     ]),
   })
 
@@ -392,7 +649,7 @@ export async function renderTaxReportPdf(
       row.taxAssetId,
       formatDecimal(row.quantity),
       formatReportAmount(row.basis, model.denominationAssetId),
-      `${row.fromCostMethod} → ${row.toCostMethod}`,
+      `${formatCostMethod(row.fromCostMethod)} → ${formatCostMethod(row.toCostMethod)}`,
       shortId(row.movementId),
     ]),
   })
@@ -414,29 +671,38 @@ export async function renderTaxReportPdf(
     ]),
   })
 
+  const calculationRows = reportCalculationKeyValues(model)
+  if (calculationRows.length > 0) {
+    sectionTitle(
+      '적용 계산 기준',
+      'Tax Engine이 이 자료에 함께 제공한 계산 기준만 표시합니다.',
+    )
+    drawKeyValues(calculationRows, '적용 계산 기준')
+  }
+
   ensureSpace(370)
   sectionTitle(
     '산출 방법과 재현 정보',
     '아래 식별자는 장부 계산에 사용된 정확한 정책과 엔진 실행을 추적하기 위한 정보입니다.',
   )
   drawKeyValues([
-    ['Tax inventory run', model.methodology.taxInventoryRunId],
-    ['Tax estimate', model.methodology.taxEstimateId],
-    ['Lot run', model.methodology.lotRunId],
-    ['Generation', model.methodology.generationId],
-    ['Schema digest', model.methodology.schemaDigest],
+    ['세금 장부 실행 ID', model.methodology.taxInventoryRunId],
+    ['세액 추정 ID', model.methodology.taxEstimateId],
+    ['Lot 실행 ID', model.methodology.lotRunId],
+    ['생성 작업 ID', model.methodology.generationId],
+    ['스키마 hash', model.methodology.schemaDigest],
     [
-      'Policy',
+      '정책 이름·버전',
       `${model.methodology.policy.name} ${model.methodology.policy.version}`,
     ],
-    ['Policy artifact digest', model.methodology.policy.artifactDigest],
+    ['정책 artifact hash', model.methodology.policy.artifactDigest],
     [
-      'Engine',
+      '엔진 이름·버전',
       `${model.methodology.engine.name} ${model.methodology.engine.version}`,
     ],
-    ['Engine artifact digest', model.methodology.engine.artifactDigest],
-    ['Input digest', model.inputDigest],
-    ['Evidence pack digest', model.evidencePackDigest],
+    ['엔진 artifact hash', model.methodology.engine.artifactDigest],
+    ['입력 hash', model.inputDigest],
+    ['근거 묶음 hash', model.evidencePackDigest],
   ], '산출 방법과 재현 정보')
 
   const range = doc.bufferedPageRange()

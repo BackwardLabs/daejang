@@ -256,6 +256,7 @@ describe('canonical tax report detail route', () => {
       reportId: REPORT_ID,
       reportModelDigest: reader.value.artifactDigest,
       evidencePackDigest: canonicalModel.evidencePackDigest,
+      taxYearCloseStatus: 'UNVERIFIED',
       summary: {
         gainLoss: {
           status: 'KNOWN',
@@ -267,6 +268,8 @@ describe('canonical tax report detail route', () => {
           amount: null,
           hasAmount: false,
         },
+        calculationRule: null,
+        calculationContract: 'UNSUPPORTED',
       },
       totals: {
         grossProceeds: {
@@ -336,6 +339,191 @@ describe('canonical tax report detail route', () => {
     expect(report).not.toHaveProperty('artifactRoots')
     expect(response.body).not.toContain(canonicalModel.subjectId)
     expect(response.body).not.toContain(canonicalModel.residentId)
+  })
+
+  it('projects the annual total-average calculation contract', async () => {
+    const annualModel = structuredClone(
+      canonicalModel,
+    ) as unknown as CanonicalTaxReportModelV1
+    annualModel.disposals = annualModel.disposals.map((row) => ({
+      ...row,
+      costMethod: 'ANNUAL_TOTAL_AVERAGE',
+      rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }))
+    annualModel.transfers = annualModel.transfers.map((row) => ({
+      ...row,
+      fromCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+      toCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+    }))
+    annualModel.summary.calculationRule = {
+      poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+      costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+      basicDeductionAmount: '2500000',
+      nationalRate: { numerator: '20', denominator: '100' },
+      localRate: { numerator: '2', denominator: '100' },
+      taxRounding: 'FLOOR',
+      basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }
+    reader.value = artifactFor(annualModel)
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}`,
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().report.summary).toMatchObject({
+      calculationContract: 'ANNUAL_TOTAL_AVERAGE',
+      calculationRule: {
+        poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+        costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+        basicDeductionAmount: '2500000',
+        deductionUsedAmount: null,
+        nationalRate: { numerator: '20', denominator: '100' },
+        localRate: { numerator: '2', denominator: '100' },
+        taxRounding: 'FLOOR',
+        basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+      },
+    })
+  })
+
+  it('does not approve an annual rule that conflicts with row cost methods', async () => {
+    const conflictingModel = structuredClone(
+      canonicalModel,
+    ) as unknown as CanonicalTaxReportModelV1
+    conflictingModel.summary.calculationRule = {
+      poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+      costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+      basicDeductionAmount: '2500000',
+      nationalRate: { numerator: '20', denominator: '100' },
+      localRate: { numerator: '2', denominator: '100' },
+      taxRounding: 'FLOOR',
+      basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }
+    reader.value = artifactFor(conflictingModel)
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}`,
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().report.summary.calculationContract).toBe(
+      'UNSUPPORTED',
+    )
+  })
+
+  it('does not approve an annual rule that conflicts with row rounding', async () => {
+    const conflictingModel = structuredClone(
+      canonicalModel,
+    ) as unknown as CanonicalTaxReportModelV1
+    conflictingModel.disposals = conflictingModel.disposals.map((row) => ({
+      ...row,
+      costMethod: 'ANNUAL_TOTAL_AVERAGE',
+      rounding: 'HALF_UP',
+    }))
+    conflictingModel.transfers = conflictingModel.transfers.map((row) => ({
+      ...row,
+      fromCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+      toCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+    }))
+    conflictingModel.summary.calculationRule = {
+      poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+      costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+      basicDeductionAmount: '2500000',
+      nationalRate: { numerator: '20', denominator: '100' },
+      localRate: { numerator: '2', denominator: '100' },
+      taxRounding: 'FLOOR',
+      basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }
+    reader.value = artifactFor(conflictingModel)
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}`,
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().report.summary.calculationContract).toBe(
+      'UNSUPPORTED',
+    )
+  })
+
+  it('does not approve the annual contract when the KRW deduction uses the wrong atomic scale', async () => {
+    const annualModel = structuredClone(
+      canonicalModel,
+    ) as unknown as CanonicalTaxReportModelV1
+    annualModel.denominationAssetId = 'asset-krw-upbit'
+    annualModel.disposals = annualModel.disposals.map((row) => ({
+      ...row,
+      costMethod: 'ANNUAL_TOTAL_AVERAGE',
+      rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }))
+    annualModel.transfers = annualModel.transfers.map((row) => ({
+      ...row,
+      fromCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+      toCostMethod: 'ANNUAL_TOTAL_AVERAGE',
+    }))
+    annualModel.summary.calculationRule = {
+      poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+      costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+      basicDeductionAmount: '2500000',
+      nationalRate: { numerator: '20', denominator: '100' },
+      localRate: { numerator: '2', denominator: '100' },
+      taxRounding: 'FLOOR',
+      basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }
+    reader.value = artifactFor(annualModel)
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}`,
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().report.summary).toMatchObject({
+      calculationContract: 'UNSUPPORTED',
+      calculationRule: {
+        basicDeductionAmount: '2500000',
+      },
+    })
+  })
+
+  it('rejects a malformed calculation rule', async () => {
+    const malformed = structuredClone(
+      canonicalModel,
+    ) as unknown as CanonicalTaxReportModelV1
+    malformed.summary.calculationRule = {
+      poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+      costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+      basicDeductionAmount: '2500000',
+      deductionUsedAmount: '500',
+      nationalRate: { numerator: '20', denominator: '0' },
+      localRate: { numerator: '2', denominator: '100' },
+      taxRounding: 'FLOOR',
+      basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    }
+    reader.value = artifactFor(malformed)
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${REPORT_ID}`,
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({
+      error: { code: 'TAX_REPORT_MODEL_INCONSISTENT' },
+    })
   })
 
   it('keeps a derived total unknown when any included disposal amount is unknown', async () => {

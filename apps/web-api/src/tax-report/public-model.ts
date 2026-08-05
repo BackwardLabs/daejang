@@ -18,6 +18,10 @@ const RFC3339_UTC_PATTERN =
 // validation limit aligned so alternate readers cannot widen that contract.
 const MAX_CANONICAL_JSON_BYTES = 16 * 1024 * 1024
 const MAX_ROWS_PER_SECTION = 100_000
+const BASIC_DEDUCTION_BY_DENOMINATION: Readonly<Record<string, string>> = {
+  KRW: '2500000',
+  'asset-krw-upbit': '250000000000000',
+}
 
 type CanonicalAmountV1 =
   | { status: 'KNOWN'; amount: string }
@@ -27,6 +31,31 @@ type CanonicalProducerV1 = {
   name: string
   version: string
   artifactDigest: string
+}
+
+type CanonicalCostMethodV1 =
+  | 'MOVING_AVERAGE'
+  | 'FIFO'
+  | 'ANNUAL_TOTAL_AVERAGE'
+
+type CanonicalCalculationRateV1 = {
+  numerator: string
+  denominator: string
+}
+
+type CanonicalCalculationRuleV1 = {
+  poolScope: 'ADDRESS' | 'RESIDENT_TAX_YEAR_TAX_ASSET'
+  costMethods: CanonicalCostMethodV1[]
+  basicDeductionAmount: string
+  deductionUsedAmount?: string
+  nationalRate: CanonicalCalculationRateV1
+  localRate: CanonicalCalculationRateV1
+  taxRounding: 'FLOOR'
+  basisAllocationRounding:
+    | ''
+    | 'FLOOR_EXCEPT_EXHAUSTED_LAYER'
+    | 'CUMULATIVE_FLOOR_ANNUAL_POOL'
+    | 'MIXED'
 }
 
 type CanonicalDisposalRowV1 = {
@@ -113,6 +142,7 @@ export type CanonicalTaxReportModelV1 = {
     nationalTax: CanonicalAmountV1
     localTax: CanonicalAmountV1
     totalTax: CanonicalAmountV1
+    calculationRule?: CanonicalCalculationRuleV1
   }
   disposals: CanonicalDisposalRowV1[]
   transfers: CanonicalTransferRowV1[]
@@ -127,6 +157,20 @@ export type PublicAmount =
   | { status: 'KNOWN'; amount: string; hasAmount: true }
   | { status: 'UNKNOWN'; amount: null; hasAmount: false }
 
+export type PublicCalculationRule = Omit<
+  CanonicalCalculationRuleV1,
+  'deductionUsedAmount'
+> & {
+  deductionUsedAmount: string | null
+}
+
+export type PublicCalculationContract =
+  | 'ANNUAL_TOTAL_AVERAGE'
+  | 'LEGACY'
+  | 'UNSUPPORTED'
+
+export type PublicTaxYearCloseStatus = 'CLOSED' | 'UNVERIFIED'
+
 export type PublicTaxReportDetail = {
   schemaVersion: typeof REPORT_SCHEMA_V1
   reportId: string
@@ -134,6 +178,7 @@ export type PublicTaxReportDetail = {
   inputDigest: string
   evidencePackDigest: string
   taxYear: number
+  taxYearCloseStatus: PublicTaxYearCloseStatus
   finality: CanonicalTaxReportModelV1['finality']
   status: CanonicalTaxReportModelV1['status']
   filingStatus: CanonicalTaxReportModelV1['filingStatus']
@@ -145,6 +190,8 @@ export type PublicTaxReportDetail = {
     nationalTax: PublicAmount
     localTax: PublicAmount
     totalTax: PublicAmount
+    calculationRule: PublicCalculationRule | null
+    calculationContract: PublicCalculationContract
   }
   totals: {
     grossProceeds: PublicAmount
@@ -387,6 +434,142 @@ const parseProducer = (
     name: requiredString(record, 'name', path),
     version: requiredString(record, 'version', path),
     artifactDigest: digestString(record, 'artifactDigest', path),
+  }
+}
+
+const parseCalculationRate = (
+  value: unknown,
+  path: string,
+): CanonicalCalculationRateV1 => {
+  const record = exactRecord(value, path, [
+    'numerator',
+    'denominator',
+  ])
+  return {
+    numerator: numericString(
+      record,
+      'numerator',
+      path,
+      UNSIGNED_INTEGER_PATTERN,
+    ),
+    denominator: numericString(
+      record,
+      'denominator',
+      path,
+      POSITIVE_INTEGER_PATTERN,
+    ),
+  }
+}
+
+const parseCostMethods = (
+  value: unknown,
+  path: string,
+): CanonicalCostMethodV1[] => {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 3) {
+    return invalid(path, 'must contain 1-3 cost methods')
+  }
+  const methods = value.map((method, index) => {
+    if (typeof method !== 'string' || method.length === 0) {
+      return invalid(`${path}[${index}]`, 'must be a non-empty string')
+    }
+    const allowed: readonly CanonicalCostMethodV1[] = [
+      'MOVING_AVERAGE',
+      'FIFO',
+      'ANNUAL_TOTAL_AVERAGE',
+    ]
+    if (!allowed.includes(method as CanonicalCostMethodV1)) {
+      return invalid(
+        `${path}[${index}]`,
+        `must be one of ${allowed.join(', ')}`,
+      )
+    }
+    return method as CanonicalCostMethodV1
+  })
+  const sortedUnique = [...new Set(methods)].sort()
+  if (
+    sortedUnique.length !== methods.length ||
+    sortedUnique.some((method, index) => method !== methods[index])
+  ) {
+    invalid(path, 'must contain unique cost methods in canonical order')
+  }
+  return methods
+}
+
+const parseCalculationRule = (
+  value: unknown,
+  path: string,
+): CanonicalCalculationRuleV1 => {
+  const record = exactRecord(
+    value,
+    path,
+    [
+      'poolScope',
+      'costMethods',
+      'basicDeductionAmount',
+      'nationalRate',
+      'localRate',
+      'taxRounding',
+      'basisAllocationRounding',
+    ],
+    ['deductionUsedAmount'],
+  )
+  const deductionUsedAmount = Object.hasOwn(
+    record,
+    'deductionUsedAmount',
+  )
+    ? numericString(
+        record,
+        'deductionUsedAmount',
+        path,
+        UNSIGNED_INTEGER_PATTERN,
+      )
+    : undefined
+  const basisAllocationRounding = record.basisAllocationRounding
+  const allowedBasisAllocationRounding = [
+    '',
+    'FLOOR_EXCEPT_EXHAUSTED_LAYER',
+    'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    'MIXED',
+  ] as const
+  if (
+    typeof basisAllocationRounding !== 'string' ||
+    !allowedBasisAllocationRounding.includes(
+      basisAllocationRounding as (typeof allowedBasisAllocationRounding)[number],
+    )
+  ) {
+    invalid(
+      `${path}.basisAllocationRounding`,
+      `must be one of ${allowedBasisAllocationRounding
+        .map((value) => (value === '' ? '(empty)' : value))
+        .join(', ')}`,
+    )
+  }
+  return {
+    poolScope: enumString(record, 'poolScope', path, [
+      'ADDRESS',
+      'RESIDENT_TAX_YEAR_TAX_ASSET',
+    ]),
+    costMethods: parseCostMethods(record.costMethods, `${path}.costMethods`),
+    basicDeductionAmount: numericString(
+      record,
+      'basicDeductionAmount',
+      path,
+      UNSIGNED_INTEGER_PATTERN,
+    ),
+    ...(deductionUsedAmount === undefined
+      ? {}
+      : { deductionUsedAmount }),
+    nationalRate: parseCalculationRate(
+      record.nationalRate,
+      `${path}.nationalRate`,
+    ),
+    localRate: parseCalculationRate(
+      record.localRate,
+      `${path}.localRate`,
+    ),
+    taxRounding: enumString(record, 'taxRounding', path, ['FLOOR']),
+    basisAllocationRounding:
+      basisAllocationRounding as CanonicalCalculationRuleV1['basisAllocationRounding'],
   }
 }
 
@@ -656,13 +839,24 @@ const parseCanonicalModel = (
       MAX_ROWS_PER_SECTION,
     ),
   }
-  const summaryRecord = exactRecord(record.summary, '$.summary', [
-    'gainLoss',
-    'taxableBase',
-    'nationalTax',
-    'localTax',
-    'totalTax',
-  ])
+  const summaryRecord = exactRecord(
+    record.summary,
+    '$.summary',
+    [
+      'gainLoss',
+      'taxableBase',
+      'nationalTax',
+      'localTax',
+      'totalTax',
+    ],
+    ['calculationRule'],
+  )
+  const calculationRule = Object.hasOwn(summaryRecord, 'calculationRule')
+    ? parseCalculationRule(
+        summaryRecord.calculationRule,
+        '$.summary.calculationRule',
+      )
+    : undefined
   const summary = {
     gainLoss: parseAmount(
       summaryRecord.gainLoss,
@@ -689,6 +883,7 @@ const parseCanonicalModel = (
       '$.summary.totalTax',
       false,
     ),
+    ...(calculationRule === undefined ? {} : { calculationRule }),
   }
   const disposals = parseArray(
     record.disposals,
@@ -882,6 +1077,81 @@ const publicAmount = (value: CanonicalAmountV1): PublicAmount =>
     ? { status: value.status, amount: value.amount, hasAmount: true }
     : { status: value.status, amount: null, hasAmount: false }
 
+const publicCalculationRule = (
+  value: CanonicalCalculationRuleV1,
+): PublicCalculationRule => ({
+  poolScope: value.poolScope,
+  costMethods: [...value.costMethods],
+  basicDeductionAmount: value.basicDeductionAmount,
+  deductionUsedAmount: value.deductionUsedAmount ?? null,
+  nationalRate: value.nationalRate,
+  localRate: value.localRate,
+  taxRounding: value.taxRounding,
+  basisAllocationRounding: value.basisAllocationRounding,
+})
+
+const calculationContract = (
+  value: CanonicalCalculationRuleV1 | undefined,
+  denominationAssetId: string,
+  disposals: readonly CanonicalDisposalRowV1[],
+  transfers: readonly CanonicalTransferRowV1[],
+): PublicCalculationContract => {
+  // A pre-extension V1 artifact proves that the rule was not recorded, not
+  // which historical cost method produced it.
+  if (value === undefined) return 'UNSUPPORTED'
+  const declaredMethods = new Set<string>(value.costMethods)
+  const rowsMatchDeclaredMethods =
+    disposals.every((row) => declaredMethods.has(row.costMethod)) &&
+    transfers.every(
+      (row) =>
+        declaredMethods.has(row.fromCostMethod) &&
+        declaredMethods.has(row.toCostMethod),
+    )
+  if (!rowsMatchDeclaredMethods) return 'UNSUPPORTED'
+  const allocationRoundingMatches = (
+    expected:
+      | 'FLOOR_EXCEPT_EXHAUSTED_LAYER'
+      | 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+  ) => {
+    const hasKnownBasis = disposals.some(
+      (row) => row.basis.status === 'KNOWN',
+    )
+    return (
+      disposals.every((row) =>
+        row.basis.status === 'KNOWN'
+          ? row.rounding === expected
+          : row.rounding === undefined,
+      ) &&
+      value.basisAllocationRounding === (hasKnownBasis ? expected : '')
+    )
+  }
+  if (
+    value.poolScope === 'RESIDENT_TAX_YEAR_TAX_ASSET' &&
+    value.costMethods.length === 1 &&
+    value.costMethods[0] === 'ANNUAL_TOTAL_AVERAGE' &&
+    value.basicDeductionAmount ===
+      BASIC_DEDUCTION_BY_DENOMINATION[denominationAssetId] &&
+    value.nationalRate.numerator === '20' &&
+    value.nationalRate.denominator === '100' &&
+    value.localRate.numerator === '2' &&
+    value.localRate.denominator === '100' &&
+    value.taxRounding === 'FLOOR' &&
+    allocationRoundingMatches('CUMULATIVE_FLOOR_ANNUAL_POOL')
+  ) {
+    return 'ANNUAL_TOTAL_AVERAGE'
+  }
+  if (
+    value.poolScope === 'ADDRESS' &&
+    value.costMethods.every(
+      (method) => method === 'MOVING_AVERAGE' || method === 'FIFO',
+    ) &&
+    allocationRoundingMatches('FLOOR_EXCEPT_EXHAUSTED_LAYER')
+  ) {
+    return 'LEGACY'
+  }
+  return 'UNSUPPORTED'
+}
+
 const sumAmounts = (
   values: readonly CanonicalAmountV1[],
 ): PublicAmount => {
@@ -950,6 +1220,9 @@ const publicProjection = (
     inputDigest: model.inputDigest,
     evidencePackDigest: model.evidencePackDigest,
     taxYear: model.taxYear,
+    // ReportModel V1 carries valuation finality but no durable tax-year close
+    // proof. It must never be inferred from FINAL or from the issue timestamp.
+    taxYearCloseStatus: 'UNVERIFIED',
     finality: model.finality,
     status: model.status,
     filingStatus: model.filingStatus,
@@ -961,6 +1234,16 @@ const publicProjection = (
       nationalTax: publicAmount(model.summary.nationalTax),
       localTax: publicAmount(model.summary.localTax),
       totalTax: publicAmount(model.summary.totalTax),
+      calculationRule:
+        model.summary.calculationRule === undefined
+          ? null
+          : publicCalculationRule(model.summary.calculationRule),
+      calculationContract: calculationContract(
+        model.summary.calculationRule,
+        model.denominationAssetId,
+        model.disposals,
+        model.transfers,
+      ),
     },
     totals: {
       grossProceeds: sumAmounts(
@@ -1087,6 +1370,77 @@ const nullableStringSchema = {
   anyOf: [{ type: 'string' }, { type: 'null' }],
 } as const
 
+const nullableUnsignedIntegerStringSchema = {
+  anyOf: [
+    { type: 'string', pattern: '^(0|[1-9][0-9]{0,77})$' },
+    { type: 'null' },
+  ],
+} as const
+
+const calculationRateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['numerator', 'denominator'],
+  properties: {
+    numerator: {
+      type: 'string',
+      pattern: '^(0|[1-9][0-9]{0,77})$',
+    },
+    denominator: {
+      type: 'string',
+      pattern: '^[1-9][0-9]{0,77}$',
+    },
+  },
+} as const
+
+const calculationRuleSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'poolScope',
+    'costMethods',
+    'basicDeductionAmount',
+    'deductionUsedAmount',
+    'nationalRate',
+    'localRate',
+    'taxRounding',
+    'basisAllocationRounding',
+  ],
+  properties: {
+    poolScope: {
+      type: 'string',
+      enum: ['ADDRESS', 'RESIDENT_TAX_YEAR_TAX_ASSET'],
+    },
+    costMethods: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 3,
+      uniqueItems: true,
+      items: {
+        type: 'string',
+        enum: ['MOVING_AVERAGE', 'FIFO', 'ANNUAL_TOTAL_AVERAGE'],
+      },
+    },
+    basicDeductionAmount: {
+      type: 'string',
+      pattern: '^(0|[1-9][0-9]{0,77})$',
+    },
+    deductionUsedAmount: nullableUnsignedIntegerStringSchema,
+    nationalRate: calculationRateSchema,
+    localRate: calculationRateSchema,
+    taxRounding: { type: 'string', const: 'FLOOR' },
+    basisAllocationRounding: {
+      type: 'string',
+      enum: [
+        '',
+        'FLOOR_EXCEPT_EXHAUSTED_LAYER',
+        'CUMULATIVE_FLOOR_ANNUAL_POOL',
+        'MIXED',
+      ],
+    },
+  },
+} as const
+
 const producerSchema = {
   type: 'object',
   additionalProperties: false,
@@ -1108,6 +1462,7 @@ export const publicTaxReportDetailSchema = {
     'inputDigest',
     'evidencePackDigest',
     'taxYear',
+    'taxYearCloseStatus',
     'finality',
     'status',
     'filingStatus',
@@ -1139,6 +1494,10 @@ export const publicTaxReportDetailSchema = {
       pattern: '^[0-9a-f]{64}$',
     },
     taxYear: { type: 'integer', minimum: 2025, maximum: 9999 },
+    taxYearCloseStatus: {
+      type: 'string',
+      enum: ['CLOSED', 'UNVERIFIED'],
+    },
     finality: { type: 'string', enum: ['FINAL', 'PROVISIONAL'] },
     status: { type: 'string', enum: ['FINAL', 'PARTIAL'] },
     filingStatus: { type: 'string', enum: ['READY', 'BLOCKED'] },
@@ -1168,6 +1527,8 @@ export const publicTaxReportDetailSchema = {
         'nationalTax',
         'localTax',
         'totalTax',
+        'calculationRule',
+        'calculationContract',
       ],
       properties: {
         gainLoss: publicAmountSchema,
@@ -1175,6 +1536,13 @@ export const publicTaxReportDetailSchema = {
         nationalTax: publicAmountSchema,
         localTax: publicAmountSchema,
         totalTax: publicAmountSchema,
+        calculationRule: {
+          anyOf: [calculationRuleSchema, { type: 'null' }],
+        },
+        calculationContract: {
+          type: 'string',
+          enum: ['ANNUAL_TOTAL_AVERAGE', 'LEGACY', 'UNSUPPORTED'],
+        },
       },
     },
     totals: {

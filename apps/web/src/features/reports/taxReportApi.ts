@@ -49,6 +49,65 @@ export type TaxReportProducerModel = {
   version: string
 }
 
+export type TaxReportRateModel = {
+  denominator: string
+  numerator: string
+}
+
+export type TaxReportCalculationRuleModel = {
+  basisAllocationRounding:
+    | ''
+    | 'FLOOR_EXCEPT_EXHAUSTED_LAYER'
+    | 'CUMULATIVE_FLOOR_ANNUAL_POOL'
+    | 'MIXED'
+  basicDeductionAmount: string
+  costMethods: Array<'MOVING_AVERAGE' | 'FIFO' | 'ANNUAL_TOTAL_AVERAGE'>
+  deductionUsedAmount?: string | null
+  localRate: TaxReportRateModel
+  nationalRate: TaxReportRateModel
+  poolScope: 'ADDRESS' | 'RESIDENT_TAX_YEAR_TAX_ASSET'
+  taxRounding: 'FLOOR'
+}
+
+export type TaxEvidenceCoordinateModel = {
+  eventId: string | null
+  fragmentId: string | null
+  generationId: string | null
+  kind: string
+  legId: string | null
+  movementId: string | null
+  observationId: string | null
+  relationId: string | null
+  reviewId: string | null
+  reviewRevisionId: string | null
+  revisionId: string | null
+  schemaDigest: string | null
+  valuationId: string | null
+}
+
+export type TaxEvidencePackModel = {
+  artifactDigest: string
+  artifactRoots: Array<{
+    digest: string
+    kind: string
+  }>
+  evidenceCoordinates: TaxEvidenceCoordinateModel[]
+  issuedAt: string
+  manifestId: string
+  methodology: {
+    engine: TaxReportProducerModel
+    generationId: string
+    lotRunId: string
+    policy: TaxReportProducerModel
+    schemaDigest: string
+    taxEstimateId: string
+    taxInventoryRunId: string
+  }
+  reportId: string
+  schemaVersion: 'giwa.tax-evidence-pack.v1'
+  taxYear: number
+}
+
 export type TaxReportDisposalModel = {
   ancillaryExpense: TaxReportDetailAmountModel
   basis: TaxReportDetailAmountModel
@@ -138,6 +197,8 @@ export type TaxReportDetailModel = {
   schemaVersion: 'giwa.tax-report-model.v1'
   status: TaxReportModel['status']
   summary: {
+    calculationContract: 'ANNUAL_TOTAL_AVERAGE' | 'LEGACY' | 'UNSUPPORTED'
+    calculationRule: TaxReportCalculationRuleModel | null
     gainLoss: TaxReportDetailAmountModel
     localTax: TaxReportDetailAmountModel
     nationalTax: TaxReportDetailAmountModel
@@ -145,6 +206,7 @@ export type TaxReportDetailModel = {
     totalTax: TaxReportDetailAmountModel
   }
   taxYear: number
+  taxYearCloseStatus: 'CLOSED' | 'UNVERIFIED'
   totals: {
     acquisitionCost: TaxReportDetailAmountModel
     ancillaryExpense: TaxReportDetailAmountModel
@@ -177,5 +239,13 @@ export const loadTaxReportDetail = (
   signal?: AbortSignal,
 ) => requestApi<{ report: TaxReportDetailModel }>(
   `/tax-reports/${encodeURIComponent(reportId)}`,
+  { signal },
+)
+
+export const loadTaxReportEvidence = (
+  reportId: string,
+  signal?: AbortSignal,
+) => requestApi<{ evidencePack: TaxEvidencePackModel }>(
+  `/tax-reports/${encodeURIComponent(reportId)}/evidence`,
   { signal },
 )

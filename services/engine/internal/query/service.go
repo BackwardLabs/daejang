@@ -62,9 +62,11 @@ type Service struct {
 }
 
 const (
-	taxReportModelMediaType = "application/vnd.giwa.tax-report-model.v1+json"
-	taxReportModelSchemaV1  = "giwa.tax-report-model.v1"
-	maxTaxReportModelBytes  = 16 << 20
+	taxReportModelMediaType   = "application/vnd.giwa.tax-report-model.v1+json"
+	taxReportModelSchemaV1    = "giwa.tax-report-model.v1"
+	taxEvidencePackMediaType  = "application/vnd.giwa.tax-evidence-pack.v1+json"
+	taxEvidencePackSchemaV1   = "giwa.tax-evidence-pack.v1"
+	maxTaxReportArtifactBytes = 16 << 20
 )
 
 func (s *Service) GetDashboard(ctx context.Context, req *enginev1.GetDashboardRequest) (*enginev1.GetDashboardResponse, error) {
@@ -618,16 +620,91 @@ func (s *Service) GetTaxReportModel(ctx context.Context, req *enginev1.GetTaxRep
 	if !found {
 		return nil, status.Error(codes.NotFound, "tax report model not found")
 	}
-	if len(object.Bytes) > maxTaxReportModelBytes {
+	if len(object.Bytes) > maxTaxReportArtifactBytes {
 		return nil, status.Error(codes.ResourceExhausted, "tax report model exceeds the response limit")
 	}
-	if err := validateTaxReportModelArtifact(subject, value, object); err != nil {
+	if _, err := validateTaxReportModelArtifact(subject, value, object); err != nil {
 		log.Printf("tax report model integrity verification failed: report=%q err=%v", value.ID, err)
 		return nil, status.Error(codes.DataLoss, "tax report model integrity verification failed")
 	}
 	return &enginev1.GetTaxReportModelResponse{
 		ReportId:       value.ID,
 		ArtifactDigest: value.ReportArtifactDigest,
+		MediaType:      object.MediaType,
+		CanonicalJson:  append([]byte(nil), object.Bytes...),
+	}, nil
+}
+
+func (s *Service) GetTaxEvidencePack(ctx context.Context, req *enginev1.GetTaxEvidencePackRequest) (*enginev1.GetTaxEvidencePackResponse, error) {
+	subject, err := source.ValidateRequestContext(req.GetContext(), false)
+	if err != nil {
+		return nil, err
+	}
+	if !validTaxReportID(req.GetReportId()) {
+		return nil, status.Error(codes.InvalidArgument, "tax report ID is invalid")
+	}
+	if s.TaxReports == nil || s.TaxReportArtifacts == nil {
+		return nil, status.Error(codes.Unavailable, "tax evidence pack query is unavailable")
+	}
+	value, found, err := s.TaxReports.GetReport(ctx, subject, req.GetReportId())
+	if err != nil {
+		return nil, status.Error(codes.Internal, "tax report query failed")
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "tax evidence pack not found")
+	}
+	if value.SubjectID != subject || value.ID != req.GetReportId() {
+		log.Printf("tax evidence pack row identity verification failed: report=%q", req.GetReportId())
+		return nil, status.Error(codes.DataLoss, "tax evidence pack integrity verification failed")
+	}
+	object, found, err := s.TaxReportArtifacts.GetTaxReportArtifact(
+		ctx,
+		subject,
+		value.ID,
+		value.EvidencePackDigest,
+	)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "tax evidence pack query failed")
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "tax evidence pack not found")
+	}
+	if len(object.Bytes) > maxTaxReportArtifactBytes {
+		return nil, status.Error(codes.ResourceExhausted, "tax evidence pack exceeds the response limit")
+	}
+	evidenceIdentity, err := validateTaxEvidencePackArtifact(subject, value, object)
+	if err != nil {
+		log.Printf("tax evidence pack integrity verification failed: report=%q err=%v", value.ID, err)
+		return nil, status.Error(codes.DataLoss, "tax evidence pack integrity verification failed")
+	}
+	reportObject, found, err := s.TaxReportArtifacts.GetTaxReportArtifact(
+		ctx,
+		subject,
+		value.ID,
+		value.ReportArtifactDigest,
+	)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "tax report model query failed while validating evidence pack")
+	}
+	if !found {
+		log.Printf("tax evidence pack report model is missing: report=%q", value.ID)
+		return nil, status.Error(codes.DataLoss, "tax evidence pack integrity verification failed")
+	}
+	if len(reportObject.Bytes) > maxTaxReportArtifactBytes {
+		return nil, status.Error(codes.ResourceExhausted, "tax report model exceeds the response limit")
+	}
+	reportIdentity, err := validateTaxReportModelArtifact(subject, value, reportObject)
+	if err != nil {
+		log.Printf("tax evidence pack report model integrity verification failed: report=%q err=%v", value.ID, err)
+		return nil, status.Error(codes.DataLoss, "tax evidence pack integrity verification failed")
+	}
+	if evidenceIdentity.GenerationID != reportIdentity.GenerationID {
+		log.Printf("tax evidence pack generation verification failed: report=%q", value.ID)
+		return nil, status.Error(codes.DataLoss, "tax evidence pack integrity verification failed")
+	}
+	return &enginev1.GetTaxEvidencePackResponse{
+		ReportId:       value.ID,
+		ArtifactDigest: value.EvidencePackDigest,
 		MediaType:      object.MediaType,
 		CanonicalJson:  append([]byte(nil), object.Bytes...),
 	}, nil
@@ -648,40 +725,85 @@ func validTaxReportID(value string) bool {
 }
 
 type taxReportModelIdentity struct {
-	SchemaVersion      string `json:"schemaVersion"`
-	ReportID           string `json:"reportId"`
-	InputDigest        string `json:"inputDigest"`
-	SubjectID          string `json:"subjectId"`
-	ResidentID         string `json:"residentId"`
-	TaxYear            int    `json:"taxYear"`
-	SchemaDigest       string `json:"schemaDigest"`
-	EvidencePackDigest string `json:"evidencePackDigest"`
+	SchemaVersion       string                      `json:"schemaVersion"`
+	ReportID            string                      `json:"reportId"`
+	InputDigest         string                      `json:"inputDigest"`
+	SubjectID           string                      `json:"subjectId"`
+	ResidentID          string                      `json:"residentId"`
+	TaxYear             int                         `json:"taxYear"`
+	TaxInventoryRunID   string                      `json:"taxInventoryRunId"`
+	TaxEstimateID       string                      `json:"taxEstimateId"`
+	LotRunID            string                      `json:"lotRunId"`
+	GenerationID        string                      `json:"generationId"`
+	SchemaDigest        string                      `json:"schemaDigest"`
+	DenominationAssetID string                      `json:"denominationAssetId"`
+	EvidencePackDigest  string                      `json:"evidencePackDigest"`
+	Policy              taxArtifactProducerIdentity `json:"policy"`
+	Engine              taxArtifactProducerIdentity `json:"engine"`
+	IssuedAt            time.Time                   `json:"issuedAt"`
+}
+
+type taxEvidencePackIdentity struct {
+	SchemaVersion     string                      `json:"schemaVersion"`
+	ManifestID        string                      `json:"manifestId"`
+	ReportID          string                      `json:"reportId"`
+	SubjectID         string                      `json:"subjectId"`
+	ResidentID        string                      `json:"residentId"`
+	TaxYear           int                         `json:"taxYear"`
+	TaxInventoryRunID string                      `json:"taxInventoryRunId"`
+	TaxEstimateID     string                      `json:"taxEstimateId"`
+	LotRunID          string                      `json:"lotRunId"`
+	GenerationID      string                      `json:"generationId"`
+	SchemaDigest      string                      `json:"schemaDigest"`
+	Policy            taxArtifactProducerIdentity `json:"policy"`
+	Engine            taxArtifactProducerIdentity `json:"engine"`
+	IssuedAt          time.Time                   `json:"issuedAt"`
+}
+
+type taxArtifactProducerIdentity struct {
+	Name           string `json:"name"`
+	Version        string `json:"version"`
+	ArtifactDigest string `json:"artifactDigest"`
+}
+
+func expectedTaxEvidencePackManifestID(report taxreportstore.StoredReport) string {
+	digest := sha256.Sum256([]byte(report.ID + "\x00" + report.InputDigest))
+	return "tax-evidence-pack:" + fmt.Sprintf("%x", digest)
+}
+
+func sameTaxReportIssuedAt(artifactTime, storedTime time.Time) bool {
+	// PostgreSQL timestamptz and pgx preserve microseconds, while a canonical
+	// JSON artifact may carry Go's full nanosecond precision. Compare at the
+	// durable store's precision so a legitimate DB round-trip is not rejected.
+	return artifactTime.UTC().Truncate(time.Microsecond).Equal(
+		storedTime.UTC().Truncate(time.Microsecond),
+	)
 }
 
 func validateTaxReportModelArtifact(
 	subject string,
 	report taxreportstore.StoredReport,
 	object artifactstore.Object,
-) error {
+) (taxReportModelIdentity, error) {
 	if len(object.Bytes) == 0 {
-		return errors.New("artifact bytes are empty")
+		return taxReportModelIdentity{}, errors.New("artifact bytes are empty")
 	}
 	if object.MediaType != taxReportModelMediaType {
-		return fmt.Errorf("unexpected media type %q", object.MediaType)
+		return taxReportModelIdentity{}, fmt.Errorf("unexpected media type %q", object.MediaType)
 	}
 	if object.PrivacyClass != artifactstore.PrivacySubjectPrivate {
-		return fmt.Errorf("unexpected privacy class %q", object.PrivacyClass)
+		return taxReportModelIdentity{}, fmt.Errorf("unexpected privacy class %q", object.PrivacyClass)
 	}
 	if object.Ref.Algorithm != "sha256" || object.Ref.Digest != report.ReportArtifactDigest {
-		return errors.New("artifact reference does not match the report digest")
+		return taxReportModelIdentity{}, errors.New("artifact reference does not match the report digest")
 	}
 	actualDigest := fmt.Sprintf("%x", sha256.Sum256(object.Bytes))
 	if actualDigest != report.ReportArtifactDigest {
-		return errors.New("artifact bytes do not match the report digest")
+		return taxReportModelIdentity{}, errors.New("artifact bytes do not match the report digest")
 	}
 	var identity taxReportModelIdentity
 	if err := json.Unmarshal(object.Bytes, &identity); err != nil {
-		return fmt.Errorf("decode report model identity: %w", err)
+		return taxReportModelIdentity{}, fmt.Errorf("decode report model identity: %w", err)
 	}
 	if identity.SchemaVersion != taxReportModelSchemaV1 ||
 		identity.ReportID != report.ID ||
@@ -689,11 +811,71 @@ func validateTaxReportModelArtifact(
 		identity.SubjectID != subject ||
 		identity.ResidentID != report.ResidentID ||
 		identity.TaxYear != report.TaxYear ||
+		identity.TaxInventoryRunID != report.TaxInventoryRunID ||
+		identity.TaxEstimateID != report.TaxEstimateID ||
+		identity.LotRunID != report.LotRunID ||
+		identity.GenerationID == "" ||
 		identity.SchemaDigest != report.SchemaDigest ||
-		identity.EvidencePackDigest != report.EvidencePackDigest {
-		return errors.New("artifact model identity does not match the stored report")
+		identity.DenominationAssetID != report.DenominationAssetID ||
+		identity.EvidencePackDigest != report.EvidencePackDigest ||
+		identity.Policy.Name != report.Policy.Name ||
+		identity.Policy.Version != report.Policy.Version ||
+		identity.Policy.ArtifactDigest != report.Policy.ArtifactDigest ||
+		identity.Engine.Name != report.Engine.Name ||
+		identity.Engine.Version != report.Engine.Version ||
+		identity.Engine.ArtifactDigest != report.Engine.ArtifactDigest ||
+		!sameTaxReportIssuedAt(identity.IssuedAt, report.IssuedAt) {
+		return taxReportModelIdentity{}, errors.New("artifact model identity does not match the stored report")
 	}
-	return nil
+	return identity, nil
+}
+
+func validateTaxEvidencePackArtifact(
+	subject string,
+	report taxreportstore.StoredReport,
+	object artifactstore.Object,
+) (taxEvidencePackIdentity, error) {
+	if len(object.Bytes) == 0 {
+		return taxEvidencePackIdentity{}, errors.New("artifact bytes are empty")
+	}
+	if object.MediaType != taxEvidencePackMediaType {
+		return taxEvidencePackIdentity{}, fmt.Errorf("unexpected media type %q", object.MediaType)
+	}
+	if object.PrivacyClass != artifactstore.PrivacySubjectPrivate {
+		return taxEvidencePackIdentity{}, fmt.Errorf("unexpected privacy class %q", object.PrivacyClass)
+	}
+	if object.Ref.Algorithm != "sha256" || object.Ref.Digest != report.EvidencePackDigest {
+		return taxEvidencePackIdentity{}, errors.New("artifact reference does not match the evidence pack digest")
+	}
+	actualDigest := fmt.Sprintf("%x", sha256.Sum256(object.Bytes))
+	if actualDigest != report.EvidencePackDigest {
+		return taxEvidencePackIdentity{}, errors.New("artifact bytes do not match the evidence pack digest")
+	}
+	var identity taxEvidencePackIdentity
+	if err := json.Unmarshal(object.Bytes, &identity); err != nil {
+		return taxEvidencePackIdentity{}, fmt.Errorf("decode evidence pack identity: %w", err)
+	}
+	if identity.SchemaVersion != taxEvidencePackSchemaV1 ||
+		identity.ManifestID != expectedTaxEvidencePackManifestID(report) ||
+		identity.ReportID != report.ID ||
+		identity.SubjectID != subject ||
+		identity.ResidentID != report.ResidentID ||
+		identity.TaxYear != report.TaxYear ||
+		identity.TaxInventoryRunID != report.TaxInventoryRunID ||
+		identity.TaxEstimateID != report.TaxEstimateID ||
+		identity.LotRunID != report.LotRunID ||
+		identity.GenerationID == "" ||
+		identity.SchemaDigest != report.SchemaDigest ||
+		identity.Policy.Name != report.Policy.Name ||
+		identity.Policy.Version != report.Policy.Version ||
+		identity.Policy.ArtifactDigest != report.Policy.ArtifactDigest ||
+		identity.Engine.Name != report.Engine.Name ||
+		identity.Engine.Version != report.Engine.Version ||
+		identity.Engine.ArtifactDigest != report.Engine.ArtifactDigest ||
+		!sameTaxReportIssuedAt(identity.IssuedAt, report.IssuedAt) {
+		return taxEvidencePackIdentity{}, errors.New("artifact evidence pack identity does not match the stored report")
+	}
+	return identity, nil
 }
 
 func currentTaxReportToProto(value taxreportstore.CurrentReportDetail) *enginev1.TaxReport {

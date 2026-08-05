@@ -1502,6 +1502,8 @@ const createTaxRuntime = async (queryURL) => {
   }
 }
 
+export const hostTaxDBMigrationVersion = '70'
+
 const taxEnvironment = (taxURL, runtime) => serviceEnvironment([], [], {
   DAEJANG_DATABASE_URL: taxURL,
   DAEJANG_ARTIFACT_ROOT: join(artifactRoot, 'tax', 'root'),
@@ -1525,7 +1527,7 @@ const taxEnvironment = (taxURL, runtime) => serviceEnvironment([], [], {
   DAEJANG_TAXD_JIT_COMMIT: runtime.jitCommit,
   DAEJANG_TAXD_DB_COMMIT: runtime.dbCommit,
   DAEJANG_TAXD_POSTING_COMMIT: runtime.postingCommit,
-  DAEJANG_TAXD_DB_MIGRATION_VERSION: '52',
+  DAEJANG_TAXD_DB_MIGRATION_VERSION: hostTaxDBMigrationVersion,
   DAEJANG_TAXD_TAX_COMMIT: runtime.taxCommit,
   DAEJANG_TAXD_CATALOG_SHA256: runtime.catalogDigest,
   DAEJANG_TAXD_HEALTH_ADDRESS: '127.0.0.1:8981',

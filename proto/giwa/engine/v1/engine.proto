@@ -33,6 +33,7 @@ service QueryService {
   rpc GetCurrentTaxReport(GetCurrentTaxReportRequest) returns (GetCurrentTaxReportResponse);
   rpc ListTaxReportHistory(ListTaxReportHistoryRequest) returns (ListTaxReportHistoryResponse);
   rpc GetTaxReportModel(GetTaxReportModelRequest) returns (GetTaxReportModelResponse);
+  rpc GetTaxEvidencePack(GetTaxEvidencePackRequest) returns (GetTaxEvidencePackResponse);
 }
 
 service ReviewService {
@@ -466,6 +467,18 @@ message GetTaxReportModelRequest {
 }
 
 message GetTaxReportModelResponse {
+  string report_id = 1;
+  string artifact_digest = 2;
+  string media_type = 3;
+  bytes canonical_json = 4;
+}
+
+message GetTaxEvidencePackRequest {
+  RequestContext context = 1;
+  string report_id = 2;
+}
+
+message GetTaxEvidencePackResponse {
   string report_id = 1;
   string artifact_digest = 2;
   string media_type = 3;
