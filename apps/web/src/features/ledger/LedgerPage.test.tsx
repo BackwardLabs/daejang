@@ -16,6 +16,13 @@ const jsonResponse = (value: unknown, status = 200) => new Response(JSON.stringi
   headers: { 'content-type': 'application/json' },
 })
 
+const isReviewListRequest = (value: string, cursor?: string) => {
+  const url = new URL(value, window.location.origin)
+  return url.pathname.endsWith('/reviews') &&
+    Boolean(url.searchParams.get('taxYear')) &&
+    url.searchParams.get('cursor') === (cursor ?? null)
+}
+
 const reviewSummary = {
   id: 'review-1',
   executionId: 'execution-1',
@@ -148,7 +155,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
-      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: cexReviewDetail })
       throw new Error(`unexpected request: ${url}`)
     }))
@@ -208,7 +215,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [cexEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -246,7 +253,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -299,7 +306,7 @@ describe('LedgerPage', () => {
         }],
       })
       if (url.includes('/ledger?')) return jsonResponse({ items: [sellEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -318,7 +325,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/ledger/lots?')) return jsonResponse({ runId: '', coverage: '', links: [] })
       if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -356,7 +363,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [airdropEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -417,7 +424,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [depositEvent, withdrawalEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -446,7 +453,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(1, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [sourceEvent] })
-      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
       throw new Error(`unexpected request: ${url}`)
     }))
@@ -498,11 +505,11 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [transferEvent] })
-      if (url.endsWith('/reviews') && !init?.method) {
+      if (isReviewListRequest(url) && !init?.method) {
         reviewRequests.push(url)
         return jsonResponse({ items: [reviewSummary], nextCursor: 'page-2' })
       }
-      if (url.endsWith('/reviews?cursor=page-2') && !init?.method) {
+      if (isReviewListRequest(url, 'page-2') && !init?.method) {
         reviewRequests.push(url)
         return jsonResponse({ items: [secondReviewSummary] })
       }
@@ -549,7 +556,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [depositEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -595,7 +602,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [ownedTransfer] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -637,7 +644,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [walletEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -700,7 +707,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: [walletEvent, cexEvent] })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -732,7 +739,7 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/ledger?')) return jsonResponse({ items: ledgerItems })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -817,8 +824,8 @@ describe('LedgerPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(141, 37)
-      if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent], nextCursor: 'page-2' })
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [reviewSummary], nextCursor: 'review-page-2' })
+      if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [reviewSummary], nextCursor: 'review-page-2' })
       if (url.endsWith('/reviews/review-1')) return jsonResponse({ review: reviewDetail })
       throw new Error(`unexpected request: ${url}`)
     }))
@@ -835,7 +842,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(1, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [ledgerEvent] })
-      if (url.endsWith('/reviews')) {
+      if (isReviewListRequest(url)) {
         reviewListReads++
         if (reviewListReads > 1) return jsonResponse({ items: [reviewSummary] })
         return jsonResponse({ error: { code: 'ENGINE_UNAVAILABLE', message: 'review unavailable' } }, 503)
@@ -866,7 +873,7 @@ describe('LedgerPage', () => {
       if (url.includes('/ledger?')) {
         return jsonResponse({ error: { code: 'ENGINE_UNAVAILABLE', message: 'ledger unavailable' } }, 503)
       }
-      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
       throw new Error(`unexpected request: ${url}`)
     }))
@@ -897,7 +904,7 @@ describe('LedgerPage', () => {
         }
         return jsonResponse({ items: [ledgerEvent] })
       }
-      if (url.endsWith('/reviews')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url)) return jsonResponse({ items: [] })
       throw new Error(`unexpected request: ${url}`)
     }))
 
@@ -914,7 +921,7 @@ describe('LedgerPage', () => {
     expect(ledgerReads).toBe(2)
   })
 
-  it('changes only year-scoped ledger data while keeping reviews global', async () => {
+  it('reloads both ledger rows and reviews for the selected year', async () => {
     let resolveOldLedger: ((response: Response) => void) | undefined
     let reviewListReads = 0
     const oldLedger = new Promise<Response>((resolve) => { resolveOldLedger = resolve })
@@ -932,7 +939,7 @@ describe('LedgerPage', () => {
       if (url.includes('/dashboard?')) return dashboardResponse(1, 1)
       if (url.includes(`/ledger?taxYear=${initialYear}`)) return oldLedger
       if (url.includes(`/ledger?taxYear=${nextYear}`)) return jsonResponse({ items: [nextEvent] })
-      if (url.endsWith('/reviews') && !init?.method) {
+      if (isReviewListRequest(url) && !init?.method) {
         reviewListReads++
         return jsonResponse({ items: [secondReviewSummary] })
       }
@@ -956,7 +963,7 @@ describe('LedgerPage', () => {
     expect(await screen.findByRole('button', { name: /추가 정보 필요/ })).toBeInTheDocument()
     expect(
       screen.getByText(
-        '검토 목록은 조회 연도와 관계없이 전체 기간의 열린 항목을 보여줍니다',
+        '선택한 연도에 발생한 검토 필요 거래를 보여줍니다',
       ),
     ).toBeInTheDocument()
 
@@ -964,7 +971,7 @@ describe('LedgerPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '전체 거래 1건' }))
     expect(screen.getByText(`event-${nextYear}`)).toBeInTheDocument()
     expect(screen.queryByText('event-2027')).not.toBeInTheDocument()
-    expect(reviewListReads).toBe(1)
+    expect(reviewListReads).toBe(2)
   })
 
   it('submits the current revision and shows durable resolution completion', async () => {
@@ -974,7 +981,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
-      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
       if (url.endsWith('/reviews/review-1/resolutions') && init?.method === 'POST') {
         resolutionBody = JSON.parse(String(init.body)) as Record<string, unknown>
@@ -1007,7 +1014,8 @@ describe('LedgerPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
 
-    expect(await screen.findByText('검토가 완료되었습니다. (개인 거래)')).toBeInTheDocument()
+    expect(await screen.findByText('검토 처리 완료')).toBeInTheDocument()
+    expect(screen.getByText('‘개인 거래’ 항목으로 장부에 반영했습니다')).toBeInTheDocument()
     await waitFor(() => expect(resolutionBody).toMatchObject({
       expectedRevisionId: 'revision-1',
       expectedPointerVersion: '3',
@@ -1023,11 +1031,11 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(0, 2)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
-      if (url.endsWith('/reviews') && !init?.method) {
+      if (isReviewListRequest(url) && !init?.method) {
         reviewRequests.push(url)
         return jsonResponse({ items: [reviewSummary], nextCursor: 'page-2' })
       }
-      if (url.endsWith('/reviews?cursor=page-2') && !init?.method) {
+      if (isReviewListRequest(url, 'page-2') && !init?.method) {
         reviewRequests.push(url)
         return jsonResponse({ items: [secondReviewSummary] })
       }
@@ -1058,7 +1066,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
-      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) {
         detailReads++
         if (detailReads === 1) return jsonResponse({ review: reviewDetail })
@@ -1101,7 +1109,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(0, 2)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
-      if (url.endsWith('/reviews') && !init?.method) {
+      if (isReviewListRequest(url) && !init?.method) {
         return jsonResponse({ items: [reviewSummary, secondReviewSummary] })
       }
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
@@ -1145,7 +1153,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(0, 2)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
-      if (url.endsWith('/reviews') && !init?.method) {
+      if (isReviewListRequest(url) && !init?.method) {
         return jsonResponse({ items: [reviewSummary, secondReviewSummary] })
       }
       if (url.endsWith('/reviews/review-1') && !init?.method) {
@@ -1201,7 +1209,7 @@ describe('LedgerPage', () => {
       const url = String(input)
       if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
       if (url.includes('/ledger?')) return jsonResponse({ items: [] })
-      if (url.endsWith('/reviews') && !init?.method) return jsonResponse({ items: [reviewSummary] })
+      if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [reviewSummary] })
       if (url.endsWith('/reviews/review-1') && !init?.method) return jsonResponse({ review: reviewDetail })
       if (url.endsWith('/reviews/review-1/resolutions') && init?.method === 'POST') {
         resolutionBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>)

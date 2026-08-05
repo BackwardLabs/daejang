@@ -374,9 +374,9 @@ export class EngineMtlsClient
     }
   }
 
-  async listReviews(context: SourceRequestContext, limit = 100, pageToken = '') {
+  async listReviews(context: SourceRequestContext, taxYear: number, limit = 100, pageToken = '') {
     const response = await this.#unaryOn(this.#queryClient, 'listReviews', {
-      context: requestContext(context), limit, pageToken,
+      context: requestContext(context), taxYear, limit, pageToken,
     }) as { items: Array<Record<string, unknown>>; nextPageToken: string }
     return {
       items: normalizeProtoValue(response.items) as Array<Record<string, unknown>>,

@@ -502,7 +502,7 @@ export const describePostingDirection = (direction: string) =>
   directionLabels[direction] ?? '방향 확인 필요'
 
 export const describeReviewReason = (reasonCode: string) =>
-  reviewReasonLabels[reasonCode] ?? '추가 확인 필요'
+  reviewReasonLabels[reasonCode] ?? '거래 정보 확인 필요'
 
 const lotBasisStatusLabels: Record<string, string> = {
   KNOWN: '취득원가 확정',

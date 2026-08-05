@@ -3,7 +3,7 @@ import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { AppLink } from '../../components/AppLink.tsx'
 import {
   loadDashboard,
-  loadLedger,
+  loadAllLedger,
   type DashboardModel,
   type LedgerEventModel,
 } from '../../api/productApi.ts'
@@ -73,7 +73,7 @@ export function DashboardPage() {
     try {
       const [dashboardResult, ledgerResult] = await Promise.all([
         loadDashboard(year, signal),
-        loadLedger(year, { signal }),
+        loadAllLedger(year, { signal }),
       ])
       setDashboard(dashboardResult.dashboard)
       setEvents(ledgerResult.items)

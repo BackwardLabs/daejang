@@ -24,15 +24,17 @@ import (
 const queryTestSubjectID = "11111111-1111-4111-8111-111111111111"
 
 type fakeReadStore struct {
-	page             readmodelstore.OpenReviewPage
-	ledgerPage       readmodelstore.LedgerEventPage
-	dashboard        readmodelstore.Dashboard
-	ledger           []readmodelstore.LedgerEvent
-	lastSubject      string
-	lastCursor       *readmodelstore.OpenReviewCursor
-	lastLimit        int32
-	lastLedgerCursor *readmodelstore.LedgerEventCursor
-	lastLedgerLimit  int32
+	page              readmodelstore.OpenReviewPage
+	ledgerPage        readmodelstore.LedgerEventPage
+	dashboard         readmodelstore.Dashboard
+	ledger            []readmodelstore.LedgerEvent
+	lastSubject       string
+	lastCursor        *readmodelstore.OpenReviewCursor
+	lastLimit         int32
+	lastLedgerCursor  *readmodelstore.LedgerEventCursor
+	lastLedgerLimit   int32
+	lastDashboardYear int32
+	reviewEvidence    map[string][]readmodelstore.ReviewEvidence
 }
 
 type fakeObservationReadStore struct {
@@ -378,7 +380,8 @@ func (f *fakeTaxReportArtifactStore) GetTaxReportArtifact(
 	return f.object, f.found, f.err
 }
 
-func (f *fakeReadStore) Dashboard(context.Context, string, int32) (readmodelstore.Dashboard, error) {
+func (f *fakeReadStore) Dashboard(_ context.Context, _ string, taxYear int32) (readmodelstore.Dashboard, error) {
+	f.lastDashboardYear = taxYear
 	return f.dashboard, nil
 }
 
@@ -400,6 +403,9 @@ func TestObservationReadProjectionAugmentsDashboardAndLedgerWithoutReplacingMate
 	if err != nil || dashboard.GetDashboard().GetTransactionCount() != 5 {
 		t.Fatalf("observation dashboard projection: response=%#v err=%v", dashboard, err)
 	}
+	if reads.lastDashboardYear != 2026 {
+		t.Fatalf("dashboard tax year=%d, want 2026", reads.lastDashboardYear)
+	}
 	ledger, err := service.ListLedgerEvents(context.Background(), &enginev1.ListLedgerEventsRequest{Context: queryTestContext(), TaxYear: 2026, Limit: 10})
 	if err != nil || len(ledger.GetItems()) != 2 || ledger.GetItems()[0].GetEventId() != "observation" || ledger.GetItems()[1].GetEventId() != "materialized" {
 		t.Fatalf("combined ledger projection: response=%#v err=%v", ledger, err)
@@ -416,6 +422,18 @@ func (f *fakeReadStore) ListOpenReviewsPage(
 	f.lastCursor = cursor
 	f.lastLimit = limit
 	return f.page, nil
+}
+
+func (f *fakeReadStore) GetReviewEvidence(
+	_ context.Context,
+	_ string,
+	reviewID string,
+) ([]readmodelstore.ReviewEvidence, error) {
+	if evidence, ok := f.reviewEvidence[reviewID]; ok {
+		return evidence, nil
+	}
+	occurredAt := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	return []readmodelstore.ReviewEvidence{{OccurredAt: &occurredAt}}, nil
 }
 
 func queryTestContext() *enginev1.RequestContext {
@@ -604,12 +622,13 @@ func TestListReviewsReturnsAndConsumesOpaqueKeysetCursor(t *testing.T) {
 	service := &Service{Reads: reads}
 	first, err := service.ListReviews(context.Background(), &enginev1.ListReviewsRequest{
 		Context: queryTestContext(),
-		Limit:   25,
+		Limit:   1,
+		TaxYear: 2027,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reads.lastSubject != queryTestSubjectID || reads.lastCursor != nil || reads.lastLimit != 25 {
+	if reads.lastSubject != queryTestSubjectID || reads.lastCursor != nil || reads.lastLimit != 200 {
 		t.Fatalf("unexpected first page input: subject=%q cursor=%#v limit=%d", reads.lastSubject, reads.lastCursor, reads.lastLimit)
 	}
 	if len(first.GetItems()) != 1 || first.GetItems()[0].GetId() != "review-2" || first.GetNextPageToken() == "" {
@@ -619,8 +638,9 @@ func TestListReviewsReturnsAndConsumesOpaqueKeysetCursor(t *testing.T) {
 	reads.page = readmodelstore.OpenReviewPage{}
 	second, err := service.ListReviews(context.Background(), &enginev1.ListReviewsRequest{
 		Context:   queryTestContext(),
-		Limit:     25,
+		Limit:     1,
 		PageToken: first.GetNextPageToken(),
+		TaxYear:   2027,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -644,16 +664,19 @@ func TestListReviewsRejectsInvalidPageInputBeforeDatabaseQuery(t *testing.T) {
 	))
 	for name, request := range map[string]*enginev1.ListReviewsRequest{
 		"invalid token": {
-			Context: queryTestContext(), PageToken: "not-base64!",
+			Context: queryTestContext(), TaxYear: 2027, PageToken: "not-base64!",
 		},
 		"NUL review ID": {
-			Context: queryTestContext(), PageToken: nulReviewIDToken,
+			Context: queryTestContext(), TaxYear: 2027, PageToken: nulReviewIDToken,
 		},
 		"zero time": {
-			Context: queryTestContext(), PageToken: zeroTimeToken,
+			Context: queryTestContext(), TaxYear: 2027, PageToken: zeroTimeToken,
 		},
 		"oversized limit": {
-			Context: queryTestContext(), Limit: 201,
+			Context: queryTestContext(), TaxYear: 2027, Limit: 201,
+		},
+		"missing tax year": {
+			Context: queryTestContext(), Limit: 25,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -667,6 +690,33 @@ func TestListReviewsRejectsInvalidPageInputBeforeDatabaseQuery(t *testing.T) {
 				t.Fatalf("database was queried for invalid input: %#v", reads)
 			}
 		})
+	}
+}
+
+func TestListReviewsOnlyReturnsEvidenceFromRequestedTaxYear(t *testing.T) {
+	createdAt := time.Date(2027, 2, 3, 4, 5, 6, 0, time.UTC)
+	occurred2026 := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	occurred2027 := time.Date(2027, 1, 4, 9, 0, 0, 0, time.UTC)
+	reads := &fakeReadStore{
+		page: readmodelstore.OpenReviewPage{Reviews: []readmodelstore.Review{
+			{ID: "review-2027", Status: "OPEN", CreatedAt: createdAt},
+			{ID: "review-2026", Status: "OPEN", CreatedAt: createdAt.Add(-time.Second)},
+		}},
+		reviewEvidence: map[string][]readmodelstore.ReviewEvidence{
+			"review-2027": {{OccurredAt: &occurred2027}},
+			"review-2026": {{OccurredAt: &occurred2026}},
+		},
+	}
+	service := &Service{Reads: reads}
+
+	response, err := service.ListReviews(context.Background(), &enginev1.ListReviewsRequest{
+		Context: queryTestContext(), TaxYear: 2026, Limit: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.GetItems()) != 1 || response.GetItems()[0].GetId() != "review-2026" {
+		t.Fatalf("cross-year review leaked into response: %#v", response)
 	}
 }
 

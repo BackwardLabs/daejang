@@ -321,6 +321,15 @@ export async function getCurrentUser(signal?: AbortSignal) {
   return parseCurrentUserResponse(await requestJson<unknown>('me', { signal }))
 }
 
+export async function updateCurrentUserDisplayName(displayName: string) {
+  return parseCurrentUserResponse(
+    await requestJson<unknown>('me', {
+      method: 'PATCH',
+      body: { displayName },
+    }),
+  )
+}
+
 export async function logout() {
   const response = await fetch(apiUrl('auth/logout'), {
     method: 'POST',

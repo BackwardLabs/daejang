@@ -4,7 +4,7 @@ import { AppLink } from '../../components/AppLink.tsx'
 import { ApiClientError } from '../../api/client.ts'
 import {
   loadDashboard,
-  loadLedger,
+  loadAllLedger,
   loadLedgerEventLots,
   loadReview,
   loadReviews,
@@ -250,7 +250,7 @@ function ReviewListCard({
       <small>{[presentation.amount, displayedAt ? formatLedgerDateTime(displayedAt) : undefined].filter(Boolean).join(' · ') || '거래 정보를 불러오는 중입니다'}</small>
     </span>
     <span className="ledger-review-card__state">
-      <small>{describeReviewReason(review.reasonCodes[0] ?? '')}</small>
+      {review.reasonCodes[0] ? <small>{describeReviewReason(review.reasonCodes[0])}</small> : null}
       <b>{statusLabel(review.status)}</b>
     </span>
   </button>
@@ -280,7 +280,7 @@ function ReviewObservationEvidence({ observation }: { observation: ReviewObserva
       <div><dt>거래 유형</dt><dd>{formatReviewKind(observation)}</dd></div>
     </dl>
     <details className="ledger-review-technical">
-      <summary>기술 식별 정보 보기</summary>
+      <summary>상세보기</summary>
       <dl>
         <div><dt>거래·원본 식별자</dt><dd>{transactionId}</dd></div>
         <div><dt>관찰 식별자</dt><dd>{observation.observationId}</dd></div>
@@ -305,6 +305,16 @@ function ReviewTechnicalDetails({ review }: { review: ReviewDetailModel }) {
       <div><dt>입력 데이터 지문</dt><dd>{review.inputDigest}</dd></div>
     </dl>
   </details>
+}
+
+function ReviewCompletionNotice({ resolution }: { resolution: string }) {
+  return <section className="ledger-review-completion" role="status" aria-live="polite">
+    <span className="ledger-review-completion__icon" aria-hidden="true">✓</span>
+    <span>
+      <strong>검토 처리 완료</strong>
+      <small>‘{resolution}’ 항목으로 장부에 반영했습니다</small>
+    </span>
+  </section>
 }
 
 const preTaxEffectiveDate = new Date('2027-01-01T00:00:00+09:00')
@@ -593,8 +603,6 @@ export function LedgerPage() {
     ),
     [filteredEvents, ledgerPageIndex],
   )
-  const [ledgerCursor, setLedgerCursor] = useState<string>()
-  const [ledgerPageStatus, setLedgerPageStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const ledgerGenerationRef = useRef(0)
   const [reviews, setReviews] = useState<ReviewModel[]>([])
   const [reviewCursor, setReviewCursor] = useState<string>()
@@ -671,15 +679,12 @@ export function LedgerPage() {
     const generation = ++ledgerGenerationRef.current
     setLedgerStatus('loading')
     setLedgerEvents([])
-    setLedgerCursor(undefined)
-    setLedgerPageStatus('idle')
     setLedgerPageIndex(0)
     setSelectedId(undefined)
-    void loadLedger(year, { signal: controller.signal })
+    void loadAllLedger(year, { signal: controller.signal })
       .then((ledger) => {
         if (ledgerGenerationRef.current !== generation) return
         setLedgerEvents(ledger.items)
-        setLedgerCursor(ledger.nextCursor)
         setLedgerStatus('ready')
       })
       .catch((error: unknown) => {
@@ -751,7 +756,7 @@ export function LedgerPage() {
     setReviewOccurredAtById({})
     selectedReviewIdRef.current = undefined
     setSelectedReviewId(undefined)
-    void loadReviews({ signal: controller.signal })
+    void loadReviews(year, { signal: controller.signal })
       .then((review) => {
         if (reviewListGenerationRef.current !== generation) return
         setReviews(review.items)
@@ -768,7 +773,7 @@ export function LedgerPage() {
         ) setReviewStatus('error')
       })
     return () => controller.abort()
-  }, [reviewReloadKey])
+  }, [reviewReloadKey, year])
 
   useEffect(() => {
     selectedReviewIdRef.current = selectedReviewId
@@ -842,7 +847,7 @@ export function LedgerPage() {
     const generation = reviewListGenerationRef.current
     setReviewPageStatus('loading')
     try {
-      const page = await loadReviews({ cursor: reviewCursor })
+      const page = await loadReviews(year, { cursor: reviewCursor })
       if (reviewListGenerationRef.current !== generation) return
       setReviews((current) => {
         const seen = new Set(current.map((review) => review.id))
@@ -855,36 +860,9 @@ export function LedgerPage() {
     }
   }
 
-  const loadNextLedgerPage = async () => {
-    if (ledgerPageIndex + 1 < ledgerPageCount) {
-      setSelectedId(undefined)
-      setLedgerPageIndex((current) => current + 1)
-      return
-    }
-    if (!ledgerCursor || ledgerPageStatus === 'loading') return
-    const generation = ledgerGenerationRef.current
-    setLedgerPageStatus('loading')
-    try {
-      const page = await loadLedger(year, { cursor: ledgerCursor })
-      if (ledgerGenerationRef.current !== generation) return
-      const seen = new Set(ledgerEvents.map((event) => `${event.eventId}\u0000${event.revisionId}`))
-      const nextLedgerEvents = [
-        ...ledgerEvents,
-        ...page.items.filter((event) => !seen.has(`${event.eventId}\u0000${event.revisionId}`)),
-      ]
-      const nextFilteredCount = projectLedgerTransactions(nextLedgerEvents)
-        .filter((event) => matchesLedgerSourceFilter(event, ledgerSourceFilter))
-        .length
-      setLedgerEvents(nextLedgerEvents)
-      setLedgerCursor(page.nextCursor)
-      if (Math.ceil(nextFilteredCount / ledgerRowsPerPage) > ledgerPageCount) {
-        setSelectedId(undefined)
-        setLedgerPageIndex((current) => current + 1)
-      }
-      setLedgerPageStatus('idle')
-    } catch {
-      if (ledgerGenerationRef.current === generation) setLedgerPageStatus('error')
-    }
+  const loadNextLedgerPage = () => {
+    setSelectedId(undefined)
+    setLedgerPageIndex((current) => Math.min(ledgerPageCount - 1, current + 1))
   }
 
   const loadPreviousLedgerPage = () => {
@@ -908,7 +886,7 @@ export function LedgerPage() {
     setReviewNavigation({ eventId, status: 'loading' })
     try {
       while (cursor) {
-        const page = await loadReviews({ cursor })
+        const page = await loadReviews(year, { cursor })
         if (reviewListGenerationRef.current !== generation) return
         const newItems = page.items.filter((review) => !loadedIds.has(review.id))
         newItems.forEach((review) => loadedIds.add(review.id))
@@ -1091,11 +1069,9 @@ export function LedgerPage() {
                     <button type="button" className={ledgerSourceFilter === 'WALLET' ? 'is-active' : undefined} aria-pressed={ledgerSourceFilter === 'WALLET'} onClick={() => changeLedgerSourceFilter('WALLET')}>지갑 · EVM</button>
                   </div>
                   <nav className="ledger-page-controls" aria-label="거래 페이지">
-                    <button type="button" aria-label="이전 거래 페이지" disabled={ledgerPageIndex === 0 || ledgerPageStatus === 'loading'} onClick={loadPreviousLedgerPage}>이전</button>
+                    <button type="button" aria-label="이전 거래 페이지" disabled={ledgerPageIndex === 0} onClick={loadPreviousLedgerPage}>이전</button>
                     <span><strong>{ledgerPageIndex + 1}</strong> / {ledgerPageCount}</span>
-                    <button type="button" aria-label="다음 거래 페이지" disabled={(ledgerPageIndex + 1 >= ledgerPageCount && !ledgerCursor) || ledgerPageStatus === 'loading'} onClick={() => void loadNextLedgerPage()}>
-                      {ledgerPageStatus === 'loading' ? '불러오는 중' : ledgerPageStatus === 'error' ? '다시 시도' : '다음'}
-                    </button>
+                    <button type="button" aria-label="다음 거래 페이지" disabled={ledgerPageIndex + 1 >= ledgerPageCount} onClick={loadNextLedgerPage}>다음</button>
                   </nav>
                 </div>
               </header>
@@ -1145,7 +1121,7 @@ export function LedgerPage() {
 
         {view === 'review' ? (
           <p className="ledger-review-scope">
-            검토 목록은 조회 연도와 관계없이 전체 기간의 열린 항목을 보여줍니다
+            선택한 연도에 발생한 검토 필요 거래를 보여줍니다
           </p>
         ) : null}
         {view === 'review' && reviewStatus === 'loading' ? (
@@ -1201,7 +1177,6 @@ export function LedgerPage() {
                   </div>
                   <b>{statusLabel(reviewDetail.status)}</b>
                 </header>
-                <p className="ledger-review-detail__reason">{reviewDetail.reasonCodes.map(describeReviewReason).join(' · ') || '추가 확인이 필요한 거래입니다'}</p>
                 <section className="ledger-review-evidence" aria-labelledby="review-evidence-heading">
                   <header>
                     <div><span>검토 근거</span><h3 id="review-evidence-heading">응답할 거래 근거</h3></div>
@@ -1232,15 +1207,12 @@ export function LedgerPage() {
                   </button>
                   {resolutionStatus === 'submitting' ? <p role="status">검토 응답을 안전하게 저장하는 중입니다.</p> : null}
                   {resolutionStatus === 'refreshing' ? <p role="status">다른 변경이 먼저 반영되어 최신 내용을 불러오는 중입니다.</p> : null}
-                  {resolutionStatus === 'success' ? <p className="is-success" role="status">검토가 완료되었습니다.</p> : null}
                   {resolutionStatus === 'stale' ? <p role="alert">다른 변경이 먼저 반영되어 최신 내용을 다시 불러왔습니다. 응답을 확인해 다시 제출해 주세요.</p> : null}
                   {resolutionStatus === 'stale-error' ? <p role="alert">변경된 최신 내용을 불러오지 못했습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.</p> : null}
                   {resolutionStatus === 'conflict' ? <p role="alert">같은 요청을 처리하는 중 내용이 달라졌습니다. 최신 내용을 확인한 뒤 다시 제출해 주세요.</p> : null}
                   {resolutionStatus === 'reanalyze' ? <p role="alert">이 검토에는 필요한 분석 정보가 없어 응답을 저장하지 않았습니다. 운영팀이 데이터 준비 상태를 확인해야 합니다.</p> : null}
                   {resolutionStatus === 'error' ? <p role="alert">응답을 저장하지 못했습니다. 같은 요청으로 다시 시도할 수 있습니다.</p> : null}
-                </form> : <p className="ledger-review-resolved" role="status">{resolutionStatus === 'success'
-                  ? `검토가 완료되었습니다. (${describeReviewResolution(reviewDetail)})`
-                  : `이 검토는 '${describeReviewResolution(reviewDetail)}' 처리로 완료되었습니다.`}</p>}
+                </form> : <ReviewCompletionNotice resolution={describeReviewResolution(reviewDetail)} />}
                 <ReviewTechnicalDetails review={reviewDetail} />
               </article> : null}
             </div>

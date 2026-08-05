@@ -312,6 +312,7 @@ message ListReviewsRequest {
   RequestContext context = 1;
   int32 limit = 2;
   string page_token = 3;
+  int32 tax_year = 4;
 }
 message ReviewItem {
   string id = 1;
