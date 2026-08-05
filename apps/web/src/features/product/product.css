@@ -137,8 +137,9 @@
 .product-settings-card {
   display: grid;
   gap: 18px;
-  max-width: 720px;
-  margin-top: 24px;
+  box-sizing: border-box;
+  width: min(720px, 100%);
+  margin: 24px auto 0;
   padding: 34px;
 }
 

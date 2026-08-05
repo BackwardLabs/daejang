@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultAppYear,
   loadAppPreferences,
@@ -28,6 +28,12 @@ beforeEach(() => {
   }))
 })
 
+afterEach(() => {
+  window.localStorage.clear()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
 describe('DashboardPage', () => {
   it('renders actual API metrics and empty queues', async () => {
     render(<DashboardPage />)
@@ -41,6 +47,15 @@ describe('DashboardPage', () => {
     expect(
       screen.getByLabelText('검토 현황'),
     ).toHaveAttribute('data-state', 'complete')
+    expect(screen.getByRole('link', { name: '데이터 소스 추가' })).toHaveAttribute(
+      'href',
+      '/sources',
+    )
+    expect(screen.getByRole('link', { name: '보고서 보기' })).toHaveClass(
+      'dashboard-action--primary',
+    )
+    expect(screen.queryByText('거래 추가')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '필터' })).not.toBeInTheDocument()
     const reviewMetric = screen.getByText('검토 완료').closest('article')
     expect(reviewMetric).not.toHaveClass('is-review')
     expect(fetch).toHaveBeenCalledWith(
@@ -235,9 +250,9 @@ describe('DashboardPage', () => {
     expect(
       await screen.findByText('확인이 필요한 거래가 1건 있습니다'),
     ).toBeInTheDocument()
-    expect(screen.getByText('USDT')).toBeInTheDocument()
     expect(screen.getByText('1.25 USDT')).toBeInTheDocument()
-    expect(screen.getByText('근거 연결됨')).toBeInTheDocument()
+    expect(screen.getByText('Upbit')).toBeInTheDocument()
+    expect(screen.getByText('증가')).toBeInTheDocument()
     expect(
       screen.queryByText('cex-document-asset:upbit:decimal8:usdt'),
     ).not.toBeInTheDocument()
@@ -247,7 +262,8 @@ describe('DashboardPage', () => {
     )
   })
 
-  it('normalizes recent transaction assets, quantities, valuations, and support labels', async () => {
+  it('shows six recent transactions with compact source, asset, value, and status information', async () => {
+    saveAppPreferences({ currency: 'KRW', year: '2025' })
     const event = {
       eventId: 'event-upbit-trade',
       revisionId: 'revision-upbit-trade',
@@ -301,13 +317,58 @@ describe('DashboardPage', () => {
 
     render(<DashboardPage />)
 
-    expect(await screen.findByText('USDT')).toBeInTheDocument()
-    expect(screen.getByText('외 1개 자산')).toBeInTheDocument()
-    expect(screen.getByText('1,801.08722461 USDT')).toBeInTheDocument()
-    expect(screen.getByText('2,701,901.16 KRW')).toBeInTheDocument()
-    expect(screen.getByText('근거 확인 완료')).toBeInTheDocument()
+    expect(await screen.findByText('1,801.08722461 USDT')).toBeInTheDocument()
+    expect(screen.getByText('Upbit')).toBeInTheDocument()
+    expect(screen.getByText(/증가 · 외 1개 · 2,701,901\.16 KRW/)).toBeInTheDocument()
+    expect(screen.getByText('완료')).toBeInTheDocument()
+    expect(screen.getByTitle('11월 거래 1건')).toHaveTextContent('1건')
     expect(screen.queryByText('asset-usdt-upbit')).not.toBeInTheDocument()
     expect(screen.queryByText('FULL')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('columnheader')).toHaveLength(4)
+  })
+
+  it('replaces spam-like token labels in the dashboard while keeping normal values visible', async () => {
+    const event = {
+      eventId: 'event-spam-token',
+      revisionId: 'revision-spam-token',
+      revisionNumber: 1,
+      eventType: 'TRANSFER',
+      flowShape: 'EXTERNAL_IN',
+      resolution: 'PARTIAL',
+      interpretationSupport: 'DETECTED_ONLY',
+      effectiveAt: '2026-07-30T00:00:00Z',
+      postings: [{
+        legId: 'leg-spam',
+        accountId: 'wallet-account',
+        accountKind: 'WALLET',
+        accountLocator: '0x1234',
+        accountChainId: 'eip155:10',
+        assetId: 'asset-spam',
+        assetSymbol: 'www.poxa.club 🎁',
+        assetDecimals: 0,
+        hasAssetDecimals: true,
+        occurredAt: '2026-07-30T00:00:00Z',
+        direction: 'IN',
+        quantity: '2215',
+        role: 'PRINCIPAL',
+        fairValue: '',
+        costBasis: '',
+        denomination: '',
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/dashboard')) return new Response(JSON.stringify(dashboardPayload), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/ledger?')) return new Response(JSON.stringify({ items: [event] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }))
+
+    render(<DashboardPage />)
+
+    expect(
+      await screen.findByText('2,215 미확인 토큰(스팸 의심)'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/poxa\.club/)).not.toBeInTheDocument()
   })
 
   it('formats one-leg CEX valuations using the canonical KRW denomination', async () => {
@@ -374,8 +435,8 @@ describe('DashboardPage', () => {
 
     render(<DashboardPage />)
 
-    expect(await screen.findByText('2,701,630.8375 KRW')).toBeInTheDocument()
-    expect(screen.getByText('2,214,473.18399853 KRW')).toBeInTheDocument()
+    expect(await screen.findByText(/2,701,630\.8375 KRW/)).toBeInTheDocument()
+    expect(screen.getByText(/2,214,473\.18399853 KRW/)).toBeInTheDocument()
     expect(screen.queryByText(/단위 확인 필요/)).not.toBeInTheDocument()
     expect(screen.queryByText(/자산 확인 필요/)).not.toBeInTheDocument()
   })

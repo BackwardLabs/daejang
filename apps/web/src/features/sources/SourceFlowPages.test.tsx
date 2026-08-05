@@ -96,7 +96,7 @@ describe('source flow pages', () => {
     const activeSource = {
       id: '33333333-3333-4333-8333-333333333333',
       type: 'EVM_WALLET',
-      address: '0x239000000000000000000000000000000000f2b2',
+      address: '0×239000000000000000000000000000000000f2b2',
       accountType: 'EOA',
       verificationChainId: 'eip155:1',
       verifiedAt: '2027-01-01T00:00:00.000Z',
@@ -154,6 +154,7 @@ describe('source flow pages', () => {
     })
     expect(within(sourceList).getAllByRole('article')).toHaveLength(1)
     expect(screen.getByText('현재 연결된 소스 1개')).toBeInTheDocument()
+    expect(screen.getByText('0x2390…f2b2')).toBeInTheDocument()
     expect(screen.queryByText('0x9510…b14d')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '연결 해제' }))

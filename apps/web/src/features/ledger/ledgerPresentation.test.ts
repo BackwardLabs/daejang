@@ -10,6 +10,7 @@ import {
   formatLedgerMoney,
   formatLedgerQuantity,
   formatLedgerUnitPrice,
+  formatUserFacingAssetSymbol,
   parseLedgerAsset,
 } from './ledgerPresentation.ts'
 
@@ -56,6 +57,13 @@ describe('ledger posting presentation', () => {
     expect(formatLedgerQuantity('27016310000000', 8)).toBe('270,163.1')
     expect(formatLedgerQuantity('2701600000', 8)).toBe('27.016')
     expect(formatLedgerQuantity('-1', 18)).toBe('-0.000000000000000001')
+  })
+
+  it('replaces domain-like and pictographic spam token labels in user-facing views', () => {
+    expect(formatUserFacingAssetSymbol('USDT')).toBe('USDT')
+    expect(formatUserFacingAssetSymbol('www.poxa.club')).toBe('미확인 토큰(스팸 의심)')
+    expect(formatUserFacingAssetSymbol('www.poxa.club 🎁')).toBe('미확인 토큰(스팸 의심)')
+    expect(formatUserFacingAssetSymbol()).toBe('자산 확인 필요')
   })
 
   it('formats the transaction amount and derives the CEX statement unit price', () => {
