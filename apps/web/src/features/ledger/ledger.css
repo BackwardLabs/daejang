@@ -2168,12 +2168,43 @@
   opacity: .55;
 }
 
-.ledger-review-form .is-success,
-.ledger-review-resolved {
-  padding: 12px;
-  border-radius: 10px;
-  color: #166534;
-  background: var(--ledger-positive-soft);
+.ledger-review-completion {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid #b7dfca;
+  border-radius: 12px;
+  color: #174f35;
+  background: #f5fbf7;
+}
+
+.ledger-review-completion__icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #fff;
+  background: #1f7a50;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.ledger-review-completion > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.ledger-review-completion strong {
+  color: #183b2a;
+  font-size: 14px;
+}
+
+.ledger-review-completion small {
+  color: #4b6357;
+  font-size: 13px;
 }
 
 @media (max-width: 900px) {

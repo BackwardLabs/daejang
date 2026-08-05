@@ -2721,6 +2721,7 @@ type ListReviewsRequest struct {
 	Context       *RequestContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
 	Limit         int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
 	PageToken     string                 `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	TaxYear       int32                  `protobuf:"varint,4,opt,name=tax_year,json=taxYear,proto3" json:"tax_year,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2774,6 +2775,13 @@ func (x *ListReviewsRequest) GetPageToken() string {
 		return x.PageToken
 	}
 	return ""
+}
+
+func (x *ListReviewsRequest) GetTaxYear() int32 {
+	if x != nil {
+		return x.TaxYear
+	}
+	return 0
 }
 
 type ReviewItem struct {
@@ -4934,12 +4942,13 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x1aGetLedgerEventLotsResponse\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1a\n" +
 	"\bcoverage\x18\x02 \x01(\tR\bcoverage\x123\n" +
-	"\x05links\x18\x03 \x03(\v2\x1d.giwa.engine.v1.LedgerLotLinkR\x05links\"\x83\x01\n" +
+	"\x05links\x18\x03 \x03(\v2\x1d.giwa.engine.v1.LedgerLotLinkR\x05links\"\x9e\x01\n" +
 	"\x12ListReviewsRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"\xff\x01\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\x12\x19\n" +
+	"\btax_year\x18\x04 \x01(\x05R\ataxYear\"\xff\x01\n" +
 	"\n" +
 	"ReviewItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +

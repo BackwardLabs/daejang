@@ -638,7 +638,7 @@ describe('review data routes', () => {
     const app = await buildRouteApp(engineClient({ listReviews }))
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/reviews?limit=25&cursor=prior-engine-token',
+      url: '/api/v1/reviews?taxYear=2026&limit=25&cursor=prior-engine-token',
     })
 
     expect(response.statusCode).toBe(200)
@@ -650,7 +650,7 @@ describe('review data routes', () => {
       requestId: expect.any(String),
       userId,
       sessionId: session.id,
-    }, 25, 'prior-engine-token')
+    }, 2026, 25, 'prior-engine-token')
   })
 
   it('maps an invalid Engine review cursor to a client error', async () => {
@@ -661,13 +661,22 @@ describe('review data routes', () => {
     }))
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/reviews?cursor=invalid-but-shaped',
+      url: '/api/v1/reviews?taxYear=2026&cursor=invalid-but-shaped',
     })
 
     expect(response.statusCode).toBe(400)
     expect(response.json()).toMatchObject({
       error: { code: 'INVALID_REVIEW_CURSOR' },
     })
+  })
+
+  it('requires a valid tax year for the review list', async () => {
+    const app = await buildRouteApp(engineClient())
+    const missing = await app.inject({ method: 'GET', url: '/api/v1/reviews' })
+    const invalid = await app.inject({ method: 'GET', url: '/api/v1/reviews?taxYear=2008' })
+
+    expect(missing.statusCode).toBe(400)
+    expect(invalid.statusCode).toBe(400)
   })
 
   it('requires an authenticated account for review detail', async () => {

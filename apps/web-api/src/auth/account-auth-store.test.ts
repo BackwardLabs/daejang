@@ -15,6 +15,30 @@ const queryResult = <T extends Record<string, unknown>>(
   }) as QueryResult<T>
 
 describe('PostgresAccountAuthStore', () => {
+  it('updates an active user nickname in the canonical users table', async () => {
+    const query = vi.fn().mockResolvedValue(
+      queryResult([
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          display_name: '새 닉네임',
+          status: 'active',
+        },
+      ]),
+    )
+    const store = new PostgresAccountAuthStore({ query } as unknown as Pool)
+
+    await expect(
+      store.updateUserDisplayName(
+        '00000000-0000-4000-8000-000000000001',
+        '새 닉네임',
+      ),
+    ).resolves.toMatchObject({ displayName: '새 닉네임', status: 'active' })
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE web_private.users'),
+      ['00000000-0000-4000-8000-000000000001', '새 닉네임'],
+    )
+  })
+
   it('trusts the database atomic OAuth consume result without app-clock filtering', async () => {
     const consumedAt = new Date('2027-07-20T00:00:00.001Z')
     const query = vi.fn().mockResolvedValue(

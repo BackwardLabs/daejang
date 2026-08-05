@@ -521,6 +521,7 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     await registerAuthRoutes(protectedApp, {
       config,
       sessionService,
+      accountStore: accountAuthStore,
       authRateLimiter,
       clearSessionCookie: authHooks.clearSessionCookie,
     })

@@ -303,6 +303,80 @@ describe('web api authentication boundary', () => {
     })
   })
 
+  it('updates a normalized nickname for the authenticated user', async () => {
+    await context.app.close()
+    const accountAuthStore = new TestDurableAccountAuthStore()
+    const updateUserDisplayName = vi
+      .spyOn(accountAuthStore, 'updateUserDisplayName')
+      .mockResolvedValue({
+        id: USER_ID,
+        displayName: '새 닉네임',
+        status: 'active',
+      })
+    context = await buildApp({
+      config,
+      logger: false,
+      now: () => now,
+      accountAuthStore,
+    })
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'PATCH',
+      url: '/api/v1/me',
+      headers: {
+        cookie: `${config.sessionCookieName}=${token}`,
+        origin: config.publicOrigin,
+      },
+      payload: { displayName: '  새   닉네임  ' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      user: { id: USER_ID, displayName: '새 닉네임' },
+    })
+    expect(updateUserDisplayName).toHaveBeenCalledWith(USER_ID, '새 닉네임')
+
+    const restored = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/me',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+    expect(restored.statusCode).toBe(200)
+    expect(restored.json()).toMatchObject({
+      user: { id: USER_ID, displayName: '새 닉네임' },
+    })
+  })
+
+  it('rejects an invalid nickname before updating the user table', async () => {
+    await context.app.close()
+    const accountAuthStore = new TestDurableAccountAuthStore()
+    const updateUserDisplayName = vi.spyOn(accountAuthStore, 'updateUserDisplayName')
+    context = await buildApp({
+      config,
+      logger: false,
+      now: () => now,
+      accountAuthStore,
+    })
+    const { token } = await createSession()
+
+    const response = await context.app.inject({
+      method: 'PATCH',
+      url: '/api/v1/me',
+      headers: {
+        cookie: `${config.sessionCookieName}=${token}`,
+        origin: config.publicOrigin,
+      },
+      payload: { displayName: 'A' },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({
+      error: { code: 'INVALID_DISPLAY_NAME' },
+    })
+    expect(updateUserDisplayName).not.toHaveBeenCalled()
+  })
+
   it('does not expose a development session issuance endpoint', async () => {
     const response = await context.app.inject({
       method: 'POST',
@@ -781,7 +855,7 @@ describe('web api authentication boundary', () => {
     for (const url of [
       '/api/v1/dashboard?taxYear=2026',
       '/api/v1/ledger?taxYear=2026',
-      '/api/v1/reviews',
+      '/api/v1/reviews?taxYear=2026',
       '/api/v1/reports?taxYear=2026',
     ]) {
       const response = await context.app.inject({ method: 'GET', url, headers })

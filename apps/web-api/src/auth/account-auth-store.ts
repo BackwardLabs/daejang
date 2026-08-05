@@ -69,6 +69,10 @@ export interface AccountAuthStore {
     provider: OAuthProviderName,
     providerSubject: string,
   ): Promise<AccountUser | undefined>
+  updateUserDisplayName(
+    userId: string,
+    displayName: string,
+  ): Promise<AccountUser | undefined>
   createPendingOAuthUser(input: {
     userId: string
     identityId: string
@@ -283,6 +287,26 @@ export class PostgresAccountAuthStore implements AccountAuthStore {
           AND identity_record.provider_subject = $2
       `,
       [provider, providerSubject],
+    )
+    const row = result.rows[0]
+    return row ? toAccountUser(row) : undefined
+  }
+
+  async updateUserDisplayName(userId: string, displayName: string) {
+    const result = await this.pool.query<{
+      id: string
+      display_name: string
+      status: UserStatus
+    }>(
+      `
+        UPDATE web_private.users
+        SET display_name = $2,
+            updated_at = now()
+        WHERE id = $1
+          AND status = 'active'
+        RETURNING id, display_name, status
+      `,
+      [userId, displayName],
     )
     const row = result.rows[0]
     return row ? toAccountUser(row) : undefined
@@ -1122,6 +1146,14 @@ export class MemoryAccountAuthStore implements AccountAuthStore {
   ) {
     const userId = this.#identities.get(`${provider}\0${providerSubject}`)
     return userId ? this.#users.get(userId) : undefined
+  }
+
+  async updateUserDisplayName(userId: string, displayName: string) {
+    const user = this.#users.get(userId)
+    if (!user || user.status !== 'active') return undefined
+    const updated = { ...user, displayName }
+    this.#users.set(userId, updated)
+    return updated
   }
 
   async createPendingOAuthUser(input: {

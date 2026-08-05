@@ -44,7 +44,7 @@ describe('AppSidebar', () => {
     expect(guideButton).toHaveFocus()
   })
 
-  it('uses the authenticated email and opens a read-only profile overlay', () => {
+  it('uses the authenticated email and opens an editable profile overlay', () => {
     setCurrentUser({
       id: '018f47a2-4b1c-7def-8abc-0123456789ab',
       displayName: 'GIWA 사용자',
@@ -62,10 +62,8 @@ describe('AppSidebar', () => {
     const profileDialog = screen.getByRole('dialog', { name: '마이페이지' })
     expect(profileDialog).toBeInTheDocument()
     expect(within(profileDialog).getByText('member@example.com')).toBeInTheDocument()
-    expect(within(profileDialog).getByText('아직 설정하지 않았어요')).toBeInTheDocument()
-    expect(
-      screen.getByText('닉네임 설정 기능은 추후 제공할 예정입니다'),
-    ).toBeInTheDocument()
+    expect(within(profileDialog).getByLabelText('닉네임')).toHaveValue('')
+    expect(within(profileDialog).getByRole('button', { name: '저장' })).toBeDisabled()
   })
 
   it('does not expose the internal default display name without an email', () => {

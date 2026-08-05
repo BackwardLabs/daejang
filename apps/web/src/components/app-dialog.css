@@ -163,7 +163,6 @@
 .app-dialog-profile {
   display: grid;
   gap: 12px;
-  margin: 0;
 }
 
 .app-dialog-profile > div {
@@ -177,25 +176,80 @@
   background: var(--product-subtle, #f7f7f8);
 }
 
-.app-dialog-profile dt {
+.app-dialog-profile__label,
+.app-dialog-profile__nickname > label {
   color: var(--product-text-muted, #6e7279);
   font-size: 13px;
   font-weight: 700;
 }
 
-.app-dialog-profile dd {
+.app-dialog-profile strong {
   min-width: 0;
-  margin: 0;
   overflow-wrap: anywhere;
   font-size: 15px;
   font-weight: 750;
 }
 
-.app-dialog-profile span {
-  grid-column: 2;
+.app-dialog-profile__nickname {
+  display: grid;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--product-border-subtle, #eceef1);
+  border-radius: 14px;
+  background: var(--product-subtle, #f7f7f8);
+}
+
+.app-dialog-profile__nickname > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.app-dialog-profile__nickname input {
+  min-width: 0;
+  height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--product-border, #d9dce1);
+  border-radius: 10px;
+  color: var(--product-text, #1a1a1a);
+  background: #fff;
+  font: inherit;
+}
+
+.app-dialog-profile__nickname button {
+  min-width: 72px;
+  border: 1px solid var(--product-text, #1a1a1a);
+  border-radius: 10px;
+  color: #fff;
+  background: var(--product-text, #1a1a1a);
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.app-dialog-profile__nickname button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.app-dialog-profile__nickname small {
   color: var(--product-text-muted, #6e7279);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.app-dialog-profile__message {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.app-dialog-profile__message--success {
+  color: #157347;
+}
+
+.app-dialog-profile__message--error {
+  color: #b42318;
 }
 
 .app-dialog-profile__error {
@@ -249,8 +303,8 @@
     grid-template-columns: 1fr;
   }
 
-  .app-dialog-profile span {
-    grid-column: 1;
+  .app-dialog-profile__nickname > div {
+    grid-template-columns: 1fr;
   }
 }
 

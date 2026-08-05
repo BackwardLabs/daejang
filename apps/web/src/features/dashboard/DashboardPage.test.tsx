@@ -49,13 +49,35 @@ describe('DashboardPage', () => {
     )
   })
 
-  it('reloads when the tax year changes', async () => {
+  it('replaces review and source metrics when the tax year changes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/dashboard')) {
+        const is2027 = url.includes('taxYear=2027')
+        return new Response(JSON.stringify({
+          dashboard: {
+            ...dashboardPayload.dashboard,
+            sourceCount: is2027 ? 1 : 2,
+            openReviewCount: is2027 ? 0 : 4,
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }))
+
     render(<DashboardPage />)
     await screen.findByText('2개')
-    fireEvent.change(screen.getByRole('combobox', { name: '조회 기간' }), { target: { value: '2026' } })
-    expect(await screen.findByText('2개')).toBeInTheDocument()
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('taxYear=2026'), expect.anything())
-    expect(loadAppPreferences().year).toBe('2026')
+    expect(screen.getAllByText('4건')).toHaveLength(2)
+
+    fireEvent.change(screen.getByRole('combobox', { name: '조회 기간' }), { target: { value: '2027' } })
+
+    expect(await screen.findByText('1개')).toBeInTheDocument()
+    expect(await screen.findByText('검토가 모두 완료되었습니다')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('taxYear=2027'), expect.anything())
+    expect(loadAppPreferences().year).toBe('2027')
   })
 
   it('does not claim review completion before the dashboard is ready', async () => {

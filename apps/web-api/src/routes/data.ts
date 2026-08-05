@@ -49,7 +49,7 @@ export type EngineDataClient = {
     coverage: string
     links: Array<Record<string, unknown>>
   }>
-  listReviews(context: SourceRequestContext, limit?: number, pageToken?: string): Promise<{
+  listReviews(context: SourceRequestContext, taxYear: number, limit?: number, pageToken?: string): Promise<{
     items: Array<Record<string, unknown>>
     nextPageToken: string
   }>
@@ -663,12 +663,14 @@ export const registerDataRoutes = async (
   app.get<{ Querystring: { eventId: string; revisionId: string } }>('/api/v1/ledger/lots', { schema: { querystring: lotQuery } },
     async (request) => engine.getLedgerEventLots(contextFor(request), request.query.eventId, request.query.revisionId))
 
-  app.get<{ Querystring: { limit?: number; cursor?: string } }>('/api/v1/reviews', {
+  app.get<{ Querystring: { taxYear: number; limit?: number; cursor?: string } }>('/api/v1/reviews', {
     schema: {
       querystring: {
         type: 'object',
         additionalProperties: false,
+        required: ['taxYear'],
         properties: {
+          taxYear: { type: 'integer', minimum: 2009, maximum: 9999 },
           limit: { type: 'integer', minimum: 1, maximum: 200 },
           cursor: { type: 'string', minLength: 1, maxLength: 2048 },
         },
@@ -678,6 +680,7 @@ export const registerDataRoutes = async (
     try {
       const page = await engine.listReviews(
         contextFor(request),
+        Number(request.query.taxYear),
         Number(request.query.limit ?? 100),
         request.query.cursor ?? '',
       )

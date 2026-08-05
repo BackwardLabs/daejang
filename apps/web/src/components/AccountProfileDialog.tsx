@@ -1,4 +1,10 @@
+import { useEffect, useState } from 'react'
 import type { AuthenticatedUser } from '../auth/api.ts'
+import {
+  updateCurrentUserDisplayName,
+  WebApiError,
+} from '../auth/api.ts'
+import { setCurrentUser } from '../auth/session-store.ts'
 import { AppDialog } from './AppDialog.tsx'
 
 export function AccountProfileDialog({
@@ -14,10 +20,48 @@ export function AccountProfileDialog({
   onLogout: () => void
   user: AuthenticatedUser | null
 }) {
-  const nickname =
+  const initialNickname =
     user?.displayName && user.displayName !== 'GIWA 사용자'
       ? user.displayName
-      : undefined
+      : ''
+  const [nickname, setNickname] = useState(initialNickname)
+  const [nicknameStatus, setNicknameStatus] = useState<
+    'idle' | 'saving' | 'success' | 'error'
+  >('idle')
+  const [nicknameMessage, setNicknameMessage] = useState('')
+
+  useEffect(() => {
+    setNickname(initialNickname)
+    setNicknameStatus('idle')
+    setNicknameMessage('')
+  }, [initialNickname, user?.id])
+
+  const saveNickname = async () => {
+    const normalized = nickname.normalize('NFC').trim().replace(/\s+/gu, ' ')
+    const length = [...normalized].length
+    if (length < 2 || length > 20) {
+      setNicknameStatus('error')
+      setNicknameMessage('닉네임은 2자 이상 20자 이하로 입력해 주세요')
+      return
+    }
+
+    setNicknameStatus('saving')
+    setNicknameMessage('')
+    try {
+      const response = await updateCurrentUserDisplayName(normalized)
+      setCurrentUser(response.user)
+      setNickname(response.user.displayName)
+      setNicknameStatus('success')
+      setNicknameMessage('닉네임을 저장했습니다')
+    } catch (error) {
+      setNicknameStatus('error')
+      setNicknameMessage(
+        error instanceof WebApiError
+          ? error.message
+          : '닉네임을 저장하지 못했습니다. 다시 시도해 주세요',
+      )
+    }
+  }
 
   return (
     <AppDialog
@@ -41,17 +85,54 @@ export function AccountProfileDialog({
       size="compact"
       title="마이페이지"
     >
-      <dl className="app-dialog-profile">
+      <div className="app-dialog-profile">
         <div>
-          <dt>로그인 이메일</dt>
-          <dd>{user?.email ?? '등록된 이메일이 없습니다'}</dd>
+          <span className="app-dialog-profile__label">로그인 이메일</span>
+          <strong>{user?.email ?? '등록된 이메일이 없습니다'}</strong>
         </div>
-        <div>
-          <dt>닉네임</dt>
-          <dd>{nickname ?? '아직 설정하지 않았어요'}</dd>
-          <span>닉네임 설정 기능은 추후 제공할 예정입니다</span>
-        </div>
-      </dl>
+        <form
+          className="app-dialog-profile__nickname"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void saveNickname()
+          }}
+        >
+          <label htmlFor="account-nickname">닉네임</label>
+          <div>
+            <input
+              id="account-nickname"
+              autoComplete="nickname"
+              disabled={nicknameStatus === 'saving'}
+              maxLength={20}
+              placeholder="사용할 닉네임을 입력해 주세요"
+              value={nickname}
+              onChange={(event) => {
+                setNickname(event.target.value)
+                setNicknameStatus('idle')
+                setNicknameMessage('')
+              }}
+            />
+            <button
+              type="submit"
+              disabled={
+                nicknameStatus === 'saving' ||
+                nickname.trim() === initialNickname
+              }
+            >
+              {nicknameStatus === 'saving' ? '저장 중' : '저장'}
+            </button>
+          </div>
+          <small>2자 이상 20자 이하로 입력할 수 있습니다</small>
+          {nicknameMessage ? (
+            <p
+              className={`app-dialog-profile__message app-dialog-profile__message--${nicknameStatus}`}
+              role={nicknameStatus === 'error' ? 'alert' : 'status'}
+            >
+              {nicknameMessage}
+            </p>
+          ) : null}
+        </form>
+      </div>
       {logoutError ? (
         <p className="app-dialog-profile__error" role="alert">
           {logoutError}

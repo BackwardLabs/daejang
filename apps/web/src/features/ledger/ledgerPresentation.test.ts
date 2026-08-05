@@ -111,7 +111,7 @@ describe('ledger posting presentation', () => {
   it('presents review reason codes without exposing internal codes', () => {
     expect(describeReviewReason('UNKNOWN_TRANSACTION')).toBe('거래 유형 확인 필요')
     expect(describeReviewReason('NEEDS_CONTEXT')).toBe('추가 정보 필요')
-    expect(describeReviewReason('NEW_INTERNAL_REASON')).toBe('추가 확인 필요')
+    expect(describeReviewReason('NEW_INTERNAL_REASON')).toBe('거래 정보 확인 필요')
   })
 
   it('labels transfers as deposits or withdrawals from durable flow evidence', () => {

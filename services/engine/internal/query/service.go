@@ -32,6 +32,7 @@ type ReadStore interface {
 	Dashboard(context.Context, string, int32) (readmodelstore.Dashboard, error)
 	ListLedgerEventsPage(context.Context, string, int32, *readmodelstore.LedgerEventCursor, int32) (readmodelstore.LedgerEventPage, error)
 	ListOpenReviewsPage(context.Context, string, *readmodelstore.OpenReviewCursor, int32) (readmodelstore.OpenReviewPage, error)
+	GetReviewEvidence(context.Context, string, string) ([]readmodelstore.ReviewEvidence, error)
 }
 type LotStore interface {
 	EventLineage(context.Context, string, string, string, int32) (lotread.Lineage, error)
@@ -426,11 +427,14 @@ func (s *Service) ListReviews(ctx context.Context, req *enginev1.ListReviewsRequ
 	if limit < 1 || limit > 200 {
 		return nil, status.Error(codes.InvalidArgument, "review page limit must be between 1 and 200")
 	}
+	if req.GetTaxYear() < 2009 || req.GetTaxYear() > 9999 {
+		return nil, status.Error(codes.InvalidArgument, "review tax year must be between 2009 and 9999")
+	}
 	cursor, err := decodeReviewPageToken(req.GetPageToken())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "review page token is invalid")
 	}
-	page, err := s.Reads.ListOpenReviewsPage(ctx, subject, cursor, limit)
+	page, err := s.listOpenReviewsForTaxYear(ctx, subject, req.GetTaxYear(), cursor, limit)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "review query failed")
 	}
@@ -449,6 +453,66 @@ func (s *Service) ListReviews(ctx context.Context, req *enginev1.ListReviewsRequ
 		}
 	}
 	return &enginev1.ListReviewsResponse{Items: items, NextPageToken: nextPageToken}, nil
+}
+
+// listOpenReviewsForTaxYear keeps the public review list consistent with the
+// year-scoped dashboard. The database review queue is globally ordered, so the
+// service scans it in bounded keyset pages and only exposes reviews whose
+// referenced observations occurred in the requested tax year.
+func (s *Service) listOpenReviewsForTaxYear(
+	ctx context.Context,
+	subject string,
+	taxYear int32,
+	cursor *readmodelstore.OpenReviewCursor,
+	limit int32,
+) (readmodelstore.OpenReviewPage, error) {
+	result := readmodelstore.OpenReviewPage{Reviews: make([]readmodelstore.Review, 0, limit)}
+	nextCursor := cursor
+	seenCursors := make(map[string]struct{})
+
+	for {
+		page, err := s.Reads.ListOpenReviewsPage(ctx, subject, nextCursor, 200)
+		if err != nil {
+			return readmodelstore.OpenReviewPage{}, err
+		}
+		for index, review := range page.Reviews {
+			evidence, evidenceErr := s.Reads.GetReviewEvidence(ctx, subject, review.ID)
+			if evidenceErr != nil {
+				return readmodelstore.OpenReviewPage{}, evidenceErr
+			}
+			matchesYear := false
+			for _, observation := range evidence {
+				if observation.OccurredAt != nil && int32(observation.OccurredAt.UTC().Year()) == taxYear {
+					matchesYear = true
+					break
+				}
+			}
+			if !matchesYear {
+				continue
+			}
+			result.Reviews = append(result.Reviews, review)
+			if int32(len(result.Reviews)) == limit {
+				if index+1 < len(page.Reviews) || page.HasMore {
+					result.HasMore = true
+					result.Next = &readmodelstore.OpenReviewCursor{CreatedAt: review.CreatedAt, ReviewID: review.ID}
+				}
+				return result, nil
+			}
+		}
+
+		if !page.HasMore {
+			return result, nil
+		}
+		if page.Next == nil {
+			return readmodelstore.OpenReviewPage{}, errors.New("review query returned an incomplete page cursor")
+		}
+		cursorKey := page.Next.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + page.Next.ReviewID
+		if _, exists := seenCursors[cursorKey]; exists {
+			return readmodelstore.OpenReviewPage{}, errors.New("review query returned a repeated page cursor")
+		}
+		seenCursors[cursorKey] = struct{}{}
+		nextCursor = page.Next
+	}
 }
 
 type reviewPageToken struct {
