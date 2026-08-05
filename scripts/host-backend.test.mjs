@@ -26,6 +26,7 @@ import {
   createRuntimeSubjectACL,
   createActionRuntimeIdentity,
   createTaxProfiles,
+  currentTaxProfileRowsQuery,
   collectRuntimeShareEntries,
   cronAutostartEntries,
   ensureRuntimeIndexerView,
@@ -36,6 +37,8 @@ import {
   hostEVMPostingWorkerEnvironment,
   hostActiveServiceOrder,
   hostTaxDBMigrationVersion,
+  hostTaxProfileStabilityPasses,
+  hostTaxQuoteRuntimeControls,
   isPrivateRuntimePath,
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
@@ -63,17 +66,20 @@ import {
   stableSupervisorPath,
   supervisorProcessSpec,
   taxBackfillArgs,
+  taxQuotePrefetchArgs,
+  taxProfileSnapshotStable,
   tryAcquireProcessLock,
+  validateTaxQuotePrefetchResult,
 } from './host-backend.mjs'
 
 test('pins taxd to the current required database migration', () => {
-  assert.equal(hostTaxDBMigrationVersion, '70')
+  assert.equal(hostTaxDBMigrationVersion, '71')
   assert.match(
     readFileSync(
       new URL('../deploy/workers.runtime.env.example', import.meta.url),
       'utf8',
     ),
-    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=70$/mu,
+    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=71$/mu,
   )
 })
 
@@ -360,66 +366,151 @@ test('derives the Tax Action Registry runtime from one verified release', () => 
   })
 })
 
-test('builds tax profiles only for subjects with canonical ledger assets', () => {
+const taxQuoteConfig = (assetIds = []) => ({
+  denomination: {
+    assetId: 'asset-krw-upbit',
+    atomicUnits: '100000000',
+  },
+  assets: assetIds.map((assetId) => ({ assetId })),
+})
+
+test('loads canonical tax identities only from exact current posting legs', () => {
+  assert.match(
+    currentTaxProfileRowsQuery,
+    /JOIN ledger\.event_revision AS revision[\s\S]*revision\.revision_id = event\.current_revision_id/,
+  )
+  assert.match(
+    currentTaxProfileRowsQuery,
+    /posting\.revision_id = revision\.revision_id/,
+  )
+  assert.match(
+    currentTaxProfileRowsQuery,
+    /FROM ledger\.leg_evidence AS evidence[\s\S]*evidence\.leg_id = posting\.leg_id/,
+  )
+  assert.match(
+    currentTaxProfileRowsQuery,
+    /assertion\.ledger_revision_id = revision\.ledger_revision_id[\s\S]*assertion\.kind = 'ASSET_IDENTITY'[\s\S]*assertion\.state = 'ACCEPTED'[\s\S]*assertion\.operation = 'ASSERT'/,
+  )
+  assert.match(
+    currentTaxProfileRowsQuery,
+    /ledger_asset\.name = 'assetId'[\s\S]*ledger_asset\.value = posting\.asset_id[\s\S]*economic\.name = 'economicAssetId'/,
+  )
+  assert.match(
+    currentTaxProfileRowsQuery,
+    /target\.kind = 'ASSET'[\s\S]*target\.target_id = posting\.asset_id/,
+  )
+})
+
+test('builds profiles for every subject from canonical quote-supported assets', () => {
   const profiles = createTaxProfiles([
     {
       subject_id: 'subject-canonical',
       account_id: 'cex-account:upbit:1',
       asset_id: 'asset-zbt-upbit',
+      tax_asset_id: 'tax-asset-zbt',
     },
     {
       subject_id: 'subject-canonical',
       account_id: 'cex-account:upbit:1',
       asset_id: 'asset-krw-upbit',
+      tax_asset_id: 'tax-asset-krw',
     },
     {
       subject_id: 'subject-document',
       account_id: 'cex-account:upbit:2',
       asset_id: 'cex-document-asset:upbit:decimal8:btc',
+      tax_asset_id: null,
     },
     {
       subject_id: 'subject-mixed',
       account_id: 'cex-account:upbit:3',
       asset_id: 'cex-document-asset:upbit:decimal8:eth',
+      tax_asset_id: null,
     },
     {
       subject_id: 'subject-mixed',
       account_id: 'wallet-account:optimism:1',
       asset_id: 'asset:eip155:10:native',
+      tax_asset_id: null,
     },
-  ])
+    {
+      subject_id: 'subject-mixed',
+      account_id: 'cex-account:upbit:3',
+      asset_id: 'asset-btc-upbit',
+      tax_asset_id: null,
+    },
+    {
+      subject_id: 'subject-mixed',
+      account_id: 'cex-account:upbit:3',
+      asset_id: 'asset-unquoted-upbit',
+      tax_asset_id: 'tax-asset-unquoted',
+    },
+  ], taxQuoteConfig(['asset-btc-upbit', 'asset-zbt-upbit']))
 
   assert.equal(profiles.schemaVersion, 'tax.downstream-profile-set.v1')
-  assert.equal(profiles.profiles.length, 6)
+  assert.equal(profiles.profiles.length, 9)
   assert.deepEqual(
     profiles.profiles.map(({ subjectId, taxYear }) => ({ subjectId, taxYear })),
     [
       { subjectId: 'subject-canonical', taxYear: 2025 },
       { subjectId: 'subject-canonical', taxYear: 2026 },
       { subjectId: 'subject-canonical', taxYear: 2027 },
+      { subjectId: 'subject-document', taxYear: 2025 },
+      { subjectId: 'subject-document', taxYear: 2026 },
+      { subjectId: 'subject-document', taxYear: 2027 },
       { subjectId: 'subject-mixed', taxYear: 2025 },
       { subjectId: 'subject-mixed', taxYear: 2026 },
       { subjectId: 'subject-mixed', taxYear: 2027 },
     ],
   )
-  assert.deepEqual(
-    profiles.profiles[0].assetBindings.map((binding) => binding.ledgerAssetId),
-    ['asset-krw-upbit', 'asset-zbt-upbit'],
-  )
+  assert.deepEqual(profiles.profiles[0].assetBindings, [
+    {
+      ledgerAssetId: 'asset-krw-upbit',
+      taxAssetId: 'tax-asset-krw',
+    },
+    {
+      ledgerAssetId: 'asset-zbt-upbit',
+      taxAssetId: 'tax-asset-zbt',
+    },
+  ])
+  assert.deepEqual(profiles.profiles[0].valuationExcludedAssetIds, [])
+  assert.deepEqual(profiles.profiles[0].valuationDirectOnlyAssetIds, [])
   assert.equal(profiles.profiles[0].accountBindings[0].kind, 'VASP')
   assert.equal(profiles.profiles[0].accountBindings[0].method, 'MOVING_AVERAGE')
-  assert.equal(profiles.profiles[3].subjectId, 'subject-mixed')
   assert.deepEqual(profiles.profiles[3].assetBindings, [{
-    ledgerAssetId: 'asset:eip155:10:native',
-    taxAssetId: 'tax-asset:eip155:10:native',
+    ledgerAssetId: 'asset-krw-upbit',
+    taxAssetId: 'tax-asset-krw',
   }])
+  assert.deepEqual(profiles.profiles[3].valuationExcludedAssetIds, [
+    'cex-document-asset:upbit:decimal8:btc',
+  ])
+  assert.deepEqual(profiles.profiles[3].valuationDirectOnlyAssetIds, [])
+  assert.equal(profiles.profiles[6].subjectId, 'subject-mixed')
+  assert.deepEqual(profiles.profiles[6].assetBindings, [
+    {
+      ledgerAssetId: 'asset-krw-upbit',
+      taxAssetId: 'tax-asset-krw',
+    },
+    {
+      ledgerAssetId: 'asset-unquoted-upbit',
+      taxAssetId: 'tax-asset-unquoted',
+    },
+  ])
+  assert.deepEqual(profiles.profiles[6].valuationExcludedAssetIds, [
+    'asset-btc-upbit',
+    'asset:eip155:10:native',
+    'cex-document-asset:upbit:decimal8:eth',
+  ])
+  assert.deepEqual(profiles.profiles[6].valuationDirectOnlyAssetIds, [
+    'asset-unquoted-upbit',
+  ])
 })
 
-test('builds 2025 through 2027 profiles for every canonical subject', () => {
+test('builds 2025 through 2027 profiles for every current ledger subject', () => {
   const profiles = createTaxProfiles([
     { subject_id: 'subject-b', account_id: 'account-b', asset_id: 'asset-b' },
     { subject_id: 'subject-a', account_id: 'account-a', asset_id: 'asset-a' },
-  ])
+  ], taxQuoteConfig())
 
   assert.deepEqual(
     profiles.profiles.map(({ subjectId, taxYear }) => `${subjectId}:${taxYear}`),
@@ -432,10 +523,95 @@ test('builds 2025 through 2027 profiles for every canonical subject', () => {
       'subject-b:2027',
     ],
   )
+  assert.deepEqual(profiles.profiles[0].assetBindings, [{
+    ledgerAssetId: 'asset-krw-upbit',
+    taxAssetId: 'tax-asset-krw',
+  }])
+  assert.deepEqual(
+    profiles.profiles.map(({ valuationExcludedAssetIds }) =>
+      valuationExcludedAssetIds),
+    [
+      ['asset-a'],
+      ['asset-a'],
+      ['asset-a'],
+      ['asset-b'],
+      ['asset-b'],
+      ['asset-b'],
+    ],
+  )
+})
+
+test('fails closed when one ledger asset has conflicting tax identities', () => {
+  assert.throws(
+    () => createTaxProfiles([
+      {
+        subject_id: 'subject-a',
+        account_id: 'account-a',
+        asset_id: 'asset-btc-upbit',
+        tax_asset_id: 'tax-asset-btc',
+      },
+      {
+        subject_id: 'subject-a',
+        account_id: 'account-a',
+        asset_id: 'asset-btc-upbit',
+        tax_asset_id: 'tax-asset-wbtc',
+      },
+    ], taxQuoteConfig(['asset-btc-upbit'])),
+    /Conflicting tax asset identities for subject-a\/asset-btc-upbit/,
+  )
+})
+
+test('excludes an asset when any current leg lacks the exact tax identity', () => {
+  const profiles = createTaxProfiles([
+    {
+      subject_id: 'subject-a',
+      account_id: 'cex-account:upbit:1',
+      asset_id: 'asset-btc-upbit',
+      tax_asset_id: 'tax-asset-btc',
+    },
+    {
+      subject_id: 'subject-a',
+      account_id: 'cex-account:upbit:1',
+      asset_id: 'asset-btc-upbit',
+      tax_asset_id: null,
+    },
+    {
+      subject_id: 'subject-a',
+      account_id: 'cex-account:upbit:1',
+      asset_id: 'asset-krw-upbit',
+      tax_asset_id: null,
+    },
+  ], taxQuoteConfig(['asset-btc-upbit']))
+
+  assert.deepEqual(profiles.profiles[0].assetBindings, [{
+    ledgerAssetId: 'asset-krw-upbit',
+    taxAssetId: 'tax-asset-krw',
+  }])
+  assert.deepEqual(profiles.profiles[0].valuationExcludedAssetIds, [
+    'asset-btc-upbit',
+  ])
+
+  assert.throws(
+    () => createTaxProfiles([
+      {
+        subject_id: 'subject-a',
+        account_id: 'cex-account:upbit:1',
+        asset_id: 'asset-krw-upbit',
+        tax_asset_id: 'tax-asset-usd',
+      },
+      {
+        subject_id: 'subject-a',
+        account_id: 'cex-account:upbit:1',
+        asset_id: 'asset-krw-upbit',
+        tax_asset_id: null,
+      },
+    ], taxQuoteConfig()),
+    /expected tax-asset-krw, got tax-asset-usd/,
+  )
 })
 
 test('keeps the core JIT and Posting pipeline active without tax profiles', () => {
-  const profiles = createTaxProfiles([])
+  const profiles = createTaxProfiles([], taxQuoteConfig())
   assert.deepEqual(profiles, {
     schemaVersion: 'tax.downstream-profile-set.v1',
     profiles: [],
@@ -481,6 +657,79 @@ test('rejects unsupported or malformed tax-backfill years', () => {
       /integer from 2025 through 9999/,
     )
   }
+})
+
+test('prefetches every subject before starting the single live quote runtime', () => {
+  assert.deepEqual(taxQuotePrefetchArgs('subject-1'), [
+    '-subject', 'subject-1',
+    '-tax-year', '2027',
+    '-apply',
+    '-skip-rebuild',
+  ])
+  assert.deepEqual(hostTaxQuoteRuntimeControls(false), {
+    DAEJANG_TAXD_UPBIT_ARCHIVE_ONLY: 'false',
+    DAEJANG_TAXD_UPBIT_REQUEST_INTERVAL: '150ms',
+    DAEJANG_TAXD_UPBIT_RATE_LIMIT_RETRIES: '3',
+  })
+  assert.deepEqual(hostTaxQuoteRuntimeControls(true), {
+    DAEJANG_TAXD_UPBIT_ARCHIVE_ONLY: 'true',
+    DAEJANG_TAXD_UPBIT_REQUEST_INTERVAL: '150ms',
+    DAEJANG_TAXD_UPBIT_RATE_LIMIT_RETRIES: '3',
+  })
+  assert.throws(
+    () => hostTaxQuoteRuntimeControls(),
+    /archive mode must be explicitly selected/,
+  )
+  assert.equal(hostTaxProfileStabilityPasses, 3)
+  assert.equal(
+    taxProfileSnapshotStable(
+      { candidateDigest: 'digest-a' },
+      { candidateDigest: 'digest-a' },
+    ),
+    true,
+  )
+  assert.equal(
+    taxProfileSnapshotStable(
+      { candidateDigest: 'digest-a' },
+      { candidateDigest: 'digest-b' },
+    ),
+    false,
+  )
+  assert.equal(taxProfileSnapshotStable(null, null), false)
+})
+
+test('accepts only completed quote-coverage results without downstream rebuild', () => {
+  const result = {
+    schemaVersion: 'tax.valuation-backfill-result.v1',
+    subjectId: 'subject-1',
+    taxYear: 2027,
+    dryRun: false,
+    archiveCoverageEvents: 3,
+    archiveCoverageLegs: 8,
+    persistedValuations: 2,
+    rebuiltLot: false,
+    rebuiltTax: false,
+    rebuiltReport: false,
+  }
+  assert.deepEqual(
+    validateTaxQuotePrefetchResult(JSON.stringify(result), 'subject-1'),
+    {
+      archiveCoverageEvents: 3,
+      archiveCoverageLegs: 8,
+      persistedValuations: 2,
+    },
+  )
+  assert.throws(
+    () => validateTaxQuotePrefetchResult(
+      JSON.stringify({ ...result, dryRun: true }),
+      'subject-1',
+    ),
+    /failed its runtime contract/,
+  )
+  assert.throws(
+    () => validateTaxQuotePrefetchResult('not-json', 'subject-1'),
+    /invalid JSON/,
+  )
 })
 
 test('pins same-period multichain coverage to one deterministic snapshot', () => {

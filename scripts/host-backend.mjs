@@ -1292,23 +1292,40 @@ const gitCommit = (repository) => {
   return commit
 }
 
-export const createTaxProfiles = (rows) => {
+const taxDenominationAssetId = 'asset-krw-upbit'
+const taxDenominationTaxAssetId = 'tax-asset-krw'
+
+export const createTaxProfiles = (rows, upbitConfig) => {
+  if (upbitConfig?.denomination?.assetId !== taxDenominationAssetId) {
+    throw new Error(
+      `Tax quote denomination must be ${taxDenominationAssetId}`,
+    )
+  }
+  const quoteAssetIds = new Set(
+    (upbitConfig.assets ?? []).map(({ assetId }) => assetId),
+  )
   const subjects = new Map()
   for (const row of rows) {
     const subject = subjects.get(row.subject_id) ?? {
       accounts: new Set(),
       assets: new Set(),
+      taxAssetIds: new Map(),
+      identityMissingAssetIds: new Set(),
     }
     subject.accounts.add(row.account_id)
-    if (!row.asset_id.startsWith('cex-document-asset:')) {
-      subject.assets.add(row.asset_id)
+    subject.assets.add(row.asset_id)
+    if (typeof row.tax_asset_id === 'string' && row.tax_asset_id.length > 0) {
+      const taxAssetIds = subject.taxAssetIds.get(row.asset_id) ?? new Set()
+      taxAssetIds.add(row.tax_asset_id)
+      subject.taxAssetIds.set(row.asset_id, taxAssetIds)
+    } else {
+      subject.identityMissingAssetIds.add(row.asset_id)
     }
     subjects.set(row.subject_id, subject)
   }
   const profiles = []
   for (const [subjectId, subject] of [...subjects].sort(([left], [right]) =>
     left.localeCompare(right))) {
-    if (subject.assets.size === 0) continue
     const accountBindings = [...subject.accounts].sort().map((accountId) => ({
       accountId,
       taxAddressId: accountId,
@@ -1317,18 +1334,72 @@ export const createTaxProfiles = (rows) => {
         ? 'MOVING_AVERAGE'
         : 'FIFO',
     }))
-    const assetBindings = [...subject.assets].sort().map((assetId) => ({
-      ledgerAssetId: assetId,
-      taxAssetId: `tax-${assetId}`,
-    }))
+    const taxAssetByLedgerAsset = new Map()
+    for (const assetId of [...subject.assets].sort()) {
+      const taxAssetIds = [...(subject.taxAssetIds.get(assetId) ?? [])].sort()
+      if (taxAssetIds.length > 1) {
+        throw new Error(
+          `Conflicting tax asset identities for ${subjectId}/${assetId}: ${taxAssetIds.join(', ')}`,
+        )
+      }
+      if (
+        taxAssetIds.length === 1 &&
+        !subject.identityMissingAssetIds.has(assetId)
+      ) {
+        taxAssetByLedgerAsset.set(assetId, taxAssetIds[0])
+      }
+    }
+    const observedDenominationTaxAssetIds = [
+      ...(subject.taxAssetIds.get(taxDenominationAssetId) ?? []),
+    ].sort()
+    const conflictingDenominationTaxAssetId =
+      observedDenominationTaxAssetIds.find(
+        (taxAssetId) => taxAssetId !== taxDenominationTaxAssetId,
+      )
+    if (conflictingDenominationTaxAssetId !== undefined) {
+      throw new Error(
+        `Conflicting tax asset identity for ${subjectId}/${taxDenominationAssetId}: expected ${taxDenominationTaxAssetId}, got ${conflictingDenominationTaxAssetId}`,
+      )
+    }
+    const assetBindings = [{
+      ledgerAssetId: taxDenominationAssetId,
+      taxAssetId: taxDenominationTaxAssetId,
+    }]
+    // Preserve an exact economic identity for Lot/Tax even when Upbit has no
+    // candle mapping. Those assets are direct-consideration-only below.
+    for (const assetId of [...subject.assets].sort()) {
+      const taxAssetId = taxAssetByLedgerAsset.get(assetId)
+      if (
+        assetId !== taxDenominationAssetId &&
+        !assetId.startsWith('cex-document-asset:') &&
+        taxAssetId !== undefined
+      ) {
+        assetBindings.push({ ledgerAssetId: assetId, taxAssetId })
+      }
+    }
+    const boundAssetIds = new Set(
+      assetBindings.map(({ ledgerAssetId }) => ledgerAssetId),
+    )
+    const valuationExcludedAssetIds = [...subject.assets]
+      .filter((assetId) =>
+        assetId !== taxDenominationAssetId &&
+        !boundAssetIds.has(assetId))
+      .sort()
+    const valuationDirectOnlyAssetIds = [...boundAssetIds]
+      .filter((assetId) =>
+        assetId !== taxDenominationAssetId &&
+        !quoteAssetIds.has(assetId))
+      .sort()
     for (const taxYear of [2025, 2026, 2027]) {
       profiles.push({
         subjectId,
         residentId: subjectId,
         taxYear,
-        denominationAssetId: 'asset-krw-upbit',
+        denominationAssetId: taxDenominationAssetId,
         accountBindings,
         assetBindings,
+        valuationExcludedAssetIds,
+        valuationDirectOnlyAssetIds,
       })
     }
   }
@@ -1394,21 +1465,75 @@ export const loadTaxActionRegistryRuntime = (
   }
 }
 
+export const currentTaxProfileRowsQuery = `
+  SELECT DISTINCT
+    event.subject_id,
+    posting.account_id,
+    posting.asset_id,
+    tax_identity.tax_asset_id
+  FROM ledger.interpreted_event AS event
+  JOIN ledger.event_revision AS revision
+    ON revision.subject_id = event.subject_id
+   AND revision.event_id = event.event_id
+   AND revision.revision_id = event.current_revision_id
+  JOIN ledger.asset_posting AS posting
+    ON posting.subject_id = revision.subject_id
+   AND posting.event_id = revision.event_id
+   AND posting.revision_id = revision.revision_id
+  LEFT JOIN LATERAL (
+    SELECT DISTINCT economic.value AS tax_asset_id
+    FROM ledger.leg_evidence AS evidence
+    JOIN ledger.assertion AS assertion
+      ON assertion.subject_id = evidence.subject_id
+     AND assertion.assertion_id = evidence.assertion_id
+     AND assertion.ledger_revision_id = revision.ledger_revision_id
+     AND assertion.kind = 'ASSET_IDENTITY'
+     AND assertion.state = 'ACCEPTED'
+     AND assertion.operation = 'ASSERT'
+     AND assertion.effective_from IS NOT NULL
+     AND assertion.effective_from <= posting.occurred_at
+     AND (
+       assertion.effective_to IS NULL
+       OR posting.occurred_at <= assertion.effective_to
+     )
+    JOIN ledger.assertion_attribute AS ledger_asset
+      ON ledger_asset.subject_id = assertion.subject_id
+     AND ledger_asset.assertion_id = assertion.assertion_id
+     AND ledger_asset.name = 'assetId'
+     AND ledger_asset.value = posting.asset_id
+    JOIN ledger.assertion_attribute AS economic
+      ON economic.subject_id = assertion.subject_id
+     AND economic.assertion_id = assertion.assertion_id
+     AND economic.name = 'economicAssetId'
+    JOIN ledger.assertion_target AS target
+      ON target.subject_id = assertion.subject_id
+     AND target.assertion_id = assertion.assertion_id
+     AND target.kind = 'ASSET'
+     AND target.target_id = posting.asset_id
+    WHERE evidence.subject_id = posting.subject_id
+      AND evidence.event_id = posting.event_id
+      AND evidence.revision_id = posting.revision_id
+      AND evidence.leg_id = posting.leg_id
+      AND evidence.kind = 'ASSERTION'
+  ) AS tax_identity ON TRUE
+  WHERE event.current_revision_id IS NOT NULL
+  ORDER BY
+    event.subject_id,
+    posting.account_id,
+    posting.asset_id,
+    tax_identity.tax_asset_id
+`
+
 const createTaxRuntime = async (queryURL) => {
+  const upbitConfig = configureTaxUpbitQuoteRuntime(JSON.parse(readFileSync(
+    join(taxRepository, 'config', 'upbit-quote-provider.v1.json'),
+    'utf8',
+  )))
   const client = new Client({ connectionString: queryURL })
   await client.connect()
   let rows
   try {
-    const result = await client.query(`
-      SELECT DISTINCT event.subject_id, posting.account_id, posting.asset_id
-      FROM ledger.interpreted_event AS event
-      JOIN ledger.asset_posting AS posting
-        ON posting.subject_id=event.subject_id
-       AND posting.event_id=event.event_id
-       AND posting.revision_id=event.current_revision_id
-      WHERE event.current_revision_id IS NOT NULL
-      ORDER BY event.subject_id,posting.account_id,posting.asset_id
-    `)
+    const result = await client.query(currentTaxProfileRowsQuery)
     rows = result.rows
   } finally {
     await client.end()
@@ -1450,13 +1575,9 @@ const createTaxRuntime = async (queryURL) => {
       activationReceiptSha256: null,
     })),
   })
-  const profileSet = createTaxProfiles(rows)
+  const profileSet = createTaxProfiles(rows, upbitConfig)
   if (profileSet.profiles.length === 0) return null
   const profiles = canonicalJSON(profileSet)
-  const upbitConfig = configureTaxUpbitQuoteRuntime(JSON.parse(readFileSync(
-    join(taxRepository, 'config', 'upbit-quote-provider.v1.json'),
-    'utf8',
-  )))
 
   const files = {
     policy: join(configRoot, 'tax-interpretation-policy.json'),
@@ -1491,6 +1612,9 @@ const createTaxRuntime = async (queryURL) => {
   )
   return {
     files,
+    subjectIDs: profileSet.profiles
+      .filter(({ taxYear }) => taxYear === 2027)
+      .map(({ subjectId }) => subjectId),
     activationDigest: sha256(activation),
     candidateDigest: sha256(`${taxCommit}:${dbCommit}:${sha256(profiles)}`),
     schemaCommit: gitCommit(schemaRepository),
@@ -1502,9 +1626,24 @@ const createTaxRuntime = async (queryURL) => {
   }
 }
 
-export const hostTaxDBMigrationVersion = '70'
+export const hostTaxDBMigrationVersion = '71'
 
-const taxEnvironment = (taxURL, runtime) => serviceEnvironment([], [], {
+export const hostTaxQuoteRuntimeControls = (archiveOnly) => {
+  if (typeof archiveOnly !== 'boolean') {
+    throw new Error('Tax quote archive mode must be explicitly selected')
+  }
+  return {
+    DAEJANG_TAXD_UPBIT_ARCHIVE_ONLY: String(archiveOnly),
+    DAEJANG_TAXD_UPBIT_REQUEST_INTERVAL: '150ms',
+    DAEJANG_TAXD_UPBIT_RATE_LIMIT_RETRIES: '3',
+  }
+}
+
+const taxEnvironment = (
+  taxURL,
+  runtime,
+  { archiveOnly },
+) => serviceEnvironment([], [], {
   DAEJANG_DATABASE_URL: taxURL,
   DAEJANG_ARTIFACT_ROOT: join(artifactRoot, 'tax', 'root'),
   DAEJANG_ARTIFACT_TEMP: join(artifactRoot, 'tax', 'tmp'),
@@ -1516,6 +1655,7 @@ const taxEnvironment = (taxURL, runtime) => serviceEnvironment([], [], {
   DAEJANG_TAXD_DOWNSTREAM_PROFILE_FILE: runtime.files.profiles,
   DAEJANG_TAXD_UPBIT_QUOTE_CONFIG_FILE: runtime.files.quotes,
   DAEJANG_TAXD_QUOTE_ARCHIVE_ROOT: join(runtimeRoot, 'quote-archive', 'upbit'),
+  ...hostTaxQuoteRuntimeControls(archiveOnly),
   DAEJANG_TAXD_PUBLICATION_POLICY_TRUST_KEY_FILE: runtime.files.trustKey,
   DAEJANG_TAXD_CANDIDATE_DIGEST: runtime.candidateDigest,
   DAEJANG_TAXD_CLAIM_CONTROL_DIR: join(stateRoot, 'tax-claim-control'),
@@ -1533,6 +1673,101 @@ const taxEnvironment = (taxURL, runtime) => serviceEnvironment([], [], {
   DAEJANG_TAXD_HEALTH_ADDRESS: '127.0.0.1:8981',
   DAEJANG_TAXD_LOG_JSON: 'true',
 })
+
+export const taxQuotePrefetchArgs = (subjectID, taxYearInput = 2027) => {
+  const taxYear = String(taxYearInput)
+  if (!subjectID) throw new Error('tax quote prefetch requires a subject ID')
+  if (!/^[0-9]{4}$/.test(taxYear) || Number(taxYear) < 2025) {
+    throw new Error('tax quote prefetch tax year must be an integer from 2025 through 9999')
+  }
+  return [
+    '-subject', subjectID,
+    '-tax-year', taxYear,
+    '-apply',
+    '-skip-rebuild',
+  ]
+}
+
+export const validateTaxQuotePrefetchResult = (
+  raw,
+  subjectID,
+  taxYear = 2027,
+) => {
+  let result
+  try {
+    result = JSON.parse(raw)
+  } catch {
+    throw new Error('Tax quote prefetch returned invalid JSON')
+  }
+  const nonnegativeInteger = (value) =>
+    Number.isSafeInteger(value) && value >= 0
+  if (
+    result.schemaVersion !== 'tax.valuation-backfill-result.v1' ||
+    result.subjectId !== subjectID ||
+    result.taxYear !== taxYear ||
+    result.dryRun !== false ||
+    result.rebuiltLot !== false ||
+    result.rebuiltTax !== false ||
+    result.rebuiltReport !== false ||
+    !nonnegativeInteger(result.archiveCoverageEvents) ||
+    !nonnegativeInteger(result.archiveCoverageLegs) ||
+    !nonnegativeInteger(result.persistedValuations)
+  ) {
+    throw new Error('Tax quote prefetch result failed its runtime contract')
+  }
+  return {
+    archiveCoverageEvents: result.archiveCoverageEvents,
+    archiveCoverageLegs: result.archiveCoverageLegs,
+    persistedValuations: result.persistedValuations,
+  }
+}
+
+export const hostTaxProfileStabilityPasses = 3
+
+export const taxProfileSnapshotStable = (before, after) =>
+  typeof before?.candidateDigest === 'string' &&
+  before.candidateDigest.length > 0 &&
+  before.candidateDigest === after?.candidateDigest
+
+const prefetchTaxQuotes = (taxURL, runtime) => {
+  const totals = {
+    subjects: 0,
+    archiveCoverageEvents: 0,
+    archiveCoverageLegs: 0,
+    persistedValuations: 0,
+  }
+  for (const [index, subjectID] of runtime.subjectIDs.entries()) {
+    const result = spawnSync(
+      join(binaryRoot, 'tax-backfill'),
+      taxQuotePrefetchArgs(subjectID),
+      {
+        cwd: taxRepository,
+        env: taxEnvironment(taxURL, runtime, { archiveOnly: false }),
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    )
+    if (result.status !== 0) {
+      const reason = result.error?.message ??
+        (result.signal ? `signal ${result.signal}` : `status ${result.status}`)
+      throw new Error(
+        `Tax quote prefetch failed at subject ${index + 1}/${runtime.subjectIDs.length} with ${reason}`,
+      )
+    }
+    const summary = validateTaxQuotePrefetchResult(
+      result.stdout,
+      subjectID,
+    )
+    totals.subjects++
+    totals.archiveCoverageEvents += summary.archiveCoverageEvents
+    totals.archiveCoverageLegs += summary.archiveCoverageLegs
+    totals.persistedValuations += summary.persistedValuations
+  }
+  console.log(
+    `Tax quote archive coverage verified: subjects=${totals.subjects} events=${totals.archiveCoverageEvents} legs=${totals.archiveCoverageLegs} persistedValuations=${totals.persistedValuations}`,
+  )
+  return totals
+}
 
 const startServices = async ({ buildArtifacts = true } = {}) => {
   if (allServiceOrder.some(isRunning))
@@ -1814,27 +2049,76 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       )
     }
 
-    const taxRuntime = await createTaxRuntime(queryURL)
+    let taxRuntime = await createTaxRuntime(queryURL)
+    let taxdStarted = false
     if (taxRuntime) {
-      rmSync(taxdNoProfilesMarker, { force: true })
-      const taxdEnvironment = taxEnvironment(taxURL, taxRuntime)
-      spawnService(
-        'taxd',
-        join(binaryRoot, 'taxd'),
-        [],
-        taxdEnvironment,
-        { cwd: taxRepository },
-      )
-      await waitFor('Tax Engine', taxReady, 30_000)
+      let quoteCoverageReady = false
+      try {
+        for (
+          let pass = 1;
+          pass <= hostTaxProfileStabilityPasses;
+          pass++
+        ) {
+          prefetchTaxQuotes(taxURL, taxRuntime)
+          const refreshedRuntime = await createTaxRuntime(queryURL)
+          if (!refreshedRuntime) {
+            throw new Error(
+              'Tax profile snapshot disappeared during quote prefetch',
+            )
+          }
+          if (taxProfileSnapshotStable(taxRuntime, refreshedRuntime)) {
+            taxRuntime = refreshedRuntime
+            quoteCoverageReady = true
+            break
+          }
+          taxRuntime = refreshedRuntime
+        }
+        if (!quoteCoverageReady) {
+          throw new Error(
+            `Tax profile snapshot did not stabilize after ${hostTaxProfileStabilityPasses} quote-prefetch passes`,
+          )
+        }
+      } catch (error) {
+        writeFileSync(
+          taxdNoProfilesMarker,
+          'Tax quote archive coverage did not complete. Inspect supervisor logs and restart after resolution.\n',
+          { mode: fileMode },
+        )
+        chmodSync(taxdNoProfilesMarker, fileMode)
+        console.error(
+          `Tax Engine remains disabled because quote archive coverage failed: ${error.message}`,
+        )
+      }
+      if (quoteCoverageReady) {
+        // Prefetch closes the current backlog before launch. Keep the single
+        // daemon network-enabled so later ledger deliveries can archive their
+        // own historical quote before calculation; manual backfill is blocked
+        // while taxd is running, so only one Host process consumes Upbit.
+        const taxdEnvironment = taxEnvironment(
+          taxURL,
+          taxRuntime,
+          { archiveOnly: false },
+        )
+        rmSync(taxdNoProfilesMarker, { force: true })
+        spawnService(
+          'taxd',
+          join(binaryRoot, 'taxd'),
+          [],
+          taxdEnvironment,
+          { cwd: taxRepository },
+        )
+        await waitFor('Tax Engine', taxReady, 30_000)
+        taxdStarted = true
+      }
     } else {
       writeFileSync(
         taxdNoProfilesMarker,
-        'No subjects have fully canonical ledger assets. Restart after canonical Posting materialization.\n',
+        'No current ledger subjects are available. Restart after Posting materialization.\n',
         { mode: fileMode },
       )
       chmodSync(taxdNoProfilesMarker, fileMode)
       console.warn(
-        'Tax Engine is disabled until at least one subject has fully canonical ledger assets; JIT and Posting remain available',
+        'Tax Engine is disabled until at least one current ledger subject exists; JIT and Posting remain available',
       )
     }
 
@@ -1917,7 +2201,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     const evmPostingStatus = evmPostingEnabled()
       ? ', JIT/EVM Posting worker'
       : ''
-    const taxStatus = taxRuntime ? ', Tax Engine' : ''
+    const taxStatus = taxdStarted ? ', Tax Engine' : ''
     console.log(
       `Backend is ready: PostgreSQL, PDF parser, multichain JIT, Engine, sync worker, SOURCE Posting worker${evmPostingStatus}${taxStatus}, Web API`,
     )
@@ -2050,7 +2334,10 @@ const taxBackfill = (subjectID, eventID, taxYearInput) => withOperationLock(asyn
   run(
     join(binaryRoot, 'tax-backfill'),
     commandArgs,
-    { cwd: taxRepository, env: taxEnvironment(taxURL, runtime) },
+    {
+      cwd: taxRepository,
+      env: taxEnvironment(taxURL, runtime, { archiveOnly: false }),
+    },
   )
 })
 
@@ -2061,7 +2348,8 @@ const status = () => {
     if (name === 'evm-posting' && !evmPostingEnabled()) {
       disabled = ' (disabled: signed claim policy not provisioned)'
     } else if (name === 'taxd' && !taxdEnabled()) {
-      disabled = ' (disabled: no fully canonical ledger assets; restart after Posting materialization)'
+      const reason = readFileSync(taxdNoProfilesMarker, 'utf8').trim()
+      disabled = ` (disabled: ${reason})`
     }
     console.log(`${name}: ${state}${disabled}`)
   }
