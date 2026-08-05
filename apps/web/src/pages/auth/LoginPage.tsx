@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   loginWithEmail,
+  socialProviderOrder,
   startSocialAuth,
   WebApiError,
   type EmailLoginResponse,
@@ -151,7 +152,7 @@ export function LoginPage({
           <>
             {error ? <p className="auth-alert auth-alert--error" role="alert">{error}</p> : null}
             <div className="auth-provider-list">
-              {(Object.keys(providers) as SocialProvider[]).map((key) => {
+              {socialProviderOrder.map((key) => {
                 const item = providers[key]
                 return (
                   <button

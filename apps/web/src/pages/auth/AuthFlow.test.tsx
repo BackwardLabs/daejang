@@ -183,6 +183,43 @@ describe('authentication flows', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('keeps Kakao, Naver, and Google in the same order for login and signup', async () => {
+    window.history.replaceState(null, '', '/login')
+    const { unmount } = render(<App />)
+
+    expect(
+      Array.from(document.querySelectorAll('.auth-provider')).map((element) =>
+        element.textContent?.trim(),
+      ),
+    ).toEqual(['카카오 로그인', '네이버로 로그인', 'Google로 로그인'])
+
+    unmount()
+    window.history.replaceState(null, '', '/')
+    render(
+      <OnboardingFlow
+        initialScreen="method"
+        onAuthenticated={vi.fn()}
+        onExit={vi.fn()}
+        onLogin={vi.fn()}
+        onNavigate={vi.fn()}
+        signupMethods={{
+          email: true,
+          oauthProviders: ['google', 'naver', 'kakao'],
+        }}
+      />,
+    )
+
+    expect(
+      Array.from(document.querySelectorAll('.auth-provider')).map((element) =>
+        element.textContent?.trim(),
+      ),
+    ).toEqual([
+      '카카오로 시작하기',
+      '네이버로 시작하기',
+      '구글로 시작하기',
+    ])
+  })
+
   it('removes the landing login button and lets the start screen open login', () => {
     render(<App />)
 

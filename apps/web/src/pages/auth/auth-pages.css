@@ -311,10 +311,9 @@
 }
 
 .auth-step-badge {
-  display: inline-flex;
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: #fff1ea;
+  margin: 0;
+  padding: 0;
+  background: transparent;
   letter-spacing: 0;
 }
 

@@ -94,7 +94,6 @@ function SourceTypeSelectionView({
       title="데이터 소스 추가"
     >
       <div className="source-mvp-guide" role="note">
-        <strong>지원 방식</strong>
         <span>
           Upbit는 PDF 업로드, EVM은 브라우저 지갑의 읽기 전용 연결 방식으로
           등록합니다.
@@ -118,7 +117,7 @@ function SourceTypeSelectionView({
         />
       </section>
 
-      <p className="source-footer-note">
+      <p className="source-footer-note source-footer-note--after-methods">
         두 방식 모두 수집 범위를 확인한 뒤 최초 수집 작업을 시작합니다.
       </p>
     </SourceFlowLayout>

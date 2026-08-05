@@ -92,6 +92,87 @@ describe('source flow pages', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('hides previously disconnected sources and removes a wallet after disconnecting it', async () => {
+    const activeSource = {
+      id: '33333333-3333-4333-8333-333333333333',
+      type: 'EVM_WALLET',
+      address: '0x239000000000000000000000000000000000f2b2',
+      accountType: 'EOA',
+      verificationChainId: 'eip155:1',
+      verifiedAt: '2027-01-01T00:00:00.000Z',
+      label: '세무 지갑',
+      status: 'ACTIVE',
+      createdAt: '2027-01-01T00:00:00.000Z',
+      updatedAt: '2027-01-01T00:00:00.000Z',
+      chainScopes: [{ chainId: 'eip155:1', status: 'ACTIVE' }],
+    }
+    const disconnectedSource = {
+      ...activeSource,
+      id: '44444444-4444-4444-8444-444444444444',
+      address: '0x951000000000000000000000000000000000b14d',
+      status: 'DISCONNECTED',
+      disconnectedAt: '2027-01-02T00:00:00.000Z',
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/sources') {
+        return new Response(
+          JSON.stringify({ items: [activeSource, disconnectedSource] }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        )
+      }
+      if (url === '/api/v1/jobs') {
+        return new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === `/api/v1/sources/${activeSource.id}/disconnect`) {
+        return new Response(
+          JSON.stringify({
+            ...activeSource,
+            status: 'DISCONNECTED',
+            disconnectedAt: '2027-01-03T00:00:00.000Z',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        )
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SourceManagementPage />)
+
+    const sourceList = await screen.findByRole('region', {
+      name: '등록된 데이터 소스',
+    })
+    expect(within(sourceList).getAllByRole('article')).toHaveLength(1)
+    expect(screen.getByText('현재 연결된 소스 1개')).toBeInTheDocument()
+    expect(screen.queryByText('0x9510…b14d')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '연결 해제' }))
+
+    expect(
+      await screen.findByRole('heading', {
+        name: '아직 연결된 데이터 소스가 없어요',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('현재 연결된 소스 0개')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('region', { name: '등록된 데이터 소스' }),
+    ).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/sources/${activeSource.id}/disconnect`,
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
   it('uses production-safe copy when source services are unavailable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ error: { code: 'WALLET_SOURCE_UNAVAILABLE' } }), {
@@ -632,6 +713,12 @@ describe('source flow pages', () => {
     expect(
       within(methods).getByRole('heading', { name: 'EVM Wallet' }),
     ).toBeInTheDocument()
+    expect(screen.queryByText('지원 방식')).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '두 방식 모두 수집 범위를 확인한 뒤 최초 수집 작업을 시작합니다.',
+      ),
+    ).toHaveClass('source-footer-note--after-methods')
     expect(
       within(methods).getByText('Upbit PDF 등록 불가'),
     ).toHaveAttribute('aria-disabled', 'true')
@@ -700,6 +787,32 @@ describe('source flow pages', () => {
     expect(
       screen.getByRole('link', { name: '연결 방식 다시 선택' }),
     ).toHaveAttribute('href', '/sources/new')
+  })
+
+  it('uses readable dark text for the enabled Upbit PDF registration action', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            upbitPdf: {
+              registrationEnabled: true,
+              encryptedPdfSupported: true,
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      ),
+    )
+
+    render(<SourceMethodIntroPage methodId="upbit-pdf" />)
+
+    expect(
+      await screen.findByRole('link', { name: 'PDF 등록 시작' }),
+    ).toHaveClass('source-primary-action--dark-text')
   })
 
   it('explains the read-only EVM Wallet connection and links to the connection flow', () => {
