@@ -1453,24 +1453,33 @@ export const loadVerifiedActionRuntimeRelease = (
     bundle.schemaVersion !== 'defi-label.action-registry.v1' ||
     bundle.registrySourceRepository !== 'BackwardLabs/DeFi-Label' ||
     !/^[0-9a-f]{40}$/.test(bundle.registrySourceCommit) ||
+    bundle.exporterContractRepository !== 'BackwardLabs/DeFi-Label' ||
+    !/^[0-9a-f]{40}$/.test(bundle.exporterContractCommit) ||
     receipt.registrySourceRepository !== bundle.registrySourceRepository ||
     receipt.registrySourceCommit !== bundle.registrySourceCommit ||
+    receipt.exporterContractRepository !== bundle.exporterContractRepository ||
+    receipt.exporterContractCommit !== bundle.exporterContractCommit ||
     receipt.bundleSha256 !== bundleDigest ||
     checksum !== `${bundleDigest}\n`
   ) {
     throw new Error('DeFi Action runtime release coordinates are inconsistent')
   }
-  const ancestry = inspect(
-    'git',
-    ['merge-base', '--is-ancestor', bundle.registrySourceCommit, 'HEAD'],
-    { cwd: repository, encoding: 'utf8' },
-  )
-  if (ancestry.status !== 0) {
-    throw new Error('DeFi Action runtime release source is not in the deployed checkout')
+  for (const [label, commit] of [
+    ['source', bundle.registrySourceCommit],
+    ['exporter runtime', bundle.exporterContractCommit],
+  ]) {
+    const ancestry = inspect(
+      'git',
+      ['merge-base', '--is-ancestor', commit, 'HEAD'],
+      { cwd: repository, encoding: 'utf8' },
+    )
+    if (ancestry.status !== 0) {
+      throw new Error(`DeFi Action runtime release ${label} is not in the deployed checkout`)
+    }
   }
   return {
-    repository: bundle.registrySourceRepository,
-    commit: bundle.registrySourceCommit,
+    repository: bundle.exporterContractRepository,
+    commit: bundle.exporterContractCommit,
     bundleSha256: bundleDigest,
   }
 }
@@ -3796,11 +3805,22 @@ const stop = async () => {
 
 const start = (options) => withOperationLock(() => startServices(options))
 
-export const runRestartOperation = async ({ prepare, pause, stop, start }) => {
+export const runRestartOperation = async ({
+  prepare,
+  pause,
+  stop,
+  start,
+  resumeAfterFailure,
+}) => {
   await prepare()
   pause()
-  await stop()
-  await start()
+  try {
+    await stop()
+    await start()
+  } catch (error) {
+    resumeAfterFailure()
+    throw error
+  }
 }
 
 export const assertReportAttestationRuntimeInstalled = ({
@@ -3840,6 +3860,7 @@ const restart = () => withOperationLock(async () => {
     pause: () => writeFileSync(pauseFile, 'paused\n', { mode: fileMode }),
     stop: stopServices,
     start: startServices,
+    resumeAfterFailure: () => rmSync(pauseFile, { force: true }),
   })
 })
 

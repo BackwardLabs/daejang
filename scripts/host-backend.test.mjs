@@ -201,6 +201,7 @@ test('rejects an attestation-enabled restart before service shutdown when its ru
       pause: () => events.push('pause'),
       stop: async () => events.push('stop'),
       start: async () => events.push('start'),
+      resumeAfterFailure: () => events.push('resume'),
     }),
     /preflight failed/,
   )
@@ -280,11 +281,14 @@ test('derives the canonical Posting trust coordinate from one verified signed re
     const releaseRoot = join(parent, 'releases')
     mkdirSync(join(parent, 'scripts'), { recursive: true })
     mkdirSync(releaseRoot, { recursive: true })
-    const commit = '1'.repeat(40)
+    const registrySourceCommit = '1'.repeat(40)
+    const exporterContractCommit = '2'.repeat(40)
     const bundle = JSON.stringify({
       schemaVersion: 'defi-label.action-registry.v1',
       registrySourceRepository: 'BackwardLabs/DeFi-Label',
-      registrySourceCommit: commit,
+      registrySourceCommit,
+      exporterContractRepository: 'BackwardLabs/DeFi-Label',
+      exporterContractCommit,
     })
     const bundleSha256 = createHash('sha256').update(bundle).digest('hex')
     writeFileSync(join(releaseRoot, 'action-registry-v1.json'), bundle)
@@ -292,7 +296,9 @@ test('derives the canonical Posting trust coordinate from one verified signed re
     writeFileSync(join(releaseRoot, 'action-registry-v1.json.receipt.json'), JSON.stringify({
       bundleSha256,
       registrySourceRepository: 'BackwardLabs/DeFi-Label',
-      registrySourceCommit: commit,
+      registrySourceCommit,
+      exporterContractRepository: 'BackwardLabs/DeFi-Label',
+      exporterContractCommit,
     }))
 
     const calls = []
@@ -305,11 +311,29 @@ test('derives the canonical Posting trust coordinate from one verified signed re
 
     assert.deepEqual(runtime, {
       repository: 'BackwardLabs/DeFi-Label',
-      commit,
+      commit: exporterContractCommit,
       bundleSha256,
     })
     assert.equal(calls[0][1][1], 'verify-runtime-release')
-    assert.deepEqual(calls[1], ['git', ['merge-base', '--is-ancestor', commit, 'HEAD']])
+    assert.deepEqual(calls.slice(1), [
+      ['git', ['merge-base', '--is-ancestor', registrySourceCommit, 'HEAD']],
+      ['git', ['merge-base', '--is-ancestor', exporterContractCommit, 'HEAD']],
+    ])
+
+    writeFileSync(join(releaseRoot, 'action-registry-v1.json.receipt.json'), JSON.stringify({
+      bundleSha256,
+      registrySourceRepository: 'BackwardLabs/DeFi-Label',
+      registrySourceCommit,
+      exporterContractRepository: 'BackwardLabs/DeFi-Label',
+      exporterContractCommit: '3'.repeat(40),
+    }))
+    assert.throws(
+      () => loadVerifiedActionRuntimeRelease(parent, (command) =>
+        command === 'git'
+          ? { status: 0, stdout: '' }
+          : { status: 0, stdout: '{"valid": true}\n' }),
+      /release coordinates are inconsistent/,
+    )
   } finally {
     rmSync(parent, { recursive: true, force: true })
   }
@@ -1823,8 +1847,37 @@ test('restart establishes pause before stopping or starting services', async () 
     pause: () => events.push('pause'),
     stop: async () => events.push('stop'),
     start: async () => events.push('start'),
+    resumeAfterFailure: () => events.push('resume'),
   })
   assert.deepEqual(events, ['prepare', 'pause', 'stop', 'start'])
+})
+
+test('failed restart releases pause so the resident supervisor can recover', async () => {
+  for (const failedStep of ['stop', 'start']) {
+    const events = []
+    await assert.rejects(
+      runRestartOperation({
+        prepare: () => events.push('prepare'),
+        pause: () => events.push('pause'),
+        stop: async () => {
+          events.push('stop')
+          if (failedStep === 'stop') throw new Error('stop failed')
+        },
+        start: async () => {
+          events.push('start')
+          if (failedStep === 'start') throw new Error('start failed')
+        },
+        resumeAfterFailure: () => events.push('resume'),
+      }),
+      new RegExp(`${failedStep} failed`),
+    )
+    assert.deepEqual(
+      events,
+      failedStep === 'stop'
+        ? ['prepare', 'pause', 'stop', 'resume']
+        : ['prepare', 'pause', 'stop', 'start', 'resume'],
+    )
+  }
 })
 
 test('signal shutdown waits for the active operation before serialized stop', async () => {
