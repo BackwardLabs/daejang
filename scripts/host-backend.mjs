@@ -1395,9 +1395,21 @@ export const createActionRuntimeIdentity = (
     'scripts/transaction_adapter.py',
     'scripts/action_evaluator.py',
   ].map((path) => ({ path, sha256: sha256(readFileSync(join(repository, path))) }))
+  const bundleIdentity = JSON.parse(readFileSync(join(repository, files[0].path), 'utf8'))
+  if (bundleIdentity.exporterContractRepository !== 'BackwardLabs/DeFi-Label') {
+    throw new Error('The Action runtime identity has an invalid repository')
+  }
+  const trustedActionRuntime = {
+    repository: bundleIdentity.exporterContractRepository,
+    commit: resolveActionRuntimeCommit(files[0].sha256, bundleIdentity.exporterContractCommit),
+    bundleSha256: files[0].sha256,
+  }
   return sha256(canonicalJSON({
-    schemaVersion: 'giwa.action-runtime-identity.v3',
+    schemaVersion: 'giwa.action-runtime-identity.v4',
     files,
+    // Reclassification must rotate when the canonical Posting trust
+    // coordinate changes, even if JIT and Posting executable bytes do not.
+    trustedActionRuntime,
     // Action evaluation consumes evidence emitted by this exact executable.
     // Rotating either side must enqueue a new immutable wallet generation.
     jitExecutableSha256: sha256(readFileSync(jitExecutable)),
@@ -1406,6 +1418,23 @@ export const createActionRuntimeIdentity = (
     // registry and JIT evidence bytes themselves did not change.
     postingExecutableSha256: sha256(readFileSync(postingExecutable)),
   }))
+}
+
+const legacyActionRuntimeCommitByBundle = new Map([
+  [
+    'e35333a161c52ad1d4c647bc462cc393623c1b0dfbdc401250d43a90078d34c3',
+    'b6b9ce8cfdb411f10e44fa74378c6eababd3eee4',
+  ],
+])
+
+export const resolveActionRuntimeCommit = (bundleDigest, exporterCommit) => {
+  if (!/^[0-9a-f]{64}$/.test(bundleDigest) || !/^[0-9a-f]{40}$/.test(exporterCommit)) {
+    throw new Error('DeFi Action runtime commit inputs are invalid')
+  }
+  // JIT emits this semantic runtime coordinate for the legacy signed bundle
+  // after independently verifying its exact registry, adapter, and evaluator
+  // bytes. Posting must trust the same coordinate, not the checkout HEAD.
+  return legacyActionRuntimeCommitByBundle.get(bundleDigest) ?? exporterCommit
 }
 
 export const loadVerifiedActionRuntimeRelease = (
@@ -1477,18 +1506,9 @@ export const loadVerifiedActionRuntimeRelease = (
       throw new Error(`DeFi Action runtime release ${label} is not in the deployed checkout`)
     }
   }
-  const checkout = inspect(
-    'git',
-    ['rev-parse', 'HEAD'],
-    { cwd: repository, encoding: 'utf8' },
-  )
-  const checkoutCommit = checkout.stdout?.trim()
-  if (checkout.status !== 0 || !/^[0-9a-f]{40}$/.test(checkoutCommit ?? '')) {
-    throw new Error('DeFi Action runtime checkout identity is invalid')
-  }
   return {
     repository: bundle.registrySourceRepository,
-    commit: checkoutCommit,
+    commit: resolveActionRuntimeCommit(bundleDigest, bundle.exporterContractCommit),
     bundleSha256: bundleDigest,
   }
 }
