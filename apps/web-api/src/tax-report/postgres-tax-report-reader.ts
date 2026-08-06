@@ -12,12 +12,18 @@ import type {
   ReportPaymentTaxReportReader,
   SignedCorrectionArtifact,
   TaxAmount,
+  TaxReportGenerationBlockedReason,
+  TaxReportGenerationOutcome,
+  TaxReportGenerationState,
+  TaxReportGenerationStatus,
+  TaxReportGenerationStatusReader,
   TaxReportFinality,
   TaxReportReader,
 } from './types.js'
 
 export class AmbiguousCurrentTaxReportError extends Error {}
 export class InconsistentTaxReportError extends Error {}
+export class InconsistentTaxReportGenerationStatusError extends Error {}
 export class CorrectionPendingError extends Error {}
 
 export type CorrectionQuarantineOptions = {
@@ -199,6 +205,62 @@ type ReportRow = {
   total_tax_amount: string | null
 }
 
+type GenerationStatusRow = {
+  subject_id: unknown
+  generation_id: unknown
+  state: unknown
+  tax_year: unknown
+  outcome: unknown
+  created_at: unknown
+  completed_at: unknown
+  blocked_reason_code: unknown
+  has_current_report: unknown
+}
+
+const generationStates = new Set<TaxReportGenerationState>([
+  'NOT_STARTED',
+  'BUILDING',
+  'ACTIVE',
+  'RETIRED',
+  'SUPERSEDED',
+])
+const generationOutcomes = new Set<TaxReportGenerationOutcome>([
+  'REPORT',
+  'NO_TAX_EVENTS',
+])
+const generationBlockedReasons = new Set<TaxReportGenerationBlockedReason>([
+  'NOT_STARTED',
+  'APPLICATION_PENDING',
+  'GENERATION_BUILDING',
+  'GENERATION_RETIRED',
+  'GENERATION_NOT_ACTIVE',
+  'LEDGER_STALE',
+  'GENERATION_INCOMPLETE',
+  'NO_TAX_EVENTS',
+  'REPORT_NOT_CURRENT',
+])
+
+const validDate = (value: unknown): value is Date =>
+  value instanceof Date && !Number.isNaN(value.getTime())
+
+const validGenerationState = (
+  value: unknown,
+): value is TaxReportGenerationState =>
+  typeof value === 'string' &&
+  generationStates.has(value as TaxReportGenerationState)
+
+const validGenerationOutcome = (
+  value: unknown,
+): value is TaxReportGenerationOutcome =>
+  typeof value === 'string' &&
+  generationOutcomes.has(value as TaxReportGenerationOutcome)
+
+const validGenerationBlockedReason = (
+  value: unknown,
+): value is TaxReportGenerationBlockedReason =>
+  typeof value === 'string' &&
+  generationBlockedReasons.has(value as TaxReportGenerationBlockedReason)
+
 const amount = (status: TaxAmount['status'], value: string | null): TaxAmount => {
   if ((status === 'KNOWN') !== (value !== null)) {
     throw new InconsistentTaxReportError('Tax amount status and value disagree')
@@ -207,7 +269,10 @@ const amount = (status: TaxAmount['status'], value: string | null): TaxAmount =>
 }
 
 export class PostgresTaxReportReader
-  implements TaxReportReader, ReportPaymentTaxReportReader
+  implements
+    TaxReportReader,
+    TaxReportGenerationStatusReader,
+    ReportPaymentTaxReportReader
 {
   readonly durable = true
 
@@ -230,6 +295,39 @@ export class PostgresTaxReportReader
     )
     if (!report) return undefined
     return this.toCurrentTaxReport(report)
+  }
+
+  async getGenerationStatus(
+    subjectId: string,
+    taxYear: 2025 | 2026 | 2027,
+  ): Promise<TaxReportGenerationStatus | undefined> {
+    const result = await this.pool.query<GenerationStatusRow>(
+      `
+        SELECT
+          subject_id,
+          generation_id,
+          state,
+          tax_year,
+          outcome,
+          created_at,
+          completed_at,
+          blocked_reason_code,
+          has_current_report
+        FROM reporting.current_tax_report_generation_status_read_v1
+        WHERE subject_id = $1
+          AND tax_year = $2
+        LIMIT 2
+      `,
+      [subjectId, taxYear],
+    )
+    if (result.rows.length > 1) {
+      throw new InconsistentTaxReportGenerationStatusError(
+        'More than one current generation status exists for this subject and tax year',
+      )
+    }
+    const row = result.rows[0]
+    if (!row) return undefined
+    return this.toGenerationStatus(row, subjectId, taxYear)
   }
 
   async getCurrentForPayment(
@@ -286,8 +384,8 @@ export class PostgresTaxReportReader
           report.local_tax_amount::text,
           report.total_tax_status,
           report.total_tax_amount::text
-        FROM reporting.current_tax_report AS current
-        JOIN reporting.tax_report AS report
+        FROM reporting.current_tax_report_read_v1 AS current
+        JOIN reporting.activated_tax_report_read_v1 AS report
           ON report.subject_id = current.subject_id
          AND report.report_id = current.report_id
         WHERE current.subject_id = $1
@@ -375,6 +473,65 @@ export class PostgresTaxReportReader
         localTax: amount(report.local_tax_status, report.local_tax_amount),
         totalTax: amount(report.total_tax_status, report.total_tax_amount),
       },
+    }
+  }
+
+  private toGenerationStatus(
+    row: GenerationStatusRow,
+    subjectId: string,
+    taxYear: 2025 | 2026 | 2027,
+  ): TaxReportGenerationStatus {
+    const outcome = row.outcome
+    const generationId = row.generation_id
+    const createdAt = row.created_at
+    const completedAt = row.completed_at
+    const blockedReasonCode = row.blocked_reason_code
+    const pointerless = row.state === 'NOT_STARTED'
+    if (
+      row.subject_id !== subjectId ||
+      row.tax_year !== taxYear ||
+      !validGenerationState(row.state) ||
+      (pointerless
+        ? generationId !== null ||
+          createdAt !== null ||
+          outcome !== null ||
+          completedAt !== null ||
+          !['NOT_STARTED', 'APPLICATION_PENDING'].includes(
+            String(blockedReasonCode),
+          ) ||
+          row.has_current_report !== false
+        : typeof generationId !== 'string' ||
+          !digestPattern.test(generationId) ||
+          !validDate(createdAt)) ||
+      (outcome !== null && !validGenerationOutcome(outcome)) ||
+      (completedAt !== null && !validDate(completedAt)) ||
+      (blockedReasonCode !== null &&
+        !validGenerationBlockedReason(blockedReasonCode)) ||
+      typeof row.has_current_report !== 'boolean' ||
+      (row.has_current_report &&
+        (row.state !== 'ACTIVE' ||
+          outcome !== 'REPORT' ||
+          blockedReasonCode !== null ||
+          completedAt === null)) ||
+      (!row.has_current_report && blockedReasonCode === null) ||
+      (row.state === 'BUILDING' && completedAt !== null) ||
+      ((row.state === 'ACTIVE' || row.state === 'RETIRED') &&
+        completedAt === null)
+    ) {
+      throw new InconsistentTaxReportGenerationStatusError(
+        'Tax report generation status row is invalid',
+      )
+    }
+
+    return {
+      generationId: pointerless ? null : generationId as string,
+      state: row.state,
+      taxYear,
+      outcome,
+      createdAt: pointerless ? null : (createdAt as Date).toISOString(),
+      completedAt: completedAt?.toISOString() ?? null,
+      blockedReasonCode,
+      hasCurrentReport: row.has_current_report,
     }
   }
 }

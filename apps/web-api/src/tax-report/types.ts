@@ -49,6 +49,45 @@ export interface TaxReportReader {
   ): Promise<CurrentTaxReport | undefined>
 }
 
+export type TaxReportGenerationState =
+  | 'NOT_STARTED'
+  | 'BUILDING'
+  | 'ACTIVE'
+  | 'RETIRED'
+  | 'SUPERSEDED'
+
+export type TaxReportGenerationOutcome = 'REPORT' | 'NO_TAX_EVENTS'
+
+export type TaxReportGenerationBlockedReason =
+  | 'NOT_STARTED'
+  | 'APPLICATION_PENDING'
+  | 'GENERATION_BUILDING'
+  | 'GENERATION_RETIRED'
+  | 'GENERATION_NOT_ACTIVE'
+  | 'LEDGER_STALE'
+  | 'GENERATION_INCOMPLETE'
+  | 'NO_TAX_EVENTS'
+  | 'REPORT_NOT_CURRENT'
+
+export type TaxReportGenerationStatus = {
+  generationId: string | null
+  state: TaxReportGenerationState
+  taxYear: 2025 | 2026 | 2027
+  outcome: TaxReportGenerationOutcome | null
+  createdAt: string | null
+  completedAt: string | null
+  blockedReasonCode: TaxReportGenerationBlockedReason | null
+  hasCurrentReport: boolean
+}
+
+export interface TaxReportGenerationStatusReader {
+  readonly durable: boolean
+  getGenerationStatus(
+    subjectId: string,
+    taxYear: 2025 | 2026 | 2027,
+  ): Promise<TaxReportGenerationStatus | undefined>
+}
+
 export interface ReportPaymentTaxReportReader {
   readonly durable: boolean
   getCurrentForPayment(

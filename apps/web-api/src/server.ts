@@ -164,7 +164,12 @@ const start = async () => {
             sessionStore: new PostgresSessionStore(pool),
             rateLimitStore: new PostgresRateLimitStore(pool),
             accountAuthStore: new PostgresAccountAuthStore(pool),
-            ...(taxReportReader ? { taxReportReader } : {}),
+            ...(taxReportReader
+              ? {
+                  taxReportReader,
+                  taxReportGenerationStatusReader: taxReportReader,
+                }
+              : {}),
             ...(config.reportPayments && taxReportReader
               ? {
                   reportPaymentTaxReportReader:

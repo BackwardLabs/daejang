@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -20,13 +21,19 @@ import { fileURLToPath } from 'node:url'
 import {
   assertReportAttestationRuntimeInstalled,
   assertCleanGitCheckout,
+  assertUpbitCollectorStarted,
+  assertUpbitCollectorReleaseReplaceable,
   combinedJITConfigExpression,
   configureTaxUpbitQuoteRuntime,
+  changedTaxSubjectIDs,
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
   createActionRuntimeIdentity,
   createTaxProfiles,
   currentTaxProfileRowsQuery,
+  currentTaxProfileEpochRowsQuery,
+  currentTaxReportGenerationRowsQuery,
+  currentTaxReportGenerationEligibilityRowsQuery,
   collectRuntimeShareEntries,
   cronAutostartEntries,
   ensureRuntimeIndexerView,
@@ -37,8 +44,12 @@ import {
   hostEVMPostingWorkerEnvironment,
   hostActiveServiceOrder,
   hostTaxDBMigrationVersion,
+  hostTaxProfileRefreshIntervalMs,
+  hostTaxProfileRefreshRetryMs,
   hostTaxProfileStabilityPasses,
+  hostTaxSimulationYears,
   hostTaxQuoteRuntimeControls,
+  eligibleTaxReportGenerationSubjectIDs,
   isPrivateRuntimePath,
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
@@ -48,8 +59,15 @@ import {
   loadVerifiedActionRuntimeRelease,
   launchdServiceDomains,
   normalizeMultichainSnapshotIds,
+  normalizeTaxSubjectEpochs,
+  normalizeTaxReportGenerationPointers,
+  normalizeTaxReportGenerationEligibility,
   pauseForSignalShutdown,
+  pinnedGoModuleCommitPrefix,
   privateObjectWriteEnvironment,
+  planTaxProfileActivation,
+  planTaxProfileReconcile,
+  pruneTaxCandidateDirectories,
   finishSignalShutdown,
   finishSuperviseCommand,
   releaseProcessLock,
@@ -57,9 +75,12 @@ import {
   resolveJITArtifactPaths,
   runRestartOperation,
   runSignalShutdown,
+  runTaxReportGenerationSubjectMutations,
+  runUpbitCollectorStartOperation,
   resolveHostRuntimeGroup,
   resolveRuntimeGroupID,
   resolveRuntimeSubjectACLSource,
+  retiredTaxGenerationSubjectIDs,
   resolveSupervisorScript,
   rewriteCrontabLines,
   sharedRuntimeFileMode,
@@ -67,19 +88,45 @@ import {
   supervisorProcessSpec,
   taxBackfillArgs,
   taxQuotePrefetchArgs,
+  taxRuntimeIdentityMatches,
+  taxRuntimeIdentityResponseReady,
+  taxProfileRefreshNeeded,
   taxProfileSnapshotStable,
+  taxReportGenerationRebuildSubjectIDs,
+  taxReportGenerationRetrySubjectIDs,
+  taxSubjectRebuildArgs,
   tryAcquireProcessLock,
+  readUpbitCandleCollectorArchiveStatus,
+  upbitCandleCollectorArgs,
   validateTaxQuotePrefetchResult,
+  validateTaxSubjectRebuildResult,
 } from './host-backend.mjs'
 
 test('pins taxd to the current required database migration', () => {
-  assert.equal(hostTaxDBMigrationVersion, '71')
+  assert.equal(hostTaxDBMigrationVersion, '73')
   assert.match(
     readFileSync(
       new URL('../deploy/workers.runtime.env.example', import.meta.url),
       'utf8',
     ),
-    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=71$/mu,
+    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=73$/mu,
+  )
+})
+
+test('pins the declared Tax DB commit to the embedded Go module revision', () => {
+  assert.equal(
+    pinnedGoModuleCommitPrefix(
+      'require github.com/BackwardLabs/daejang-db v0.0.0-20260805061007-35ac546734bf\n',
+      'github.com/BackwardLabs/daejang-db',
+    ),
+    '35ac546734bf',
+  )
+  assert.throws(
+    () => pinnedGoModuleCommitPrefix(
+      'require github.com/BackwardLabs/daejang-db v1.2.3\n',
+      'github.com/BackwardLabs/daejang-db',
+    ),
+    /not pinned to a Git revision/,
   )
 })
 
@@ -161,11 +208,19 @@ test('rejects an attestation-enabled restart before service shutdown when its ru
 })
 
 test('rejects mutable semantic runtime checkouts before a production build', () => {
+  let inspectedArguments
   assert.doesNotThrow(() =>
-    assertCleanGitCheckout('/runtime', 'runtime', () => ({
-      status: 0,
-      stdout: '',
-    })),
+    assertCleanGitCheckout('/runtime', 'runtime', (_command, args) => {
+      inspectedArguments = args
+      return {
+        status: 0,
+        stdout: '',
+      }
+    }),
+  )
+  assert.deepEqual(
+    inspectedArguments,
+    ['status', '--porcelain', '--untracked-files=normal'],
   )
   assert.throws(
     () =>
@@ -174,6 +229,14 @@ test('rejects mutable semantic runtime checkouts before a production build', () 
         stdout: ' M scripts/transaction_adapter.py\n',
       })),
     /deploy a pinned clean checkout/,
+  )
+  assert.throws(
+    () =>
+      assertCleanGitCheckout('/runtime', 'runtime', () => ({
+        status: 0,
+        stdout: '?? cmd/rogue.go\n',
+      })),
+    /uncommitted or untracked changes/,
   )
 })
 
@@ -659,13 +722,23 @@ test('rejects unsupported or malformed tax-backfill years', () => {
   }
 })
 
-test('prefetches every subject before starting the single live quote runtime', () => {
+test('prefetches quote coverage and rebuilds every simulation year before taxd starts', () => {
+  assert.deepEqual(hostTaxSimulationYears, [2025, 2026, 2027])
   assert.deepEqual(taxQuotePrefetchArgs('subject-1'), [
     '-subject', 'subject-1',
     '-tax-year', '2027',
     '-apply',
     '-skip-rebuild',
   ])
+  assert.deepEqual(taxSubjectRebuildArgs('subject-1', 2025), [
+    '-subject', 'subject-1',
+    '-tax-year', '2025',
+    '-apply',
+  ])
+  assert.throws(
+    () => taxSubjectRebuildArgs('subject-1', 2024),
+    /integer from 2025 through 9999/,
+  )
   assert.deepEqual(hostTaxQuoteRuntimeControls(false), {
     DAEJANG_TAXD_UPBIT_ARCHIVE_ONLY: 'false',
     DAEJANG_TAXD_UPBIT_REQUEST_INTERVAL: '150ms',
@@ -681,21 +754,508 @@ test('prefetches every subject before starting the single live quote runtime', (
     /archive mode must be explicitly selected/,
   )
   assert.equal(hostTaxProfileStabilityPasses, 3)
+  assert.equal(hostTaxProfileRefreshIntervalMs, 30_000)
+  assert.equal(hostTaxProfileRefreshRetryMs, 60_000)
   assert.equal(
     taxProfileSnapshotStable(
-      { candidateDigest: 'digest-a' },
-      { candidateDigest: 'digest-a' },
+      {
+        candidateDigest: 'digest-a',
+        subjectEpochs: [{ subjectId: 'subject-1', ledgerEpoch: 'a'.repeat(64) }],
+      },
+      {
+        candidateDigest: 'digest-a',
+        subjectEpochs: [{ subjectId: 'subject-1', ledgerEpoch: 'a'.repeat(64) }],
+      },
     ),
     true,
   )
   assert.equal(
     taxProfileSnapshotStable(
-      { candidateDigest: 'digest-a' },
-      { candidateDigest: 'digest-b' },
+      {
+        candidateDigest: 'digest-a',
+        subjectEpochs: [{ subjectId: 'subject-1', ledgerEpoch: 'a'.repeat(64) }],
+      },
+      {
+        candidateDigest: 'digest-b',
+        subjectEpochs: [{ subjectId: 'subject-1', ledgerEpoch: 'a'.repeat(64) }],
+      },
+    ),
+    false,
+  )
+  assert.equal(
+    taxProfileSnapshotStable(
+      {
+        candidateDigest: 'digest-a',
+        subjectEpochs: [{ subjectId: 'subject-1', ledgerEpoch: 'a'.repeat(64) }],
+      },
+      {
+        candidateDigest: 'digest-a',
+        subjectEpochs: [{ subjectId: 'subject-1', ledgerEpoch: 'b'.repeat(64) }],
+      },
     ),
     false,
   )
   assert.equal(taxProfileSnapshotStable(null, null), false)
+})
+
+test('accepts only the exact ready Tax candidate identity', () => {
+  const candidateDigest = 'a'.repeat(64)
+  const identity = {
+    schemaVersion: 'tax.runtime-identity.v1',
+    candidateDigest,
+    ready: true,
+  }
+  assert.equal(taxRuntimeIdentityMatches(identity, candidateDigest), true)
+  assert.equal(
+    taxRuntimeIdentityMatches(JSON.stringify(identity), candidateDigest),
+    true,
+  )
+  assert.equal(
+    taxRuntimeIdentityMatches(
+      { ...identity, candidateDigest: 'b'.repeat(64) },
+      candidateDigest,
+    ),
+    false,
+  )
+  assert.equal(
+    taxRuntimeIdentityMatches({ ...identity, ready: false }, candidateDigest),
+    false,
+  )
+  assert.equal(
+    taxRuntimeIdentityMatches(
+      { ...identity, schemaVersion: 'tax.runtime-identity.v2' },
+      candidateDigest,
+    ),
+    false,
+  )
+  assert.equal(taxRuntimeIdentityMatches('not-json', candidateDigest), false)
+  assert.equal(taxRuntimeIdentityMatches(identity, 'not-a-digest'), false)
+  const response = {
+    status: 200,
+    contentType: 'application/json; charset=utf-8',
+    body: JSON.stringify(identity),
+  }
+  assert.equal(
+    taxRuntimeIdentityResponseReady(response, candidateDigest),
+    true,
+  )
+  assert.equal(
+    taxRuntimeIdentityResponseReady(
+      { ...response, status: 503 },
+      candidateDigest,
+    ),
+    false,
+  )
+  assert.equal(
+    taxRuntimeIdentityResponseReady(
+      { ...response, contentType: 'text/plain' },
+      candidateDigest,
+    ),
+    false,
+  )
+})
+
+test('retains the active and recent owned Tax candidates without following symlinks', () => {
+  const root = mkdtempSync(join(tmpdir(), 'giwa-tax-candidates-'))
+  const fileNames = [
+    'activation.json',
+    'ownership.json',
+    'policy.json',
+    'profiles.json',
+    'quotes.json',
+    'runtime.json',
+    'trust-key.pub',
+  ]
+  const createCandidate = (digest) => {
+    const directory = join(root, digest)
+    mkdirSync(directory)
+    for (const fileName of fileNames) {
+      writeFileSync(
+        join(directory, fileName),
+        fileName === 'runtime.json'
+          ? JSON.stringify({
+            schemaVersion: 'giwa.tax-runtime-candidate.v1',
+            candidateDigest: digest,
+          })
+          : '{}',
+      )
+    }
+  }
+  try {
+    const digests = ['a', 'b', 'c', 'd'].map((value) => value.repeat(64))
+    for (const digest of digests) createCandidate(digest)
+    const removed = pruneTaxCandidateDirectories({
+      root,
+      activeDigest: digests[0],
+      retainCount: 2,
+    })
+    assert.equal(removed.length, 2)
+    assert.equal(existsSync(join(root, digests[0])), true)
+    assert.equal(
+      readdirSync(root).filter((name) => /^[0-9a-f]{64}$/.test(name)).length,
+      2,
+    )
+
+    const target = join(root, 'untrusted-target')
+    mkdirSync(target)
+    const symlinkDigest = 'e'.repeat(64)
+    symlinkSync(target, join(root, symlinkDigest), 'dir')
+    assert.throws(
+      () => pruneTaxCandidateDirectories({
+        root,
+        activeDigest: digests[0],
+        retainCount: 2,
+      }),
+      /not an owned directory/,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('uses exact per-subject ledger fingerprints for bounded tax profile refresh', () => {
+  const activeDigest = 'a'.repeat(64)
+  const now = Date.parse('2027-01-01T00:00:00Z')
+  assert.match(
+    currentTaxProfileEpochRowsQuery,
+    /sha256\(/,
+  )
+  const epochOne = normalizeTaxSubjectEpochs([
+    { subject_id: 'subject-1', ledger_epoch: '1'.repeat(64) },
+  ])
+  const epochTwo = normalizeTaxSubjectEpochs([
+    { subject_id: 'subject-1', ledger_epoch: '2'.repeat(64) },
+    { subject_id: 'subject-2', ledger_epoch: '3'.repeat(64) },
+  ])
+  assert.deepEqual(epochOne, [
+    { subjectId: 'subject-1', ledgerEpoch: '1'.repeat(64) },
+  ])
+  assert.throws(
+    () => normalizeTaxSubjectEpochs([
+      { subject_id: 'subject-2', ledger_epoch: '1'.repeat(64) },
+      { subject_id: 'subject-1', ledger_epoch: '1'.repeat(64) },
+    ]),
+    /incomplete or unsorted/,
+  )
+  assert.deepEqual(
+    changedTaxSubjectIDs(epochOne, epochTwo, ['subject-1', 'subject-2']),
+    ['subject-1', 'subject-2'],
+  )
+  assert.deepEqual(
+    changedTaxSubjectIDs(epochTwo, [], ['subject-1']),
+    ['subject-1'],
+  )
+  assert.deepEqual(
+    changedTaxSubjectIDs(epochTwo, [], []),
+    [],
+  )
+
+  const active = {
+    status: 'ACTIVE',
+    candidateDigest: activeDigest,
+    subjectEpochs: epochOne,
+  }
+  assert.equal(taxProfileRefreshNeeded(active, epochOne, now), false)
+  assert.equal(taxProfileRefreshNeeded(active, epochTwo, now), true)
+  assert.equal(taxProfileRefreshNeeded({ status: 'NO_PROFILES' }, [], now), false)
+  assert.equal(taxProfileRefreshNeeded({ status: 'NO_PROFILES' }, epochOne, now), true)
+  assert.equal(taxProfileRefreshNeeded({
+    status: 'NO_PROFILES',
+    subjectEpochs: epochOne,
+  }, epochOne, now), false)
+  assert.equal(planTaxProfileReconcile({
+    state: active,
+    subjectEpochs: epochOne,
+    taxdRunning: false,
+    taxdReady: false,
+    now,
+  }), 'RESTART_TAXD')
+  assert.equal(planTaxProfileReconcile({
+    state: active,
+    subjectEpochs: epochTwo,
+    taxdRunning: true,
+    taxdReady: true,
+    now,
+  }), 'REFRESH_PROFILES')
+  assert.deepEqual(planTaxProfileActivation({
+    state: active,
+    runtime: {
+      candidateDigest: activeDigest,
+      subjectEpochs: epochTwo,
+      subjectIDs: ['subject-1', 'subject-2'],
+    },
+    action: 'REFRESH_PROFILES',
+  }), {
+    candidateChanged: false,
+    prefetch: true,
+    subjectIDs: ['subject-1', 'subject-2'],
+  })
+
+  assert.deepEqual(planTaxProfileActivation({
+    state: active,
+    runtime: {
+      candidateDigest: 'b'.repeat(64),
+      subjectEpochs: epochTwo,
+      subjectIDs: ['subject-1', 'subject-2'],
+    },
+    action: 'REFRESH_PROFILES',
+  }), {
+    candidateChanged: true,
+    prefetch: true,
+    subjectIDs: ['subject-1', 'subject-2'],
+  })
+  assert.equal(planTaxProfileReconcile({
+    state: {
+      status: 'ACTIVATING',
+      candidateDigest: activeDigest,
+      subjectEpochs: epochTwo,
+    },
+    subjectEpochs: epochTwo,
+    taxdRunning: false,
+    taxdReady: false,
+    now,
+  }), 'REFRESH_PROFILES')
+
+  const failed = {
+    status: 'FAILED',
+    candidateDigest: activeDigest,
+    subjectEpochs: epochTwo,
+    retryAt: '2027-01-01T00:01:00.000Z',
+  }
+  assert.equal(taxProfileRefreshNeeded(failed, epochTwo, now), false)
+  assert.equal(
+    taxProfileRefreshNeeded(
+      failed,
+      epochTwo,
+      now + hostTaxProfileRefreshRetryMs,
+    ),
+    true,
+  )
+})
+
+test('normalizes generation pointers and retires only removed profile subjects', () => {
+  assert.match(
+    currentTaxReportGenerationRowsQuery,
+    /reporting\.current_tax_report_generation/,
+  )
+  const pointers = normalizeTaxReportGenerationPointers([
+    {
+      subject_id: 'subject-1',
+      generation_id: '1'.repeat(64),
+      candidate_digest: '2'.repeat(64),
+      ledger_fingerprint: '3'.repeat(64),
+      state: 'ACTIVE',
+      pointer_version: '7',
+      annual_results_current: true,
+    },
+    {
+      subject_id: 'subject-2',
+      generation_id: '4'.repeat(64),
+      candidate_digest: '5'.repeat(64),
+      ledger_fingerprint: '6'.repeat(64),
+      state: 'RETIRED',
+      pointer_version: '8',
+      annual_results_current: false,
+    },
+    {
+      subject_id: 'subject-3',
+      generation_id: '7'.repeat(64),
+      candidate_digest: '8'.repeat(64),
+      ledger_fingerprint: '9'.repeat(64),
+      state: 'BUILDING',
+      pointer_version: '9',
+      annual_results_current: false,
+    },
+  ])
+  assert.deepEqual(pointers[0], {
+    subjectId: 'subject-1',
+    generationId: '1'.repeat(64),
+    candidateDigest: '2'.repeat(64),
+    ledgerFingerprint: '3'.repeat(64),
+    state: 'ACTIVE',
+    pointerVersion: 7,
+    annualResultsCurrent: true,
+  })
+  assert.deepEqual(
+    retiredTaxGenerationSubjectIDs(pointers, ['subject-3']),
+    ['subject-1'],
+  )
+  assert.deepEqual(
+    taxReportGenerationRetrySubjectIDs(
+      ['subject-1', 'subject-3'],
+      ['subject-2', 'subject-3'],
+    ),
+    ['subject-1', 'subject-2', 'subject-3'],
+  )
+  assert.deepEqual(
+    taxReportGenerationRebuildSubjectIDs(
+      pointers,
+      {
+        candidateDigest: '2'.repeat(64),
+        subjectIDs: ['subject-1', 'subject-2', 'subject-3', 'subject-4'],
+        subjectEpochs: [
+          { subjectId: 'subject-1', ledgerEpoch: '3'.repeat(64) },
+          { subjectId: 'subject-2', ledgerEpoch: '6'.repeat(64) },
+          { subjectId: 'subject-3', ledgerEpoch: '9'.repeat(64) },
+          { subjectId: 'subject-4', ledgerEpoch: 'a'.repeat(64) },
+        ],
+      },
+    ),
+    ['subject-2', 'subject-3', 'subject-4'],
+  )
+  assert.deepEqual(
+    taxReportGenerationRebuildSubjectIDs(
+      pointers,
+      {
+        candidateDigest: '2'.repeat(64),
+        subjectIDs: ['subject-1'],
+        subjectEpochs: [
+          { subjectId: 'subject-1', ledgerEpoch: 'b'.repeat(64) },
+        ],
+      },
+    ),
+    ['subject-1'],
+  )
+  assert.deepEqual(
+    taxReportGenerationRebuildSubjectIDs(
+      [{ ...pointers[0], annualResultsCurrent: false }],
+      {
+        candidateDigest: '2'.repeat(64),
+        subjectIDs: ['subject-1'],
+        subjectEpochs: [
+          { subjectId: 'subject-1', ledgerEpoch: '3'.repeat(64) },
+        ],
+      },
+    ),
+    ['subject-1'],
+  )
+  assert.throws(
+    () => normalizeTaxReportGenerationPointers([{
+      subject_id: 'subject-1',
+      generation_id: 'bad',
+      candidate_digest: '2'.repeat(64),
+      ledger_fingerprint: '3'.repeat(64),
+      state: 'ACTIVE',
+      pointer_version: '1',
+      annual_results_current: true,
+    }]),
+    /incomplete or unsorted/,
+  )
+})
+
+test('keeps all profile subjects but rebuilds only DB-eligible subjects', () => {
+  assert.match(
+    currentTaxReportGenerationEligibilityRowsQuery,
+    /reporting\.tax_report_generation_eligibility_read_v1/,
+  )
+  const eligibility = normalizeTaxReportGenerationEligibility([
+    { subject_id: 'subject-1', eligibility_status: 'ELIGIBLE' },
+    { subject_id: 'subject-2', eligibility_status: 'APPLICATION_PENDING' },
+    { subject_id: 'subject-3', eligibility_status: 'ELIGIBLE' },
+    { subject_id: 'subject-4', eligibility_status: 'APPLICATION_PENDING' },
+    { subject_id: 'subject-5', eligibility_status: 'ELIGIBLE' },
+    { subject_id: 'subject-6', eligibility_status: 'APPLICATION_PENDING' },
+  ])
+  const allProfileSubjectIDs = [
+    'subject-1',
+    'subject-2',
+    'subject-3',
+    'subject-4',
+    'subject-5',
+    'subject-6',
+  ]
+
+  assert.deepEqual(
+    eligibleTaxReportGenerationSubjectIDs(
+      eligibility,
+      allProfileSubjectIDs,
+      allProfileSubjectIDs,
+    ),
+    ['subject-1', 'subject-3', 'subject-5'],
+  )
+  assert.equal(allProfileSubjectIDs.length, 6)
+})
+
+test('excludes an application-pending subject again on a refresh retry', () => {
+  const allProfileSubjectIDs = ['subject-1', 'subject-2']
+  const refreshedEligibility = normalizeTaxReportGenerationEligibility([
+    { subject_id: 'subject-1', eligibility_status: 'ELIGIBLE' },
+    { subject_id: 'subject-2', eligibility_status: 'APPLICATION_PENDING' },
+  ])
+
+  assert.deepEqual(
+    eligibleTaxReportGenerationSubjectIDs(
+      refreshedEligibility,
+      allProfileSubjectIDs,
+      ['subject-2'],
+    ),
+    [],
+  )
+  assert.throws(
+    () => eligibleTaxReportGenerationSubjectIDs(
+      refreshedEligibility.slice(0, 1),
+      allProfileSubjectIDs,
+      allProfileSubjectIDs,
+    ),
+    /eligibility is missing for subject-2/,
+  )
+})
+
+test('rechecks eligibility before activation without dropping other subjects', () => {
+  const allProfileSubjectIDs = ['subject-1', 'subject-2']
+  const beforePrefetch = normalizeTaxReportGenerationEligibility([
+    { subject_id: 'subject-1', eligibility_status: 'ELIGIBLE' },
+    { subject_id: 'subject-2', eligibility_status: 'ELIGIBLE' },
+  ])
+  const beforeActivation = normalizeTaxReportGenerationEligibility([
+    { subject_id: 'subject-1', eligibility_status: 'ELIGIBLE' },
+    { subject_id: 'subject-2', eligibility_status: 'APPLICATION_PENDING' },
+  ])
+
+  assert.deepEqual(
+    eligibleTaxReportGenerationSubjectIDs(
+      beforePrefetch,
+      allProfileSubjectIDs,
+      allProfileSubjectIDs,
+    ),
+    allProfileSubjectIDs,
+  )
+  assert.deepEqual(
+    eligibleTaxReportGenerationSubjectIDs(
+      beforeActivation,
+      allProfileSubjectIDs,
+      allProfileSubjectIDs,
+    ),
+    ['subject-1'],
+  )
+})
+
+test('isolates per-subject generation mutations and fails closed on mutation errors', async () => {
+  const visited = []
+  const results = await runTaxReportGenerationSubjectMutations(
+    ['subject-3', 'subject-1', 'subject-2'],
+    async (subjectID) => {
+      visited.push(subjectID)
+      if (subjectID === 'subject-2') return undefined
+      return `${subjectID}-active`
+    },
+  )
+
+  assert.deepEqual(visited, ['subject-1', 'subject-2', 'subject-3'])
+  assert.deepEqual([...results], [
+    ['subject-1', 'subject-1-active'],
+    ['subject-3', 'subject-3-active'],
+  ])
+  await assert.rejects(
+    runTaxReportGenerationSubjectMutations(
+      ['subject-1', 'subject-2'],
+      async (subjectID) => {
+        if (subjectID === 'subject-2') throw new Error('real database error')
+        return true
+      },
+    ),
+    /real database error/,
+  )
 })
 
 test('accepts only completed quote-coverage results without downstream rebuild', () => {
@@ -729,6 +1289,76 @@ test('accepts only completed quote-coverage results without downstream rebuild',
   assert.throws(
     () => validateTaxQuotePrefetchResult('not-json', 'subject-1'),
     /invalid JSON/,
+  )
+})
+
+test('requires a Lot rebuild and matching annual Tax/Report outcome', () => {
+  const result = {
+    schemaVersion: 'tax.valuation-backfill-result.v1',
+    subjectId: 'subject-1',
+    taxYear: 2026,
+    dryRun: false,
+    persistedValuations: 0,
+    rebuiltLot: true,
+    rebuiltTax: false,
+    rebuiltReport: false,
+  }
+  assert.deepEqual(
+    validateTaxSubjectRebuildResult(
+      JSON.stringify(result),
+      'subject-1',
+      2026,
+    ),
+    {
+      persistedValuations: 0,
+      rebuiltLot: true,
+      rebuiltTax: false,
+      rebuiltReport: false,
+      report: null,
+    },
+  )
+  assert.deepEqual(
+    validateTaxSubjectRebuildResult(
+      JSON.stringify({
+        ...result,
+        rebuiltTax: true,
+        rebuiltReport: true,
+        reportId: 'report-2026',
+        reportPointerVersion: 7,
+      }),
+      'subject-1',
+      2026,
+    ).report,
+    { reportId: 'report-2026', pointerVersion: 7 },
+  )
+  assert.throws(
+    () => validateTaxSubjectRebuildResult(
+      JSON.stringify({ ...result, rebuiltLot: false }),
+      'subject-1',
+      2026,
+    ),
+    /failed its runtime contract/,
+  )
+  assert.throws(
+    () => validateTaxSubjectRebuildResult(
+      JSON.stringify({ ...result, rebuiltTax: true }),
+      'subject-1',
+      2026,
+    ),
+    /failed its runtime contract/,
+  )
+  assert.throws(
+    () => validateTaxSubjectRebuildResult(
+      JSON.stringify({
+        ...result,
+        rebuiltTax: true,
+        rebuiltReport: true,
+        reportId: 'report-2026',
+      }),
+      'subject-1',
+      2026,
+    ),
+    /failed its runtime contract/,
   )
 })
 
@@ -1489,6 +2119,154 @@ test('switching to launchd drops the marked entries and keeps the rest', () => {
 
 test('autostart tries the background user launchd domain after GUI', () => {
   assert.deepEqual(launchdServiceDomains(502), ['gui/502', 'user/502'])
+})
+
+test('collector uses bounded archive and public API safety controls', () => {
+  assert.deepEqual(upbitCandleCollectorArgs({
+    archiveRoot: '/srv/archive',
+    quoteConfig: '/srv/config/quotes.json',
+  }), [
+    '--archive-root', '/srv/archive',
+    '--quote-config', '/srv/config/quotes.json',
+    '--start-month', '2017-09',
+    '--priority-year', '2025',
+    '--request-interval', '750ms',
+    '--rate-limit-retries', '3',
+    '--http-timeout', '10s',
+    '--max-archive-bytes', '68719476736',
+    '--min-free-bytes', '34359738368',
+    '--max-tasks-per-run', '32',
+    '--poll-interval', '24h',
+  ])
+  assert.ok(!hostActiveServiceOrder().includes('upbit-candle-sync'))
+})
+
+test('collector-only release refuses to replace Tax binaries while core services run', () => {
+  assert.doesNotThrow(() => assertUpbitCollectorReleaseReplaceable([]))
+  assert.throws(
+    () => assertUpbitCollectorReleaseReplaceable(['taxd', 'web-api']),
+    /cannot replace Tax binaries while core services are running: taxd, web-api/,
+  )
+  assert.throws(
+    () => assertUpbitCollectorReleaseReplaceable('taxd'),
+    /service list is invalid/,
+  )
+})
+
+test('collector startup requires the exact spawned process to remain alive', () => {
+  assert.doesNotThrow(() => assertUpbitCollectorStarted(true))
+  assert.throws(
+    () => assertUpbitCollectorStarted(false),
+    /exited during startup; inspect backend:logs/,
+  )
+  assert.throws(
+    () => assertUpbitCollectorStarted('true'),
+    /exited during startup; inspect backend:logs/,
+  )
+})
+
+test('collector-only start prepares and restarts without a core lifecycle action', async () => {
+  const actions = []
+  await runUpbitCollectorStartOperation({
+    prepare: async () => actions.push('prepare'),
+    restart: async () => actions.push('restart-collector'),
+  })
+  assert.deepEqual(actions, ['prepare', 'restart-collector'])
+
+  let restarted = false
+  await assert.rejects(
+    runUpbitCollectorStartOperation({
+      prepare: async () => { throw new Error('build failed') },
+      restart: async () => { restarted = true },
+    }),
+    /build failed/,
+  )
+  assert.equal(restarted, false)
+  const packageDocument = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  )
+  assert.equal(
+    packageDocument.scripts['backend:upbit-collector-start'],
+    'node scripts/host-backend.mjs upbit-collector-start',
+  )
+})
+
+test('collector binary is covered by the prebuilt Tax release manifest', () => {
+  const source = readFileSync(
+    new URL('./host-backend.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.match(
+    source,
+    /upbitCandleSyncBinarySha256:\s*sha256\([\s\S]*?'upbit-candle-sync'/u,
+  )
+  assert.match(
+    source,
+    /!digest\(release\.upbitCandleSyncBinarySha256\)/u,
+  )
+  assert.match(
+    source,
+    /upbitCandleSyncQuoteConfigSha256:\s*sha256\([\s\S]*?upbitCandleCollectorQuoteConfigFile/u,
+  )
+  assert.match(
+    source,
+    /!digest\(release\.upbitCandleSyncQuoteConfigSha256\)/u,
+  )
+})
+
+test('collector archive status fails closed on corrupt state', () => {
+  const valid = readUpbitCandleCollectorArchiveStatus({
+    path: '/archive/state.json',
+    fileExists: () => true,
+    readFile: () => JSON.stringify({
+      schemaVersion: 'daejang.upbit-minute-bulk-state.v1',
+      status: 'SYNCING',
+      updatedAt: '2026-08-06T03:04:05Z',
+      archiveBytes: 1024,
+      quotaBytes: 2048,
+      completedPacks: 9,
+      nextMarket: 'KRW-BTC',
+      nextMonth: '2025-02',
+    }),
+  })
+  assert.deepEqual(valid, {
+    status: 'SYNCING',
+    updatedAt: '2026-08-06T03:04:05.000Z',
+    archiveBytes: 1024,
+    quotaBytes: 2048,
+    completedPacks: 9,
+    nextMarket: 'KRW-BTC',
+    nextMonth: '2025-02',
+    manualBlock: false,
+    blockedUntil: '',
+    lastError: '',
+  })
+  assert.deepEqual(readUpbitCandleCollectorArchiveStatus({
+    path: '/archive/state.json',
+    fileExists: () => true,
+    readFile: () => '{not-json',
+  }), { status: 'CORRUPT' })
+  assert.deepEqual(readUpbitCandleCollectorArchiveStatus({
+    path: '/archive/state.json',
+    fileExists: () => false,
+  }), { status: 'NOT_STARTED' })
+
+  const blocked = readUpbitCandleCollectorArchiveStatus({
+    path: '/archive/state.json',
+    fileExists: () => true,
+    readFile: () => JSON.stringify({
+      schemaVersion: 'daejang.upbit-minute-bulk-state.v1',
+      status: 'BLOCKED',
+      updatedAt: '2026-08-06T03:04:05Z',
+      archiveBytes: 4096,
+      quotaBytes: 8192,
+      manualBlock: true,
+      lastError: 'HTTP 418 requires operator review',
+    }),
+  })
+  assert.equal(blocked.status, 'BLOCKED')
+  assert.equal(blocked.manualBlock, true)
+  assert.equal(blocked.lastError, 'HTTP 418 requires operator review')
 })
 
 test('autostart uses a bounded host PATH without session tool directories', () => {

@@ -75,7 +75,10 @@ import {
   MemoryWalletSourceStore,
   type WalletSourceStore,
 } from './sources/wallet-source-store.js'
-import type { TaxReportReader } from './tax-report/types.js'
+import type {
+  TaxReportGenerationStatusReader,
+  TaxReportReader,
+} from './tax-report/types.js'
 import type {
   TaxEvidencePackReader,
   TaxReportModelReader,
@@ -102,6 +105,7 @@ type BuildAppOptions = {
   uploadStore?: UploadStore
   engineDataClient?: EngineDataClient
   taxReportReader?: TaxReportReader
+  taxReportGenerationStatusReader?: TaxReportGenerationStatusReader
   taxReportModelReader?: TaxReportModelReader
   taxEvidencePackReader?: TaxEvidencePackReader
   reportPaymentTaxReportReader?: ReportPaymentTaxReportReader
@@ -209,6 +213,14 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   }
   if (config.runtimeMode === 'production' && options.taxReportReader?.durable !== true) {
     throw new Error('A durable TaxReportReader is required in production')
+  }
+  if (
+    config.runtimeMode === 'production' &&
+    options.taxReportGenerationStatusReader?.durable !== true
+  ) {
+    throw new Error(
+      'A durable TaxReportGenerationStatusReader is required in production',
+    )
   }
   if (
     config.runtimeMode === 'production' &&
@@ -543,6 +555,9 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     if (options.taxReportReader) {
       await registerTaxReportRoutes(protectedApp, {
         reader: options.taxReportReader,
+        ...(options.taxReportGenerationStatusReader
+          ? { statusReader: options.taxReportGenerationStatusReader }
+          : {}),
       })
     }
     if (options.taxReportModelReader) {

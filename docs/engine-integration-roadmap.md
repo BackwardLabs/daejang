@@ -23,7 +23,9 @@
 | 미물질화 Observation 장부 조회 | 구현 | `OBSERVATION_ONLY`·`PARTIAL`, 실제 posting 생성 시 자동 제외 |
 | Source coverage 보고서 | 구현 | 연도별 거래·완료·예외 집계, 손익 `UNKNOWN`, private manifest |
 | DEX·CEX 통합 Lot·세금 Report | 구현 | 원본 generation member, 행별 CEX outcome, UNKNOWN·Review provenance 보존 |
-| Review delivery·anchor·Report gate·PDF | 후속 | delivery worker, anchor/application receipt, latest proof 일치, immutable manifest 필요 |
+| Report generation visibility·상태 API | 구현 | 2025·2026·2027 원자 활성화, exact report ID/pointer, live ledger, subject-wide V2 resolution fail-closed |
+| Report tax mode·기초재고 계약 | 후속 | `taxMode`·`basisTransitionPolicy`, Host `openingBalances`, 2027 법정 전환시가 evidence 필요 |
+| Review application·anchor·최종 proof gate·PDF | 후속 | typed action, application result, delivery worker, anchor receipt, latest proof 일치, immutable manifest 필요 |
 | 운영 환경 배포 | 배포 대기 | DB 변경 commit 배포, 인증서·DSN·Cloudflare `/api/*` route 필요 |
 
 ## 현재 실행 흐름
@@ -43,7 +45,10 @@ flowchart TD
   review --> resolution[Account-scoped Review resolution]
   resolution --> delivery[ReviewResolved V2 + durable delivery rows]
   delivery -. 후속 consumer 구현 전 .-> pending[재계산 대기]
-  tax --> report[Immutable Report snapshot]
+  tax --> report[Immutable Report snapshot + raw current pointer]
+  report --> host[Daejang Host가 연도별 exact identity 수집]
+  host --> generation[3개 연도 generation exact activation]
+  generation --> safe[Safe current/history view + status API]
 ```
 
 Upbit PDF의 매수·매도·입금·출금 행은 Source Evidence Observation으로 정규화되고,
@@ -54,8 +59,21 @@ DEX와 CEX의 원본 generation member를 보존한 하나의 연간 Report를 �
 현재 Tax 계산은 `SubjectEvidencePublished` 처리 시 실행됩니다. delivery row는 downstream
 handoff가 저장됐다는 뜻일 뿐이며, `ReviewResolved`를 소비해 Tax를 다시 계산하는 consumer는
 아직 구현되지 않았습니다. 따라서 delivery는 recalculation, anchor 또는 report delivery 완료
-신호가 아닙니다. parser가
+신호가 아닙니다. 현재 generation visibility gate는 subject의 V2 resolution이 하나라도 있으면
+delivery 상태와 무관하게 `APPLICATION_PENDING`으로 Report를 숨깁니다. 각 연도의
+`report_id`·`pointer_version`이 rebuild 결과와 정확히 일치하고 live ledger fingerprint가
+같을 때만 safe current view가 열립니다. Report 부재 이유는
+`GET /api/v1/tax-reports/:taxYear/status`에서 확인하며 raw current pointer나 `hasReport`
+boolean으로 추정하지 않습니다. parser가
 없는 문서는 성공한 거래 0건으로 위장하지 않고 지원 불가 실패로 종료해야 합니다.
+
+2025·2026은 2027의 연간 총평균·공제·세율을 사용하는 pre-effective simulation이지만,
+미래인 2026-12-31 가격을 취득가액에 소급하지 않습니다. 실제 2027 시행 전 보유분에는
+법정 opening basis가 필요합니다. 현재 Host profile은 `openingBalances`를 공급하지 않으므로
+해당 basis가 없으면 Tax Engine이 `UNKNOWN_DISPOSAL_BASIS`로 차단합니다. 이 opening의
+법정 시가는 Upbit 단독 캔들이 아니라 시가고시가상자산사업자 공시가격 평균을 근거로 해야
+하며, Report API도 `taxMode`와 `basisTransitionPolicy`를 명시적으로 전달해야 합니다.
+가격 근거는 [국세청 가상자산 과세 안내](https://g.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=238935&mi=40370)를 따릅니다.
 
 세부 매핑과 재처리 불변조건은 [Upbit PDF Observation 정규화](upbit-observation-pipeline.md), 통합 계산과 증빙 연결은 [DEX·CEX 통합 세금 보고서 흐름](dex-cex-tax-report-flow.md)을 따릅니다.
 

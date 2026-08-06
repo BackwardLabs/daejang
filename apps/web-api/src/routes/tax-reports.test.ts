@@ -2,8 +2,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildApp } from '../app.js'
 import type { AppConfig } from '../config.js'
-import type { CurrentTaxReport, TaxReportFinality, TaxReportReader } from '../tax-report/types.js'
-import { CorrectionPendingError } from '../tax-report/postgres-tax-report-reader.js'
+import type {
+  CurrentTaxReport,
+  TaxReportFinality,
+  TaxReportGenerationStatus,
+  TaxReportGenerationStatusReader,
+  TaxReportReader,
+} from '../tax-report/types.js'
+import {
+  CorrectionPendingError,
+  InconsistentTaxReportGenerationStatusError,
+} from '../tax-report/postgres-tax-report-reader.js'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 const OTHER_USER_ID = '00000000-0000-4000-8000-000000000002'
@@ -59,16 +68,44 @@ const fixture: CurrentTaxReport = {
   summary: { gainLoss: { status: 'KNOWN', amount: '0' }, taxableBase: { status: 'UNKNOWN' }, nationalTax: { status: 'UNKNOWN' }, localTax: { status: 'UNKNOWN' }, totalTax: { status: 'UNKNOWN' } },
 }
 
-class FakeTaxReportReader implements TaxReportReader {
+const generationStatusFixture: TaxReportGenerationStatus = {
+  generationId: 'b'.repeat(64),
+  state: 'BUILDING',
+  taxYear: 2027,
+  outcome: null,
+  createdAt: '2028-01-09T00:00:00.000Z',
+  completedAt: null,
+  blockedReasonCode: 'GENERATION_BUILDING',
+  hasCurrentReport: false,
+}
+
+class FakeTaxReportReader
+  implements TaxReportReader, TaxReportGenerationStatusReader
+{
   readonly durable = true
   calls: Array<{ subjectId: string; taxYear: number; finality: TaxReportFinality; residentId?: string }> = []
+  statusCalls: Array<{
+    subjectId: string
+    taxYear: 2025 | 2026 | 2027
+  }> = []
   value: CurrentTaxReport | undefined = fixture
+  statusValue: TaxReportGenerationStatus | undefined = generationStatusFixture
   failure: Error | undefined
+  statusFailure: Error | undefined
 
   async getCurrent(subjectId: string, taxYear: number, finality: TaxReportFinality, residentId?: string) {
     this.calls.push({ subjectId, taxYear, finality, ...(residentId ? { residentId } : {}) })
     if (this.failure) throw this.failure
     return this.value
+  }
+
+  async getGenerationStatus(
+    subjectId: string,
+    taxYear: 2025 | 2026 | 2027,
+  ) {
+    this.statusCalls.push({ subjectId, taxYear })
+    if (this.statusFailure) throw this.statusFailure
+    return this.statusValue
   }
 }
 
@@ -78,7 +115,12 @@ describe('current tax report route', () => {
 
   beforeEach(async () => {
     reader = new FakeTaxReportReader()
-    context = await buildApp({ config, logger: false, taxReportReader: reader })
+    context = await buildApp({
+      config,
+      logger: false,
+      taxReportReader: reader,
+      taxReportGenerationStatusReader: reader,
+    })
   })
 
   afterEach(async () => context.app.close())
@@ -153,5 +195,100 @@ describe('current tax report route', () => {
     expect(response.statusCode).toBe(503)
     expect(response.json()).toMatchObject({ error: { code: 'CORRECTION_PENDING' } })
     expect(response.body).not.toContain(OTHER_USER_ID)
+  })
+
+  it('returns the generation gate reason from the authenticated subject only', async () => {
+    const { token } = await createSession()
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/status',
+      headers: {
+        cookie: `${config.sessionCookieName}=${token}`,
+        'x-user-id': OTHER_USER_ID,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(reader.statusCalls).toEqual([
+      { subjectId: USER_ID, taxYear: 2027 },
+    ])
+    expect(response.json()).toEqual({ status: generationStatusFixture })
+    expect(response.body).not.toContain(USER_ID)
+    expect(response.body).not.toContain(OTHER_USER_ID)
+  })
+
+  it('returns NOT_STARTED instead of 404 when no generation exists', async () => {
+    reader.statusValue = undefined
+    const { token } = await createSession()
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2025/status',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      status: {
+        generationId: null,
+        state: 'NOT_STARTED',
+        taxYear: 2025,
+        outcome: null,
+        createdAt: null,
+        completedAt: null,
+        blockedReasonCode: 'NOT_STARTED',
+        hasCurrentReport: false,
+      },
+    })
+  })
+
+  it('returns the DB-owned application-pending state without inventing a generation', async () => {
+    reader.statusValue = {
+      generationId: null,
+      state: 'NOT_STARTED',
+      taxYear: 2027,
+      outcome: null,
+      createdAt: null,
+      completedAt: null,
+      blockedReasonCode: 'APPLICATION_PENDING',
+      hasCurrentReport: false,
+    }
+    const { token } = await createSession()
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/status',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ status: reader.statusValue })
+  })
+
+  it('rejects unsupported status years before storage access', async () => {
+    const { token } = await createSession()
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2028/status',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(reader.statusCalls).toHaveLength(0)
+  })
+
+  it('fails closed when the persisted generation status is inconsistent', async () => {
+    reader.statusFailure = new InconsistentTaxReportGenerationStatusError(
+      'invalid status row',
+    )
+    const { token } = await createSession()
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2027/status',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({
+      error: { code: 'TAX_REPORT_STATUS_INCONSISTENT' },
+    })
   })
 })

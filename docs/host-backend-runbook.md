@@ -4,6 +4,8 @@
 sync worker, SOURCE/CEX Posting worker, JIT/EVM Posting worker, Web API를 Docker
 애플리케이션 이미지 없이 한 명령으로 관리한다.
 PostgreSQL만 기존 `daejang-db` Compose 서비스를 사용한다.
+Tax Engine이 직접 읽는 Upbit 분봉 아카이브 수집기도 같은 supervisor가 감시하지만,
+백엔드의 start/stop dependency set과는 분리한다.
 
 ## 준비
 
@@ -103,6 +105,77 @@ cron fallback의 1분 watchdog은 프로세스 이름 검색을 사용하지 않
 기록된 PID와 실제 명령 신원을 검사한다. supervisor가 강제 종료되어 stale lock이
 남아도 다른 프로세스가 해당 PID·명령을 소유하지 않음을 확인한 뒤 lock을 회수하고
 monitor만 다시 시작한다.
+
+### Upbit 과거 시세 수집기
+
+`backend:start`와 `backend:restart`는 `upbit-candle-sync`를 빌드하고
+quote config를 runtime에 복사한 다음 `tax-binary-release.json`에 두 파일의 SHA-256을
+함께 고정한다. 그 뒤 실행 중인 구 수집기를 종료하고 검증된 새 runtime으로 교체한다.
+supervisor는 이후 수집기 PID와 실제 명령 신원을 1분 재시도 간격으로 감시한다. 이
+감시는 core readiness와 독립적이므로 다음 규칙을 지킨다.
+
+core와 `taxd`를 아직 켜지 않고 가격 수집만 먼저 시작하는 최초 배포는 clean checkout에서
+다음 두 명령을 사용한다.
+
+```bash
+npm run backend:upbit-collector-start
+npm run backend:install-autostart
+npm run backend:status
+```
+
+첫 명령은 현재 `paused` marker를 지우지 않고 core service를 시작하지 않는다. 대신 같은
+Tax commit의 `taxd`, `tax-backfill`, `upbit-candle-sync`를 함께 빌드하고 quote config와
+release manifest를 검증한 뒤 수집기만 시작한다. Git에 추적된 변경뿐 아니라 ignore되지
+않은 untracked build input도 있으면 이 단계는 실패한다. 새 PID와 실제 명령 신원이 1초 뒤에도
+살아 있어 즉시 종료하지 않았음을 확인해야 첫 명령이 성공한다. 두 번째 명령은 기존 supervisor를 이
+clean checkout으로 교체한다. 새 supervisor는 pause 상태에서도 수집기를 복구하지만 core와
+`taxd`는 계속 멈춰 둔다. 공유 Tax 바이너리를 실행 중에 바꾸지 않도록 collector-only
+명령은 core service가 하나라도 실행 중이면 실패한다. core가 이미 실행 중인 배포는
+`backend:restart`로 전체 release를 원자적으로 교체한다.
+
+- `backend:stop`은 Web API·Engine·taxd 등 dependency set만 멈추며 가격 수집기는
+  계속 실행한다.
+- `backend:start`와 `backend:restart`는 성공한 새 빌드가 있을 때 가격 수집기를
+  교체한다.
+- launchd를 사용할 수 없는 호스트에서도 기존 supervisor cron fallback이 가격
+  수집기를 함께 복구한다. 별도의 collector LaunchAgent나 cron entry는 만들지 않는다.
+- 수집기 실패는 core 서비스를 내리지 않는다. 대신 `backend:status`의
+  `upbit-candle-sync` 행과 `backend:logs`의 `upbit-candle-sync.log`에서 독립적으로
+  확인한다.
+
+저장 경로는 일반 PostgreSQL data directory와 분리된 다음 위치다.
+
+```text
+~/Library/Application Support/GIWA/production/quote-archive/upbit/bulk-v1
+```
+
+수집기는 인증키가 필요 없는 Upbit 공개 Quotation API를 사용한다. 매 catalog 갱신 때
+현재 전체 거래쌍을 보존하고, 모든 현재 base token에 대해 `KRW → USDT → BTC` 우선순위로
+대표 market 하나를 선택한다. 2025년을 먼저 채운 뒤 최신 완료 월부터 과거
+`2017-09`까지 수집한다. 완료된 UTC 월은 deterministic gzip pack과 SHA-256 index로
+고정하며 현재 진행 중인 월은 bulk pack으로 확정하지 않는다.
+
+운영 안전 한도는 다음과 같다.
+
+- 요청 간격: `750ms`
+- 네트워크·`429`·일시적 `5xx` 재시도: 최대 3회
+- 한 요청 timeout: `10s`
+- catalog 재확인 전 신규 월 task: 최대 32개
+- 완료 상태 재확인: 24시간
+- `bulk-v1` hard quota: 64 GiB
+- host filesystem free-space floor: 32 GiB
+
+`backend:status`는 프로세스 상태와 함께 `archive`, 마지막 갱신 시각, 사용량/한도,
+이번 실행에서 생성한 pack 수, 다음 market/month를 출력한다. `CORRUPT`, `FAILED`,
+`BLOCKED`를 정상으로 취급하지 않는다. `HTTP 418`의 차단 만료를 안전하게 해석할 수
+없으면 `manual-block=true`로 영구 latch한다. 이 경우 Upbit 접근 제한이 실제로 해제된
+것을 운영자가 확인하고, incident 증거로 `bulk-v1/state.json`을 별도 보존한 뒤에만
+수집기 프로세스와 state를 수동 복구한다. state만 지워 차단을 우회하거나 재시도를
+반복하지 않는다.
+
+현재 세금 계산에 바로 사용할 수 있는 것은 KRW 대표 market뿐이다. USDT/BTC 대표
+market은 향후 명시적인 교차환율 정책과 검증을 추가하기 전까지 수집·보존만 하고
+Tax Engine의 KRW 평가 입력으로 승격하지 않는다.
 
 SOURCE Posting worker는 `SOURCE` publication을 소비해 CEX Event·Posting·Relation을
 원자적으로 저장한다. 시작 시 signed `normal-single-writer` policy로 한 번의 bounded

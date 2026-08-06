@@ -358,6 +358,9 @@ export const assertTaxReportSchema = async (pool: Pool) => {
   const result = await pool.query<{
     report_table: string | null
     current_table: string | null
+    activated_read_view: string | null
+    current_read_view: string | null
+    generation_status_read_view: string | null
     contract_version: string | null
     migration_version: string | null
     reporting_usage: boolean
@@ -366,10 +369,19 @@ export const assertTaxReportSchema = async (pool: Pool) => {
     report_write: boolean
     current_select: boolean
     current_write: boolean
+    activated_read_select: boolean
+    activated_read_write: boolean
+    current_read_select: boolean
+    current_read_write: boolean
+    generation_status_read_select: boolean
+    generation_status_read_write: boolean
   }>(`
     SELECT
       to_regclass('reporting.tax_report')::text AS report_table,
       to_regclass('reporting.current_tax_report')::text AS current_table,
+      to_regclass('reporting.activated_tax_report_read_v1')::text AS activated_read_view,
+      to_regclass('reporting.current_tax_report_read_v1')::text AS current_read_view,
+      to_regclass('reporting.current_tax_report_generation_status_read_v1')::text AS generation_status_read_view,
       (SELECT contract_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS contract_version,
       (SELECT migration_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS migration_version,
       has_schema_privilege(current_user, 'reporting', 'USAGE') AS reporting_usage,
@@ -377,20 +389,36 @@ export const assertTaxReportSchema = async (pool: Pool) => {
       has_table_privilege(current_user, 'reporting.tax_report', 'SELECT') AS report_select,
       has_table_privilege(current_user, 'reporting.tax_report', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS report_write,
       has_table_privilege(current_user, 'reporting.current_tax_report', 'SELECT') AS current_select,
-      has_table_privilege(current_user, 'reporting.current_tax_report', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS current_write
+      has_table_privilege(current_user, 'reporting.current_tax_report', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS current_write,
+      has_table_privilege(current_user, 'reporting.activated_tax_report_read_v1', 'SELECT') AS activated_read_select,
+      has_table_privilege(current_user, 'reporting.activated_tax_report_read_v1', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS activated_read_write,
+      has_table_privilege(current_user, 'reporting.current_tax_report_read_v1', 'SELECT') AS current_read_select,
+      has_table_privilege(current_user, 'reporting.current_tax_report_read_v1', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS current_read_write,
+      has_table_privilege(current_user, 'reporting.current_tax_report_generation_status_read_v1', 'SELECT') AS generation_status_read_select,
+      has_table_privilege(current_user, 'reporting.current_tax_report_generation_status_read_v1', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS generation_status_read_write
   `)
   const row = result.rows[0]
   if (
     row?.report_table !== 'reporting.tax_report' ||
     row.current_table !== 'reporting.current_tax_report' ||
+    row.activated_read_view !== 'reporting.activated_tax_report_read_v1' ||
+    row.current_read_view !== 'reporting.current_tax_report_read_v1' ||
+    row.generation_status_read_view !==
+      'reporting.current_tax_report_generation_status_read_v1' ||
     row.contract_version !== '1' ||
-    row.migration_version !== '62' ||
+    row.migration_version !== '73' ||
     !row.reporting_usage ||
     row.reporting_create ||
-    !row.report_select ||
+    row.report_select ||
     row.report_write ||
-    !row.current_select ||
-    row.current_write
+    row.current_select ||
+    row.current_write ||
+    !row.activated_read_select ||
+    row.activated_read_write ||
+    !row.current_read_select ||
+    row.current_read_write ||
+    !row.generation_status_read_select ||
+    row.generation_status_read_write
   ) {
     throw new Error('tax report persistence migration contract is invalid')
   }

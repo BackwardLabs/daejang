@@ -13,7 +13,10 @@ import { EngineRpcError } from './engine/rpc-error.js'
 import { status as grpcStatus } from '@grpc/grpc-js'
 import type { EngineDataClient } from './routes/data.js'
 import type { CreateUpload, UploadSession, UploadStore } from './uploads/upload-store.js'
-import type { TaxReportReader } from './tax-report/types.js'
+import type {
+  TaxReportGenerationStatusReader,
+  TaxReportReader,
+} from './tax-report/types.js'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 
@@ -75,9 +78,14 @@ class TestDurableAccountAuthStore extends MemoryAccountAuthStore {
   override readonly durable = true
 }
 
-class TestDurableTaxReportReader implements TaxReportReader {
+class TestDurableTaxReportReader
+  implements TaxReportReader, TaxReportGenerationStatusReader
+{
   readonly durable = true
   async getCurrent() {
+    return undefined
+  }
+  async getGenerationStatus() {
     return undefined
   }
 }
@@ -1058,6 +1066,24 @@ describe('web api authentication boundary', () => {
       }),
     ).rejects.toThrow('durable TaxReportReader')
 
+    const productionTaxReportReader = new TestDurableTaxReportReader()
+    await expect(
+      buildApp({
+        config: {
+          ...config,
+          runtimeMode: 'production',
+          secureCookies: true,
+          sessionCookieName: '__Host-daejang_session',
+        },
+        logger: false,
+        sessionStore: new TestDurableSessionStore(),
+        rateLimitStore: new TestDurableRateLimitStore(),
+        walletSourceStore: new TestDurableWalletSourceStore(),
+        accountAuthStore: new TestDurableAccountAuthStore(),
+        taxReportReader: productionTaxReportReader,
+      }),
+    ).rejects.toThrow('durable TaxReportGenerationStatusReader')
+
     const productionContext = await buildApp({
       config: {
         ...config,
@@ -1070,7 +1096,8 @@ describe('web api authentication boundary', () => {
       rateLimitStore: new TestDurableRateLimitStore(),
       walletSourceStore: new TestDurableWalletSourceStore(),
       accountAuthStore: new TestDurableAccountAuthStore(),
-      taxReportReader: new TestDurableTaxReportReader(),
+      taxReportReader: productionTaxReportReader,
+      taxReportGenerationStatusReader: productionTaxReportReader,
     })
     const health = await productionContext.app.inject('/healthz')
     expect(health.headers['strict-transport-security']).toBe(

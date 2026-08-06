@@ -328,12 +328,12 @@ function ReviewTechnicalDetails({ review }: { review: ReviewDetailModel }) {
   </details>
 }
 
-function ReviewCompletionNotice({ resolution }: { resolution: string }) {
+function ReviewSubmissionNotice({ resolution }: { resolution: string }) {
   return <section className="ledger-review-completion" role="status" aria-live="polite">
     <span className="ledger-review-completion__icon" aria-hidden="true">✓</span>
     <span>
-      <strong>검토 처리 완료</strong>
-      <small>‘{resolution}’ 항목으로 장부에 반영했습니다</small>
+      <strong>검토 응답 저장 완료 · 장부 반영 대기</strong>
+      <small>‘{resolution}’ 응답을 저장했습니다</small>
     </span>
   </section>
 }
@@ -1210,7 +1210,7 @@ export function LedgerPage() {
 
         {reviewStatus === 'ready' && view === 'review' ? (
           <>
-            {reviewCompletion ? <ReviewCompletionNotice resolution={reviewCompletion} /> : null}
+            {reviewCompletion ? <ReviewSubmissionNotice resolution={reviewCompletion} /> : null}
             {reviews.length === 0 ? <section className="ledger-state-card ledger-state-card--empty"><h2>열린 검토가 없습니다</h2><p>추가 확인이 필요한 거래가 생기면 사유와 근거가 여기에 표시됩니다</p></section> :
             <section className="ledger-review-browser" aria-label="열린 검토">
             <div className="ledger-review-browser__list" tabIndex={0} aria-label="검토 항목 목록">
@@ -1286,7 +1286,7 @@ export function LedgerPage() {
                   {resolutionStatus === 'conflict' ? <p role="alert">같은 요청을 처리하는 중 내용이 달라졌습니다. 최신 내용을 확인한 뒤 다시 제출해 주세요.</p> : null}
                   {resolutionStatus === 'reanalyze' ? <p role="alert">이 검토에는 필요한 분석 정보가 없어 응답을 저장하지 않았습니다. 운영팀이 데이터 준비 상태를 확인해야 합니다.</p> : null}
                   {resolutionStatus === 'error' ? <p role="alert">응답을 저장하지 못했습니다. 같은 요청으로 다시 시도할 수 있습니다.</p> : null}
-                </form> : <ReviewCompletionNotice resolution={describeReviewResolution(reviewDetail)} />}
+                </form> : <ReviewSubmissionNotice resolution={describeReviewResolution(reviewDetail)} />}
                 <ReviewTechnicalDetails review={reviewDetail} />
               </article> : null}
             </div>

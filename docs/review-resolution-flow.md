@@ -5,7 +5,9 @@ revision과 ReviewRoom·application engine 전달 대기열까지 안전하게 �
 현재 구현 경계를 설명한다. `BackwardLabs/daejang-reviewroom`에는
 `REVIEWROOM` delivery worker, strict canonical V2 ingest와 Anchor Worker가
 구현되어 있다. `APPLICATION_ENGINE` worker, Report gate와 최종 PDF 생성은
-아직 후속 의존성이다.
+아직 후속 의존성이다. 여기서 후속인 Report gate는 application result와 proof까지
+확인하는 최종 gate를 뜻한다. durable result가 없는 V2 resolution을 사용자 Report에서
+가리는 보수적인 generation visibility gate와 상태 API는 이미 구현돼 있다.
 
 ## 구현된 경계
 
@@ -135,6 +137,7 @@ Anchor Worker가 온체인 proof를 발행한다. 별도 `APPLICATION_ENGINE` ro
   내부 필드를 해석하지 않는다.
 - `GET /api/v1/reviews/:reviewId`: account-scoped 상세 조회
 - `POST /api/v1/reviews/:reviewId/resolutions`: CAS 기반 해결
+- `GET /api/v1/tax-reports/:taxYear/status`: current Report가 없거나 가려진 이유 조회
 - 첫 성공은 `201`, 동일 intent replay는 `200`
 - missing detail은 `404`, stale/not-open/intent conflict는 각 안전한 `409`
 
@@ -157,10 +160,33 @@ delivery와 anchored receipt가 없으므로 proof-complete가 아니다. 향후
 모든 역사 Review가 아니라 해당 Report가 고정한 최신 analysis execution/generation의
 required Review set만 평가하고, V1-only 행을 Manifest 후보로 선택하지 않아야 한다.
 
+이 문단은 목표 계약이다. migration 73의 generation visibility gate는
+`application_result`가 아직 없기 때문에 더 보수적이다. subject에
+`review.resolution_event_v2`가 하나라도 있으면 tax year, generation, delivery 상태와
+무관하게 `APPLICATION_PENDING`으로 차단한다. `DELIVERED`도 transport ACK일 뿐 장부 적용
+성공이 아니므로 gate를 열지 않는다. 향후 resolution별 immutable application result가
+`APPLIED` 또는 증명 가능한 `NO_OP`, resulting ledger fingerprint와 그 결과를 사용한
+Report rebuild를 결합한 뒤에만 required Review set 단위로 범위를 좁힌다.
+
+Host는 모든 current ledger subject를 Tax profile에 유지한다. 다만 generation lifecycle은
+DB의 `tax_report_generation_eligibility_read_v1`을 기준으로 삼아
+`APPLICATION_PENDING` subject를 begin·prefetch·rebuild·activation에서 제외한다. 이
+eligibility는 최초 기동뿐 아니라 profile refresh와 retry, prefetch 중 snapshot 재확인에도
+다시 평가한다.
+
+현재 generation activation은 subject별 transaction에서 2025·2026·2027을 함께 전환한다.
+한 subject의 실패나 적용 대기는 다른 subject의 transaction을 롤백하지 않는다. Report가
+생긴 연도는 rebuild가 반환한 정확한 `report_id`와 `report_pointer_version`이 raw current
+pointer와 일치해야 하고, `NULL/NULL`인 연도는 DB가 해당 한국 과세연도에 current Event가
+없음을 확인한 뒤 `NO_TAX_EVENTS`로 기록한다. Web은 raw current pointer가 아니라
+generation-gated safe view를 읽고, Report가 보이지 않을 때는 status endpoint의
+`blockedReasonCode`를 사용한다.
+
 ## 아직 구현하지 않은 후속 의존성
 
-현재 완료는 “사용자 응답 revision과 전달할 V2 event가 durable하다”는 뜻이며
-“온체인 proof가 확정됐다”는 뜻이 아니다. 최종 Report/PDF를 열기 전에 별도
+현재 Review 완료는 “사용자 응답 revision과 전달할 V2 event가 durable하다”는 뜻이며
+”장부 반영이나 온체인 proof가 확정됐다”는 뜻이 아니다. 현재 generation visibility
+gate는 이 상태를 fail-closed로 숨기지만, 최종 Report/PDF를 안전하게 열기 전에 별도
 구현에서 최소한 다음 조건을 검사해야 한다.
 
 1. 모든 필수 Review에 최신 사용자 응답과 ReviewResolved V2 event가 존재하고,

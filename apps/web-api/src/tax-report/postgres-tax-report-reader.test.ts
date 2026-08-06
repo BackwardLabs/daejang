@@ -6,6 +6,7 @@ import {
   AmbiguousCurrentTaxReportError,
   canonicalCorrectionArtifact,
   CorrectionPendingError,
+  InconsistentTaxReportGenerationStatusError,
   InconsistentTaxReportError,
   PostgresTaxReportReader,
 } from './postgres-tax-report-reader.js'
@@ -38,6 +39,28 @@ const reportRow = {
   local_tax_amount: null,
   total_tax_status: 'UNKNOWN',
   total_tax_amount: null,
+} as const
+const generationStatusRow = {
+  subject_id: 'subject-1',
+  generation_id: 'b'.repeat(64),
+  state: 'ACTIVE',
+  tax_year: 2027,
+  outcome: 'REPORT',
+  created_at: new Date('2028-01-09T00:00:00.000Z'),
+  completed_at: new Date('2028-01-10T00:00:00.000Z'),
+  blocked_reason_code: null,
+  has_current_report: true,
+} as const
+const applicationPendingStatusRow = {
+  subject_id: 'subject-1',
+  generation_id: null,
+  state: 'NOT_STARTED',
+  tax_year: 2027,
+  outcome: null,
+  created_at: null,
+  completed_at: null,
+  blocked_reason_code: 'APPLICATION_PENDING',
+  has_current_report: false,
 } as const
 const { privateKey, publicKey } = generateKeyPairSync('ed25519')
 const receiptDigest = 'a'.repeat(64)
@@ -110,8 +133,10 @@ describe('PostgresTaxReportReader', () => {
 
     expect(query).toHaveBeenCalledTimes(1)
     const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]]
-    expect(sql).toContain('reporting.current_tax_report')
-    expect(sql).toContain('reporting.tax_report')
+    expect(sql).toContain('reporting.current_tax_report_read_v1')
+    expect(sql).not.toMatch(/FROM\s+reporting\.current_tax_report\s/)
+    expect(sql).toContain('reporting.activated_tax_report_read_v1')
+    expect(sql).not.toMatch(/JOIN\s+reporting\.tax_report\s/)
     expect(sql).not.toMatch(/(?:FROM|JOIN)\s+tax\./)
     expect(params).toEqual(['subject-1', 2027, 'FINAL', 'resident-1'])
     expect(report).toMatchObject({
@@ -133,6 +158,16 @@ describe('PostgresTaxReportReader', () => {
     )
   })
 
+  it('returns no current or payment report while the generation gate is closed', async () => {
+    const { reader } = readerWithRows([])
+    await expect(
+      reader.getCurrent('subject-1', 2027, 'FINAL', 'resident-1'),
+    ).resolves.toBeUndefined()
+    await expect(
+      reader.getCurrentForPayment('subject-1', 2027, 'FINAL', 'resident-1'),
+    ).resolves.toBeUndefined()
+  })
+
   it('rejects an amount whose status and persisted value disagree', async () => {
     const { reader } = readerWithRows([{
       ...reportRow,
@@ -143,6 +178,98 @@ describe('PostgresTaxReportReader', () => {
       InconsistentTaxReportError,
     )
   })
+
+  it('reads one subject-scoped status using only the Web-safe generation view', async () => {
+    const { query, reader } = readerWithRows([generationStatusRow])
+    const status = await reader.getGenerationStatus('subject-1', 2027)
+
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]]
+    expect(sql).toContain(
+      'reporting.current_tax_report_generation_status_read_v1',
+    )
+    expect(sql).not.toMatch(
+      /(?:FROM|JOIN)\s+reporting\.(?:tax_report_generation|current_tax_report_generation|tax_report)\s/,
+    )
+    expect(params).toEqual(['subject-1', 2027])
+    expect(status).toEqual({
+      generationId: 'b'.repeat(64),
+      state: 'ACTIVE',
+      taxYear: 2027,
+      outcome: 'REPORT',
+      createdAt: '2028-01-09T00:00:00.000Z',
+      completedAt: '2028-01-10T00:00:00.000Z',
+      blockedReasonCode: null,
+      hasCurrentReport: true,
+    })
+  })
+
+  it('returns no status when the subject has no current generation', async () => {
+    const { reader } = readerWithRows([])
+    await expect(
+      reader.getGenerationStatus('subject-1', 2025),
+    ).resolves.toBeUndefined()
+  })
+
+  it('reads an explicit pointerless application-pending status', async () => {
+    const { reader } = readerWithRows([applicationPendingStatusRow])
+
+    await expect(
+      reader.getGenerationStatus('subject-1', 2027),
+    ).resolves.toEqual({
+      generationId: null,
+      state: 'NOT_STARTED',
+      taxYear: 2027,
+      outcome: null,
+      createdAt: null,
+      completedAt: null,
+      blockedReasonCode: 'APPLICATION_PENDING',
+      hasCurrentReport: false,
+    })
+  })
+
+  it('reads an explicit pointerless not-started status', async () => {
+    const { reader } = readerWithRows([{
+      ...applicationPendingStatusRow,
+      tax_year: 2025,
+      blocked_reason_code: 'NOT_STARTED',
+    }])
+
+    await expect(
+      reader.getGenerationStatus('subject-1', 2025),
+    ).resolves.toMatchObject({
+      generationId: null,
+      state: 'NOT_STARTED',
+      blockedReasonCode: 'NOT_STARTED',
+    })
+  })
+
+  it('fails closed for invalid status enums, nullability, or subject scope', async () => {
+    const invalidRows = [
+      { ...generationStatusRow, state: 'READY' },
+      { ...generationStatusRow, outcome: null },
+      { ...generationStatusRow, blocked_reason_code: 'UNKNOWN_REASON' },
+      { ...generationStatusRow, subject_id: 'subject-2' },
+      {
+        ...generationStatusRow,
+        state: 'BUILDING',
+        outcome: null,
+        completed_at: null,
+        blocked_reason_code: null,
+        has_current_report: false,
+      },
+      { ...applicationPendingStatusRow, generation_id: 'b'.repeat(64) },
+      { ...applicationPendingStatusRow, created_at: new Date() },
+      { ...applicationPendingStatusRow, blocked_reason_code: null },
+    ]
+
+    for (const row of invalidRows) {
+      const { reader } = readerWithRows([row])
+      await expect(
+        reader.getGenerationStatus('subject-1', 2027),
+      ).rejects.toBeInstanceOf(InconsistentTaxReportGenerationStatusError)
+    }
+  })
+
   it('fails closed for tampered, expired, wrong-subject, stale, or wrong-pointer quarantine artifacts', async () => {
     const cases = [
       (() => {

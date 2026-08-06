@@ -13,6 +13,7 @@ import {
   readdirSync,
   readlinkSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -87,6 +88,15 @@ const socketRoot = resolve(
     ),
 )
 const configRoot = join(stateRoot, 'config')
+const taxCandidateRoot = join(configRoot, 'tax-candidates')
+const upbitCandleCollectorQuoteConfigFile = join(
+  configRoot,
+  'upbit-candle-sync-quotes.v1.json',
+)
+const taxBinaryReleaseManifestFile = join(
+  stateRoot,
+  'tax-binary-release.json',
+)
 const sourcePublicationClaimPolicy = join(
   configRoot,
   'source-publication-claim-policy.json',
@@ -95,7 +105,17 @@ const evmPublicationClaimPolicy = join(
   configRoot,
   'evm-publication-claim-policy.json',
 )
-const taxdNoProfilesMarker = join(stateRoot, 'taxd.disabled-no-profiles')
+// Kept only so the first run after upgrading can clean up the legacy marker.
+// taxd.profile-state.json is the sole runtime source of truth from then on.
+const taxdLegacyNoProfilesMarker = join(stateRoot, 'taxd.disabled-no-profiles')
+const taxdProfileStateFile = join(stateRoot, 'taxd.profile-state.json')
+const upbitCandleCollectorStateFile = join(
+  runtimeRoot,
+  'quote-archive',
+  'upbit',
+  'bulk-v1',
+  'state.json',
+)
 export const resolveJITArtifactPaths = ({
   runtime,
   rootOverride,
@@ -190,6 +210,34 @@ const runtimeShared = runtimeGroupID >= 0
 const directoryMode = runtimeShared ? 0o2750 : 0o700
 const fileMode = runtimeShared ? 0o640 : 0o600
 
+export const upbitCandleCollectorArgs = ({
+  archiveRoot,
+  quoteConfig,
+} = {}) => [
+  '--archive-root', archiveRoot,
+  '--quote-config', quoteConfig,
+  '--start-month', '2017-09',
+  '--priority-year', '2025',
+  '--request-interval', '750ms',
+  '--rate-limit-retries', '3',
+  '--http-timeout', '10s',
+  '--max-archive-bytes', '68719476736',
+  '--min-free-bytes', '34359738368',
+  '--max-tasks-per-run', '32',
+  '--poll-interval', '24h',
+]
+
+const writeRuntimeFileAtomically = (path, contents, mode = fileMode) => {
+  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(temporaryPath, contents, { mode, flag: 'wx' })
+    chmodSync(temporaryPath, mode)
+    renameSync(temporaryPath, path)
+  } finally {
+    rmSync(temporaryPath, { force: true })
+  }
+}
+
 // Mirrors the owner read and execute bits into the group without ever adding
 // group write, so prebuilt binaries stay executable for the shared group.
 export const sharedRuntimeFileMode = (mode) =>
@@ -201,6 +249,7 @@ export const sharedRuntimeFileMode = (mode) =>
 // (daejang-tax-engine/internal/daemon/{config,claim_control}.go).
 const privateRuntimePaths = [
   join(configRoot, 'tax-publication-policy-trust-key.pub'),
+  taxCandidateRoot,
   join(stateRoot, 'tax-claim-receipts'),
 ]
 
@@ -250,6 +299,7 @@ const ensureRuntimeDirectories = () => {
     pidRoot,
     socketRoot,
     configRoot,
+    taxCandidateRoot,
     binaryRoot,
     join(artifactRoot, 'source', 'root'),
     join(artifactRoot, 'source', 'tmp'),
@@ -409,17 +459,17 @@ const allServiceOrder = [
   'web-api',
 ]
 const evmPostingEnabled = () => existsSync(evmPublicationClaimPolicy)
-const taxdEnabled = () => !existsSync(taxdNoProfilesMarker)
+const taxdEnabled = () => {
+  const state = readTaxdProfileState()
+  if (state !== null) return state.status === 'ACTIVE'
+  return !existsSync(taxdLegacyNoProfilesMarker)
+}
 export const hostActiveServiceOrder = ({
   evmPosting = true,
   taxd = true,
 } = {}) => allServiceOrder.filter((name) =>
   (name !== 'evm-posting' || evmPosting) &&
   (name !== 'taxd' || taxd))
-const activeServiceOrder = () => hostActiveServiceOrder({
-  evmPosting: evmPostingEnabled(),
-  taxd: taxdEnabled(),
-})
 const pidFile = (name) => join(pidRoot, `${name}.pid`)
 const logFile = (name) => join(logRoot, `${name}.log`)
 
@@ -491,6 +541,77 @@ const spawnService = (name, command, args, environment, options = {}) => {
     `${JSON.stringify({ pid: child.pid, commandLine: [command, ...args].join(' ') })}\n`,
     { mode: fileMode },
   )
+}
+
+const upbitCandleCollectorRuntime = () => {
+  const binary = join(binaryRoot, 'upbit-candle-sync')
+  const quoteConfig = upbitCandleCollectorQuoteConfigFile
+  if (!existsSync(binary) || !existsSync(quoteConfig)) {
+    throw new Error(
+      'Upbit candle collector binary or quote config is missing; run backend:upbit-collector-start or backend:start to build the runtime',
+    )
+  }
+  return {
+    binary,
+    args: upbitCandleCollectorArgs({
+      archiveRoot: join(runtimeRoot, 'quote-archive', 'upbit'),
+      quoteConfig,
+    }),
+  }
+}
+
+const ensureUpbitCandleCollectorRunning = () => {
+  if (isRunning('upbit-candle-sync')) return false
+  // This also verifies the collector digest and every semantic checkout
+  // coordinate before a prebuilt collector is brought back after a crash.
+  loadTaxBinaryReleaseManifest()
+  const runtime = upbitCandleCollectorRuntime()
+  spawnService(
+    'upbit-candle-sync',
+    runtime.binary,
+    runtime.args,
+    baseEnvironment(),
+    { cwd: taxRepository },
+  )
+  return true
+}
+
+export const assertUpbitCollectorStarted = (running) => {
+  if (running !== true) {
+    throw new Error(
+      'Upbit candle collector exited during startup; inspect backend:logs before retrying',
+    )
+  }
+}
+
+const restartUpbitCandleCollector = async () => {
+  if (isRunning('upbit-candle-sync')) {
+    await stopService('upbit-candle-sync')
+  }
+  ensureUpbitCandleCollectorRunning()
+  await sleep(1_000)
+  assertUpbitCollectorStarted(isRunning('upbit-candle-sync'))
+}
+
+export const assertUpbitCollectorReleaseReplaceable = (
+  runningCoreServices,
+) => {
+  if (!Array.isArray(runningCoreServices)) {
+    throw new Error('Running backend service list is invalid')
+  }
+  if (runningCoreServices.length > 0) {
+    throw new Error(
+      `Upbit collector-only release cannot replace Tax binaries while core services are running: ${runningCoreServices.join(', ')}`,
+    )
+  }
+}
+
+export const runUpbitCollectorStartOperation = async ({
+  prepare,
+  restart,
+}) => {
+  await prepare()
+  await restart()
 }
 
 const baseEnvironment = () => Object.fromEntries(
@@ -815,27 +936,65 @@ const webReady = async () => {
   }
 }
 
-const taxReady = async () => {
+export const taxRuntimeIdentityMatches = (identity, candidateDigest) => {
+  if (!/^[0-9a-f]{64}$/.test(candidateDigest ?? '')) return false
+  let parsed
   try {
-    return (await fetch('http://127.0.0.1:8981/readyz')).ok
+    parsed = typeof identity === 'string' ? JSON.parse(identity) : identity
+  } catch {
+    return false
+  }
+  return parsed?.schemaVersion === 'tax.runtime-identity.v1' &&
+    parsed.candidateDigest === candidateDigest &&
+    parsed.ready === true
+}
+
+export const taxRuntimeIdentityResponseReady = (
+  { status, contentType, body },
+  candidateDigest,
+) => status === 200 &&
+  /^application\/json(?:\s*;|$)/i.test(contentType ?? '') &&
+  taxRuntimeIdentityMatches(body, candidateDigest)
+
+const taxRuntimeReady = async (candidateDigest) => {
+  try {
+    const response = await fetch('http://127.0.0.1:8981/identityz', {
+      signal: AbortSignal.timeout(1_000),
+    })
+    return taxRuntimeIdentityResponseReady({
+      status: response.status,
+      contentType: response.headers.get('content-type'),
+      body: await response.text(),
+    }, candidateDigest)
   } catch {
     return false
   }
 }
 
-const runtimeHealthy = async () => {
-  if (!activeServiceOrder().every(isRunning)) return false
+const coreRuntimeHealthy = async () => {
+  const coreServices = hostActiveServiceOrder({
+    evmPosting: evmPostingEnabled(),
+    taxd: false,
+  })
+  if (!coreServices.every(isRunning)) return false
   const jitSocket = join(socketRoot, 'jit.sock')
-  const taxIsReady = !taxdEnabled() || await taxReady()
   return (
     await parserReady() &&
     existsSync(jitSocket) &&
     await unixReady(jitSocket) &&
     engineReady() &&
     existsSync(join(stateRoot, 'worker.ready')) &&
-    taxIsReady &&
     await webReady()
   )
+}
+
+const runtimeHealthy = async () => {
+  if (!await coreRuntimeHealthy()) return false
+  if (!taxdEnabled()) return true
+  const state = readTaxdProfileState()
+  return state?.status === 'ACTIVE' &&
+    isRunning('taxd') &&
+    await taxRuntimeReady(state.candidateDigest)
 }
 
 const databaseURL = (role, password) => {
@@ -854,7 +1013,7 @@ export const assertCleanGitCheckout = (
 ) => {
   const result = inspect(
     'git',
-    ['status', '--porcelain', '--untracked-files=no'],
+    ['status', '--porcelain', '--untracked-files=normal'],
     { cwd: repository, encoding: 'utf8' },
   )
   if (result.status !== 0) {
@@ -862,14 +1021,57 @@ export const assertCleanGitCheckout = (
   }
   if (result.stdout.trim()) {
     throw new Error(
-      `${label} checkout has uncommitted tracked changes; deploy a pinned clean checkout: ${repository}`,
+      `${label} checkout has uncommitted or untracked changes; deploy a pinned clean checkout: ${repository}`,
     )
   }
 }
 
+const assertCleanRuntimeCheckouts = () => {
+  for (const [repository, label] of [
+    [repositoryRoot, 'Host application'],
+    [databaseRepository, 'Database contract'],
+    [postingRepository, 'Posting Service'],
+    [taxRepository, 'Tax Engine'],
+    [schemaRepository, 'Schema'],
+    [jitRepository, 'JIT engine'],
+    [deFiLabelRepository, 'DeFi Action runtime'],
+  ]) {
+    assertCleanGitCheckout(repository, label)
+  }
+}
+
+const buildTaxBinaries = () => {
+  for (const [command, output] of [
+    ['./cmd/taxd', join(binaryRoot, 'taxd')],
+    ['./cmd/tax-backfill', join(binaryRoot, 'tax-backfill')],
+    ['./cmd/upbit-candle-sync', join(binaryRoot, 'upbit-candle-sync')],
+  ]) {
+    run('go', ['build', '-o', output, command], {
+      cwd: taxRepository,
+      env: {
+        ...baseEnvironment(),
+        GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
+        GOWORK: 'off',
+        GOPRIVATE: 'github.com/BackwardLabs',
+        GONOSUMDB: 'github.com/BackwardLabs',
+        GOPROXY: 'direct',
+      },
+    })
+  }
+}
+
+const stageUpbitCandleCollectorRelease = () => {
+  writeRuntimeFileAtomically(
+    upbitCandleCollectorQuoteConfigFile,
+    readFileSync(
+      join(taxRepository, 'config', 'upbit-quote-provider.v1.json'),
+    ),
+  )
+  writeTaxBinaryReleaseManifest()
+}
+
 const build = () => {
-  assertCleanGitCheckout(jitRepository, 'JIT engine')
-  assertCleanGitCheckout(deFiLabelRepository, 'DeFi Action runtime')
+  assertCleanRuntimeCheckouts()
   run('npm', ['run', 'build', '--workspace', '@daejang/web-api'], {
     cwd: repositoryRoot,
     env: baseEnvironment(),
@@ -916,22 +1118,7 @@ const build = () => {
       GOPROXY: 'direct',
     },
   })
-  for (const [command, output] of [
-    ['./cmd/taxd', join(binaryRoot, 'taxd')],
-    ['./cmd/tax-backfill', join(binaryRoot, 'tax-backfill')],
-  ]) {
-    run('go', ['build', '-o', output, command], {
-      cwd: taxRepository,
-      env: {
-        ...baseEnvironment(),
-        GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
-        GOWORK: 'off',
-        GOPRIVATE: 'github.com/BackwardLabs',
-        GONOSUMDB: 'github.com/BackwardLabs',
-        GOPROXY: 'direct',
-      },
-    })
-  }
+  buildTaxBinaries()
   run('go', [
     'build',
     '-trimpath',
@@ -971,7 +1158,27 @@ const build = () => {
   cpSync(join(repositoryRoot, 'proto'), runtimeProto, { recursive: true })
   rmSync(runtimeNodeModules, { recursive: true, force: true })
   symlinkSync(join(repositoryRoot, 'node_modules'), runtimeNodeModules, 'dir')
+  stageUpbitCandleCollectorRelease()
 }
+
+const startUpbitCandleCollectorOnly = () => withOperationLock(async () => {
+  assertExternalRuntimeRoot()
+  ensureRuntimeDirectories()
+  assertUpbitCollectorReleaseReplaceable(
+    allServiceOrder.filter(isRunning),
+  )
+  await runUpbitCollectorStartOperation({
+    prepare: async () => {
+      assertCleanRuntimeCheckouts()
+      buildTaxBinaries()
+      stageUpbitCandleCollectorRelease()
+    },
+    restart: restartUpbitCandleCollector,
+  })
+  console.log(
+    'Upbit candle collector is running without changing the backend pause state or starting taxd',
+  )
+})
 
 export const combinedJITConfigExpression = ({
   socket,
@@ -1292,6 +1499,97 @@ const gitCommit = (repository) => {
   return commit
 }
 
+export const pinnedGoModuleCommitPrefix = (goMod, modulePath) => {
+  const fields = goMod.split(/\r?\n/).map((value) =>
+    value.trim().split(/\s+/)).find((value) =>
+    value[0] === modulePath ||
+    value[0] === 'require' && value[1] === modulePath)
+  const version = fields?.[0] === 'require'
+    ? fields[2] ?? ''
+    : fields?.[1] ?? ''
+  const match = version.match(/-([0-9a-f]{12,40})(?:\+incompatible)?$/)
+  if (!match) {
+    throw new Error(`Go module ${modulePath} is not pinned to a Git revision`)
+  }
+  return match[1]
+}
+
+const currentTaxBinaryRelease = () => {
+  const dbCommit = gitCommit(databaseRepository)
+  const embeddedDBCommitPrefix = pinnedGoModuleCommitPrefix(
+    readFileSync(join(taxRepository, 'go.mod'), 'utf8'),
+    'github.com/BackwardLabs/daejang-db',
+  )
+  if (!dbCommit.startsWith(embeddedDBCommitPrefix)) {
+    throw new Error(
+      `Tax binary embeds daejang-db ${embeddedDBCommitPrefix}, but the runtime DB checkout is ${dbCommit}`,
+    )
+  }
+  return {
+    schemaVersion: 'giwa.tax-binary-release.v1',
+    dbCommit,
+    jitCommit: gitCommit(jitRepository),
+    postingCommit: gitCommit(postingRepository),
+    schemaCommit: gitCommit(schemaRepository),
+    taxBackfillBinarySha256: sha256(
+      readFileSync(join(binaryRoot, 'tax-backfill')),
+    ),
+    taxCommit: gitCommit(taxRepository),
+    taxdBinarySha256: sha256(readFileSync(join(binaryRoot, 'taxd'))),
+    upbitCandleSyncBinarySha256: sha256(
+      readFileSync(join(binaryRoot, 'upbit-candle-sync')),
+    ),
+    upbitCandleSyncQuoteConfigSha256: sha256(
+      readFileSync(upbitCandleCollectorQuoteConfigFile),
+    ),
+  }
+}
+
+const writeTaxBinaryReleaseManifest = () => {
+  const release = currentTaxBinaryRelease()
+  writeRuntimeFileAtomically(
+    taxBinaryReleaseManifestFile,
+    `${canonicalJSON(release)}\n`,
+  )
+  return release
+}
+
+const loadTaxBinaryReleaseManifest = () => {
+  let release
+  try {
+    release = JSON.parse(
+      readFileSync(taxBinaryReleaseManifestFile, 'utf8'),
+    )
+  } catch (error) {
+    throw new Error(`Read Tax binary release manifest: ${error.message}`)
+  }
+  const commit = (value) => typeof value === 'string' &&
+    /^[0-9a-f]{40}$/.test(value)
+  const digest = (value) => typeof value === 'string' &&
+    /^[0-9a-f]{64}$/.test(value)
+  if (
+    release?.schemaVersion !== 'giwa.tax-binary-release.v1' ||
+    !commit(release.dbCommit) ||
+    !commit(release.jitCommit) ||
+    !commit(release.postingCommit) ||
+    !commit(release.schemaCommit) ||
+    !commit(release.taxCommit) ||
+    !digest(release.taxBackfillBinarySha256) ||
+    !digest(release.taxdBinarySha256) ||
+    !digest(release.upbitCandleSyncBinarySha256) ||
+    !digest(release.upbitCandleSyncQuoteConfigSha256)
+  ) {
+    throw new Error('Tax binary release manifest failed its runtime contract')
+  }
+  const current = currentTaxBinaryRelease()
+  if (canonicalJSON(release) !== canonicalJSON(current)) {
+    throw new Error(
+      'Tax binaries or semantic checkout commits differ from the built release manifest',
+    )
+  }
+  return release
+}
+
 const taxDenominationAssetId = 'asset-krw-upbit'
 const taxDenominationTaxAssetId = 'tax-asset-krw'
 
@@ -1525,6 +1823,7 @@ export const currentTaxProfileRowsQuery = `
 `
 
 const createTaxRuntime = async (queryURL) => {
+  assertCleanRuntimeCheckouts()
   const upbitConfig = configureTaxUpbitQuoteRuntime(JSON.parse(readFileSync(
     join(taxRepository, 'config', 'upbit-quote-provider.v1.json'),
     'utf8',
@@ -1532,9 +1831,17 @@ const createTaxRuntime = async (queryURL) => {
   const client = new Client({ connectionString: queryURL })
   await client.connect()
   let rows
+  let subjectEpochs
   try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
     const result = await client.query(currentTaxProfileRowsQuery)
     rows = result.rows
+    const epochResult = await client.query(currentTaxProfileEpochRowsQuery)
+    subjectEpochs = normalizeTaxSubjectEpochs(epochResult.rows)
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw error
   } finally {
     await client.end()
   }
@@ -1576,57 +1883,350 @@ const createTaxRuntime = async (queryURL) => {
     })),
   })
   const profileSet = createTaxProfiles(rows, upbitConfig)
-  if (profileSet.profiles.length === 0) return null
+  if (profileSet.profiles.length === 0) {
+    return {
+      noProfiles: true,
+      subjectIDs: [],
+      subjectEpochs,
+    }
+  }
   const profiles = canonicalJSON(profileSet)
 
-  const files = {
-    policy: join(configRoot, 'tax-interpretation-policy.json'),
-    ownership: join(configRoot, 'tax-ownership.json'),
-    activation: join(configRoot, 'tax-activation-set.json'),
-    profiles: join(configRoot, 'tax-downstream-profiles.json'),
-    quotes: join(configRoot, 'tax-upbit-quotes.json'),
-    trustKey: join(configRoot, 'tax-publication-policy-trust-key.pub'),
-  }
-  for (const [path, contents] of [
-    [files.policy, policy],
-    [files.ownership, canonicalJSON({ assertions: [] })],
-    [files.activation, activation],
-    [files.profiles, profiles],
-    [files.quotes, canonicalJSON(upbitConfig)],
-  ]) {
-    writeFileSync(path, contents, { mode: fileMode })
-    chmodSync(path, fileMode)
-  }
-  writeFileSync(
-    files.trustKey,
-    decodePublicationTrustKey(process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY),
-    { mode: 0o600 },
+  const ownership = canonicalJSON({ assertions: [] })
+  const quotes = canonicalJSON(upbitConfig)
+  const trustKey = decodePublicationTrustKey(
+    process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY,
   )
-  // taxd refuses to start when the trust key grants group or other access.
-  chmodSync(files.trustKey, 0o600)
-
-  const taxCommit = gitCommit(taxRepository)
-  const dbCommit = gitCommit(databaseRepository)
+  const {
+    dbCommit,
+    jitCommit,
+    postingCommit,
+    schemaCommit,
+    taxBackfillBinarySha256,
+    taxCommit,
+    taxdBinarySha256,
+  } = loadTaxBinaryReleaseManifest()
   const catalog = readFileSync(
     join(taxRepository, 'internal', 'registry', 'release', 'action-registry-v1.json'),
   )
+  const activationDigest = sha256(activation)
+  const catalogDigest = sha256(catalog)
+  const candidateCoordinates = {
+    schemaVersion: 'giwa.tax-runtime-candidate-coordinates.v1',
+    activationDigest,
+    catalogDigest,
+    dbCommit,
+    jitCommit,
+    postingCommit,
+    schemaCommit,
+    taxBackfillBinarySha256,
+    taxCommit,
+    taxdBinarySha256,
+    files: {
+      activation: sha256(activation),
+      ownership: sha256(ownership),
+      policy: sha256(policy),
+      profiles: sha256(profiles),
+      quotes: sha256(quotes),
+      trustKey: sha256(trustKey),
+    },
+  }
+  const candidateDigest = sha256(canonicalJSON(candidateCoordinates))
+  const candidateDirectory = join(taxCandidateRoot, candidateDigest)
+  const files = {
+    policy: join(candidateDirectory, 'policy.json'),
+    ownership: join(candidateDirectory, 'ownership.json'),
+    activation: join(candidateDirectory, 'activation.json'),
+    profiles: join(candidateDirectory, 'profiles.json'),
+    quotes: join(candidateDirectory, 'quotes.json'),
+    trustKey: join(candidateDirectory, 'trust-key.pub'),
+  }
+  const subjectIDs = profileSet.profiles
+    .filter(({ taxYear }) => taxYear === 2027)
+    .map(({ subjectId }) => subjectId)
+  const manifestPath = join(candidateDirectory, 'runtime.json')
+  const manifest = canonicalJSON({
+    schemaVersion: 'giwa.tax-runtime-candidate.v1',
+    candidateDigest,
+    activationDigest,
+    catalogDigest,
+    dbCommit,
+    fileDigests: candidateCoordinates.files,
+    files,
+    jitCommit,
+    postingCommit,
+    schemaCommit,
+    subjectIDs,
+    taxBackfillBinarySha256,
+    taxCommit,
+    taxdBinarySha256,
+  })
+  const candidateFiles = [
+    [files.policy, policy, fileMode],
+    [files.ownership, ownership, fileMode],
+    [files.activation, activation, fileMode],
+    [files.profiles, profiles, fileMode],
+    [files.quotes, quotes, fileMode],
+    [files.trustKey, trustKey, 0o600],
+    [manifestPath, `${manifest}\n`, fileMode],
+  ]
+  if (existsSync(candidateDirectory)) {
+    const metadata = lstatSync(candidateDirectory)
+    if (
+      metadata.isSymbolicLink() ||
+      !metadata.isDirectory() ||
+      metadata.uid !== process.getuid()
+    ) {
+      throw new Error('Existing Tax candidate is not an owned directory')
+    }
+    for (const [path, contents] of candidateFiles) {
+      const fileMetadata = lstatSync(path)
+      if (
+        fileMetadata.isSymbolicLink() ||
+        !fileMetadata.isFile() ||
+        fileMetadata.uid !== process.getuid()
+      ) {
+        throw new Error(`Existing Tax candidate file is not owned: ${path}`)
+      }
+      const expected = Buffer.isBuffer(contents)
+        ? contents
+        : Buffer.from(contents)
+      const actual = readFileSync(path)
+      if (!actual.equals(expected)) {
+        throw new Error(
+          `Existing Tax candidate differs from its digest coordinate: ${path}`,
+        )
+      }
+    }
+  } else {
+    const temporaryDirectory = join(
+      taxCandidateRoot,
+      `.${candidateDigest}.${process.pid}.${randomUUID()}.tmp`,
+    )
+    mkdirSync(temporaryDirectory, { mode: 0o700 })
+    try {
+      for (const [path, contents, mode] of candidateFiles) {
+        const temporaryPath = join(temporaryDirectory, basename(path))
+        writeRuntimeFileAtomically(temporaryPath, contents, mode)
+      }
+      renameSync(temporaryDirectory, candidateDirectory)
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true })
+    }
+  }
+
   return {
     files,
-    subjectIDs: profileSet.profiles
-      .filter(({ taxYear }) => taxYear === 2027)
-      .map(({ subjectId }) => subjectId),
-    activationDigest: sha256(activation),
-    candidateDigest: sha256(`${taxCommit}:${dbCommit}:${sha256(profiles)}`),
-    schemaCommit: gitCommit(schemaRepository),
-    jitCommit: gitCommit(jitRepository),
+    subjectIDs,
+    subjectEpochs,
+    activationDigest,
+    candidateDigest,
+    manifestPath,
+    schemaCommit,
+    jitCommit,
     dbCommit,
-    postingCommit: gitCommit(postingRepository),
+    postingCommit,
     taxCommit,
-    catalogDigest: sha256(catalog),
+    catalogDigest,
+    taxBackfillBinarySha256,
+    taxdBinarySha256,
   }
 }
 
-export const hostTaxDBMigrationVersion = '71'
+const taxRuntimeHasProfiles = (runtime) =>
+  runtime?.noProfiles !== true &&
+  Array.isArray(runtime?.subjectIDs) &&
+  runtime.subjectIDs.length > 0
+
+const taxCandidateFileNames = [
+  'activation.json',
+  'ownership.json',
+  'policy.json',
+  'profiles.json',
+  'quotes.json',
+  'runtime.json',
+  'trust-key.pub',
+]
+
+export const pruneTaxCandidateDirectories = ({
+  root,
+  activeDigest,
+  retainCount = 3,
+  uid = process.getuid(),
+}) => {
+  if (!/^[0-9a-f]{64}$/.test(activeDigest ?? '') ||
+      !Number.isSafeInteger(retainCount) || retainCount < 1) {
+    throw new Error('Tax candidate pruning requires an active digest and positive retention count')
+  }
+  const rootMetadata = lstatSync(root)
+  if (rootMetadata.isSymbolicLink() ||
+      !rootMetadata.isDirectory() || rootMetadata.uid !== uid) {
+    throw new Error('Tax candidate root is not an owned directory')
+  }
+  const candidates = []
+  for (const name of readdirSync(root)) {
+    if (!/^[0-9a-f]{64}$/.test(name)) continue
+    const directory = join(root, name)
+    const metadata = lstatSync(directory)
+    if (metadata.isSymbolicLink() ||
+        !metadata.isDirectory() || metadata.uid !== uid) {
+      throw new Error(`Tax candidate is not an owned directory: ${name}`)
+    }
+    const fileNames = readdirSync(directory).sort()
+    if (canonicalJSON(fileNames) !== canonicalJSON(taxCandidateFileNames)) {
+      throw new Error(`Tax candidate has unexpected files: ${name}`)
+    }
+    for (const fileName of fileNames) {
+      const fileMetadata = lstatSync(join(directory, fileName))
+      if (fileMetadata.isSymbolicLink() ||
+          !fileMetadata.isFile() || fileMetadata.uid !== uid) {
+        throw new Error(`Tax candidate file is not owned: ${name}/${fileName}`)
+      }
+    }
+    const manifest = JSON.parse(readFileSync(join(directory, 'runtime.json'), 'utf8'))
+    if (manifest?.schemaVersion !== 'giwa.tax-runtime-candidate.v1' ||
+        manifest.candidateDigest !== name) {
+      throw new Error(`Tax candidate manifest identity is invalid: ${name}`)
+    }
+    candidates.push({ name, directory, mtimeMs: metadata.mtimeMs })
+  }
+  if (!candidates.some(({ name }) => name === activeDigest)) {
+    throw new Error('Active Tax candidate directory is missing')
+  }
+  candidates.sort((left, right) =>
+    right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name))
+  const retained = new Set([activeDigest])
+  for (const candidate of candidates) {
+    if (retained.size >= retainCount) break
+    retained.add(candidate.name)
+  }
+  const removed = []
+  for (const candidate of candidates) {
+    if (retained.has(candidate.name)) continue
+    rmSync(candidate.directory, { recursive: true })
+    removed.push(candidate.name)
+  }
+  return removed.sort()
+}
+
+const loadActiveTaxRuntime = (state) => {
+  if (
+    state?.status !== 'ACTIVE' ||
+    !/^[0-9a-f]{64}$/.test(state.candidateDigest ?? '') ||
+    typeof state.runtimeManifestPath !== 'string' ||
+    resolve(state.runtimeManifestPath) !== state.runtimeManifestPath ||
+    !pathIsWithin(taxCandidateRoot, state.runtimeManifestPath)
+  ) {
+    throw new Error('Active Tax runtime state has no valid candidate manifest')
+  }
+  const candidateDirectory = dirname(state.runtimeManifestPath)
+  const directoryMetadata = lstatSync(candidateDirectory)
+  if (
+    directoryMetadata.isSymbolicLink() ||
+    !directoryMetadata.isDirectory() ||
+    directoryMetadata.uid !== process.getuid()
+  ) {
+    throw new Error('Active Tax candidate directory is not a private owned directory')
+  }
+  const manifest = JSON.parse(readFileSync(state.runtimeManifestPath, 'utf8'))
+  const digest = (value) => typeof value === 'string' &&
+    /^[0-9a-f]{64}$/.test(value)
+  const commit = (value) => typeof value === 'string' &&
+    /^[0-9a-f]{40}$/.test(value)
+  const fileKeys = [
+    'activation',
+    'ownership',
+    'policy',
+    'profiles',
+    'quotes',
+    'trustKey',
+  ]
+  if (
+    manifest?.schemaVersion !== 'giwa.tax-runtime-candidate.v1' ||
+    manifest.candidateDigest !== state.candidateDigest ||
+    !digest(manifest.activationDigest) ||
+    !digest(manifest.catalogDigest) ||
+    !digest(manifest.taxBackfillBinarySha256) ||
+    !digest(manifest.taxdBinarySha256) ||
+    !commit(manifest.dbCommit) ||
+    !commit(manifest.jitCommit) ||
+    !commit(manifest.postingCommit) ||
+    !commit(manifest.schemaCommit) ||
+    !commit(manifest.taxCommit) ||
+    !Array.isArray(manifest.subjectIDs) ||
+    manifest.subjectIDs.length === 0 ||
+    manifest.subjectIDs.some((subjectID, index) =>
+      typeof subjectID !== 'string' ||
+      subjectID.length === 0 ||
+      (index > 0 && manifest.subjectIDs[index - 1] >= subjectID)) ||
+    fileKeys.some((key) =>
+      typeof manifest.files?.[key] !== 'string' ||
+      resolve(manifest.files[key]) !== manifest.files[key] ||
+      dirname(manifest.files[key]) !== candidateDirectory ||
+      !digest(manifest.fileDigests?.[key]))
+  ) {
+    throw new Error('Active Tax candidate manifest failed its runtime contract')
+  }
+  const reconstructedCandidateDigest = sha256(canonicalJSON({
+    schemaVersion: 'giwa.tax-runtime-candidate-coordinates.v1',
+    activationDigest: manifest.activationDigest,
+    catalogDigest: manifest.catalogDigest,
+    dbCommit: manifest.dbCommit,
+    jitCommit: manifest.jitCommit,
+    postingCommit: manifest.postingCommit,
+    schemaCommit: manifest.schemaCommit,
+    taxBackfillBinarySha256: manifest.taxBackfillBinarySha256,
+    taxCommit: manifest.taxCommit,
+    taxdBinarySha256: manifest.taxdBinarySha256,
+    files: manifest.fileDigests,
+  }))
+  if (reconstructedCandidateDigest !== manifest.candidateDigest) {
+    throw new Error('Active Tax candidate manifest digest does not match coordinates')
+  }
+  for (const key of fileKeys) {
+    const metadata = lstatSync(manifest.files[key])
+    if (
+      metadata.isSymbolicLink() ||
+      !metadata.isFile() ||
+      metadata.uid !== process.getuid()
+    ) {
+      throw new Error(`Active Tax candidate file is not owned: ${key}`)
+    }
+    const contents = readFileSync(manifest.files[key])
+    if (sha256(contents) !== manifest.fileDigests[key]) {
+      throw new Error(`Active Tax candidate file digest mismatch: ${key}`)
+    }
+  }
+  if ((statSync(manifest.files.trustKey).mode & 0o777) !== 0o600) {
+    throw new Error('Active Tax candidate trust key is not mode 0600')
+  }
+  if (
+    sha256(readFileSync(join(binaryRoot, 'taxd'))) !==
+      manifest.taxdBinarySha256 ||
+    sha256(readFileSync(join(binaryRoot, 'tax-backfill'))) !==
+      manifest.taxBackfillBinarySha256
+  ) {
+    throw new Error('Active Tax candidate binary digest does not match runtime')
+  }
+  return {
+    files: manifest.files,
+    subjectIDs: manifest.subjectIDs,
+    subjectEpochs: state.subjectEpochs,
+    activationDigest: manifest.activationDigest,
+    candidateDigest: manifest.candidateDigest,
+    manifestPath: state.runtimeManifestPath,
+    schemaCommit: manifest.schemaCommit,
+    jitCommit: manifest.jitCommit,
+    dbCommit: manifest.dbCommit,
+    postingCommit: manifest.postingCommit,
+    taxCommit: manifest.taxCommit,
+    catalogDigest: manifest.catalogDigest,
+    taxBackfillBinarySha256: manifest.taxBackfillBinarySha256,
+    taxdBinarySha256: manifest.taxdBinarySha256,
+  }
+}
+
+export const hostTaxDBMigrationVersion = '73'
 
 export const hostTaxQuoteRuntimeControls = (archiveOnly) => {
   if (typeof archiveOnly !== 'boolean') {
@@ -1674,17 +2274,34 @@ const taxEnvironment = (
   DAEJANG_TAXD_LOG_JSON: 'true',
 })
 
-export const taxQuotePrefetchArgs = (subjectID, taxYearInput = 2027) => {
+export const hostTaxSimulationYears = Object.freeze([2025, 2026, 2027])
+
+const normalizeTaxRuntimeYear = (taxYearInput, operation) => {
   const taxYear = String(taxYearInput)
-  if (!subjectID) throw new Error('tax quote prefetch requires a subject ID')
   if (!/^[0-9]{4}$/.test(taxYear) || Number(taxYear) < 2025) {
-    throw new Error('tax quote prefetch tax year must be an integer from 2025 through 9999')
+    throw new Error(`${operation} tax year must be an integer from 2025 through 9999`)
   }
+  return taxYear
+}
+
+export const taxQuotePrefetchArgs = (subjectID, taxYearInput = 2027) => {
+  if (!subjectID) throw new Error('tax quote prefetch requires a subject ID')
+  const taxYear = normalizeTaxRuntimeYear(taxYearInput, 'tax quote prefetch')
   return [
     '-subject', subjectID,
     '-tax-year', taxYear,
     '-apply',
     '-skip-rebuild',
+  ]
+}
+
+export const taxSubjectRebuildArgs = (subjectID, taxYearInput) => {
+  if (!subjectID) throw new Error('tax subject rebuild requires a subject ID')
+  const taxYear = normalizeTaxRuntimeYear(taxYearInput, 'tax subject rebuild')
+  return [
+    '-subject', subjectID,
+    '-tax-year', taxYear,
+    '-apply',
   ]
 }
 
@@ -1722,24 +2339,716 @@ export const validateTaxQuotePrefetchResult = (
   }
 }
 
+export const validateTaxSubjectRebuildResult = (
+  raw,
+  subjectID,
+  taxYear,
+) => {
+  let result
+  try {
+    result = JSON.parse(raw)
+  } catch {
+    throw new Error('Tax subject rebuild returned invalid JSON')
+  }
+  const nonnegativeInteger = (value) =>
+    Number.isSafeInteger(value) && value >= 0
+  const hasExactReport = result.rebuiltReport === true &&
+    typeof result.reportId === 'string' && result.reportId.trim().length > 0 &&
+    Number.isSafeInteger(result.reportPointerVersion) &&
+    result.reportPointerVersion > 0
+  const hasNoReportIdentity = result.rebuiltReport === false &&
+    result.reportId === undefined &&
+    result.reportPointerVersion === undefined
+  if (
+    result.schemaVersion !== 'tax.valuation-backfill-result.v1' ||
+    result.subjectId !== subjectID ||
+    result.taxYear !== taxYear ||
+    result.dryRun !== false ||
+    result.rebuiltLot !== true ||
+    typeof result.rebuiltTax !== 'boolean' ||
+    typeof result.rebuiltReport !== 'boolean' ||
+    result.rebuiltTax !== result.rebuiltReport ||
+    !(hasExactReport || hasNoReportIdentity) ||
+    !nonnegativeInteger(result.persistedValuations)
+  ) {
+    throw new Error('Tax subject rebuild result failed its runtime contract')
+  }
+  return {
+    persistedValuations: result.persistedValuations,
+    rebuiltLot: result.rebuiltLot,
+    rebuiltTax: result.rebuiltTax,
+    rebuiltReport: result.rebuiltReport,
+    report: hasExactReport
+      ? { reportId: result.reportId, pointerVersion: result.reportPointerVersion }
+      : null,
+  }
+}
+
 export const hostTaxProfileStabilityPasses = 3
+export const hostTaxProfileRefreshIntervalMs = 30_000
+export const hostTaxProfileRefreshRetryMs = 60_000
+
+export const currentTaxProfileEpochRowsQuery = `
+  SELECT
+    subject_id,
+    encode(
+      sha256(
+        convert_to(
+          jsonb_agg(
+            jsonb_build_array(event_id, current_revision_id, pointer_version)
+            ORDER BY event_id
+          )::text,
+          'UTF8'
+        )
+      ),
+      'hex'
+    ) AS ledger_epoch
+  FROM ledger.interpreted_event
+  WHERE current_revision_id IS NOT NULL
+  GROUP BY subject_id
+  ORDER BY subject_id
+`
+
+export const currentTaxReportGenerationRowsQuery = `
+  SELECT
+    current.subject_id,
+    current.generation_id,
+    generation.candidate_digest,
+    generation.ledger_fingerprint,
+    generation.state,
+    current.pointer_version::text,
+    (
+      SELECT count(*) = 3 AND bool_and(
+        annual.outcome = 'NO_TAX_EVENTS'
+        OR annual.outcome = 'REPORT' AND EXISTS (
+          SELECT 1
+          FROM reporting.current_tax_report AS report_pointer
+          WHERE report_pointer.subject_id = annual.subject_id
+            AND report_pointer.tax_year = annual.tax_year
+            AND report_pointer.finality = annual.finality
+            AND report_pointer.report_id = annual.report_id
+            AND report_pointer.pointer_version = annual.report_pointer_version
+        )
+      )
+      FROM reporting.tax_report_generation_year AS annual
+      WHERE annual.subject_id = current.subject_id
+        AND annual.generation_id = current.generation_id
+        AND annual.tax_year IN (2025, 2026, 2027)
+        AND annual.finality = 'FINAL'
+    ) AS annual_results_current
+  FROM reporting.current_tax_report_generation AS current
+  JOIN reporting.tax_report_generation AS generation
+    ON generation.subject_id = current.subject_id
+   AND generation.generation_id = current.generation_id
+  ORDER BY current.subject_id
+`
+
+export const currentTaxReportGenerationEligibilityRowsQuery = `
+  SELECT
+    subject_id,
+    eligibility_status
+  FROM reporting.tax_report_generation_eligibility_read_v1
+  ORDER BY subject_id
+`
+
+export const normalizeTaxSubjectEpochs = (rows) => rows.map((row, index) => {
+  if (
+    typeof row.subject_id !== 'string' ||
+    row.subject_id.length === 0 ||
+    typeof row.ledger_epoch !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(row.ledger_epoch) ||
+    (index > 0 && rows[index - 1].subject_id >= row.subject_id)
+  ) {
+    throw new Error('Tax profile subject epochs are incomplete or unsorted')
+  }
+  return { subjectId: row.subject_id, ledgerEpoch: row.ledger_epoch }
+})
+
+export const normalizeTaxReportGenerationPointers = (rows) =>
+  rows.map((row, index) => {
+    if (
+      typeof row.subject_id !== 'string' || row.subject_id.length === 0 ||
+      typeof row.generation_id !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(row.generation_id) ||
+      typeof row.candidate_digest !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(row.candidate_digest) ||
+      typeof row.ledger_fingerprint !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(row.ledger_fingerprint) ||
+      !['BUILDING', 'ACTIVE', 'RETIRED', 'SUPERSEDED'].includes(row.state) ||
+      typeof row.pointer_version !== 'string' ||
+      !/^[1-9][0-9]*$/.test(row.pointer_version) ||
+      BigInt(row.pointer_version) > BigInt(Number.MAX_SAFE_INTEGER) ||
+      typeof row.annual_results_current !== 'boolean' ||
+      (index > 0 && rows[index - 1].subject_id >= row.subject_id)
+    ) {
+      throw new Error('Tax report generation pointers are incomplete or unsorted')
+    }
+    return {
+      subjectId: row.subject_id,
+      generationId: row.generation_id,
+      candidateDigest: row.candidate_digest,
+      ledgerFingerprint: row.ledger_fingerprint,
+      state: row.state,
+      pointerVersion: Number(row.pointer_version),
+      annualResultsCurrent: row.annual_results_current,
+    }
+  })
+
+export const normalizeTaxReportGenerationEligibility = (rows) =>
+  rows.map((row, index) => {
+    if (
+      typeof row.subject_id !== 'string' || row.subject_id.length === 0 ||
+      !['ELIGIBLE', 'APPLICATION_PENDING'].includes(row.eligibility_status) ||
+      (index > 0 && rows[index - 1].subject_id >= row.subject_id)
+    ) {
+      throw new Error(
+        'Tax report generation eligibility is incomplete or unsorted',
+      )
+    }
+    return {
+      subjectId: row.subject_id,
+      eligibilityStatus: row.eligibility_status,
+    }
+  })
+
+export const eligibleTaxReportGenerationSubjectIDs = (
+  eligibility,
+  runtimeSubjectIDs,
+  requestedSubjectIDs = runtimeSubjectIDs,
+) => {
+  const runtimeSubjects = new Set(runtimeSubjectIDs ?? [])
+  const eligibilityBySubject = new Map(
+    (eligibility ?? []).map(({ subjectId, eligibilityStatus }) =>
+      [subjectId, eligibilityStatus]),
+  )
+  for (const subjectID of runtimeSubjects) {
+    if (!eligibilityBySubject.has(subjectID)) {
+      throw new Error(
+        `Tax report generation eligibility is missing for ${subjectID}`,
+      )
+    }
+  }
+  const requested = [...new Set(requestedSubjectIDs ?? [])]
+  if (requested.some((subjectID) => !runtimeSubjects.has(subjectID))) {
+    throw new Error(
+      'Tax report generation eligibility subject is outside the candidate runtime',
+    )
+  }
+  return requested
+    .filter((subjectID) =>
+      eligibilityBySubject.get(subjectID) === 'ELIGIBLE')
+    .sort()
+}
+
+export const runTaxReportGenerationSubjectMutations = async (
+  subjectIDs,
+  mutate,
+) => {
+  const results = new Map()
+  for (const subjectID of [...new Set(subjectIDs ?? [])].sort()) {
+    const result = await mutate(subjectID)
+    if (result !== undefined) results.set(subjectID, result)
+  }
+  return results
+}
+
+export const retiredTaxGenerationSubjectIDs = (
+  generationPointers,
+  profileSubjectIDs,
+) => {
+  const profiles = new Set(profileSubjectIDs ?? [])
+  return (generationPointers ?? [])
+    .filter(({ subjectId, state }) => state !== 'RETIRED' && !profiles.has(subjectId))
+    .map(({ subjectId }) => subjectId)
+    .sort()
+}
+
+export const taxReportGenerationRetrySubjectIDs = (
+  pendingSubjectIDs,
+  currentSubjectIDs,
+) => [...new Set([
+  ...(pendingSubjectIDs ?? []),
+  ...(currentSubjectIDs ?? []),
+])].sort()
+
+export const taxReportGenerationRebuildSubjectIDs = (
+  generationPointers,
+  runtime,
+  requestedSubjectIDs = runtime?.subjectIDs ?? [],
+) => {
+  const pointers = new Map(
+    (generationPointers ?? []).map((pointer) => [pointer.subjectId, pointer]),
+  )
+  const epochs = new Map(
+    (runtime?.subjectEpochs ?? []).map(({ subjectId, ledgerEpoch }) =>
+      [subjectId, ledgerEpoch]),
+  )
+  return [...new Set(requestedSubjectIDs ?? [])]
+    .filter((subjectID) => {
+      const pointer = pointers.get(subjectID)
+      return pointer?.state !== 'ACTIVE' ||
+        pointer.candidateDigest !== runtime?.candidateDigest ||
+        pointer.ledgerFingerprint !== epochs.get(subjectID) ||
+        !pointer.annualResultsCurrent
+    })
+    .sort()
+}
+
+export const changedTaxSubjectIDs = (
+  previousEpochs,
+  nextEpochs,
+  nextProfileSubjectIDs,
+) => {
+  const previous = new Map(
+    (previousEpochs ?? []).map(({ subjectId, ledgerEpoch }) =>
+      [subjectId, ledgerEpoch]),
+  )
+  const current = new Map(
+    (nextEpochs ?? []).map(({ subjectId, ledgerEpoch }) =>
+      [subjectId, ledgerEpoch]),
+  )
+  return [...new Set(nextProfileSubjectIDs ?? [])]
+    .filter((subjectID) => previous.get(subjectID) !== current.get(subjectID))
+    .sort()
+}
 
 export const taxProfileSnapshotStable = (before, after) =>
   typeof before?.candidateDigest === 'string' &&
   before.candidateDigest.length > 0 &&
-  before.candidateDigest === after?.candidateDigest
+  before.candidateDigest === after?.candidateDigest &&
+  canonicalJSON(before.subjectEpochs) === canonicalJSON(after?.subjectEpochs)
 
-const prefetchTaxQuotes = (taxURL, runtime) => {
+export const taxProfileRefreshNeeded = (
+  state,
+  subjectEpochs,
+  now = Date.now(),
+) => {
+  const epochs = subjectEpochs ?? []
+  if (state === null || state === undefined) return true
+  if (state.status === 'NO_PROFILES') {
+    return canonicalJSON(state.subjectEpochs ?? []) !== canonicalJSON(epochs)
+  }
+  if (state.status === 'ACTIVE') {
+    return canonicalJSON(state.subjectEpochs ?? []) !==
+      canonicalJSON(epochs)
+  }
+  if (state.status !== 'FAILED') return true
+  const retryAt = Date.parse(state.retryAt ?? '')
+  return !Number.isFinite(retryAt) || now >= retryAt
+}
+
+export const planTaxProfileReconcile = ({
+  state,
+  subjectEpochs,
+  taxdRunning,
+  taxdReady,
+  now = Date.now(),
+}) => {
+  if (taxProfileRefreshNeeded(state, subjectEpochs, now)) {
+    return 'REFRESH_PROFILES'
+  }
+  if (state?.status === 'ACTIVE' && (!taxdRunning || !taxdReady)) {
+    return 'RESTART_TAXD'
+  }
+  return 'NONE'
+}
+
+export const planTaxProfileActivation = ({ state, runtime, action }) => {
+  const candidateChanged = state?.candidateDigest !== runtime.candidateDigest
+  const changedSubjectIDs = changedTaxSubjectIDs(
+    state?.subjectEpochs ?? [],
+    runtime.subjectEpochs,
+    runtime.subjectIDs,
+  )
+  const retryingSameCandidate = ['ACTIVATING', 'FAILED'].includes(state?.status) &&
+    state.candidateDigest === runtime.candidateDigest
+  return {
+    candidateChanged,
+    prefetch: retryingSameCandidate
+      ? state.prefetchRequired
+      : action === 'REFRESH_PROFILES',
+    subjectIDs: retryingSameCandidate
+      ? state.affectedSubjectIDs.filter((subjectID) =>
+        runtime.subjectIDs.includes(subjectID))
+      : state?.status === 'ACTIVE'
+        ? candidateChanged
+          ? runtime.subjectIDs
+          : changedSubjectIDs
+        : runtime.subjectIDs,
+  }
+}
+
+const readTaxSubjectEpochs = async (queryURL) => {
+  const client = new Client({ connectionString: queryURL })
+  await client.connect()
+  try {
+    const result = await client.query(currentTaxProfileEpochRowsQuery)
+    return normalizeTaxSubjectEpochs(result.rows)
+  } finally {
+    await client.end()
+  }
+}
+
+const readTaxReportGenerationPointers = async (client) => {
+  const result = await client.query(currentTaxReportGenerationRowsQuery)
+  return normalizeTaxReportGenerationPointers(result.rows)
+}
+
+const readTaxReportGenerationEligibility = async (client) => {
+  const result = await client.query(
+    currentTaxReportGenerationEligibilityRowsQuery,
+  )
+  return normalizeTaxReportGenerationEligibility(result.rows)
+}
+
+const filterTaxReportGenerationEligibleSubjects = async (
+  taxURL,
+  runtime,
+  subjectIDs,
+) => {
+  const client = new Client({ connectionString: taxURL })
+  await client.connect()
+  try {
+    return eligibleTaxReportGenerationSubjectIDs(
+      await readTaxReportGenerationEligibility(client),
+      runtime.subjectIDs,
+      subjectIDs,
+    )
+  } finally {
+    await client.end()
+  }
+}
+
+const filterTaxReportGenerationRebuildSubjects = async (
+  taxURL,
+  runtime,
+  subjectIDs,
+) => {
+  const client = new Client({ connectionString: taxURL })
+  await client.connect()
+  try {
+    const eligibleSubjectIDs = eligibleTaxReportGenerationSubjectIDs(
+      await readTaxReportGenerationEligibility(client),
+      runtime.subjectIDs,
+      subjectIDs,
+    )
+    return taxReportGenerationRebuildSubjectIDs(
+      await readTaxReportGenerationPointers(client),
+      runtime,
+      eligibleSubjectIDs,
+    )
+  } finally {
+    await client.end()
+  }
+}
+
+const normalizeTaxReportGenerationMutation = (row, expectedState) => {
+  if (
+    typeof row?.generation_id !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(row.generation_id) ||
+    typeof row?.pointer_version !== 'string' ||
+    !/^[1-9][0-9]*$/.test(row.pointer_version) ||
+    BigInt(row.pointer_version) > BigInt(Number.MAX_SAFE_INTEGER) ||
+    row?.state !== expectedState
+  ) {
+    throw new Error(`Tax report generation ${expectedState} result is invalid`)
+  }
+  return {
+    generationId: row.generation_id,
+    pointerVersion: Number(row.pointer_version),
+    state: row.state,
+  }
+}
+
+const withTaxReportGenerationTransaction = async (taxURL, operation) => {
+  const client = new Client({ connectionString: taxURL })
+  await client.connect()
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ')
+    const result = await operation(client)
+    await client.query('COMMIT')
+    return result
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw error
+  } finally {
+    await client.end()
+  }
+}
+
+const retireMissingTaxReportGenerations = async (taxURL, runtime) =>
+  withTaxReportGenerationTransaction(taxURL, async (client) => {
+    const pointers = await readTaxReportGenerationPointers(client)
+    const retiredSubjectIDs = retiredTaxGenerationSubjectIDs(
+      pointers,
+      runtime.subjectIDs,
+    )
+    const pointerBySubject = new Map(
+      pointers.map((pointer) => [pointer.subjectId, pointer]),
+    )
+    const epochBySubject = new Map(
+      runtime.subjectEpochs.map(({ subjectId, ledgerEpoch }) =>
+        [subjectId, ledgerEpoch]),
+    )
+    for (const subjectID of retiredSubjectIDs) {
+      const pointer = pointerBySubject.get(subjectID)
+      const candidateDigest = runtime.candidateDigest ?? pointer.candidateDigest
+      const result = await client.query(
+        `
+          SELECT generation_id,pointer_version::text,state
+          FROM reporting.retire_tax_report_generation_v1($1,$2,$3,$4,$5)
+        `,
+        [
+          subjectID,
+          candidateDigest,
+          epochBySubject.get(subjectID) ?? null,
+          pointer.generationId,
+          pointer.pointerVersion,
+        ],
+      )
+      normalizeTaxReportGenerationMutation(result.rows[0], 'RETIRED')
+    }
+    return retiredSubjectIDs
+  })
+
+const beginTaxReportGenerations = async (taxURL, runtime, subjectIDs) => {
+  const epochBySubject = new Map(
+    runtime.subjectEpochs.map(({ subjectId, ledgerEpoch }) =>
+      [subjectId, ledgerEpoch]),
+  )
+  return runTaxReportGenerationSubjectMutations(
+    subjectIDs,
+    (subjectID) => withTaxReportGenerationTransaction(
+      taxURL,
+      async (client) => {
+        const eligibleSubjectIDs = eligibleTaxReportGenerationSubjectIDs(
+          await readTaxReportGenerationEligibility(client),
+          runtime.subjectIDs,
+          [subjectID],
+        )
+        if (eligibleSubjectIDs.length === 0) return undefined
+        if (!runtime.subjectIDs.includes(subjectID)) {
+          throw new Error(
+            'Tax report generation subject is outside the candidate runtime',
+          )
+        }
+        const ledgerFingerprint = epochBySubject.get(subjectID)
+        if (!ledgerFingerprint) {
+          throw new Error(
+            'Tax report generation subject has no ledger fingerprint',
+          )
+        }
+        const pointers = await readTaxReportGenerationPointers(client)
+        const pointerBySubject = new Map(
+          pointers.map((pointer) => [pointer.subjectId, pointer]),
+        )
+        const current = pointerBySubject.get(subjectID)
+        const mutation = await client.query(
+          `
+            SELECT generation_id,pointer_version::text,state
+            FROM reporting.begin_tax_report_generation_v1($1,$2,$3,$4,$5)
+          `,
+          [
+            subjectID,
+            runtime.candidateDigest,
+            ledgerFingerprint,
+            current?.generationId ?? null,
+            current?.pointerVersion ?? 0,
+          ],
+        )
+        const normalized = normalizeTaxReportGenerationMutation(
+          mutation.rows[0],
+          'BUILDING',
+        )
+        return {
+          ...normalized,
+          candidateDigest: runtime.candidateDigest,
+          ledgerFingerprint,
+        }
+      },
+    ),
+  )
+}
+
+const activateTaxReportGenerations = async (
+  taxURL,
+  runtime,
+  pendingGenerations,
+) => runTaxReportGenerationSubjectMutations(
+  pendingGenerations.keys(),
+  (subjectID) => withTaxReportGenerationTransaction(taxURL, async (client) => {
+    const eligibleSubjectIDs = eligibleTaxReportGenerationSubjectIDs(
+      await readTaxReportGenerationEligibility(client),
+      runtime.subjectIDs,
+      [subjectID],
+    )
+    if (eligibleSubjectIDs.length === 0) return undefined
+    const pending = pendingGenerations.get(subjectID)
+    if (
+      pending.candidateDigest !== runtime.candidateDigest ||
+      runtime.subjectEpochs.find(({ subjectId }) => subjectId === subjectID)
+        ?.ledgerEpoch !== pending.ledgerFingerprint
+    ) {
+      throw new Error('Tax report generation activation snapshot is stale')
+    }
+    const outcomes = new Map(
+      pending.outcomes.map(({ taxYear, report }) => [taxYear, report]),
+    )
+    if (
+      outcomes.size !== hostTaxSimulationYears.length ||
+      hostTaxSimulationYears.some((taxYear) =>
+        outcomes.get(taxYear) !== null && (
+          typeof outcomes.get(taxYear)?.reportId !== 'string' ||
+          outcomes.get(taxYear).reportId.trim().length === 0 ||
+          !Number.isSafeInteger(outcomes.get(taxYear)?.pointerVersion) ||
+          outcomes.get(taxYear).pointerVersion < 1
+        ))
+    ) {
+      throw new Error('Tax report generation is missing an annual outcome')
+    }
+    const mutation = await client.query(
+      `
+        SELECT generation_id,pointer_version::text,state
+        FROM reporting.activate_tax_report_generation_v1(
+          $1,$2,$3,$4,$5,$6,$7,$8,$9
+        )
+      `,
+      [
+        subjectID,
+        pending.generationId,
+        pending.pointerVersion,
+        outcomes.get(2025)?.reportId ?? null,
+        outcomes.get(2025)?.pointerVersion ?? null,
+        outcomes.get(2026)?.reportId ?? null,
+        outcomes.get(2026)?.pointerVersion ?? null,
+        outcomes.get(2027)?.reportId ?? null,
+        outcomes.get(2027)?.pointerVersion ?? null,
+      ],
+    )
+    normalizeTaxReportGenerationMutation(mutation.rows[0], 'ACTIVE')
+    return true
+  }),
+)
+
+const readTaxdProfileState = () => {
+  try {
+    const state = JSON.parse(readFileSync(taxdProfileStateFile, 'utf8'))
+    if (
+      state?.schemaVersion !== 'giwa.taxd-profile-state.v2' ||
+      !['ACTIVE', 'ACTIVATING', 'FAILED', 'NO_PROFILES'].includes(state.status) ||
+      (state.candidateDigest !== null &&
+        !/^[0-9a-f]{64}$/.test(state.candidateDigest)) ||
+      (state.runtimeManifestPath !== null &&
+        (typeof state.runtimeManifestPath !== 'string' ||
+          !isAbsolute(state.runtimeManifestPath) ||
+          resolve(state.runtimeManifestPath) !== state.runtimeManifestPath ||
+          !pathIsWithin(taxCandidateRoot, state.runtimeManifestPath))) ||
+      (['ACTIVE', 'ACTIVATING'].includes(state.status) &&
+        (state.candidateDigest === null || state.runtimeManifestPath === null)) ||
+      (state.status === 'NO_PROFILES' &&
+        (state.candidateDigest !== null || state.runtimeManifestPath !== null)) ||
+      typeof state.prefetchRequired !== 'boolean' ||
+      !Array.isArray(state.affectedSubjectIDs) ||
+      state.affectedSubjectIDs.some((subjectID, index) =>
+        typeof subjectID !== 'string' ||
+        subjectID.length === 0 ||
+        (index > 0 && state.affectedSubjectIDs[index - 1] >= subjectID)) ||
+      (!['ACTIVATING', 'FAILED'].includes(state.status) &&
+        (state.prefetchRequired || state.affectedSubjectIDs.length > 0)) ||
+      !Array.isArray(state.subjectEpochs) ||
+      state.subjectEpochs.some((epoch, index) =>
+        typeof epoch?.subjectId !== 'string' ||
+        epoch.subjectId.length === 0 ||
+        typeof epoch.ledgerEpoch !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(epoch.ledgerEpoch) ||
+        (index > 0 &&
+          state.subjectEpochs[index - 1].subjectId >= epoch.subjectId)) ||
+      typeof state.updatedAt !== 'string' ||
+      (state.reason !== undefined && typeof state.reason !== 'string') ||
+      (state.retryAt !== undefined &&
+        !Number.isFinite(Date.parse(state.retryAt)))
+    ) return null
+    return state
+  } catch {
+    return null
+  }
+}
+
+const writeTaxdProfileState = ({
+  status,
+  candidateDigest = null,
+  runtimeManifestPath = null,
+  subjectEpochs = [],
+  prefetchRequired = false,
+  affectedSubjectIDs = [],
+  reason = null,
+  retryAt = null,
+  now = new Date(),
+}) => {
+  const state = {
+    schemaVersion: 'giwa.taxd-profile-state.v2',
+    status,
+    candidateDigest,
+    runtimeManifestPath,
+    prefetchRequired,
+    affectedSubjectIDs,
+    subjectEpochs,
+    updatedAt: now.toISOString(),
+  }
+  if (reason !== null) state.reason = reason
+  if (retryAt !== null) state.retryAt = retryAt.toISOString()
+  writeRuntimeFileAtomically(
+    taxdProfileStateFile,
+    `${canonicalJSON(state)}\n`,
+  )
+  rmSync(taxdLegacyNoProfilesMarker, { force: true })
+  return state
+}
+
+const markTaxdDisabled = ({
+  reason,
+  status,
+  candidateDigest = null,
+  runtimeManifestPath = null,
+  subjectEpochs = [],
+  prefetchRequired = false,
+  affectedSubjectIDs = [],
+  retry = false,
+}) => {
+  const now = new Date()
+  writeTaxdProfileState({
+    status,
+    candidateDigest,
+    runtimeManifestPath,
+    prefetchRequired,
+    affectedSubjectIDs,
+    subjectEpochs,
+    reason,
+    retryAt: retry
+      ? new Date(now.getTime() + hostTaxProfileRefreshRetryMs)
+      : null,
+    now,
+  })
+}
+
+const prefetchTaxQuotes = (
+  taxURL,
+  runtime,
+  subjectIDs = runtime.subjectIDs,
+) => {
   const totals = {
     subjects: 0,
     archiveCoverageEvents: 0,
     archiveCoverageLegs: 0,
     persistedValuations: 0,
+    annualRebuilds: 0,
+    annualReports: 0,
+    subjectOutcomes: [],
   }
-  for (const [index, subjectID] of runtime.subjectIDs.entries()) {
+  const runBackfill = (args, label) => {
     const result = spawnSync(
       join(binaryRoot, 'tax-backfill'),
-      taxQuotePrefetchArgs(subjectID),
+      args,
       {
         cwd: taxRepository,
         env: taxEnvironment(taxURL, runtime, { archiveOnly: false }),
@@ -1750,23 +3059,277 @@ const prefetchTaxQuotes = (taxURL, runtime) => {
     if (result.status !== 0) {
       const reason = result.error?.message ??
         (result.signal ? `signal ${result.signal}` : `status ${result.status}`)
-      throw new Error(
-        `Tax quote prefetch failed at subject ${index + 1}/${runtime.subjectIDs.length} with ${reason}`,
-      )
+      throw new Error(`${label} failed with ${reason}`)
     }
-    const summary = validateTaxQuotePrefetchResult(
-      result.stdout,
-      subjectID,
-    )
-    totals.subjects++
-    totals.archiveCoverageEvents += summary.archiveCoverageEvents
-    totals.archiveCoverageLegs += summary.archiveCoverageLegs
-    totals.persistedValuations += summary.persistedValuations
+    return result.stdout
+  }
+  for (const [index, subjectID] of subjectIDs.entries()) {
+    try {
+      const summary = validateTaxQuotePrefetchResult(
+        runBackfill(
+          taxQuotePrefetchArgs(subjectID),
+          `Tax quote prefetch at subject ${index + 1}/${subjectIDs.length}`,
+        ),
+        subjectID,
+      )
+      totals.subjects++
+      totals.archiveCoverageEvents += summary.archiveCoverageEvents
+      totals.archiveCoverageLegs += summary.archiveCoverageLegs
+      totals.persistedValuations += summary.persistedValuations
+      const outcomes = []
+      for (const taxYear of hostTaxSimulationYears) {
+        const rebuilt = validateTaxSubjectRebuildResult(
+          runBackfill(
+            taxSubjectRebuildArgs(subjectID, taxYear),
+            `Tax annual rebuild ${taxYear} at subject ${index + 1}/${subjectIDs.length}`,
+          ),
+          subjectID,
+          taxYear,
+        )
+        totals.persistedValuations += rebuilt.persistedValuations
+        totals.annualRebuilds++
+        if (rebuilt.rebuiltReport) totals.annualReports++
+        outcomes.push({ taxYear, report: rebuilt.report })
+      }
+      totals.subjectOutcomes.push({ subjectID, outcomes })
+    } catch (error) {
+      error.taxRuntime = runtime
+      error.taxSubjectIDs = subjectIDs.slice(index)
+      throw error
+    }
   }
   console.log(
-    `Tax quote archive coverage verified: subjects=${totals.subjects} events=${totals.archiveCoverageEvents} legs=${totals.archiveCoverageLegs} persistedValuations=${totals.persistedValuations}`,
+    `Tax quote archive coverage and annual rebuild verified: subjects=${totals.subjects} events=${totals.archiveCoverageEvents} legs=${totals.archiveCoverageLegs} persistedValuations=${totals.persistedValuations} annualRebuilds=${totals.annualRebuilds} annualReports=${totals.annualReports}`,
   )
   return totals
+}
+
+const prepareStableTaxRuntime = async (
+  queryURL,
+  taxURL,
+  initialRuntime,
+  initialSubjectIDs = initialRuntime.subjectIDs,
+) => {
+  let runtime = initialRuntime
+  let subjectIDs = await filterTaxReportGenerationRebuildSubjects(
+    taxURL,
+    initialRuntime,
+    initialSubjectIDs,
+  )
+  if (subjectIDs.length === 0) return runtime
+  const pendingGenerations = new Map()
+  const retrySubjectIDs = () => taxReportGenerationRetrySubjectIDs(
+    pendingGenerations.keys(),
+    subjectIDs,
+  )
+  for (let pass = 1; pass <= hostTaxProfileStabilityPasses; pass++) {
+    writeTaxdProfileState({
+      status: 'ACTIVATING',
+      candidateDigest: runtime.candidateDigest,
+      runtimeManifestPath: runtime.manifestPath,
+      subjectEpochs: runtime.subjectEpochs,
+      prefetchRequired: true,
+      affectedSubjectIDs: retrySubjectIDs(),
+    })
+    const begun = await beginTaxReportGenerations(taxURL, runtime, subjectIDs)
+    subjectIDs = [...begun.keys()].sort()
+    if (subjectIDs.length === 0 && pendingGenerations.size === 0) {
+      return runtime
+    }
+    let rebuilt
+    try {
+      rebuilt = prefetchTaxQuotes(taxURL, runtime, subjectIDs)
+    } catch (error) {
+      error.taxRuntime = runtime
+      error.taxSubjectIDs = retrySubjectIDs()
+      throw error
+    }
+    for (const { subjectID, outcomes } of rebuilt.subjectOutcomes) {
+      const generation = begun.get(subjectID)
+      if (!generation) {
+        throw new Error('Tax annual rebuild has no BUILDING generation')
+      }
+      pendingGenerations.set(subjectID, { ...generation, outcomes })
+    }
+    let refreshedRuntime
+    try {
+      refreshedRuntime = await createTaxRuntime(queryURL)
+    } catch (error) {
+      error.taxRuntime = runtime
+      error.taxSubjectIDs = retrySubjectIDs()
+      throw error
+    }
+    if (!taxRuntimeHasProfiles(refreshedRuntime)) {
+      await retireMissingTaxReportGenerations(taxURL, refreshedRuntime)
+      const error = new Error(
+        'Tax profile snapshot disappeared during quote prefetch',
+      )
+      error.taxRuntime = runtime
+      error.taxSubjectIDs = runtime.subjectIDs
+      throw error
+    }
+    if (taxProfileSnapshotStable(runtime, refreshedRuntime)) {
+      try {
+        await activateTaxReportGenerations(
+          taxURL,
+          refreshedRuntime,
+          pendingGenerations,
+        )
+      } catch (error) {
+        error.taxRuntime = refreshedRuntime
+        error.taxSubjectIDs = retrySubjectIDs()
+        throw error
+      }
+      return refreshedRuntime
+    }
+    try {
+      await retireMissingTaxReportGenerations(taxURL, refreshedRuntime)
+    } catch (error) {
+      error.taxRuntime = refreshedRuntime
+      error.taxSubjectIDs = retrySubjectIDs()
+      throw error
+    }
+    for (const [subjectID, pending] of pendingGenerations) {
+      const refreshedEpoch = refreshedRuntime.subjectEpochs.find(
+        ({ subjectId }) => subjectId === subjectID,
+      )?.ledgerEpoch
+      if (
+        pending.candidateDigest !== refreshedRuntime.candidateDigest ||
+        pending.ledgerFingerprint !== refreshedEpoch ||
+        !refreshedRuntime.subjectIDs.includes(subjectID)
+      ) {
+        pendingGenerations.delete(subjectID)
+      }
+    }
+    subjectIDs = changedTaxSubjectIDs(
+      runtime.subjectEpochs,
+      refreshedRuntime.subjectEpochs,
+      refreshedRuntime.subjectIDs,
+    )
+    if (
+      runtime.candidateDigest !== refreshedRuntime.candidateDigest
+    ) {
+      subjectIDs = refreshedRuntime.subjectIDs
+    }
+    runtime = refreshedRuntime
+    subjectIDs = await filterTaxReportGenerationRebuildSubjects(
+      taxURL,
+      runtime,
+      subjectIDs,
+    )
+  }
+  const error = new Error(
+    `Tax profile snapshot did not stabilize after ${hostTaxProfileStabilityPasses} quote-prefetch passes`,
+  )
+  error.taxRuntime = runtime
+  error.taxSubjectIDs = retrySubjectIDs()
+  throw error
+}
+
+const startTaxdRuntime = async (taxURL, runtime) => {
+  if (isRunning('taxd')) {
+    throw new Error('Tax profile activation requires taxd to be stopped')
+  }
+  const taxdEnvironment = taxEnvironment(
+    taxURL,
+    runtime,
+    { archiveOnly: false },
+  )
+  spawnService(
+    'taxd',
+    join(binaryRoot, 'taxd'),
+    [],
+    taxdEnvironment,
+    { cwd: taxRepository },
+  )
+  await waitFor(
+    'Tax Engine candidate',
+    () => isRunning('taxd') && taxRuntimeReady(runtime.candidateDigest),
+    30_000,
+  )
+  writeTaxdProfileState({
+    status: 'ACTIVE',
+    candidateDigest: runtime.candidateDigest,
+    runtimeManifestPath: runtime.manifestPath,
+    subjectEpochs: runtime.subjectEpochs,
+  })
+  try {
+    const removed = pruneTaxCandidateDirectories({
+      root: taxCandidateRoot,
+      activeDigest: runtime.candidateDigest,
+    })
+    if (removed.length > 0) {
+      console.log(`Pruned ${removed.length} inactive Tax runtime candidates`)
+    }
+  } catch (error) {
+    console.warn(`Tax candidate pruning skipped: ${error.message}`)
+  }
+}
+
+const activateTaxRuntime = async (
+  queryURL,
+  taxURL,
+  initialRuntime,
+  { prefetch, subjectIDs = initialRuntime.subjectIDs },
+) => {
+  let runtime = initialRuntime
+  let activationSubjectIDs = []
+  try {
+    if (typeof prefetch !== 'boolean') {
+      throw new Error('Tax profile activation requires an explicit prefetch mode')
+    }
+    if (!taxRuntimeHasProfiles(runtime)) {
+      throw new Error('Tax profile activation requires a non-empty runtime')
+    }
+    activationSubjectIDs = [...new Set(subjectIDs)].sort()
+    if (activationSubjectIDs.some((subjectID) =>
+      typeof subjectID !== 'string' ||
+      !runtime.subjectIDs.includes(subjectID))) {
+      throw new Error('Tax profile activation subjects are outside the candidate runtime')
+    }
+    if (prefetch) {
+      activationSubjectIDs = await filterTaxReportGenerationEligibleSubjects(
+        taxURL,
+        runtime,
+        activationSubjectIDs,
+      )
+    }
+    writeTaxdProfileState({
+      status: 'ACTIVATING',
+      candidateDigest: runtime.candidateDigest,
+      runtimeManifestPath: runtime.manifestPath,
+      subjectEpochs: runtime.subjectEpochs,
+      prefetchRequired: prefetch,
+      affectedSubjectIDs: prefetch ? activationSubjectIDs : [],
+    })
+    if (isRunning('taxd')) await stopService('taxd')
+    if (prefetch) {
+      runtime = await prepareStableTaxRuntime(
+        queryURL,
+        taxURL,
+        runtime,
+        activationSubjectIDs,
+      )
+    }
+    await startTaxdRuntime(taxURL, runtime)
+    return true
+  } catch (error) {
+    runtime = error.taxRuntime ?? runtime
+    const failedSubjectIDs = error.taxSubjectIDs ?? activationSubjectIDs
+    if (isRunning('taxd')) await stopService('taxd')
+    markTaxdDisabled({
+      reason: 'Tax profile activation, quote archive coverage, or annual rebuild did not complete. The supervisor will retry after the bounded cooldown.',
+      status: 'FAILED',
+      candidateDigest: runtime?.candidateDigest ?? null,
+      runtimeManifestPath: runtime?.manifestPath ?? null,
+      subjectEpochs: runtime?.subjectEpochs ?? [],
+      prefetchRequired: prefetch,
+      affectedSubjectIDs: prefetch ? [...failedSubjectIDs].sort() : [],
+      retry: true,
+    })
+    console.error(`Tax Engine remains disabled: ${error.message}`)
+    return false
+  }
 }
 
 const startServices = async ({ buildArtifacts = true } = {}) => {
@@ -1777,7 +3340,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
   // JIT evaluates profiles from this checkout while the canonical Posting
   // worker independently verifies their runtime coordinate. Pin both services
   // to the same clean revision on every start, including prebuilt restarts.
-  assertCleanGitCheckout(deFiLabelRepository, 'DeFi Action runtime')
+  assertCleanRuntimeCheckouts()
   const actionRuntimeRelease = loadVerifiedActionRuntimeRelease(deFiLabelRepository)
   if (buildArtifacts) build()
   for (const requiredArtifact of [
@@ -1788,12 +3351,20 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     join(binaryRoot, 'posting-worker'),
     join(binaryRoot, 'taxd'),
     join(binaryRoot, 'tax-backfill'),
+    join(binaryRoot, 'upbit-candle-sync'),
+    upbitCandleCollectorQuoteConfigFile,
+    taxBinaryReleaseManifestFile,
     join(binaryRoot, 'evm-posting-worker'),
     join(runtimeRoot, 'app', 'web-api', 'server.js'),
   ]) {
     if (!existsSync(requiredArtifact)) {
       throw new Error(`Prebuilt backend artifact is missing: ${requiredArtifact}`)
     }
+  }
+  if (buildArtifacts) {
+    await restartUpbitCandleCollector()
+  } else {
+    ensureUpbitCandleCollectorRunning()
   }
   loadRuntimeEnvironment()
 
@@ -2049,76 +3620,28 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       )
     }
 
-    let taxRuntime = await createTaxRuntime(queryURL)
+    const taxRuntime = await createTaxRuntime(queryURL)
+    await retireMissingTaxReportGenerations(taxURL, taxRuntime)
     let taxdStarted = false
-    if (taxRuntime) {
-      let quoteCoverageReady = false
-      try {
-        for (
-          let pass = 1;
-          pass <= hostTaxProfileStabilityPasses;
-          pass++
-        ) {
-          prefetchTaxQuotes(taxURL, taxRuntime)
-          const refreshedRuntime = await createTaxRuntime(queryURL)
-          if (!refreshedRuntime) {
-            throw new Error(
-              'Tax profile snapshot disappeared during quote prefetch',
-            )
-          }
-          if (taxProfileSnapshotStable(taxRuntime, refreshedRuntime)) {
-            taxRuntime = refreshedRuntime
-            quoteCoverageReady = true
-            break
-          }
-          taxRuntime = refreshedRuntime
-        }
-        if (!quoteCoverageReady) {
-          throw new Error(
-            `Tax profile snapshot did not stabilize after ${hostTaxProfileStabilityPasses} quote-prefetch passes`,
-          )
-        }
-      } catch (error) {
-        writeFileSync(
-          taxdNoProfilesMarker,
-          'Tax quote archive coverage did not complete. Inspect supervisor logs and restart after resolution.\n',
-          { mode: fileMode },
-        )
-        chmodSync(taxdNoProfilesMarker, fileMode)
-        console.error(
-          `Tax Engine remains disabled because quote archive coverage failed: ${error.message}`,
-        )
-      }
-      if (quoteCoverageReady) {
-        // Prefetch closes the current backlog before launch. Keep the single
-        // daemon network-enabled so later ledger deliveries can archive their
-        // own historical quote before calculation; manual backfill is blocked
-        // while taxd is running, so only one Host process consumes Upbit.
-        const taxdEnvironment = taxEnvironment(
-          taxURL,
-          taxRuntime,
-          { archiveOnly: false },
-        )
-        rmSync(taxdNoProfilesMarker, { force: true })
-        spawnService(
-          'taxd',
-          join(binaryRoot, 'taxd'),
-          [],
-          taxdEnvironment,
-          { cwd: taxRepository },
-        )
-        await waitFor('Tax Engine', taxReady, 30_000)
-        taxdStarted = true
-      }
-    } else {
-      writeFileSync(
-        taxdNoProfilesMarker,
-        'No current ledger subjects are available. Restart after Posting materialization.\n',
-        { mode: fileMode },
+    if (taxRuntimeHasProfiles(taxRuntime)) {
+      // Prefetch closes the current backlog before launch. Keep the single
+      // daemon network-enabled so later ledger deliveries can archive their
+      // own historical quote before calculation; manual backfill is blocked
+      // while taxd is running, so only one Host process consumes Upbit.
+      taxdStarted = await activateTaxRuntime(
+        queryURL,
+        taxURL,
+        taxRuntime,
+        { prefetch: true },
       )
-      chmodSync(taxdNoProfilesMarker, fileMode)
+    } else {
+      markTaxdDisabled({
+        reason: 'No current ledger subjects are available. The supervisor will activate taxd after Posting materialization.',
+        status: 'NO_PROFILES',
+        subjectEpochs: taxRuntime.subjectEpochs,
+      })
       console.warn(
-        'Tax Engine is disabled until at least one current ledger subject exists; JIT and Posting remain available',
+        'Tax Engine is disabled until at least one current ledger subject exists; the supervisor will recheck automatically',
       )
     }
 
@@ -2211,32 +3734,54 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
   }
 }
 
-const stopServices = async () => {
-  for (const name of [...allServiceOrder].reverse()) {
-    const state = readProcessState(name)
-    if (!isRunning(name)) {
-      rmSync(pidFile(name), { force: true })
-      continue
+const stopService = async (name) => {
+  const state = readProcessState(name)
+  if (!isRunning(name)) {
+    rmSync(pidFile(name), { force: true })
+    if (name === 'taxd') {
+      await waitFor(
+        'taxd port release',
+        async () => !await tcpReady(8981),
+        5_000,
+      )
     }
+    return
+  }
+  try {
+    process.kill(-state.pid, 'SIGTERM')
+  } catch {
+    process.kill(state.pid, 'SIGTERM')
+  }
+  const stoppedGracefully = await waitFor(
+    `${name} shutdown`,
+    () => Promise.resolve(!isRunning(name)),
+    15_000,
+  ).then(() => true).catch(() => false)
+  if (!stoppedGracefully && isRunning(name)) {
     try {
-      process.kill(-state.pid, 'SIGTERM')
+      process.kill(-state.pid, 'SIGKILL')
     } catch {
-      process.kill(state.pid, 'SIGTERM')
+      process.kill(state.pid, 'SIGKILL')
     }
     await waitFor(
-      `${name} shutdown`,
+      `${name} forced shutdown`,
       () => Promise.resolve(!isRunning(name)),
-      15_000,
-    ).catch(() => {
-      if (isRunning(name)) {
-        try {
-          process.kill(-state.pid, 'SIGKILL')
-        } catch {
-          process.kill(state.pid, 'SIGKILL')
-        }
-      }
-    })
-    rmSync(pidFile(name), { force: true })
+      5_000,
+    )
+  }
+  if (name === 'taxd') {
+    await waitFor(
+      'taxd port release',
+      async () => !await tcpReady(8981),
+      5_000,
+    )
+  }
+  rmSync(pidFile(name), { force: true })
+}
+
+const stopServices = async () => {
+  for (const name of [...allServiceOrder].reverse()) {
+    await stopService(name)
   }
   console.log('Backend services stopped; PostgreSQL remains running')
 }
@@ -2331,6 +3876,9 @@ const taxBackfill = (subjectID, eventID, taxYearInput) => withOperationLock(asyn
     process.env.DAEJANG_TAX_APP_PASSWORD,
   )
   const runtime = await createTaxRuntime(queryURL)
+  if (!taxRuntimeHasProfiles(runtime)) {
+    throw new Error('Tax backfill requires at least one current ledger subject profile')
+  }
   run(
     join(binaryRoot, 'tax-backfill'),
     commandArgs,
@@ -2348,19 +3896,170 @@ const status = () => {
     if (name === 'evm-posting' && !evmPostingEnabled()) {
       disabled = ' (disabled: signed claim policy not provisioned)'
     } else if (name === 'taxd' && !taxdEnabled()) {
-      const reason = readFileSync(taxdNoProfilesMarker, 'utf8').trim()
+      const reason = readTaxdProfileState()?.reason ??
+        'Tax profile runtime is not active'
       disabled = ` (disabled: ${reason})`
     }
     console.log(`${name}: ${state}${disabled}`)
   }
+  const collector = readUpbitCandleCollectorArchiveStatus({
+    path: upbitCandleCollectorStateFile,
+  })
+  const serviceState = isRunning('upbit-candle-sync') ? 'running' : 'stopped'
+  const details = [`archive=${collector.status}`]
+  if (collector.updatedAt) details.push(`updated=${collector.updatedAt}`)
+  if (Number.isSafeInteger(collector.archiveBytes)) {
+    details.push(
+      `storage=${(collector.archiveBytes / (1 << 30)).toFixed(2)}/${(collector.quotaBytes / (1 << 30)).toFixed(0)}GiB`,
+    )
+  }
+  if (Number.isSafeInteger(collector.completedPacks)) {
+    details.push(`packs-created-this-run=${collector.completedPacks}`)
+  }
+  if (collector.nextMarket && collector.nextMonth) {
+    details.push(`next=${collector.nextMarket}/${collector.nextMonth}`)
+  }
+  if (collector.status === 'BLOCKED') {
+    details.push(collector.manualBlock
+      ? 'manual-block=true'
+      : `blocked-until=${collector.blockedUntil || 'unknown'}`)
+  }
+  if (collector.lastError) {
+    details.push(`error=${collector.lastError.replaceAll(/\s+/gu, ' ').slice(0, 240)}`)
+  }
+  console.log(
+    `upbit-candle-sync: ${serviceState} (supervisor-managed); ${details.join(', ')}`,
+  )
 }
 
 const logs = () => {
-  const files = allServiceOrder
+  const files = [...allServiceOrder, 'upbit-candle-sync']
     .filter((name) => existsSync(logFile(name)))
     .map(logFile)
   if (files.length === 0) throw new Error('No backend logs are available')
   run('tail', ['-n', process.env.GIWA_LOG_LINES ?? '80', ...files])
+}
+
+let lastTaxProfileRefreshCheckAt = 0
+let lastUpbitCandleCollectorRecoveryAt = 0
+
+const reconcileUpbitCandleCollector = () => {
+  if (isRunning('upbit-candle-sync')) return
+  const now = Date.now()
+  if (now - lastUpbitCandleCollectorRecoveryAt < 60_000) return
+  lastUpbitCandleCollectorRecoveryAt = now
+  try {
+    ensureUpbitCandleCollectorRunning()
+    console.log('Upbit candle collector recovered from the verified prebuilt release')
+  } catch (error) {
+    console.error(`Upbit candle collector recovery failed: ${error.message}`)
+  }
+}
+
+const reconcileTaxRuntime = async () => {
+  if (!await coreRuntimeHealthy()) return false
+
+  const now = Date.now()
+  const state = readTaxdProfileState()
+  const taxdRunning = isRunning('taxd')
+  const taxdReady = taxdRunning &&
+    state?.status === 'ACTIVE' &&
+    await taxRuntimeReady(state.candidateDigest)
+  const unhealthyTaxd = state?.status === 'ACTIVE' &&
+    (!taxdRunning || !taxdReady)
+  if (
+    !unhealthyTaxd &&
+    now - lastTaxProfileRefreshCheckAt < hostTaxProfileRefreshIntervalMs
+  ) return false
+  lastTaxProfileRefreshCheckAt = now
+
+  const queryURL = databaseURL(
+    'daejang_query_app',
+    process.env.DAEJANG_QUERY_APP_PASSWORD,
+  )
+  const taxURL = databaseURL(
+    'daejang_tax_app',
+    process.env.DAEJANG_TAX_APP_PASSWORD,
+  )
+  const subjectEpochs = await readTaxSubjectEpochs(queryURL)
+  const action = planTaxProfileReconcile({
+    state,
+    subjectEpochs,
+    taxdRunning,
+    taxdReady,
+    now,
+  })
+  if (action === 'NONE') return false
+
+  if (action === 'RESTART_TAXD') {
+    let activeRuntime
+    try {
+      activeRuntime = loadActiveTaxRuntime(state)
+    } catch (error) {
+      markTaxdDisabled({
+        reason: `Active Tax runtime recovery failed: ${error.message}`,
+        status: 'FAILED',
+        candidateDigest: state?.candidateDigest ?? null,
+        runtimeManifestPath: state?.runtimeManifestPath ?? null,
+        subjectEpochs: state?.subjectEpochs ?? subjectEpochs,
+        retry: true,
+      })
+      if (taxdRunning) await stopService('taxd')
+      console.error(`Tax Engine recovery failed closed: ${error.message}`)
+      return true
+    }
+    console.log('Tax Engine health failed; restarting taxd only from its active candidate manifest')
+    await activateTaxRuntime(
+      queryURL,
+      taxURL,
+      activeRuntime,
+      { prefetch: false },
+    )
+    return true
+  }
+
+  let runtime
+  try {
+    runtime = await createTaxRuntime(queryURL)
+    await retireMissingTaxReportGenerations(taxURL, runtime)
+  } catch (error) {
+    markTaxdDisabled({
+      reason: `Tax profile generation failed: ${error.message}`,
+      status: 'FAILED',
+      subjectEpochs,
+      retry: true,
+    })
+    if (taxdRunning) await stopService('taxd')
+    console.error(`Tax Engine stopped after profile generation failed: ${error.message}`)
+    return true
+  }
+
+  if (!taxRuntimeHasProfiles(runtime)) {
+    markTaxdDisabled({
+      reason: 'No current ledger subjects are available. The supervisor will activate taxd after Posting materialization.',
+      status: 'NO_PROFILES',
+      subjectEpochs: runtime.subjectEpochs,
+    })
+    if (taxdRunning) await stopService('taxd')
+    console.warn('Tax Engine stopped because no current ledger subject remains')
+    return true
+  }
+
+  const activation = planTaxProfileActivation({ state, runtime, action })
+
+  console.log(
+    `${activation.candidateChanged ? 'Tax profile change' : 'Tax ledger change or Engine failure'} detected; rebuilding affected annual outputs and restarting taxd: ${state?.candidateDigest ?? 'none'} -> ${runtime.candidateDigest}`,
+  )
+  await activateTaxRuntime(
+    queryURL,
+    taxURL,
+    runtime,
+    {
+      prefetch: activation.prefetch,
+      subjectIDs: activation.subjectIDs,
+    },
+  )
+  return true
 }
 
 const supervise = async () => {
@@ -2373,14 +4072,15 @@ const supervise = async () => {
   }
   try {
     while (!shutdownRequested) {
-      if (!existsSync(pauseFile)) {
-        await withOperationLock(async () => {
-          if (existsSync(pauseFile) || await runtimeHealthy()) return
-          const running = allServiceOrder.filter(isRunning)
-          if (running.length > 0) await stopServices()
-          await startServices({ buildArtifacts: false })
-        }).catch((error) => console.error(error))
-      }
+      await withOperationLock(async () => {
+        reconcileUpbitCandleCollector()
+        if (existsSync(pauseFile)) return
+        if (await reconcileTaxRuntime()) return
+        if (await runtimeHealthy()) return
+        const running = allServiceOrder.filter(isRunning)
+        if (running.length > 0) await stopServices()
+        await startServices({ buildArtifacts: false })
+      }).catch((error) => console.error(error))
       await sleep(5_000)
     }
   } finally {
@@ -2397,6 +4097,60 @@ const xmlEscape = (value) => value
 const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`
 
 export const launchdServiceDomains = (uid) => [`gui/${uid}`, `user/${uid}`]
+
+export const readUpbitCandleCollectorArchiveStatus = ({
+  path,
+  fileExists = existsSync,
+  readFile = readFileSync,
+}) => {
+  if (!fileExists(path)) return { status: 'NOT_STARTED' }
+  try {
+    const state = JSON.parse(readFile(path, 'utf8'))
+    const allowed = new Set([
+      'CATALOG',
+      'PARTIAL',
+      'SYNCING',
+      'IDLE',
+      'FAILED',
+      'BLOCKED',
+    ])
+    if (
+      state?.schemaVersion !== 'daejang.upbit-minute-bulk-state.v1' ||
+      !allowed.has(state.status) ||
+      typeof state.updatedAt !== 'string' ||
+      !Number.isFinite(Date.parse(state.updatedAt)) ||
+      !Number.isSafeInteger(state.archiveBytes) ||
+      state.archiveBytes < 0 ||
+      !Number.isSafeInteger(state.quotaBytes) ||
+      state.quotaBytes < 1
+    ) {
+      return { status: 'CORRUPT' }
+    }
+    return {
+      status: state.status,
+      updatedAt: new Date(state.updatedAt).toISOString(),
+      archiveBytes: state.archiveBytes,
+      quotaBytes: state.quotaBytes,
+      completedPacks: Number.isSafeInteger(state.completedPacks)
+        ? state.completedPacks
+        : 0,
+      nextMarket: typeof state.nextMarket === 'string'
+        ? state.nextMarket
+        : '',
+      nextMonth: typeof state.nextMonth === 'string'
+        ? state.nextMonth
+        : '',
+      manualBlock: state.manualBlock === true,
+      blockedUntil: typeof state.blockedUntil === 'string' &&
+          Number.isFinite(Date.parse(state.blockedUntil))
+        ? new Date(state.blockedUntil).toISOString()
+        : '',
+      lastError: typeof state.lastError === 'string' ? state.lastError : '',
+    }
+  } catch {
+    return { status: 'CORRUPT' }
+  }
+}
 
 export const stableSupervisorPath = ({ node, home }) => [...new Set([
   dirname(node),
@@ -2548,7 +4302,7 @@ export const resolveSupervisorScript = (repository, fileExists = existsSync) => 
   return script
 }
 
-const installAutostart = () => {
+const installAutostart = () => withOperationLock(async () => {
   assertExternalRuntimeRoot()
   ensureRuntimeDirectories()
   const launchAgents = join(homedir(), 'Library', 'LaunchAgents')
@@ -2556,6 +4310,13 @@ const installAutostart = () => {
   const plist = join(launchAgents, 'io.backwardlabs.giwa-host-backend.plist')
   const script = resolveSupervisorScript(canonicalRepositoryRoot)
   const servicePath = stableSupervisorPath({ node: process.execPath, home: homedir() })
+  const collectorBinary = join(binaryRoot, 'upbit-candle-sync')
+  const collectorQuoteConfig = upbitCandleCollectorQuoteConfigFile
+  if (!existsSync(collectorBinary) || !existsSync(collectorQuoteConfig)) {
+    throw new Error(
+      'Upbit candle collector binary or quote config is missing; run backend:upbit-collector-start or backend:start before installing autostart',
+    )
+  }
   writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -2612,7 +4373,9 @@ const installAutostart = () => {
   } else {
     runSupervisorWatchdog(script)
   }
-}
+  ensureUpbitCandleCollectorRunning()
+  console.log('Upbit candle collector is supervised independently from backend stop/start')
+})
 
 let handlingSignal = false
 export const runSignalShutdown = async ({
@@ -2685,7 +4448,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const command = process.argv[2]
   if (command === 'start') await start()
   else if (command === 'stop') await stop()
-  else if (command === 'restart') {
+  else if (command === 'upbit-collector-start') {
+    await startUpbitCandleCollectorOnly()
+  } else if (command === 'restart') {
     await restart()
   } else if (command === 'tax-backfill') {
     await taxBackfill(process.argv[3], process.argv[4], process.argv[5])
@@ -2703,10 +4468,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       exit: process.exit,
     })
   }
-  else if (command === 'install-autostart') installAutostart()
+  else if (command === 'install-autostart') await installAutostart()
   else if (command === 'share-runtime') shareRuntime()
   else if (command === 'watchdog') {
     runSupervisorWatchdog(fileURLToPath(import.meta.url))
   }
-  else throw new Error('Usage: host-backend.mjs start|stop|restart|status|logs|tax-backfill <subject> <event> [tax-year>=2025]|supervise|watchdog|install-autostart|share-runtime')
+  else throw new Error('Usage: host-backend.mjs start|stop|upbit-collector-start|restart|status|logs|tax-backfill <subject> <event> [tax-year>=2025]|supervise|watchdog|install-autostart|share-runtime')
 }
