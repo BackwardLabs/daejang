@@ -151,9 +151,9 @@ clean checkout으로 교체한다. 새 supervisor는 pause 상태에서도 수�
 
 수집기는 인증키가 필요 없는 Upbit 공개 Quotation API를 사용한다. 매 catalog 갱신 때
 현재 전체 거래쌍을 보존하고, 모든 현재 base token에 대해 `KRW → USDT → BTC` 우선순위로
-대표 market 하나를 선택한다. 2025년을 먼저 채운 뒤 최신 완료 월부터 과거
-`2017-09`까지 수집한다. 완료된 UTC 월은 deterministic gzip pack과 SHA-256 index로
-고정하며 현재 진행 중인 월은 bulk pack으로 확정하지 않는다.
+대표 market 하나를 선택한다. 수집 범위는 `2025-01` 이후이며, 2025년을 먼저 채운 뒤
+2026년 이후의 최신 완료 월부터 역순으로 보완한다. 완료된 UTC 월은 deterministic gzip
+pack과 SHA-256 index로 고정하며 현재 진행 중인 월은 bulk pack으로 확정하지 않는다.
 
 운영 안전 한도는 다음과 같다.
 
