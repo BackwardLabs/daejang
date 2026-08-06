@@ -1477,9 +1477,18 @@ export const loadVerifiedActionRuntimeRelease = (
       throw new Error(`DeFi Action runtime release ${label} is not in the deployed checkout`)
     }
   }
+  const checkout = inspect(
+    'git',
+    ['rev-parse', 'HEAD'],
+    { cwd: repository, encoding: 'utf8' },
+  )
+  const checkoutCommit = checkout.stdout?.trim()
+  if (checkout.status !== 0 || !/^[0-9a-f]{40}$/.test(checkoutCommit ?? '')) {
+    throw new Error('DeFi Action runtime checkout identity is invalid')
+  }
   return {
-    repository: bundle.exporterContractRepository,
-    commit: bundle.exporterContractCommit,
+    repository: bundle.registrySourceRepository,
+    commit: checkoutCommit,
     bundleSha256: bundleDigest,
   }
 }
