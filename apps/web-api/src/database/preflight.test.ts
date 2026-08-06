@@ -50,14 +50,24 @@ const validWebAuthContract = {
 const validTaxReportContract = {
   report_table: 'reporting.tax_report',
   current_table: 'reporting.current_tax_report',
+  activated_read_view: 'reporting.activated_tax_report_read_v1',
+  current_read_view: 'reporting.current_tax_report_read_v1',
+  generation_status_read_view:
+    'reporting.current_tax_report_generation_status_read_v1',
   contract_version: '1',
-  migration_version: '62',
+  migration_version: '73',
   reporting_usage: true,
   reporting_create: false,
-  report_select: true,
+  report_select: false,
   report_write: false,
-  current_select: true,
+  current_select: false,
   current_write: false,
+  activated_read_select: true,
+  activated_read_write: false,
+  current_read_select: true,
+  current_read_write: false,
+  generation_status_read_select: true,
+  generation_status_read_write: false,
 }
 
 const validSubjectNameProvisionerContract = {
@@ -147,7 +157,7 @@ describe('web authentication schema preflight', () => {
 })
 
 describe('tax report schema preflight', () => {
-  it('accepts the simulation-year tax report persistence contract at migration 62', async () => {
+  it('accepts the generation-gated tax report persistence contract at migration 73', async () => {
     await expect(
       assertTaxReportSchema(poolReturning(validTaxReportContract)),
     ).resolves.toBeUndefined()
@@ -158,7 +168,7 @@ describe('tax report schema preflight', () => {
       assertTaxReportSchema(
         poolReturning({
           ...validTaxReportContract,
-          migration_version: '24',
+          migration_version: '62',
         }),
       ),
     ).rejects.toThrow('tax report persistence migration contract is invalid')
@@ -169,7 +179,51 @@ describe('tax report schema preflight', () => {
       assertTaxReportSchema(
         poolReturning({
           ...validTaxReportContract,
-          report_select: false,
+          current_read_select: false,
+        }),
+      ),
+    ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+
+  it('rejects a runtime role without the activated history/detail grant', async () => {
+    await expect(
+      assertTaxReportSchema(
+        poolReturning({
+          ...validTaxReportContract,
+          activated_read_select: false,
+        }),
+      ),
+    ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+
+  it('rejects a runtime role without the generation status grant', async () => {
+    await expect(
+      assertTaxReportSchema(
+        poolReturning({
+          ...validTaxReportContract,
+          generation_status_read_select: false,
+        }),
+      ),
+    ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+
+  it('rejects a runtime role that can bypass the generation-gated view', async () => {
+    await expect(
+      assertTaxReportSchema(
+        poolReturning({
+          ...validTaxReportContract,
+          current_select: true,
+        }),
+      ),
+    ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+
+  it('rejects a runtime role that can read unbound raw report history', async () => {
+    await expect(
+      assertTaxReportSchema(
+        poolReturning({
+          ...validTaxReportContract,
+          report_select: true,
         }),
       ),
     ).rejects.toThrow('tax report persistence migration contract is invalid')

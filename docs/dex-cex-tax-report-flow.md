@@ -24,6 +24,7 @@ sequenceDiagram
   participant Ledger as Ledger DB
   participant Review as Review DB
   participant Report as Lot·Tax·Report DB
+  participant Host as Daejang Host
 
   Wallet->>JIT: 공개 온체인 거래 조회
   JIT->>Evidence: 검증된 ActionProof와 Observation 발행
@@ -47,7 +48,10 @@ sequenceDiagram
   Tax->>Review: 해당 과세연도의 열린 검토 조회
   Review-->>Tax: review revision·Observation 근거 좌표
   Tax->>Report: Tax inventory·estimate·evidence pack 저장
-  Report-->>Tax: 하나의 현재 보고서 pointer
+  Report-->>Tax: immutable Report와 raw current pointer
+  Tax-->>Host: 연도별 exact Report ID·pointer 또는 NO_TAX_EVENTS
+  Host->>Report: 2025·2026·2027 generation 활성화
+  Report-->>Host: generation-gated safe current/history + status
 
   alt 가격·basis·검토가 모두 확정
     Note over Tax,Report: FINAL · 신고 가능
@@ -78,6 +82,28 @@ Tax Engine은 producer 이름으로 DEX와 CEX를 임의 병합하지 않는다.
 
 열린 검토는 같은 사용자, 같은 한국 과세연도, 현재 Lot member에 포함된 근거만 보고서 limitation으로 들어간다. supersede된 과거 fragment나 다른 연도의 검토가 현재 보고서를 막지 않는다.
 
+이는 계산 artifact에 포함되는 OPEN Review limitation의 범위다. 별도로 migration 73의
+사용자 노출 gate는 durable `application_result`가 아직 없기 때문에 subject에 V2 resolution
+event가 하나라도 있으면 연도·generation·delivery 상태와 무관하게
+`APPLICATION_PENDING`으로 닫힌다. `DELIVERED`는 적용 성공이 아니다. 향후 application
+result가 실제 장부 결과와 rebuild generation을 증명할 때만 이 보수적 범위를 좁힌다.
+Tax profile에는 해당 subject를 계속 포함하되, DB가 공개하는 eligibility가
+`APPLICATION_PENDING`인 subject는 generation begin·가격 prefetch·annual rebuild·activation
+대상에서 제외한다. 따라서 한 사용자의 적용 대기가 다른 사용자의 계산과 taxd 기동을
+롤백하지 않는다.
+
+Tax writer가 만든 raw current pointer는 곧바로 사용자에게 노출하지 않는다. Host가 세
+지원 연도의 rebuild 결과를 모아, Report가 있는 연도는 정확한 `report_id`와
+`report_pointer_version`, Event가 없는 연도는 `NULL/NULL`을 전달한다. DB가 exact current
+identity와 live ledger fingerprint를 확인해 generation을 ACTIVE로 만든 뒤에만 Web API가
+safe view로 읽는다. Report가 없을 때는 status endpoint의 `blockedReasonCode`를 사용한다.
+
+Upbit 과거 캔들은 각 거래 시점의 KRW 환산과 2025·2026 simulation에 사용할 수 있다.
+그러나 2027년 1월 1일 현재 남은 시행 전 보유분의 법정 전환시가는 별도 입력이다.
+시가고시가상자산사업자들의 2027-01-01 00:00 공시가격 평균과 2026-12-31 보유 snapshot을
+결합해 versioned `openingBalances`로 공급하기 전에는, Upbit 단독 종가로 이를 채우거나
+2027 Report를 신고 가능 상태로 표시하지 않는다.
+
 ## 보고서 재현 근거
 
 Evidence pack은 다음 연결을 보존한다.
@@ -98,7 +124,7 @@ Evidence pack은 다음 연결을 보존한다.
 - KRW denomination과 유효 구간이 명확한 quote snapshot
 - 지갑·거래소 account의 실제 ownership assertion
 - JIT·Tax policy 및 Engine artifact pin
-- `daejang-db` migration 42
+- `daejang-db` migration 73
 - JIT와 SOURCE producer 각각의 서명된 publication claim 정책
 - private artifact 저장소와 PostgreSQL runtime role
 

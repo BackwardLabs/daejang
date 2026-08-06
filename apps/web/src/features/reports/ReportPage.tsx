@@ -318,6 +318,7 @@ export function ReportWorkspacePage() {
           ) : null}
           {detailStatus === 'ready' && reportDetail ? (
             <TaxReportDetail
+              key={reportDetail.reportId}
               report={reportDetail}
               pointerVersion={
                 selectedReport &&

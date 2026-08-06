@@ -4,17 +4,21 @@ import { ApiError, resourceNotFound, unauthorized } from '../errors.js'
 import {
   AmbiguousCurrentTaxReportError,
   CorrectionPendingError,
+  InconsistentTaxReportGenerationStatusError,
   InconsistentTaxReportError,
 } from '../tax-report/postgres-tax-report-reader.js'
 import type {
   CurrentTaxReport,
   TaxAmount,
   TaxReportFinality,
+  TaxReportGenerationStatus,
+  TaxReportGenerationStatusReader,
   TaxReportReader,
 } from '../tax-report/types.js'
 
 type TaxReportRoutesOptions = {
   reader: TaxReportReader
+  statusReader?: TaxReportGenerationStatusReader
 }
 
 const amountSchema = {
@@ -61,6 +65,72 @@ const reportResponseSchema = {
   },
 } as const
 
+const generationStatusResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'generationId',
+    'state',
+    'taxYear',
+    'outcome',
+    'createdAt',
+    'completedAt',
+    'blockedReasonCode',
+    'hasCurrentReport',
+  ],
+  properties: {
+    generationId: {
+      anyOf: [
+        { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        { type: 'null' },
+      ],
+    },
+    state: {
+      type: 'string',
+      enum: ['NOT_STARTED', 'BUILDING', 'ACTIVE', 'RETIRED', 'SUPERSEDED'],
+    },
+    taxYear: { type: 'integer', minimum: 2025, maximum: 2027 },
+    outcome: {
+      anyOf: [
+        { type: 'string', enum: ['REPORT', 'NO_TAX_EVENTS'] },
+        { type: 'null' },
+      ],
+    },
+    createdAt: {
+      anyOf: [
+        { type: 'string', format: 'date-time' },
+        { type: 'null' },
+      ],
+    },
+    completedAt: {
+      anyOf: [
+        { type: 'string', format: 'date-time' },
+        { type: 'null' },
+      ],
+    },
+    blockedReasonCode: {
+      anyOf: [
+        {
+          type: 'string',
+          enum: [
+            'NOT_STARTED',
+            'APPLICATION_PENDING',
+            'GENERATION_BUILDING',
+            'GENERATION_RETIRED',
+            'GENERATION_NOT_ACTIVE',
+            'LEDGER_STALE',
+            'GENERATION_INCOMPLETE',
+            'NO_TAX_EVENTS',
+            'REPORT_NOT_CURRENT',
+          ],
+        },
+        { type: 'null' },
+      ],
+    },
+    hasCurrentReport: { type: 'boolean' },
+  },
+} as const
+
 const publicAmount = (amount: TaxAmount) => {
   const hasAmount = amount.status === 'KNOWN' && typeof amount.amount === 'string'
   return {
@@ -86,6 +156,21 @@ const publicReport = (report: CurrentTaxReport) => ({
   localTax: publicAmount(report.summary.localTax),
   totalTax: publicAmount(report.summary.totalTax),
 })
+
+const publicGenerationStatus = (
+  status: TaxReportGenerationStatus | undefined,
+  taxYear: 2025 | 2026 | 2027,
+) =>
+  status ?? {
+    generationId: null,
+    state: 'NOT_STARTED' as const,
+    taxYear,
+    outcome: null,
+    createdAt: null,
+    completedAt: null,
+    blockedReasonCode: 'NOT_STARTED' as const,
+    hasCurrentReport: false,
+  }
 
 export const registerTaxReportRoutes = async (
   app: FastifyInstance,
@@ -139,4 +224,53 @@ export const registerTaxReportRoutes = async (
       }
     },
   )
+  const statusReader = options.statusReader
+  if (statusReader) {
+    app.get<{ Params: { taxYear: string } }>(
+      '/api/v1/tax-reports/:taxYear/status',
+      {
+        schema: {
+          params: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['taxYear'],
+            properties: {
+              taxYear: { type: 'string', pattern: '^(2025|2026|2027)$' },
+            },
+          },
+          response: {
+            200: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['status'],
+              properties: { status: generationStatusResponseSchema },
+            },
+          },
+        },
+      },
+      async (request) => {
+        const subjectId = request.authSession?.user.id
+        if (!subjectId) {
+          throw unauthorized()
+        }
+        const taxYear = Number(request.params.taxYear) as 2025 | 2026 | 2027
+        try {
+          const status = await statusReader.getGenerationStatus(
+            subjectId,
+            taxYear,
+          )
+          return { status: publicGenerationStatus(status, taxYear) }
+        } catch (error) {
+          if (error instanceof InconsistentTaxReportGenerationStatusError) {
+            throw new ApiError(
+              503,
+              'TAX_REPORT_STATUS_INCONSISTENT',
+              '신고 자료 생성 상태의 일관성 검증에 실패했습니다.',
+            )
+          }
+          throw error
+        }
+      },
+    )
+  }
 }

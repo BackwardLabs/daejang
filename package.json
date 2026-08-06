@@ -17,6 +17,7 @@
     "dev:api": "npm run dev --workspace @daejang/web-api",
     "start:web-api:host-production": "node scripts/start-web-api-host-production.mjs",
     "backend:start": "node scripts/host-backend.mjs start",
+    "backend:upbit-collector-start": "node scripts/host-backend.mjs upbit-collector-start",
     "backend:stop": "node scripts/host-backend.mjs stop",
     "backend:restart": "node scripts/host-backend.mjs restart",
     "backend:status": "node scripts/host-backend.mjs status",

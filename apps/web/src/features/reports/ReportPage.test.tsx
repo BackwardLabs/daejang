@@ -669,11 +669,15 @@ describe('ReportPage', () => {
       '/api/v1/tax-reports/tax-report-1/artifacts/pdf',
     )
     expect(screen.getByText('요약할 처분 자산이 없습니다.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: '처분 장부' }))
+    const disposalTab = screen.getByRole('tab', { name: '처분 장부' })
+    fireEvent.click(disposalTab)
+    expect(disposalTab).toHaveAttribute('aria-selected', 'true')
     expect(
-      await screen.findByText('이 장부에 포함된 처분이 없습니다.'),
-    ).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: '이체·전환' }))
+      screen.getByRole('tabpanel', { name: '처분 장부' }),
+    ).toHaveTextContent('이 장부에 포함된 처분이 없습니다.')
+    const movementsTab = screen.getByRole('tab', { name: '이체·전환' })
+    fireEvent.click(movementsTab)
+    expect(movementsTab).toHaveAttribute('aria-selected', 'true')
     expect(
       screen.getByText('이 장부에 포함된 이체가 없습니다.'),
     ).toBeInTheDocument()

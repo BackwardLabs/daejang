@@ -62,7 +62,7 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
   beforeAll(async () => {
     await assertTaxReportSchema(pool)
     const result = await pool.query<{ subject_id: string; tax_year: number; finality: 'FINAL' | 'PROVISIONAL'; resident_id: string }>(
-      `SELECT subject_id,tax_year,finality,resident_id FROM reporting.current_tax_report ORDER BY updated_at DESC LIMIT 1`,
+      `SELECT subject_id,tax_year,finality,resident_id FROM reporting.current_tax_report_read_v1 ORDER BY updated_at DESC LIMIT 1`,
     )
     const row = result.rows[0]
     if (!row) throw new Error('The integration database has no current tax report')
@@ -70,7 +70,12 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
     taxYear = row.tax_year
     finality = row.finality
     residentId = row.resident_id
-    appContext = await buildApp({ config, logger: false, taxReportReader: reader })
+    appContext = await buildApp({
+      config,
+      logger: false,
+      taxReportReader: reader,
+      taxReportGenerationStatusReader: reader,
+    })
   })
 
   afterAll(async () => {
@@ -119,5 +124,27 @@ describeWithPostgres('PostgreSQL tax report reader', () => {
     expect(response.json()).toMatchObject({ report: { taxYear, finality } })
     expect(response.json().report).not.toHaveProperty('residentId')
     expect(response.json().report).not.toHaveProperty('evidencePackDigest')
+  })
+
+  it('serves the current generation status through the authenticated safe view contract', async () => {
+    const { token } = await appContext.sessionService.create({
+      user: { id: subjectId, displayName: 'integration subject' },
+    })
+    const response = await appContext.app.inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${taxYear}/status`,
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      status: {
+        taxYear,
+        state: 'ACTIVE',
+        outcome: 'REPORT',
+        hasCurrentReport: true,
+        blockedReasonCode: null,
+      },
+    })
+    expect(response.json().status).not.toHaveProperty('subjectId')
   })
 })

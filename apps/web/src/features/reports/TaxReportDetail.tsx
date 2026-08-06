@@ -340,13 +340,6 @@ export function TaxReportDetail({
   const artifactRootsPreview = evidencePack?.artifactRoots.slice(0, 20) ?? []
 
   useEffect(() => {
-    setActiveTab('summary')
-    setExpandedAssetIds(new Set())
-    setEvidencePack(null)
-    setEvidenceStatus('idle')
-  }, [report.reportId])
-
-  useEffect(() => {
     if (
       activeTab !== 'trace' ||
       evidencePack?.reportId === report.reportId

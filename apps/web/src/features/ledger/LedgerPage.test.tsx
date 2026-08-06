@@ -995,7 +995,7 @@ describe('LedgerPage', () => {
     expect(reviewListReads).toBe(2)
   })
 
-  it('submits the current revision and shows durable resolution completion', async () => {
+  it('submits the current revision and shows ledger application is still pending', async () => {
     vi.stubGlobal('crypto', { randomUUID: () => '00000000-0000-4000-8000-000000000099' })
     let resolutionBody: Record<string, unknown> | undefined
     let dashboardReads = 0
@@ -1039,8 +1039,9 @@ describe('LedgerPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '이 응답으로 검토 완료' }))
 
-    expect(await screen.findByText('검토 처리 완료')).toBeInTheDocument()
-    expect(screen.getByText('‘개인 거래’ 항목으로 장부에 반영했습니다')).toBeInTheDocument()
+    expect(await screen.findByText('검토 응답 저장 완료 · 장부 반영 대기')).toBeInTheDocument()
+    expect(screen.getByText('‘개인 거래’ 응답을 저장했습니다')).toBeInTheDocument()
+    expect(screen.queryByText(/장부에 반영했습니다/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '열린 검토가 없습니다' })).toBeInTheDocument()
     expect(screen.queryByLabelText('검토 항목 목록')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /거래 유형 확인 필요/ })).not.toBeInTheDocument()
@@ -1096,7 +1097,7 @@ describe('LedgerPage', () => {
       replayed: false,
     }, 201))
 
-    expect(await screen.findByText('검토 처리 완료')).toBeInTheDocument()
+    expect(await screen.findByText('검토 응답 저장 완료 · 장부 반영 대기')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /거래 유형 확인 필요/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /추가 정보 필요/ })).toBeInTheDocument()
     expect(await screen.findByText('review-2')).toBeInTheDocument()
