@@ -2128,7 +2128,7 @@ test('collector uses bounded archive and public API safety controls', () => {
   }), [
     '--archive-root', '/srv/archive',
     '--quote-config', '/srv/config/quotes.json',
-    '--start-month', '2017-09',
+    '--start-month', '2025-01',
     '--priority-year', '2025',
     '--request-interval', '750ms',
     '--rate-limit-retries', '3',

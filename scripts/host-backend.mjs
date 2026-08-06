@@ -216,7 +216,7 @@ export const upbitCandleCollectorArgs = ({
 } = {}) => [
   '--archive-root', archiveRoot,
   '--quote-config', quoteConfig,
-  '--start-month', '2017-09',
+  '--start-month', '2025-01',
   '--priority-year', '2025',
   '--request-interval', '750ms',
   '--rate-limit-retries', '3',
