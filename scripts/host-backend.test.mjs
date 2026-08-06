@@ -71,6 +71,7 @@ import {
   finishSignalShutdown,
   finishSuperviseCommand,
   releaseProcessLock,
+  resolveActionRuntimeCommit,
   resolvePostingRepository,
   resolveJITArtifactPaths,
   runRestartOperation,
@@ -245,7 +246,10 @@ test('changes the action runtime identity when evaluation or evidence runtime by
   const parent = mkdtempSync(join(tmpdir(), 'giwa-action-runtime-test-'))
   try {
     for (const [path, value] of [
-      ['releases/action-registry-v1.json', '{}'],
+      ['releases/action-registry-v1.json', JSON.stringify({
+        exporterContractRepository: 'BackwardLabs/DeFi-Label',
+        exporterContractCommit: '2'.repeat(40),
+      })],
       ['scripts/registry.py', 'registry'],
       ['scripts/transaction_adapter.py', 'adapter'],
       ['scripts/action_evaluator.py', 'evaluator'],
@@ -283,7 +287,6 @@ test('derives the canonical Posting trust coordinate from one verified signed re
     mkdirSync(releaseRoot, { recursive: true })
     const registrySourceCommit = '1'.repeat(40)
     const exporterContractCommit = '2'.repeat(40)
-    const checkoutCommit = '3'.repeat(40)
     const bundle = JSON.stringify({
       schemaVersion: 'defi-label.action-registry.v1',
       registrySourceRepository: 'BackwardLabs/DeFi-Label',
@@ -306,31 +309,32 @@ test('derives the canonical Posting trust coordinate from one verified signed re
     const runtime = loadVerifiedActionRuntimeRelease(parent, (command, args) => {
       calls.push([command, args])
       return command === 'git'
-        ? {
-            status: 0,
-            stdout: args[0] === 'rev-parse' ? `${checkoutCommit}\n` : '',
-          }
+        ? { status: 0, stdout: '' }
         : { status: 0, stdout: '{"valid": true}\n' }
     })
 
     assert.deepEqual(runtime, {
       repository: 'BackwardLabs/DeFi-Label',
-      commit: checkoutCommit,
+      commit: exporterContractCommit,
       bundleSha256,
     })
     assert.equal(calls[0][1][1], 'verify-runtime-release')
     assert.deepEqual(calls.slice(1), [
       ['git', ['merge-base', '--is-ancestor', registrySourceCommit, 'HEAD']],
       ['git', ['merge-base', '--is-ancestor', exporterContractCommit, 'HEAD']],
-      ['git', ['rev-parse', 'HEAD']],
     ])
 
+    assert.equal(
+      resolveActionRuntimeCommit(
+        'e35333a161c52ad1d4c647bc462cc393623c1b0dfbdc401250d43a90078d34c3',
+        exporterContractCommit,
+      ),
+      'b6b9ce8cfdb411f10e44fa74378c6eababd3eee4',
+    )
+    assert.equal(resolveActionRuntimeCommit('a'.repeat(64), exporterContractCommit), exporterContractCommit)
     assert.throws(
-      () => loadVerifiedActionRuntimeRelease(parent, (command, args) =>
-        command === 'git'
-          ? { status: 0, stdout: args[0] === 'rev-parse' ? 'not-a-commit\n' : '' }
-          : { status: 0, stdout: '{"valid": true}\n' }),
-      /checkout identity is invalid/,
+      () => resolveActionRuntimeCommit('not-a-digest', exporterContractCommit),
+      /commit inputs are invalid/,
     )
 
     writeFileSync(join(releaseRoot, 'action-registry-v1.json.receipt.json'), JSON.stringify({
