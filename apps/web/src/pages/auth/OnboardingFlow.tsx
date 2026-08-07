@@ -708,7 +708,7 @@ function ConsentScreen({
   }, [])
 
   const requiredAccepted = documents
-    .filter(({ required }) => required)
+    .filter(({ consentMode }) => consentMode === 'required')
     .every(({ id }) => accepted[id])
   const allAccepted =
     documents.length > 0 && documents.every(({ id }) => accepted[id])
@@ -777,7 +777,7 @@ function ConsentScreen({
                     />
                     <span>
                       <strong>
-                        {document.required ? '[필수]' : '[선택]'} {copy.title}
+                        {document.consentMode === 'required' ? '[필수]' : '[선택]'} {copy.title}
                       </strong>
                       <small>버전 {document.version}</small>
                     </span>
