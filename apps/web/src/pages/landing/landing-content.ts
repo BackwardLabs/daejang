@@ -50,4 +50,62 @@ export const workflowSteps = [
   },
 ] as const
 
+export const collectionSupport = {
+  timezone: '대한민국 표준시(KST, UTC+9) 기준',
+  documentTypes: ['Upbit 거래 내역서'],
+  networks: [
+    {
+      id: 'ethereum-mainnet',
+      name: 'Ethereum mainnet',
+      collectedRanges: [
+        {
+          start: '2015-07-31 00:26:28',
+          end: '2022-09-15 15:42:42',
+        },
+        {
+          start: '2026-07-18 19:56:23',
+          end: '2026-08-07 16:14:59',
+        },
+      ],
+      missingRanges: [
+        {
+          start: '2022-09-15 15:42:59',
+          end: '2026-07-18 19:56:11',
+        },
+      ],
+    },
+    {
+      id: 'optimism-mainnet',
+      name: 'Optimism mainnet',
+      collectedRanges: [
+        {
+          start: '2021-11-12 06:16:39',
+          end: '2025-10-09 16:05:09',
+        },
+        {
+          start: '2026-07-20 15:33:19',
+          end: '2026-08-07 18:38:15',
+        },
+      ],
+      missingRanges: [
+        {
+          start: '2025-10-09 16:05:11',
+          end: '2026-07-20 15:33:17',
+        },
+      ],
+    },
+    {
+      id: 'giwa-sepolia',
+      name: 'GIWA Sepolia',
+      collectedRanges: [
+        {
+          start: '2025-07-24 17:18:36',
+          end: '2026-08-05 03:01:00',
+        },
+      ],
+      missingRanges: [],
+    },
+  ],
+} as const
+
 export const faqs = supportFaqs

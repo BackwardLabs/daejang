@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App.tsx'
 
@@ -43,6 +43,63 @@ describe('App', () => {
     expect(
       screen.getByRole('heading', { name: '자주 묻는 질문' }),
     ).toBeInTheDocument()
+    const collectSection = screen.getByRole('region', {
+      name: /거래소와 개인지갑 기록/,
+    })
+    expect(
+      within(collectSection).queryByRole('link', { name: '수집 흐름 보기' }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(collectSection).queryByRole('link', { name: '지원 범위' }),
+    ).not.toBeInTheDocument()
+    const supportScope = within(collectSection).getByRole('region', {
+      name: '현재 지원 범위',
+    })
+    const supportedDocuments = within(supportScope).getByRole('list', {
+      name: '지원 거래 자료',
+    })
+    expect(
+      within(supportedDocuments).getByText('Upbit 거래 내역서'),
+    ).toBeInTheDocument()
+    expect(
+      within(supportScope).getByText('지원 기간은 지속적으로 확장 중입니다.'),
+    ).toBeInTheDocument()
+    expect(
+      within(supportScope).getByText('대한민국 표준시(KST, UTC+9) 기준'),
+    ).toBeInTheDocument()
+    const collectionPeriods = within(supportScope).getByRole('list', {
+      name: '지원 네트워크와 수집 기간',
+    })
+    const ethereumPeriod = within(collectionPeriods).getByRole('listitem', {
+      name: 'Ethereum mainnet',
+    })
+    expect(
+      within(ethereumPeriod).getByText('2015-07-31 00:26:28'),
+    ).toBeInTheDocument()
+    expect(
+      within(ethereumPeriod).getByText('2026-07-18 19:56:23'),
+    ).toBeInTheDocument()
+    expect(
+      within(ethereumPeriod).queryByText('2022-09-15 15:42:59'),
+    ).not.toBeInTheDocument()
+    const optimismPeriod = within(collectionPeriods).getByRole('listitem', {
+      name: 'Optimism mainnet',
+    })
+    expect(
+      within(optimismPeriod).getByText('2021-11-12 06:16:39'),
+    ).toBeInTheDocument()
+    expect(
+      within(optimismPeriod).getByText('2026-07-20 15:33:19'),
+    ).toBeInTheDocument()
+    const giwaPeriod = within(collectionPeriods).getByRole('listitem', {
+      name: 'GIWA Sepolia',
+    })
+    expect(
+      within(giwaPeriod).getByText('2025-07-24 17:18:36'),
+    ).toBeInTheDocument()
+    expect(within(supportScope).queryByText('수집')).not.toBeInTheDocument()
+    expect(within(supportScope).queryByText('미수집')).not.toBeInTheDocument()
+    expect(within(supportScope).queryByText('추후 안내 예정')).not.toBeInTheDocument()
     expect(
       screen.getByRole('img', {
         name: '대장의 자산 현황, 소스별 보유량과 보유 자산을 보여주는 대시보드',

@@ -187,9 +187,10 @@ describe('AppRouter', () => {
     expect(meCalls).toBe(1)
   })
 
-  it('uses the signup completion user without rechecking the session', async () => {
+  it('completes signup with only required consents and reuses the completion user', async () => {
     let meCalls = 0
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const submittedDecisions: unknown[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/me')) {
         meCalls += 1
@@ -234,10 +235,33 @@ describe('AppRouter', () => {
               required: false,
               consentMode: 'notice',
             },
+            {
+              id: 'legal-privacy-collection',
+              documentType: 'privacy_collection',
+              locale: 'ko-KR',
+              version: '1.0',
+              contentHash: 'privacy-collection-hash',
+              content: '# 개인정보 수집·이용 동의',
+              effectiveAt: '2026-07-26T00:00:00.000Z',
+              required: true,
+              consentMode: 'required',
+            },
+            {
+              id: 'legal-marketing',
+              documentType: 'marketing',
+              locale: 'ko-KR',
+              version: '1.0',
+              contentHash: 'marketing-hash',
+              content: '# 서비스 소식 및 마케팅 정보 수신',
+              effectiveAt: '2026-07-26T00:00:00.000Z',
+              required: false,
+              consentMode: 'optional',
+            },
           ],
         })
       }
       if (url.includes('/signup/consents')) {
+        submittedDecisions.push(JSON.parse(String(init?.body)).decisions)
         return jsonResponse({
           status: 'authenticated',
           nextPath: '/dashboard',
@@ -265,12 +289,40 @@ describe('AppRouter', () => {
     render(<AppRouter />)
 
     await screen.findByText('[필수] 서비스 이용약관')
+    const completeButton = screen.getByRole('button', { name: '가입 완료하기' })
+    expect(completeButton).toBeDisabled()
+
     fireEvent.click(
+      screen.getByRole('checkbox', { name: /서비스 이용약관/ }),
+    )
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /개인정보 수집·이용 동의/ }),
+    )
+    expect(
+      screen.getByRole('checkbox', {
+        name: /서비스 소식 및 마케팅 정보 수신/,
+      }),
+    ).not.toBeChecked()
+    expect(
       screen.getByRole('checkbox', {
         name: '모두 동의선택 항목에 동의하지 않아도 가입할 수 있어요',
       }),
-    )
-    fireEvent.click(screen.getByRole('button', { name: '가입 완료하기' }))
+    ).not.toBeChecked()
+    expect(completeButton).toBeEnabled()
+
+    fireEvent.click(completeButton)
+    await waitFor(() => {
+      expect(submittedDecisions).toEqual([
+        [
+          { legalDocumentId: 'legal-terms', action: 'accepted' },
+          {
+            legalDocumentId: 'legal-privacy-collection',
+            action: 'accepted',
+          },
+          { legalDocumentId: 'legal-marketing', action: 'withdrawn' },
+        ],
+      ])
+    })
     fireEvent.click(
       await screen.findByRole('button', { name: '서비스로 이동' }),
     )

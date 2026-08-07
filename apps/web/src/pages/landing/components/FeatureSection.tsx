@@ -1,12 +1,8 @@
-interface FeatureAction {
-  href: string
-  label: string
-  variant: 'primary' | 'secondary'
-}
+import type { ReactNode } from 'react'
 
 interface FeatureSectionProps {
-  actions?: readonly FeatureAction[]
   bullets: readonly string[]
+  children?: ReactNode
   description: string
   eyebrow: string
   heading: string
@@ -17,8 +13,8 @@ interface FeatureSectionProps {
 }
 
 export function FeatureSection({
-  actions,
   bullets,
+  children,
   description,
   eyebrow,
   heading,
@@ -43,19 +39,7 @@ export function FeatureSection({
               <li key={bullet}>{bullet}</li>
             ))}
           </ul>
-          {actions ? (
-            <div className="button-row">
-              {actions.map((action) => (
-                <a
-                  className={`button button--${action.variant}`}
-                  href={action.href}
-                  key={action.label}
-                >
-                  {action.label}
-                </a>
-              ))}
-            </div>
-          ) : null}
+          {children}
         </div>
 
         <figure className="product-preview">
