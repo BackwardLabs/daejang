@@ -197,6 +197,7 @@ restart_indexer() {
   set -a
   source "$env_file"
   set +a
+  export EVM_BULK_INDEX_DIR="${EVM_BULK_INDEX_DIR:-$(dirname "${EVM_INDEXER_DATA_DIR:?set EVM_INDEXER_DATA_DIR}")/index-bulk}"
   (cd "$INDEXER_DIR" && go build -trimpath -o "$next" ./cmd/evm-indexer)
   "$next" profile --config "$INDEXER_DIR/configs/bulk-portal.json" --chain optimism-mainnet-bulk-bedrock >/dev/null
   "$INDEXER_DIR/scripts/stop-secret-proxy.sh"
