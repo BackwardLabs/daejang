@@ -12,7 +12,7 @@ DEPLOYED_STATE_FILE="$RUNTIME_ROOT/deployed-release.tsv"
 INDEXER_STATE_FILE="$RUNTIME_ROOT/evm-indexer-deployed.tsv"
 
 repositories=(
-  "evm-indexer|$INDEXER_DIR|BackwardLabs/evm-indexer"
+  "evm-indexer|$INDEXER_DIR|BackwardLabs/daejang-evm-indexer"
   "DeFi-Label|$DAEJANG_ROOT/DeFi-Label|BackwardLabs/DeFi-Label"
   "daejang|$DAEJANG_ROOT/daejang|BackwardLabs/daejang"
   "daejang-db|$DAEJANG_ROOT/daejang-db|BackwardLabs/daejang-db"

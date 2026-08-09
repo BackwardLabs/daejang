@@ -12,6 +12,9 @@
 | 배포 checkout | Mac Studio `/Users/Shared/Projects` | `main` fast-forward와 빌드·재시작만 수행 |
 | 운영 데이터 | PostgreSQL, EVM index, quote archive, GIWA runtime root | Git 명령과 checkout 정리 대상에서 제외 |
 
+EVM 인덱서의 원격 정본 이름은 `BackwardLabs/daejang-evm-indexer`다. 과거
+`BackwardLabs/evm-indexer` URL의 redirect에 의존하지 않는다.
+
 배포 checkout에서 코드를 수정하거나 브랜치를 만들지 않는다. 개인 노트북의 기존
 worktree, 미병합 브랜치, ignored runtime 파일은 소스 정본도 배포 입력도 아니다.
 
