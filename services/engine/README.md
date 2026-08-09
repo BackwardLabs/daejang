@@ -129,7 +129,7 @@ selection을 받습니다. `jitd`에는 날짜를 block으로 변환하는 RPC�
         {
           "coverageStart": "2027-01-01",
           "coverageEnd": "2027-12-31",
-          "indexSnapshotId": "snapshot-2027",
+          "indexSnapshotId": "etherscan-v2:eip155:1:ethereum-mainnet:v1",
           "fromBlock": 21400000,
           "toBlock": 24100000
         }
@@ -139,7 +139,9 @@ selection을 받습니다. `jitd`에는 날짜를 block으로 변환하는 RPC�
 }
 ```
 
-여러 chain을 한 job에 넣으면 모든 mapping의 `indexSnapshotId`가 같아야 합니다.
+`indexSnapshotId`는 선택 source의 immutable revision을 함께 보존합니다. Etherscan
+V2 source는 `etherscan-v2:<chain-id>:<source-revision>` 형식을 사용합니다. 여러
+chain을 한 job에 넣으면 모든 mapping의 `indexSnapshotId`가 같아야 합니다.
 날짜는 UTC calendar boundary로 정규화하고, inclusive 종료일은 JIT ownership
 window의 exclusive 다음 날 00:00 UTC로 변환합니다. Worker는 selection을 만든 뒤
 source job ID에서 안정적으로 파생한 generation ID로 run을 시작합니다. 응답 유실

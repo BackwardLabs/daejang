@@ -115,7 +115,7 @@ func (s *recordingJITServer) GetJitRun(_ context.Context, request *jitv1.GetJitR
 	}
 	return &jitv1.GetJitRunResponse{Result: &jitv1.JitRunResultEnvelope{
 		RunId: request.GetRunId(), Status: status, SubjectEvidenceFragmentId: fragment,
-		IndexSnapshotId: "snapshot-2027", ResultDigest: strings.Repeat("b", 64),
+		IndexSnapshotId: "etherscan-v2:eip155:1:ethereum-mainnet:v1", ResultDigest: strings.Repeat("b", 64),
 		Progress: &jitv1.JitProgress{LogicalCandidates: 3, CandidatesTerminal: 3},
 	}}, nil
 }
@@ -153,7 +153,7 @@ func TestClientUsesExactCoverageMappingAndPublishedTerminalFragment(t *testing.T
 		t.Fatalf("unexpected materialization count: %d", len(server.materialized))
 	}
 	materialized := server.materialized[0]
-	if materialized.GetRange().GetFromBlock() != "100" || materialized.GetRange().GetToBlock() != "200" || materialized.GetIndexSnapshotId() != "snapshot-2027" {
+	if materialized.GetRange().GetFromBlock() != "100" || materialized.GetRange().GetToBlock() != "200" || materialized.GetIndexSnapshotId() != "etherscan-v2:eip155:1:ethereum-mainnet:v1" {
 		t.Fatalf("coverage mapping was not sent exactly: %#v", materialized)
 	}
 	if server.started == nil || len(server.started.GetAccounts()) != 1 || len(server.started.GetCandidateSelections()) != 1 {
@@ -307,7 +307,7 @@ func testConfig() Config {
 			ChainID: "eip155:1", ChainStore: "ethereum-mainnet", GenesisHash: "0x" + strings.Repeat("a", 64),
 			EvidenceProfile: evidenceProfile, ProfileHash: strings.Repeat("b", 64),
 			Coverage: []CoverageMapping{{
-				CoverageStart: "2027-01-01", CoverageEnd: "2027-12-31", IndexSnapshotID: "snapshot-2027", FromBlock: 100, ToBlock: 200,
+				CoverageStart: "2027-01-01", CoverageEnd: "2027-12-31", IndexSnapshotID: "etherscan-v2:eip155:1:ethereum-mainnet:v1", FromBlock: 100, ToBlock: 200,
 			}},
 		}},
 	}
