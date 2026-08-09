@@ -124,6 +124,7 @@ DB migration과 persistence client는 `daejang-db`가 소유합니다. Engine �
 - [Technical Spec — GIWA MVP v0.1](https://linear.app/giwa-daejang/document/technical-spec-giwa-mvp-v01-18d511232c66)
 - [인증·Session Sequence](docs/auth-session-sequences.md)
 - [실제 보고서 x402 결제 Sequence](docs/report-x402-payment.md)
+- [Mac Studio 개발·배포 가이드](docs/mac-studio-source-and-deployment.md)
 
 ## 협업
 
