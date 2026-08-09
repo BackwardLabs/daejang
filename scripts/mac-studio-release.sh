@@ -193,6 +193,21 @@ restart_indexer() {
   local current="$INDEXER_DIR/bin/evm-indexer"
   local previous="$INDEXER_DIR/bin/evm-indexer.previous"
   local env_file="${EVM_ENV_FILE:-$INDEXER_DIR/configs/local-nodes.env}"
+  local launchd_domain="gui/$(id -u)"
+  local launchd_label="io.backwardlabs.evm-indexer-bulk"
+  local launchd_plist="$HOME/Library/LaunchAgents/$launchd_label.plist"
+  local launchd_was_loaded=0
+
+  start_bulk_runtime() {
+    if (( launchd_was_loaded )); then
+      launchctl bootstrap "$launchd_domain" "$launchd_plist"
+      launchctl print "$launchd_domain/$launchd_label" >/dev/null
+      echo "bulk supervisor restored through launchd"
+      return
+    fi
+    "$INDEXER_DIR/scripts/start-bulk-runtime.sh"
+  }
+
   [[ -r "$env_file" ]] || { echo "missing EVM environment: $env_file" >&2; return 1; }
   set -a
   source "$env_file"
@@ -200,20 +215,25 @@ restart_indexer() {
   export EVM_BULK_INDEX_DIR="${EVM_BULK_INDEX_DIR:-$(dirname "${EVM_INDEXER_DATA_DIR:?set EVM_INDEXER_DATA_DIR}")/index-bulk}"
   (cd "$INDEXER_DIR" && go build -trimpath -o "$next" ./cmd/evm-indexer)
   "$next" profile --config "$INDEXER_DIR/configs/bulk-portal.json" --chain optimism-mainnet-bulk-bedrock >/dev/null
+  if [[ -r "$launchd_plist" ]] && launchctl print "$launchd_domain/$launchd_label" >/dev/null 2>&1; then
+    launchctl bootout "$launchd_domain" "$launchd_plist"
+    launchd_was_loaded=1
+    echo "bulk launchd agent stopped for binary replacement"
+  fi
   "$INDEXER_DIR/scripts/stop-secret-proxy.sh"
   "$INDEXER_DIR/scripts/stop-bulk-runtime.sh"
   if [[ -x "$current" ]]; then
     mv "$current" "$previous"
   fi
   mv "$next" "$current"
-  if ! "$INDEXER_DIR/scripts/start-secret-proxy.sh" || ! "$INDEXER_DIR/scripts/start-bulk-runtime.sh"; then
+  if ! "$INDEXER_DIR/scripts/start-secret-proxy.sh" || ! start_bulk_runtime; then
     echo "new EVM indexer failed to start; restoring previous binary" >&2
     "$INDEXER_DIR/scripts/stop-secret-proxy.sh" || true
     "$INDEXER_DIR/scripts/stop-bulk-runtime.sh" || true
     if [[ -x "$previous" ]]; then
       mv "$previous" "$current"
       "$INDEXER_DIR/scripts/start-secret-proxy.sh" || true
-      "$INDEXER_DIR/scripts/start-bulk-runtime.sh" || true
+      start_bulk_runtime || true
     fi
     return 1
   fi
