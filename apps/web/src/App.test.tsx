@@ -38,7 +38,7 @@ describe('App', () => {
       }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '기록이 보고서가 되는 네 단계' }),
+      screen.getByRole('heading', { name: '거래 기록을 세금 보고서로 만드는 네 단계' }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('heading', { name: '자주 묻는 질문' }),

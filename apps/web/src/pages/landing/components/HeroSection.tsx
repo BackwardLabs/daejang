@@ -17,7 +17,7 @@ export function HeroSection({
           </h1>
           <p className="hero-copy__description">
             거래소 거래내역과 개인지갑 기록을 한 형식으로 모아, 확인이 필요한
-            항목과 계산 근거를 함께 보여줍니다.
+            항목과 세금 계산 근거를 함께 보여줍니다.
           </p>
           <div className="button-row">
             <button className="button button--primary" type="button" onClick={onStart}>
