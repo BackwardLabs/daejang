@@ -1255,10 +1255,20 @@ export const normalizeMultichainSnapshotIds = (config) => {
   return config
 }
 
+// One Etherscan-backed JIT selection can legitimately take several minutes:
+// the bridge request covers all account endpoints and candidate verification.
+// Keep the bridge deadline aligned with the worker's 15 minute await window.
+export const normalizeJITBridgeTimeouts = (config) => {
+  config.requestTimeout = '10m'
+  return config
+}
+
 const createRuntimeBridgeConfig = (source) => {
   const output = join(configRoot, 'jit-bridge.runtime.json')
-  const config = normalizeMultichainSnapshotIds(
-    JSON.parse(readFileSync(source, 'utf8')),
+  const config = normalizeJITBridgeTimeouts(
+    normalizeMultichainSnapshotIds(
+      JSON.parse(readFileSync(source, 'utf8')),
+    ),
   )
   config.endpoint = `unix://${join(socketRoot, 'jit.sock')}`
   const chainStores = new Map([
@@ -4391,6 +4401,7 @@ const installAutostart = () => withOperationLock(async () => {
   <key>StandardErrorPath</key><string>${xmlEscape(join(logRoot, 'supervisor.log'))}</string>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>${xmlEscape(servicePath)}</string>
+    <key>GIWA_HOST_SUPERVISOR_MANAGED</key><string>launchd</string>
     <key>GIWA_HOST_RUNTIME_ROOT</key><string>${xmlEscape(runtimeRoot)}</string>
     <key>GIWA_APP_REPOSITORY</key><string>${xmlEscape(canonicalRepositoryRoot)}</string>${runtimeShared ? `
     <key>GIWA_HOST_RUNTIME_GROUP</key><string>${xmlEscape(String(runtimeGroupID))}</string>` : ''}
@@ -4455,8 +4466,8 @@ export const finishSuperviseCommand = ({ shutdown, exitCode, exit }) => {
   if (shutdown) exit(exitCode ?? 0)
 }
 
-export const handoffSupervisorAfterSignal = ({ shutdown, start }) => {
-  if (shutdown) start()
+export const handoffSupervisorAfterSignal = ({ shutdown, managedByLaunchd, start }) => {
+  if (shutdown && !managedByLaunchd) start()
 }
 
 export const pauseForSignalShutdown = ({ supervising, pause }) => {
@@ -4517,6 +4528,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     await supervise()
     handoffSupervisorAfterSignal({
       shutdown: shutdownRequested,
+      managedByLaunchd: process.env.GIWA_HOST_SUPERVISOR_MANAGED === 'launchd',
       start: () => startDetachedSupervisor(fileURLToPath(import.meta.url)),
     })
     finishSuperviseCommand({

@@ -100,6 +100,7 @@ type Runner struct {
 	HeartbeatInterval time.Duration
 	PollInterval      time.Duration
 	RetryDelay        time.Duration
+	MaxRetryAttempts  uint32
 	Wallets           WalletStore
 	EVMJIT            EVMJITOrchestrator
 }
@@ -116,6 +117,9 @@ func (r Runner) Run(ctx context.Context) error {
 	}
 	if r.RetryDelay <= 0 {
 		r.RetryDelay = 5 * time.Second
+	}
+	if r.MaxRetryAttempts == 0 {
+		r.MaxRetryAttempts = 6
 	}
 	if r.HeartbeatInterval <= 0 {
 		r.HeartbeatInterval = r.LeaseDuration / 3
@@ -149,6 +153,15 @@ func (r Runner) Run(ctx context.Context) error {
 				continue
 			}
 			code, message := retryDetails(err)
+			if job.Attempts >= r.MaxRetryAttempts {
+				if failErr := r.Store.Fail(ctx, job, code, message); failErr != nil {
+					if errors.Is(failErr, sourcejobstore.ErrLeaseLost) {
+						continue
+					}
+					return failErr
+				}
+				continue
+			}
 			if retryErr := r.Store.Retry(ctx, job, r.RetryDelay, code, message); retryErr != nil {
 				if errors.Is(retryErr, sourcejobstore.ErrLeaseLost) {
 					continue
