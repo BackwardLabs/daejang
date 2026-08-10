@@ -439,11 +439,11 @@ function PdfReviewStep({
             </dd>
           </div>
           <div>
-            <dt>등록 다음 단계</dt>
+            <dt>등록 후 확인</dt>
             <dd>
-              <strong>조회 기간 설정</strong>
+              <strong>데이터 소스 관리</strong>
               <span className="pdf-review-list__description">
-                소스가 저장된 뒤 조회 기간과 문서 포함 기간을 확인합니다.
+                등록한 소스와 수집 기간을 한곳에서 확인합니다.
               </span>
             </dd>
           </div>
@@ -621,21 +621,13 @@ function PdfCompletionStep({
       </div>
 
       <div className="pdf-completion-actions">
-        <button
-          type="button"
-          className="source-primary-action"
-          disabled
-          aria-describedby="period-follow-up-note"
-        >
-          조회 기간 설정 <span aria-hidden="true">→</span>
-        </button>
+        <AppLink className="source-primary-action" href="/sources">
+          등록한 소스 보기 <span aria-hidden="true">→</span>
+        </AppLink>
         <button type="button" className="pdf-secondary-action" onClick={onReset}>
           PDF 추가 등록
         </button>
       </div>
-      <p id="period-follow-up-note" className="pdf-completion-follow-up">
-        등록한 데이터 소스는 유지되며, 조회 기간 설정은 다음 단계에서 연결됩니다.
-      </p>
     </section>
   )
 }
@@ -815,7 +807,7 @@ function UpbitPdfRegistrationFlow({
     state.view === 'complete'
       ? {
           description:
-            '서버 확인이 끝난 Upbit PDF 소스를 조회 기간 설정으로 연결합니다.',
+            '등록한 Upbit PDF 소스와 수집 기간을 데이터 소스 관리에서 확인할 수 있습니다.',
           title: 'Upbit PDF 등록 완료',
         }
       : state.view === 'review' || state.view === 'submitting'

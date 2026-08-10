@@ -711,13 +711,6 @@
   min-width: 190px;
 }
 
-.pdf-completion-follow-up {
-  margin: 9px 0 0 !important;
-  color: #6e6a65 !important;
-  font-size: 9px !important;
-  line-height: 15px !important;
-}
-
 @keyframes pdf-registration-spin {
   to {
     transform: rotate(360deg);
