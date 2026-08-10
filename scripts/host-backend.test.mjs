@@ -43,6 +43,7 @@ import {
   hostEVMPostingWorkerArgs,
   hostEVMPostingWorkerEnvironment,
   hostActiveServiceOrder,
+  hostJITForwardedEnvironmentNames,
   hostTaxDBMigrationVersion,
   hostTaxProfileRefreshIntervalMs,
   hostTaxProfileRefreshRetryMs,
@@ -1769,6 +1770,13 @@ test('requires a distinct signed JIT claim policy for the canonical EVM worker',
     () => hostEVMPostingWorkerEnvironment('', 'event-url'),
     /TRUST_KEY is missing/,
   )
+})
+
+test('forwards the Etherscan credential only to the JIT boundary', () => {
+  assert.deepEqual(hostJITForwardedEnvironmentNames, [
+    'EVM_INDEXER_DATA_DIR',
+    'ENV_ETHERSCAN_API_KEY',
+  ])
 })
 
 test('forwards GIWA report deployment settings only to the Web API boundary', () => {
