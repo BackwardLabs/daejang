@@ -25,11 +25,12 @@ import (
 type recordingJITServer struct {
 	jitv1.UnimplementedCandidateQueryServiceServer
 	jitv1.UnimplementedJitEngineServiceServer
-	mu           sync.Mutex
-	materialized []*jitv1.MaterializeAccountSelectionRequest
-	started      *jitv1.StartJitRunRequest
-	retried      *jitv1.RetryJitRunRequest
-	getCalls     int
+	mu                    sync.Mutex
+	materialized          []*jitv1.MaterializeAccountSelectionRequest
+	started               *jitv1.StartJitRunRequest
+	retried               *jitv1.RetryJitRunRequest
+	getCalls              int
+	logicalCandidateCount uint64
 }
 
 func (s *recordingJITServer) RetryJitRun(_ context.Context, request *jitv1.RetryJitRunRequest) (*jitv1.RetryJitRunResponse, error) {
@@ -43,9 +44,35 @@ func (s *recordingJITServer) MaterializeAccountSelection(_ context.Context, requ
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.materialized = append(s.materialized, request)
+	count := s.logicalCandidateCount
+	if count == 0 {
+		count = 3
+	}
 	return &jitv1.MaterializeAccountSelectionResponse{Selection: &jitv1.AccountCandidateSelectionRef{
-		SelectionId: "selection-1", SelectionDigest: strings.Repeat("a", 64), LogicalCandidateCount: 3,
+		SelectionId: "selection-1", SelectionDigest: strings.Repeat("a", 64), LogicalCandidateCount: count,
 	}}, nil
+}
+
+func TestClientFailsClosedWhenTaxPeriodSelectionExceedsFiveHundredCandidates(t *testing.T) {
+	server := &recordingJITServer{logicalCandidateCount: 501}
+	connection := newTestConnection(t, server)
+	client, err := New(jitv1.NewCandidateQueryServiceClient(connection), jitv1.NewJitEngineServiceClient(connection), testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Start(context.Background(), worker.EVMJITRequest{
+		IdempotencyKey: "job-limit", SubjectID: "subject-1", SourceID: "wallet-1",
+		Address: "0x1111111111111111111111111111111111111111", ChainIDs: []string{"eip155:1"},
+		CoverageStart: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), CoverageEnd: time.Date(2027, 12, 31, 0, 0, 0, 0, time.UTC),
+	})
+	if err == nil || !strings.Contains(err.Error(), "JIT_SELECTION_BUDGET_EXCEEDED") {
+		t.Fatalf("expected candidate-budget failure, got %v", err)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.started != nil {
+		t.Fatalf("JIT start was issued after an over-budget selection: %#v", server.started)
+	}
 }
 
 func TestClientRetriesFailedRunThroughTheCanonicalJITRPC(t *testing.T) {
@@ -88,7 +115,7 @@ func (s *recordingJITServer) GetJitRun(_ context.Context, request *jitv1.GetJitR
 	}
 	return &jitv1.GetJitRunResponse{Result: &jitv1.JitRunResultEnvelope{
 		RunId: request.GetRunId(), Status: status, SubjectEvidenceFragmentId: fragment,
-		IndexSnapshotId: "snapshot-2027", ResultDigest: strings.Repeat("b", 64),
+		IndexSnapshotId: "etherscan-v2:eip155:1:ethereum-mainnet:v1", ResultDigest: strings.Repeat("b", 64),
 		Progress: &jitv1.JitProgress{LogicalCandidates: 3, CandidatesTerminal: 3},
 	}}, nil
 }
@@ -126,7 +153,7 @@ func TestClientUsesExactCoverageMappingAndPublishedTerminalFragment(t *testing.T
 		t.Fatalf("unexpected materialization count: %d", len(server.materialized))
 	}
 	materialized := server.materialized[0]
-	if materialized.GetRange().GetFromBlock() != "100" || materialized.GetRange().GetToBlock() != "200" || materialized.GetIndexSnapshotId() != "snapshot-2027" {
+	if materialized.GetRange().GetFromBlock() != "100" || materialized.GetRange().GetToBlock() != "200" || materialized.GetIndexSnapshotId() != "etherscan-v2:eip155:1:ethereum-mainnet:v1" {
 		t.Fatalf("coverage mapping was not sent exactly: %#v", materialized)
 	}
 	if server.started == nil || len(server.started.GetAccounts()) != 1 || len(server.started.GetCandidateSelections()) != 1 {
@@ -280,7 +307,7 @@ func testConfig() Config {
 			ChainID: "eip155:1", ChainStore: "ethereum-mainnet", GenesisHash: "0x" + strings.Repeat("a", 64),
 			EvidenceProfile: evidenceProfile, ProfileHash: strings.Repeat("b", 64),
 			Coverage: []CoverageMapping{{
-				CoverageStart: "2027-01-01", CoverageEnd: "2027-12-31", IndexSnapshotID: "snapshot-2027", FromBlock: 100, ToBlock: 200,
+				CoverageStart: "2027-01-01", CoverageEnd: "2027-12-31", IndexSnapshotID: "etherscan-v2:eip155:1:ethereum-mainnet:v1", FromBlock: 100, ToBlock: 200,
 			}},
 		}},
 	}

@@ -26,6 +26,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+const maxTaxPeriodCandidates = 500
+
 type Client struct {
 	candidate jitv1.CandidateQueryServiceClient
 	jit       jitv1.JitEngineServiceClient
@@ -141,11 +143,16 @@ func (c *Client) Start(ctx context.Context, request worker.EVMJITRequest) (worke
 	}
 	selections := make([]*jitv1.CandidateSelectionBinding, 0, len(chains))
 	accounts := make([]*jitv1.JitAccountInput, 0, len(chains))
+	var candidateCount uint64
 	for index, chain := range chains {
 		mapping := mappings[index]
 		selection, err := c.materialize(ctx, chain, mapping, request.Address)
 		if err != nil {
 			return worker.JITRun{}, err
+		}
+		candidateCount += selection.GetLogicalCandidateCount()
+		if candidateCount > maxTaxPeriodCandidates {
+			return worker.JITRun{}, worker.NewJITFailure("JIT_SELECTION_BUDGET_EXCEEDED", "과세기간의 EVM 후보가 500건을 초과했습니다.", false, nil)
 		}
 		accountID := stableID("wallet-account", request.SubjectID, request.SourceID, chain.ChainID)
 		accounts = append(accounts, &jitv1.JitAccountInput{
