@@ -391,4 +391,28 @@ describe('EvmWalletConnectionPage', () => {
     expect(screen.getByText('job-real-1')).toBeInTheDocument()
     expect(watchSyncJob).toHaveBeenCalledWith(expect.objectContaining({ jobId: 'job-real-1' }))
   })
+
+  it('renders a failed sync message in the alert content column', async () => {
+    const failureMessage = '요청 기간에 대한 검증된 JIT 블록 범위가 없습니다.'
+    const watchSyncJob = vi.fn<WatchWalletSyncJob>(async ({ jobId, onUpdate }) => {
+      const terminal = {
+        attempts: 1,
+        failureMessage,
+        id: jobId,
+        processedRecords: 0,
+        state: 'FAILED' as const,
+        updatedAt: '2027-01-02T00:00:05Z',
+      }
+      onUpdate(terminal)
+      return terminal
+    })
+
+    await moveToScope({ watchSyncJob })
+    fireEvent.click(screen.getByRole('button', { name: '연결 완료' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(failureMessage)
+    expect(alert.querySelector('.wallet-flow-alert__icon')).toBeInTheDocument()
+    expect(alert.querySelector('p')).toHaveTextContent(failureMessage)
+  })
 })

@@ -199,11 +199,27 @@ function WalletFlowStepper({ currentStep }: { currentStep: number }) {
   )
 }
 
-function FlowAlert({
-  error,
+function FlowAlertBox({
+  body,
+  title,
 }: {
-  error: EvmWalletFlowError
+  body: string
+  title?: string
 }) {
+  return (
+    <div className="wallet-flow-alert" role="alert">
+      <span className="wallet-flow-alert__icon" aria-hidden="true">
+        !
+      </span>
+      <div>
+        {title ? <strong>{title}</strong> : null}
+        <p>{body}</p>
+      </div>
+    </div>
+  )
+}
+
+function FlowAlert({ error }: { error: EvmWalletFlowError }) {
   const copy =
     error.code === 'PERIOD_INVALID'
       ? {
@@ -221,17 +237,7 @@ function FlowAlert({
           ? connectionErrorCopy[error.code]
           : signatureErrorCopy[error.code]
 
-  return (
-    <div className="wallet-flow-alert" role="alert">
-      <span className="wallet-flow-alert__icon" aria-hidden="true">
-        !
-      </span>
-      <div>
-        <strong>{copy.title}</strong>
-        <p>{copy.body}</p>
-      </div>
-    </div>
-  )
+  return <FlowAlertBox body={copy.body} title={copy.title} />
 }
 
 function SafetyAside() {
@@ -909,14 +915,10 @@ function CompletionStep({
           {syncCopy.description}
         </p>
         {watchError ? (
-          <p className="wallet-flow-alert" role="alert">
-            동기화 상태를 새로 확인하지 못했습니다. 작업은 서버에서 계속될 수 있습니다.
-          </p>
+          <FlowAlertBox body="동기화 상태를 새로 확인하지 못했습니다. 작업은 서버에서 계속될 수 있습니다." />
         ) : null}
         {jobSnapshot?.state === 'FAILED' && jobSnapshot.failureMessage ? (
-          <p className="wallet-flow-alert" role="alert">
-            {jobSnapshot.failureMessage}
-          </p>
+          <FlowAlertBox body={jobSnapshot.failureMessage} />
         ) : null}
 
         <dl className="wallet-completion-details">
