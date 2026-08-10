@@ -56,13 +56,13 @@ describe('evmWalletFlowReducer', () => {
     let state = advanceToScopeEditing()
 
     expect(state).toMatchObject({
-      chainIds: ['eip155:1', 'eip155:10'],
+      chainIds: ['eip155:1'],
       error: null,
       intentKey: null,
       period: {
-        endDate: '2026-07-29',
+        endDate: '2026-08-10',
         mode: 'CUSTOM',
-        startDate: '2026-07-21',
+        startDate: '2025-01-01',
       },
       status: 'EDITING',
       verificationId: 'verification-1',
@@ -108,7 +108,7 @@ describe('evmWalletFlowReducer', () => {
 
     expect(state).toEqual({
       addressPreview: '0x1234…5678',
-      chainIds: ['eip155:1', 'eip155:10'],
+      chainIds: ['eip155:1'],
       jobId: 'job-wallet-1',
       normalizedPeriod: result.normalizedPeriod,
       provider: 'rabby',
@@ -399,7 +399,7 @@ describe('EVM wallet period validation and normalization', () => {
     })
   })
 
-  it('allows at most one inclusive calendar year', () => {
+  it('allows at most two inclusive calendar years', () => {
     expect(
       validateEvmWalletPeriodDraft({
         endDate: '2026-12-31',
@@ -412,6 +412,13 @@ describe('EVM wallet period validation and normalization', () => {
         endDate: '2027-01-01',
         mode: 'CUSTOM',
         startDate: '2026-01-01',
+      }),
+    ).toBeNull()
+    expect(
+      validateEvmWalletPeriodDraft({
+        endDate: '2027-01-01',
+        mode: 'CUSTOM',
+        startDate: '2025-01-01',
       }),
     ).toMatchObject({
       code: 'PERIOD_INVALID',

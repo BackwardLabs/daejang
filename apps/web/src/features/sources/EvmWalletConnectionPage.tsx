@@ -140,7 +140,7 @@ const periodFieldErrorCopy: Record<
   string
 > = {
   AFTER_LATEST_ALLOWED_DATE: '현재 선택할 수 있는 가장 늦은 날짜를 확인해 주세요.',
-  EXCEEDS_MAX_PERIOD: '직접 설정 기간은 최대 1년까지 선택할 수 있습니다.',
+  EXCEEDS_MAX_PERIOD: '직접 설정 기간은 최대 2년까지 선택할 수 있습니다.',
   INVALID_FORMAT: 'YYYY-MM-DD 형식의 실제 날짜를 입력해 주세요.',
   NOT_ALLOWED: '현재 선택할 수 있는 과세연도를 골라 주세요.',
   REQUIRED: '필수 입력값입니다.',

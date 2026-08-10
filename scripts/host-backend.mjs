@@ -1192,6 +1192,8 @@ export const combinedJITConfigExpression = ({
 }) =>
   [
     '. as $item ireduce ({}; . * $item)',
+    '.selection.driver = "etherscan-v2"',
+    '.selection.chainDrivers."eip155:10" = "indexer"',
     `.server.listen = ${JSON.stringify(`unix://${socket}`)}`,
     `.persistence.artifact.root = ${JSON.stringify(artifactRoot)}`,
     `.persistence.artifact.temp = ${JSON.stringify(artifactTemp)}`,
