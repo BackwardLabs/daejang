@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { faqs } from '../landing-content.ts'
 
+function splitFaqAnswer(answer: string) {
+  return answer.match(/[^.]+(?:\.|$)/g)?.map((sentence) => sentence.trim()) ?? [answer]
+}
+
 export function FaqSection() {
   const [openId, setOpenId] = useState<string | null>(null)
 
@@ -33,7 +37,11 @@ export function FaqSection() {
                 </h3>
                 {isOpen ? (
                   <div className="faq-item__answer" id={answerId}>
-                    <p>{faq.answer}</p>
+                    <p>
+                      {splitFaqAnswer(faq.answer).map((sentence, index) => (
+                        <span key={faq.id + index}>{sentence}</span>
+                      ))}
+                    </p>
                   </div>
                 ) : null}
               </article>

@@ -1090,11 +1090,15 @@ select:focus-visible {
 }
 
 .faq-item__answer p {
-  max-width: 78ch;
   color: var(--color-muted);
   font-size: 15px;
   line-height: 25px;
+  overflow-wrap: normal;
   word-break: keep-all;
+}
+
+.faq-item__answer p > span {
+  display: block;
 }
 
 .final-cta {

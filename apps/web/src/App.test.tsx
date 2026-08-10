@@ -123,7 +123,7 @@ describe('App', () => {
       name: '기존 계정이 있다고 표시되는 이유는 무엇인가요?',
     })
     const secondQuestion = screen.getByRole('button', {
-      name: '본인확인이 계속 실패해요',
+      name: '본인확인이 계속 실패하는 이유는 무엇인가요?',
     })
 
     fireEvent.click(firstQuestion)
@@ -136,7 +136,7 @@ describe('App', () => {
       screen.queryByText(/같은 본인확인 정보나/),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByText(/이름과 휴대전화 명의를/),
+      screen.getByText(/이름과 휴대전화 명의가/),
     ).toBeInTheDocument()
   })
 })
