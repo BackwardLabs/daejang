@@ -34,11 +34,14 @@ describe('App', () => {
     expect(screen.getAllByRole('link', { name: 'Daejang 홈' })).toHaveLength(2)
     expect(
       screen.getByRole('heading', {
-        name: /흩어진 디지털 자산 기록,.*한곳에서/,
+        name: /흩어진 디지털 자산 기록,.*하나의 장부로/,
       }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '기록이 보고서가 되는 네 단계' }),
+      screen.getByRole('heading', { name: '거래 기록을 세금 보고서로 만드는 네 단계' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '내 거래내역으로 디지털 자산 장부를 만들어 보세요' }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('heading', { name: '자주 묻는 질문' }),

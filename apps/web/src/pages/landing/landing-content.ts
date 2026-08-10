@@ -12,41 +12,41 @@ export const sourceJourney = [
 export const principles = [
   {
     number: '01',
-    title: '처리 근거 기록',
-    description: '수집 범위와 정리 과정의 근거 기록',
+    title: '수집 출처와 기간 확인',
+    description: '업비트 거래내역서와 개인지갑에서 가져온 기록의 출처와 수집 기간을 확인합니다.',
   },
   {
     number: '02',
-    title: '검토 가능한 결과',
-    description: '확인 이유와 현재 처리 상태 표시',
+    title: '검토할 거래와 이유 표시',
+    description: '금액이나 분류가 확정되지 않은 거래를 구분하고, 확인이 필요한 이유를 함께 보여줍니다.',
   },
   {
     number: '03',
-    title: '재현 가능한 보고서',
-    description: '입력부터 보고서까지 계산 근거 기록',
+    title: '계산 근거가 남는 세금 보고서',
+    description: '검토 결과와 세금 계산 근거를 반영해 다시 확인할 수 있는 보고서를 만듭니다.',
   },
 ] as const
 
 export const workflowSteps = [
   {
     number: '01',
-    title: '데이터 소스 연결',
-    description: '지원되는 거래소 문서 또는 개인지갑 주소 등록',
+    title: '거래 기록 연결',
+    description: '업비트 거래내역서 PDF를 올리거나 개인지갑 주소를 등록합니다.',
   },
   {
     number: '02',
-    title: '수집 범위 확인',
-    description: '과세연도와 기록 수집 기간 확인',
+    title: '대상 기간 설정',
+    description: '보고할 과세연도와 거래 기록을 수집할 기간을 선택합니다.',
   },
   {
     number: '03',
-    title: '자동 처리',
-    description: '서로 다른 기록 형식을 맞추고 관련 항목 연결',
+    title: '거래내역 자동 정리',
+    description: '거래소와 지갑 기록을 같은 형식으로 정리하고 서로 관련된 내역을 연결합니다.',
   },
   {
     number: '04',
-    title: '검토와 보고서',
-    description: '남은 항목을 검토한 뒤 보고서 생성',
+    title: '확인 후 보고서 생성',
+    description: '확인이 필요한 거래를 검토하고 반영된 결과로 세금 보고서를 만듭니다.',
   },
 ] as const
 
