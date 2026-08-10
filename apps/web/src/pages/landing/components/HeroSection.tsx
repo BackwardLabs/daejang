@@ -13,7 +13,7 @@ export function HeroSection({
           </p>
           <h1 id="hero-title">
             흩어진 디지털 자산 기록,
-            <span>한곳에서</span>
+            <span>하나의 장부로</span>
           </h1>
           <p className="hero-copy__description">
             거래소 거래내역과 개인지갑 기록을 한 형식으로 모아, 확인이 필요한

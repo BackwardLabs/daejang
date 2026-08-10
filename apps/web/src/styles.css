@@ -443,6 +443,7 @@ select:focus-visible {
   font-weight: 700;
   line-height: 60px;
   letter-spacing: -0.025em;
+  word-break: keep-all;
 }
 
 .hero-copy h1 span {
@@ -639,12 +640,15 @@ select:focus-visible {
   font-weight: 700;
   line-height: 44px;
   letter-spacing: -0.02em;
+  word-break: keep-all;
 }
 
 .value-section__description {
-  color: var(--color-muted);
+  color: #ffffff;
   font-size: 18px;
   line-height: 30px;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 .principle-list {
@@ -674,16 +678,21 @@ select:focus-visible {
 }
 
 .principle-list h3 {
+  margin-bottom: 8px;
   color: #ffffff;
   font-size: 16px;
   font-weight: 500;
   line-height: 22px;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 .principle-list p {
-  color: var(--color-muted);
+  color: #ffffff;
   font-size: 12px;
   line-height: 18px;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 
 .ruled-section {
@@ -1133,12 +1142,14 @@ select:focus-visible {
   font-weight: 700;
   line-height: 36px;
   letter-spacing: -0.02em;
+  word-break: keep-all;
 }
 
 .final-cta__card > div:first-child > p:last-child {
   color: var(--color-muted);
   font-size: 18px;
   line-height: 30px;
+  word-break: keep-all;
 }
 
 .final-cta .button--secondary {
