@@ -169,7 +169,7 @@ export function PrivacyPage(props: PublicPageProps) {
     <PolicyPage
       {...props}
       title="개인정보 처리방침"
-      description="처리하는 정보와 목적, 보유기간, 이용자 권리 안내"
+      description="처리하는 정보와 목적, 보유 기간, 이용자 권리 안내"
       documentType="privacy"
     />
   )
@@ -186,7 +186,7 @@ export function SupportPage(props: PublicPageProps) {
         <header className="public-intro">
           <p>SUPPORT</p>
           <h1>고객지원</h1>
-          <span>자주 묻는 질문을 확인하고 해결되지 않으면 문의해 주세요</span>
+          <span>자주 묻는 질문을 확인하고 해결되지 않으면 문의해주세요</span>
         </header>
         <div className="support-layout">
           <section className="support-faq" aria-labelledby="support-faq-title">
