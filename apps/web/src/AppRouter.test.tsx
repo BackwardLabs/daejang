@@ -92,13 +92,20 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
-  it('bootstraps a valid root session once and redirects to the dashboard', async () => {
+  it('keeps a valid root session on the landing until start opens the dashboard', async () => {
     window.history.pushState({}, '', '/')
     render(
       <StrictMode>
         <AppRouter />
       </StrictMode>,
     )
+
+    expect(
+      screen.getByRole('heading', { name: /흩어진 디지털 자산 기록/ }),
+    ).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/')
+
+    fireEvent.click(screen.getAllByRole('button', { name: '시작하기' })[0]!)
 
     expect(
       await screen.findByRole('heading', { name: '세무 장부 요약' }),
@@ -108,6 +115,17 @@ describe('AppRouter', () => {
       vi.mocked(fetch).mock.calls.filter(([input]) =>
         String(input).endsWith('/me')),
     ).toHaveLength(1)
+  })
+
+  it('continues redirecting an existing session from login to the dashboard', async () => {
+    window.history.pushState({}, '', '/login')
+
+    render(<AppRouter />)
+
+    expect(
+      await screen.findByRole('heading', { name: '세무 장부 요약' }),
+    ).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/dashboard')
   })
 
   it('enters the authenticated app after email login without a document reload', async () => {

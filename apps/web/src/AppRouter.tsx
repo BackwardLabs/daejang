@@ -114,7 +114,7 @@ export function AppRouter() {
   const session = useSession()
   const isProtectedRoute =
     protectedRoutes.has(path) || path.startsWith('/sources/')
-  const isPublicEntry = path === '/' || path === '/login'
+  const isLoginEntry = path === '/login'
 
   useEffect(() => {
     const rawPath = window.location.pathname.replace(/\/+$/, '') || '/'
@@ -162,14 +162,14 @@ export function AppRouter() {
   }, [session.status])
 
   useEffect(() => {
-    if (session.status === 'authenticated' && isPublicEntry) {
+    if (session.status === 'authenticated' && isLoginEntry) {
       navigateTo('/dashboard', true)
       return
     }
     if (session.status === 'anonymous' && isProtectedRoute) {
       navigateTo('/login', true)
     }
-  }, [isProtectedRoute, isPublicEntry, session.status])
+  }, [isLoginEntry, isProtectedRoute, session.status])
 
   const productRoutes: Partial<Record<string, ProductPageKind>> = {
     '/settings': 'settings',
@@ -219,9 +219,9 @@ export function AppRouter() {
     )
   }
 
-  if (isPublicEntry && session.status === 'authenticated') {
+  if (isLoginEntry && session.status === 'authenticated') {
     return <SessionLoadingState />
   }
 
-  return <App />
+  return <App sessionStatus={session.status} />
 }
