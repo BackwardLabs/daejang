@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getAuthCapabilities,
   type AuthCapabilities,
   type EmailLoginResponse,
 } from './auth/api.ts'
-import { setCurrentUser } from './auth/session-store.ts'
+import {
+  bootstrapSession,
+  setCurrentUser,
+  type SessionStatus,
+} from './auth/session-store.ts'
 import {
   consumeOnboardingReturn,
   navigateTo,
@@ -38,7 +42,11 @@ const pageTitles: Record<PublicPath, string> = {
   '/support': '고객지원 | Daejang',
 }
 
-export function App() {
+export function App({
+  sessionStatus = 'anonymous',
+}: {
+  sessionStatus?: SessionStatus
+}) {
   const [returnedFromSignup] = useState(() => consumeOnboardingReturn())
   const [path, setPath] = useState<PublicPath | null>(() => readPublicPath())
   const [authCapabilities, setAuthCapabilities] = useState<AuthCapabilities>()
@@ -47,6 +55,7 @@ export function App() {
     returnedFromSignup ? 'consent' : 'entry',
   )
   const [onboardingKey, setOnboardingKey] = useState(0)
+  const startRoutePending = useRef(false)
   const signupAvailable = authCapabilities ? canSignup(authCapabilities) : false
 
   useEffect(() => {
@@ -117,12 +126,35 @@ export function App() {
     setPath('/')
   }
 
-  const openAuthChoice = () => {
+  const showAuthChoice = () => {
     navigateTo('/')
     setPath('/')
     setOnboardingScreen('entry')
     setOnboardingKey((current) => current + 1)
     setOnboardingVisible(true)
+  }
+
+  const openAuthChoice = () => {
+    const continueFromStart = (status: SessionStatus) => {
+      if (status === 'authenticated') {
+        navigateTo('/dashboard')
+        return
+      }
+      showAuthChoice()
+    }
+
+    if (sessionStatus === 'unknown' || sessionStatus === 'checking') {
+      if (startRoutePending.current) return
+      startRoutePending.current = true
+      void bootstrapSession()
+        .then(({ status }) => continueFromStart(status))
+        .finally(() => {
+          startRoutePending.current = false
+        })
+      return
+    }
+
+    continueFromStart(sessionStatus)
   }
 
   const startOnboarding = () => {
