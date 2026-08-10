@@ -17,6 +17,8 @@ export const evmWalletNetworkMetadata = [
 export const EVM_WALLET_SUPPORTED_CHAIN_IDS =
   evmWalletNetworkMetadata.map((network) => network.chainId)
 
+export const EVM_WALLET_DEFAULT_CHAIN_IDS = ['eip155:1'] as const
+
 const networkMetadataByChainId = new Map<
   string,
   (typeof evmWalletNetworkMetadata)[number]

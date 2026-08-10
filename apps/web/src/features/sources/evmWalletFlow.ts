@@ -1,4 +1,7 @@
-import { EVM_WALLET_SUPPORTED_CHAIN_IDS } from './evmNetworks.ts'
+import {
+  EVM_WALLET_DEFAULT_CHAIN_IDS,
+  EVM_WALLET_SUPPORTED_CHAIN_IDS,
+} from './evmNetworks.ts'
 
 export const EVM_WALLET_PROVIDER_IDS = [
   'rabby',
@@ -134,8 +137,8 @@ export const EVM_WALLET_ALLOWED_TAX_YEARS = [
   '2026',
 ] as const
 export const EVM_WALLET_LATEST_ALLOWED_DATE = '2027-12-31'
-export const EVM_WALLET_COVERAGE_START_DATE = '2026-07-21'
-export const EVM_WALLET_COVERAGE_END_DATE = '2026-07-29'
+export const EVM_WALLET_COVERAGE_START_DATE = '2025-01-01'
+export const EVM_WALLET_COVERAGE_END_DATE = '2026-08-10'
 export const DEFAULT_EVM_WALLET_PERIOD: EvmWalletPeriodDraft = {
   endDate: EVM_WALLET_COVERAGE_END_DATE,
   mode: 'CUSTOM',
@@ -357,7 +360,7 @@ export function evmWalletFlowReducer(
       }
 
       return {
-        chainIds: [...EVM_WALLET_SUPPORTED_CHAIN_IDS],
+        chainIds: [...EVM_WALLET_DEFAULT_CHAIN_IDS],
         error: null,
         intentKey: null,
         period: { ...DEFAULT_EVM_WALLET_PERIOD },
@@ -579,7 +582,7 @@ export function validateEvmWalletPeriodDraft(
         }
       } else if (
         period.endDate >=
-        addOneCalendarYear(period.startDate)
+        addTwoCalendarYears(period.startDate)
       ) {
         fieldErrors.endDate = 'EXCEEDS_MAX_PERIOD'
       }
@@ -649,10 +652,10 @@ function isStrictIsoDate(value: string) {
   return daysInMonth !== undefined && day >= 1 && day <= daysInMonth
 }
 
-function addOneCalendarYear(value: string) {
+function addTwoCalendarYears(value: string) {
   const [year, month, day] = value.split('-').map(Number)
   const anniversary = new Date(
-    Date.UTC((year ?? 0) + 1, (month ?? 1) - 1, day ?? 1),
+    Date.UTC((year ?? 0) + 2, (month ?? 1) - 1, day ?? 1),
   )
 
   return anniversary.toISOString().slice(0, 10)
