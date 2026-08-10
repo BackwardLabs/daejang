@@ -639,7 +639,7 @@ function ScopeStep({
                 <input
                   type="checkbox"
                   checked={chainIds.includes(network.chainId)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !network.collectionEnabled}
                   onChange={(event) => {
                     const nextChainIds = event.currentTarget.checked
                       ? [...chainIds, network.chainId]
@@ -647,7 +647,12 @@ function ScopeStep({
                     onChainIdsChange(nextChainIds)
                   }}
                 />
-                <span>{network.label}</span>
+                <span>
+                  {network.label}
+                  {'disabledReason' in network
+                    ? ` · ${network.disabledReason}`
+                    : ''}
+                </span>
               </label>
             ))}
           </div>

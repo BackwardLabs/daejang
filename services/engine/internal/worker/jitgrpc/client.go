@@ -301,6 +301,9 @@ func (c *Client) resolve(request worker.EVMJITRequest) ([]chainRuntime, []covera
 		}
 		mapping, ok := chain.coverage[coverageKey(start, end)]
 		if !ok {
+			mapping, ok = containingEtherscanCoverage(chain.coverage, start, end)
+		}
+		if !ok {
 			return nil, nil, worker.NewJITFailure("JIT_COVERAGE_MAPPING_UNAVAILABLE", "요청 기간에 대한 검증된 JIT 블록 범위가 없습니다.", false, nil)
 		}
 		if snapshot == "" {
@@ -311,6 +314,21 @@ func (c *Client) resolve(request worker.EVMJITRequest) ([]chainRuntime, []covera
 		chains, mappings = append(chains, chain), append(mappings, mapping)
 	}
 	return chains, mappings, nil
+}
+
+func containingEtherscanCoverage(coverage map[string]coverageRuntime, start, end time.Time) (coverageRuntime, bool) {
+	var selected coverageRuntime
+	found := false
+	for _, candidate := range coverage {
+		if !strings.HasPrefix(candidate.IndexSnapshotID, "etherscan-v2:") ||
+			candidate.start.After(start) || candidate.end.Before(end) {
+			continue
+		}
+		if !found || candidate.end.Sub(candidate.start) < selected.end.Sub(selected.start) {
+			selected, found = candidate, true
+		}
+	}
+	return selected, found
 }
 
 func rpcFailure(code, message string, err error) error {

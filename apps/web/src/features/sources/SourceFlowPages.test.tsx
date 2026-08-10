@@ -578,7 +578,7 @@ describe('source flow pages', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('adds networks to the same wallet source and starts collection without another signature', async () => {
+  it('disables Optimism and starts collection for an updated Ethereum period', async () => {
     const source = {
       id: '33333333-3333-4333-8333-333333333333',
       type: 'EVM_WALLET',
@@ -605,13 +605,6 @@ describe('source flow pages', () => {
       createdAt: '2027-01-01T00:00:00.000Z',
       updatedAt: '2027-01-01T00:05:00.000Z',
     }
-    const updatedSource = {
-      ...source,
-      chainScopes: [
-        { chainId: 'eip155:1', status: 'ACTIVE' },
-        { chainId: 'eip155:10', status: 'ACTIVE' },
-      ],
-    }
     const newJob = {
       ...existingJob,
       id: '66666666-6666-4666-8666-666666666666',
@@ -630,12 +623,6 @@ describe('source flow pages', () => {
       }
       if (url === '/api/v1/jobs') {
         return new Response(JSON.stringify({ items: [existingJob] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        })
-      }
-      if (url === `/api/v1/sources/${source.id}/chains`) {
-        return new Response(JSON.stringify(updatedSource), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })
@@ -662,29 +649,26 @@ describe('source flow pages', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '수집 네트워크 관리' }))
     expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Optimism' }))
+    expect(screen.getByRole('checkbox', { name: /Optimism/ })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('수집 시작일'), {
+      target: { value: '2025-01-01' },
+    })
+    fireEvent.change(screen.getByLabelText('수집 종료일'), {
+      target: { value: '2026-08-11' },
+    })
     fireEvent.click(
       screen.getByRole('button', { name: '설정 저장 후 수집' }),
     )
 
     expect(await screen.findByRole('status')).toHaveTextContent(
-      '수집 네트워크를 저장하고 같은 기간의 새 수집을 시작했습니다.',
+      '수집 설정을 저장하고 선택한 기간의 새 수집을 시작했습니다.',
     )
-    expect(screen.getByText('Ethereum, Optimism')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/v1/sources/${source.id}/chains`,
-      expect.objectContaining({
-        method: 'PUT',
-        body: JSON.stringify({
-          chainIds: ['eip155:1', 'eip155:10'],
-        }),
-      }),
-    )
+    expect(screen.getByText('Ethereum')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/syncs',
       expect.objectContaining({
         method: 'POST',
-        body: expect.stringContaining('"sourceId":"33333333-3333-4333-8333-333333333333"'),
+        body: expect.stringContaining('"coverageStart":"2025-01-01"'),
       }),
     )
   })
@@ -824,7 +808,7 @@ describe('source flow pages', () => {
         name: 'Ethereum',
       })
       const optimism = within(editor).getByRole('checkbox', {
-        name: 'Optimism',
+        name: /Optimism/,
       })
 
       expect(ethereum).toBeChecked()

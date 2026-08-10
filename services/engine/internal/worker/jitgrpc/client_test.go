@@ -168,6 +168,39 @@ func TestClientUsesExactCoverageMappingAndPublishedTerminalFragment(t *testing.T
 	}
 }
 
+func TestClientUsesContainingEtherscanCoverageForRequestedSubPeriod(t *testing.T) {
+	server := &recordingJITServer{}
+	connection := newTestConnection(t, server)
+	client, err := New(
+		jitv1.NewCandidateQueryServiceClient(connection),
+		jitv1.NewJitEngineServiceClient(connection),
+		testConfig(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = client.Start(context.Background(), worker.EVMJITRequest{
+		IdempotencyKey: "job-sub-period", SubjectID: "subject-1", SourceID: "wallet-1",
+		Address: "0x1111111111111111111111111111111111111111", ChainIDs: []string{"eip155:1"},
+		CoverageStart: time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC),
+		CoverageEnd:   time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.materialized) != 1 || server.materialized[0].GetRange().GetFromBlock() != "100" || server.materialized[0].GetRange().GetToBlock() != "200" {
+		t.Fatalf("containing Etherscan coverage was not used: %#v", server.materialized)
+	}
+	account := server.started.GetAccounts()[0]
+	if !account.GetOwnershipFrom().AsTime().Equal(time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)) ||
+		!account.GetOwnershipTo().AsTime().Equal(time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("requested sub-period was not preserved: %#v", account)
+	}
+}
+
 func TestClientMaterializesEverySelectedNetworkForOneWalletAddress(t *testing.T) {
 	server := &recordingJITServer{}
 	connection := newTestConnection(t, server)
