@@ -631,6 +631,11 @@ const serviceEnvironment = (exactNames, prefixes, overrides = {}) => ({
   ...overrides,
 })
 
+export const hostJITForwardedEnvironmentNames = Object.freeze([
+  'EVM_INDEXER_DATA_DIR',
+  'ENV_ETHERSCAN_API_KEY',
+])
+
 export const hostWebAPIForwardedEnvironmentPrefixes = Object.freeze([
   'OAUTH_',
   'GOOGLE_',
@@ -3524,7 +3529,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         '--defi-label-dir',
         deFiLabelRepository,
       ],
-      serviceEnvironment(['EVM_INDEXER_DATA_DIR'], ['ENV_RPC_URL_', 'ETHEREUM_', 'OPTIMISM_'], {
+      serviceEnvironment(hostJITForwardedEnvironmentNames, ['ENV_RPC_URL_', 'ETHEREUM_', 'OPTIMISM_'], {
         ENV_POSTGRES_DSN: jitURL,
         ENV_RPC_URL_ETHEREUM_MAINNET: ethereumRPC,
         ENV_RPC_URL_OPTIMISM_MAINNET: optimismRPC,
