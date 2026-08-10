@@ -60,7 +60,7 @@ describe('evmWalletFlowReducer', () => {
       error: null,
       intentKey: null,
       period: {
-        endDate: '2026-08-10',
+        endDate: '2026-08-11',
         mode: 'CUSTOM',
         startDate: '2025-01-01',
       },

@@ -482,6 +482,36 @@ body:has(.source-page) {
   background: #f8fafc;
 }
 
+.source-network-editor__fields {
+  display: grid;
+  gap: 18px;
+}
+
+.source-network-editor__period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.source-network-editor__period label {
+  display: grid;
+  grid-template-columns: auto minmax(130px, 1fr);
+  gap: 8px;
+}
+
+.source-network-editor__period label > span {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.source-network-editor__period input[type='date'] {
+  min-height: 32px;
+  border: 0;
+  color: #111827;
+  font: inherit;
+}
+
 .source-network-editor fieldset {
   margin: 0;
   padding: 0;

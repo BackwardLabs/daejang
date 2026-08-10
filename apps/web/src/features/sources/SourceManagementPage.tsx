@@ -19,6 +19,11 @@ import {
   evmWalletNetworkMetadata,
   getEvmWalletNetwork,
 } from './evmNetworks.ts'
+import {
+  EVM_WALLET_COVERAGE_END_DATE,
+  EVM_WALLET_COVERAGE_START_DATE,
+  validateEvmWalletPeriodDraft,
+} from './evmWalletFlow.ts'
 
 const jobStatusLabel: Record<SyncJobApiModel['state'], string> = {
   QUEUED: '처리 대기',
@@ -299,6 +304,10 @@ export function SourceManagementPage() {
   const [disconnectingId, setDisconnectingId] = useState<string>()
   const [editingNetworksId, setEditingNetworksId] = useState<string>()
   const [networkDraft, setNetworkDraft] = useState<string[]>([])
+  const [coverageDraft, setCoverageDraft] = useState({
+    endDate: EVM_WALLET_COVERAGE_END_DATE,
+    startDate: EVM_WALLET_COVERAGE_START_DATE,
+  })
   const [updatingNetworksId, setUpdatingNetworksId] = useState<string>()
   const [networkUpdateMessage, setNetworkUpdateMessage] = useState<{
     sourceId: string
@@ -397,7 +406,10 @@ export function SourceManagementPage() {
     }
   }
 
-  function openNetworkEditor(source: Extract<SourceApiModel, { type: 'EVM_WALLET' }>) {
+  function openNetworkEditor(
+    source: Extract<SourceApiModel, { type: 'EVM_WALLET' }>,
+    latestJob: SyncJobApiModel | undefined,
+  ) {
     setEditingNetworksId(source.id)
     setNetworkDraft(
       source.chainScopes
@@ -405,11 +417,19 @@ export function SourceManagementPage() {
           (scope) =>
             scope.status === 'ACTIVE' &&
             evmWalletNetworkMetadata.some(
-              (network) => network.chainId === scope.chainId,
+              (network) =>
+                network.chainId === scope.chainId &&
+                network.collectionEnabled,
             ),
         )
         .map((scope) => scope.chainId),
     )
+    setCoverageDraft({
+      endDate:
+        latestJob?.requestedCoverageEnd ?? EVM_WALLET_COVERAGE_END_DATE,
+      startDate:
+        latestJob?.requestedCoverageStart ?? EVM_WALLET_COVERAGE_START_DATE,
+    })
     setNetworkUpdateMessage(undefined)
   }
 
@@ -418,10 +438,19 @@ export function SourceManagementPage() {
     latestJob: SyncJobApiModel | undefined,
   ) {
     const savedChainIds = getActiveWalletChainIds(source)
+      .filter((chainId) =>
+        evmWalletNetworkMetadata.some(
+          (network) =>
+            network.chainId === chainId && network.collectionEnabled,
+        ),
+      )
+    const periodChanged =
+      latestJob?.requestedCoverageStart !== coverageDraft.startDate ||
+      latestJob?.requestedCoverageEnd !== coverageDraft.endDate
     if (
       networkUpdateInFlight.current.has(source.id) ||
       isSyncJobActive(latestJob) ||
-      haveSameChainIds(savedChainIds, networkDraft)
+      (haveSameChainIds(savedChainIds, networkDraft) && !periodChanged)
     ) {
       return
     }
@@ -435,22 +464,42 @@ export function SourceManagementPage() {
       return
     }
 
+    const periodError = validateEvmWalletPeriodDraft({
+      endDate: coverageDraft.endDate,
+      mode: 'CUSTOM',
+      startDate: coverageDraft.startDate,
+    })
+    if (
+      periodError ||
+      coverageDraft.startDate < EVM_WALLET_COVERAGE_START_DATE ||
+      coverageDraft.endDate > EVM_WALLET_COVERAGE_END_DATE
+    ) {
+      setNetworkUpdateMessage({
+        sourceId: source.id,
+        tone: 'error',
+        text: `수집 기간은 ${EVM_WALLET_COVERAGE_START_DATE}부터 ${EVM_WALLET_COVERAGE_END_DATE}까지 선택해 주세요.`,
+      })
+      return
+    }
+
     networkUpdateInFlight.current.add(source.id)
     setUpdatingNetworksId(source.id)
     setNetworkUpdateMessage(undefined)
     const controller = new AbortController()
     let updated: Extract<SourceApiModel, { type: 'EVM_WALLET' }>
     try {
-      updated = await updateWalletSourceNetworks({
-        chainIds: networkDraft,
-        signal: controller.signal,
-        sourceId: source.id,
-      })
-      setSources((current) =>
-        current.map((candidate) =>
-          candidate.id === updated.id ? updated : candidate,
-        ),
-      )
+      if (!haveSameChainIds(savedChainIds, networkDraft)) {
+        updated = await updateWalletSourceNetworks({
+          chainIds: networkDraft,
+          signal: controller.signal,
+          sourceId: source.id,
+        })
+        setSources((current) =>
+          current.map((candidate) =>
+            candidate.id === updated.id ? updated : candidate,
+          ),
+        )
+      }
     } catch {
       controller.abort()
       networkUpdateInFlight.current.delete(source.id)
@@ -464,10 +513,10 @@ export function SourceManagementPage() {
     }
 
     try {
-      if (latestJob?.requestedCoverageStart && latestJob.requestedCoverageEnd) {
+      {
         const { job } = await createSyncJob({
-          coverageStart: latestJob.requestedCoverageStart,
-          coverageEnd: latestJob.requestedCoverageEnd,
+          coverageStart: coverageDraft.startDate,
+          coverageEnd: coverageDraft.endDate,
           intentKey: createNetworkUpdateIntentKey(source.id),
           signal: controller.signal,
           sourceId: source.id,
@@ -500,9 +549,7 @@ export function SourceManagementPage() {
       setNetworkUpdateMessage({
         sourceId: source.id,
         tone: 'success',
-        text: latestJob?.requestedCoverageStart && latestJob.requestedCoverageEnd
-          ? '수집 네트워크를 저장하고 같은 기간의 새 수집을 시작했습니다.'
-          : '수집 네트워크를 저장했습니다.',
+        text: '수집 설정을 저장하고 선택한 기간의 새 수집을 시작했습니다.',
       })
     } catch {
       controller.abort()
@@ -510,7 +557,7 @@ export function SourceManagementPage() {
       setNetworkUpdateMessage({
         sourceId: source.id,
         tone: 'error',
-        text: '수집 네트워크는 저장했지만 새 수집을 시작하지 못했습니다. 잠시 후 다시 수집해 주세요.',
+        text: '수집 설정은 저장했지만 새 수집을 시작하지 못했습니다. 잠시 후 다시 수집해 주세요.',
       })
     } finally {
       networkUpdateInFlight.current.delete(source.id)
@@ -625,6 +672,9 @@ export function SourceManagementPage() {
             const networkDraftChanged =
               source.type === 'EVM_WALLET' &&
               !haveSameChainIds(savedChainIds, networkDraft)
+            const periodDraftChanged =
+              latestJob?.requestedCoverageStart !== coverageDraft.startDate ||
+              latestJob?.requestedCoverageEnd !== coverageDraft.endDate
             const isExpanded =
               latestJob?.state === 'FAILED' &&
               expandedJobId === latestJob.id
@@ -705,7 +755,7 @@ export function SourceManagementPage() {
                         className="source-list__networks"
                         type="button"
                         aria-expanded={editingNetworksId === source.id}
-                        onClick={() => openNetworkEditor(source)}
+                        onClick={() => openNetworkEditor(source, latestJob)}
                       >
                         수집 네트워크 관리
                       </button>
@@ -764,43 +814,91 @@ export function SourceManagementPage() {
                       </dl>
                     </header>
                     <div className="source-network-editor__body">
-                      <fieldset disabled={Boolean(activeJob)}>
-                        <legend>수집 대상</legend>
-                        <div className="source-network-editor__options">
-                          {evmWalletNetworkMetadata.map((network) => (
-                            <label key={network.chainId}>
-                              <input
-                                type="checkbox"
-                                checked={networkDraft.includes(network.chainId)}
-                                disabled={
-                                  updatingNetworksId === source.id ||
-                                  Boolean(activeJob)
-                                }
-                                onChange={(event) => {
-                                  const checked = event.currentTarget.checked
-                                  setNetworkDraft((current) =>
-                                    checked
-                                      ? [...current, network.chainId]
-                                      : current.filter(
-                                          (chainId) =>
-                                            chainId !== network.chainId,
-                                        ),
-                                  )
-                                }}
-                              />
-                              <span>{network.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </fieldset>
+                      <div className="source-network-editor__fields">
+                        <fieldset disabled={Boolean(activeJob)}>
+                          <legend>수집 대상</legend>
+                          <div className="source-network-editor__options">
+                            {evmWalletNetworkMetadata.map((network) => (
+                              <label key={network.chainId}>
+                                <input
+                                  type="checkbox"
+                                  checked={networkDraft.includes(network.chainId)}
+                                  disabled={
+                                    updatingNetworksId === source.id ||
+                                    Boolean(activeJob) ||
+                                    !network.collectionEnabled
+                                  }
+                                  onChange={(event) => {
+                                    const checked = event.currentTarget.checked
+                                    setNetworkDraft((current) =>
+                                      checked
+                                        ? [...current, network.chainId]
+                                        : current.filter(
+                                            (chainId) =>
+                                              chainId !== network.chainId,
+                                          ),
+                                    )
+                                  }}
+                                />
+                                <span>
+                                  {network.label}
+                                  {'disabledReason' in network
+                                    ? ` · ${network.disabledReason}`
+                                    : ''}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
+                        <fieldset
+                          className="source-network-editor__period"
+                          disabled={Boolean(activeJob)}
+                        >
+                          <legend>수집 기간</legend>
+                          <label>
+                            <span>시작일</span>
+                            <input
+                              aria-label="수집 시작일"
+                              type="date"
+                              min={EVM_WALLET_COVERAGE_START_DATE}
+                              max={coverageDraft.endDate}
+                              value={coverageDraft.startDate}
+                              onChange={(event) => {
+                                const startDate = event.currentTarget.value
+                                setCoverageDraft((current) => ({
+                                  ...current,
+                                  startDate,
+                                }))
+                              }}
+                            />
+                          </label>
+                          <label>
+                            <span>종료일</span>
+                            <input
+                              aria-label="수집 종료일"
+                              type="date"
+                              min={coverageDraft.startDate}
+                              max={EVM_WALLET_COVERAGE_END_DATE}
+                              value={coverageDraft.endDate}
+                              onChange={(event) => {
+                                const endDate = event.currentTarget.value
+                                setCoverageDraft((current) => ({
+                                  ...current,
+                                  endDate,
+                                }))
+                              }}
+                            />
+                          </label>
+                        </fieldset>
+                      </div>
                       <div className="source-network-editor__guidance">
                         {activeJob ? (
                           <p role="status">
                             현재 수집이 진행 중입니다. 완료된 뒤 네트워크 설정을
                             변경할 수 있습니다.
                           </p>
-                        ) : networkDraftChanged ? (
-                          <p>저장하면 기존 조회 기간으로 새 수집을 시작합니다.</p>
+                        ) : networkDraftChanged || periodDraftChanged ? (
+                          <p>저장하면 선택한 네트워크와 기간으로 새 수집을 시작합니다.</p>
                         ) : (
                           <p>현재 저장된 설정과 같습니다.</p>
                         )}
@@ -818,7 +916,7 @@ export function SourceManagementPage() {
                         disabled={
                           updatingNetworksId === source.id ||
                           networkDraft.length === 0 ||
-                          !networkDraftChanged ||
+                          (!networkDraftChanged && !periodDraftChanged) ||
                           Boolean(activeJob)
                         }
                         onClick={() => void handleNetworkUpdate(source, latestJob)}
@@ -827,7 +925,7 @@ export function SourceManagementPage() {
                           ? '저장 중…'
                           : activeJob
                             ? '수집 진행 중'
-                            : networkDraftChanged
+                            : networkDraftChanged || periodDraftChanged
                               ? '설정 저장 후 수집'
                               : '변경사항 없음'}
                       </button>

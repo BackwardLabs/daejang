@@ -29,7 +29,8 @@ var (
 
 // Config is deployment-owned bridge configuration. Coverage mappings are
 // immutable facts produced from the same read-only index snapshot consumed by
-// jitd. The bridge intentionally has no heuristic date-to-block fallback.
+// jitd. Etherscan-backed mappings may safely cover a requested sub-period;
+// replay still enforces the request's ownership dates.
 type Config struct {
 	Endpoint       string        `json:"endpoint"`
 	RequestTimeout string        `json:"requestTimeout"`
