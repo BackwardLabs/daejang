@@ -112,6 +112,10 @@ describe('UpbitPdfRegistrationPage', () => {
       screen.getByRole('heading', { name: '선택한 파일을 확인하세요' }),
     ).toHaveFocus()
     expect(screen.getByText('upbit-2027.pdf')).toBeInTheDocument()
+    expect(screen.getByText('등록 후 확인')).toBeInTheDocument()
+    expect(screen.getByText('데이터 소스 관리')).toBeInTheDocument()
+    expect(screen.queryByText('등록 다음 단계')).not.toBeInTheDocument()
+    expect(screen.queryByText('조회 기간 설정')).not.toBeInTheDocument()
     expect(
       screen.getByLabelText(/PDF 비밀번호|파일 암호|비밀번호/),
     ).toHaveAttribute('autocomplete', 'off')
@@ -137,8 +141,16 @@ describe('UpbitPdfRegistrationPage', () => {
     expect(screen.getByText('등록 완료 · 검토 필요')).toBeInTheDocument()
     expect(screen.getByText('12건 확인 · 0건 반영')).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: '조회 기간 설정' }),
-    ).toBeDisabled()
+      screen.getByRole('link', { name: '등록한 소스 보기' }),
+    ).toHaveAttribute('href', '/sources')
+    expect(
+      screen.getByText(
+        '등록한 Upbit PDF 소스와 수집 기간을 데이터 소스 관리에서 확인할 수 있습니다.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/조회 기간 설정은 다음 단계에서 연결됩니다/),
+    ).not.toBeInTheDocument()
     expect(registrationCalls).toBe(1)
     expect(submittedFile).toBe(pdf)
     expect(storedText(window.localStorage)).not.toContain(pdf.name)
