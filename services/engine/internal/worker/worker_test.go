@@ -478,6 +478,8 @@ type runRetryStore struct {
 	cancel    context.CancelFunc
 	claimDone bool
 	retryCode string
+	failCode  string
+	attempts  uint32
 }
 
 func (s *runRetryStore) Claim(context.Context, time.Duration) (sourcejobstore.SyncJob, bool, error) {
@@ -485,13 +487,38 @@ func (s *runRetryStore) Claim(context.Context, time.Duration) (sourcejobstore.Sy
 		return sourcejobstore.SyncJob{}, false, nil
 	}
 	s.claimDone = true
-	return heartbeatJob(), true, nil
+	job := heartbeatJob()
+	job.Attempts = s.attempts
+	return job, true, nil
+}
+
+func (s *runRetryStore) Fail(_ context.Context, _ sourcejobstore.SyncJob, code, _ string) error {
+	s.failCode = code
+	s.cancel()
+	return nil
 }
 
 func (s *runRetryStore) Retry(_ context.Context, _ sourcejobstore.SyncJob, _ time.Duration, code, _ string) error {
 	s.retryCode = code
 	s.cancel()
 	return nil
+}
+
+func TestRunStopsRetryingAfterAttemptBudget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	store := &runRetryStore{cancel: cancel, attempts: 6}
+	runner := Runner{
+		Store: store, ObjectRoot: t.TempDir(), LeaseDuration: 90 * time.Millisecond,
+		HeartbeatInterval: 10 * time.Millisecond, PollInterval: time.Millisecond, RetryDelay: time.Millisecond,
+		Wallets: fakeWalletStore{value: WalletSource{ID: "wallet-heartbeat"}},
+		EVMJIT:  &fakeJIT{startErr: NewJITFailure("JIT_START_FAILED", "반복 실패를 종료합니다.", true, context.DeadlineExceeded)},
+	}
+	if err := runner.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if store.failCode != "JIT_START_FAILED" || store.retryCode != "" {
+		t.Fatalf("retry budget did not become a terminal failure: fail=%q retry=%q", store.failCode, store.retryCode)
+	}
 }
 
 func TestRunRequeuesTransientJITFailureWithoutCrashingWorker(t *testing.T) {

@@ -59,6 +59,7 @@ import {
   loadTaxActionRegistryRuntime,
   loadVerifiedActionRuntimeRelease,
   launchdServiceDomains,
+  normalizeJITBridgeTimeouts,
   normalizeMultichainSnapshotIds,
   normalizeTaxSubjectEpochs,
   normalizeTaxReportGenerationPointers,
@@ -1474,6 +1475,13 @@ test('preserves a single-chain snapshot identity', () => {
   )
 })
 
+test('keeps the JIT bridge deadline long enough for Etherscan selection', () => {
+  assert.deepEqual(
+    normalizeJITBridgeTimeouts({ requestTimeout: '10s', awaitTimeout: '15m' }),
+    { requestTimeout: '10m', awaitTimeout: '15m' },
+  )
+})
+
 test('prefers the canonical Posting repository and supports the historical checkout name', () => {
   const root = '/srv/giwa'
   assert.equal(
@@ -1962,13 +1970,25 @@ test('supervisor signal performs a detached monitor handoff', () => {
   const events = []
   handoffSupervisorAfterSignal({
     shutdown: true,
+    managedByLaunchd: false,
     start: () => events.push('start'),
   })
   handoffSupervisorAfterSignal({
     shutdown: false,
+    managedByLaunchd: false,
     start: () => events.push('unexpected-start'),
   })
   assert.deepEqual(events, ['start'])
+})
+
+test('launchd-owned supervisor does not create a competing detached monitor', () => {
+  const events = []
+  handoffSupervisorAfterSignal({
+    shutdown: true,
+    managedByLaunchd: true,
+    start: () => events.push('unexpected-start'),
+  })
+  assert.deepEqual(events, [])
 })
 
 test('cron fallback installs a PATH-aware reboot entry and watchdog', () => {
