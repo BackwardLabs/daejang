@@ -422,7 +422,7 @@ const jitEnvrc = resolve(
 )
 const indexerEnvFile = resolve(
   process.env.GIWA_EVM_INDEXER_ENV_FILE ??
-    '/Users/Shared/Projects/00_Backlight/evm-indexer/configs/local-nodes.env',
+    '/Users/Shared/Projects/01_Daejang/evm-indexer/configs/local-nodes.env',
 )
 
 const loadRuntimeEnvironment = () => {
@@ -3506,16 +3506,16 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       join(configRoot, 'evm-indexer-view'),
       {
         'ethereum-mainnet-tail': process.env.GIWA_ETHEREUM_INDEX_STORE ??
-          '/Users/Shared/Projects/00_Backlight/evm-indexer-data/index/ethereum-mainnet-tail',
+          '/Users/Shared/Projects/01_Daejang/evm-indexer-data/index/ethereum-mainnet-tail',
         'optimism-mainnet-bulk-bedrock-tail': process.env.GIWA_OPTIMISM_INDEX_STORE ??
-          '/Users/Shared/Projects/00_Backlight/evm-indexer-data/index-bulk/optimism-mainnet-bulk-bedrock-tail',
+          '/Users/Shared/Projects/01_Daejang/evm-indexer-data/index-bulk/optimism-mainnet-bulk-bedrock-tail',
       },
     )
     const indexerConfig = createRuntimeIndexerConfig(
       process.env.GIWA_EVM_INDEXER_CONFIG ??
-        '/Users/Shared/Projects/00_Backlight/evm-indexer/configs/local-nodes.json',
+        '/Users/Shared/Projects/01_Daejang/evm-indexer/configs/local-nodes.json',
       process.env.GIWA_EVM_BULK_INDEXER_CONFIG ??
-        '/Users/Shared/Projects/00_Backlight/evm-indexer/configs/bulk-portal.json',
+        '/Users/Shared/Projects/01_Daejang/evm-indexer/configs/bulk-portal.json',
       join(configRoot, 'evm-indexer.runtime.json'),
       indexerView,
     )
@@ -3529,7 +3529,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         join(stateRoot, 'selections'),
         '--indexer-binary',
         process.env.GIWA_EVM_INDEXER_BINARY ??
-          '/Users/Shared/Projects/00_Backlight/evm-indexer/bin/evm-indexer',
+          '/Users/Shared/Projects/01_Daejang/evm-indexer/bin/evm-indexer',
         '--indexer-config',
         indexerConfig,
         '--schema-dir',

@@ -4,7 +4,7 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 DAEJANG_ROOT="${GIWA_DAEJANG_ROOT:-/Users/Shared/Projects/01_Daejang}"
-INDEXER_DIR="${GIWA_EVM_INDEXER_DIR:-/Users/Shared/Projects/00_Backlight/evm-indexer}"
+INDEXER_DIR="${GIWA_EVM_INDEXER_DIR:-/Users/Shared/Projects/01_Daejang/evm-indexer}"
 DEPLOY_USER="${GIWA_DEPLOY_USER:-backwardlabs}"
 RUNTIME_ROOT="${GIWA_RUNTIME_ROOT:-$HOME/Library/Application Support/GIWA/production}"
 SOURCE_STATE_FILE="$RUNTIME_ROOT/source-checkouts.tsv"
