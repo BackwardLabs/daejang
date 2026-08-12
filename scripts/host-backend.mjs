@@ -1095,6 +1095,20 @@ const build = () => {
       GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
     },
   })
+  run('go', [
+    'build',
+    '-trimpath',
+    '-buildvcs=false',
+    '-o',
+    join(binaryRoot, 'jit-query'),
+    './cmd/jit-query',
+  ], {
+    cwd: jitRepository,
+    env: {
+      ...baseEnvironment(),
+      GOCACHE: process.env.GOCACHE ?? join(runtimeRoot, 'go-build-cache'),
+    },
+  })
   for (const [command, output] of [
     ['./cmd/engine-api', join(binaryRoot, 'engine-api')],
     ['./cmd/engine-healthcheck', join(binaryRoot, 'engine-healthcheck')],
@@ -1193,7 +1207,6 @@ export const combinedJITConfigExpression = ({
   [
     '. as $item ireduce ({}; . * $item)',
     '.selection.driver = "etherscan-v2"',
-    '.selection.chainDrivers."eip155:10" = "indexer"',
     `.server.listen = ${JSON.stringify(`unix://${socket}`)}`,
     `.persistence.artifact.root = ${JSON.stringify(artifactRoot)}`,
     `.persistence.artifact.temp = ${JSON.stringify(artifactTemp)}`,
