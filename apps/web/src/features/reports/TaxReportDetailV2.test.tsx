@@ -20,10 +20,13 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
     const url = String(input)
     if (url.endsWith('/artifacts/pdf')) {
-      return new Response(new Blob(['%PDF-1.7'], { type: 'application/pdf' }), {
+      const pdf = new Blob(['%PDF-1.7'], { type: 'application/pdf' })
+      return {
+        ok: true,
         status: 200,
-        headers: { 'content-type': 'application/pdf' },
-      })
+        headers: new Headers({ 'content-type': 'application/pdf' }),
+        blob: vi.fn(async () => pdf),
+      } as unknown as Response
     }
     return new Response(JSON.stringify({ error: { code: 'RESOURCE_NOT_FOUND' } }), {
       status: 404,
@@ -266,11 +269,7 @@ describe('TaxReportDetailV2', () => {
     fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기' }))
     expect(screen.getByRole('dialog', { name: 'PDF 미리보기' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('PDF를 안전하게 불러오는 중입니다.')
-    expect(await screen.findByTitle(
-      '2027년 세무 장부 PDF',
-      undefined,
-      { timeout: 5_000 },
-    )).toHaveAttribute(
+    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
       'src', 'blob:tax-report-pdf',
     )
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
@@ -337,11 +336,7 @@ describe('TaxReportDetailV2', () => {
     const { rerender, unmount } = render(<TaxReportDetailV2 report={report} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기' }))
-    expect(await screen.findByTitle(
-      '2027년 세무 장부 PDF',
-      undefined,
-      { timeout: 5_000 },
-    )).toHaveAttribute(
+    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
       'src', 'blob:tax-report-first',
     )
 
@@ -352,11 +347,7 @@ describe('TaxReportDetailV2', () => {
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith(
       'blob:tax-report-first',
     ))
-    expect(await screen.findByTitle(
-      '2027년 세무 장부 PDF',
-      undefined,
-      { timeout: 5_000 },
-    )).toHaveAttribute(
+    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
       'src', 'blob:tax-report-second',
     )
 
