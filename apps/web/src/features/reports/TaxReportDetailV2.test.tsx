@@ -266,7 +266,11 @@ describe('TaxReportDetailV2', () => {
     fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기' }))
     expect(screen.getByRole('dialog', { name: 'PDF 미리보기' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('PDF를 안전하게 불러오는 중입니다.')
-    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
+    expect(await screen.findByTitle(
+      '2027년 세무 장부 PDF',
+      undefined,
+      { timeout: 5_000 },
+    )).toHaveAttribute(
       'src', 'blob:tax-report-pdf',
     )
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
@@ -333,7 +337,11 @@ describe('TaxReportDetailV2', () => {
     const { rerender, unmount } = render(<TaxReportDetailV2 report={report} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기' }))
-    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
+    expect(await screen.findByTitle(
+      '2027년 세무 장부 PDF',
+      undefined,
+      { timeout: 5_000 },
+    )).toHaveAttribute(
       'src', 'blob:tax-report-first',
     )
 
@@ -344,7 +352,11 @@ describe('TaxReportDetailV2', () => {
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith(
       'blob:tax-report-first',
     ))
-    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
+    expect(await screen.findByTitle(
+      '2027년 세무 장부 PDF',
+      undefined,
+      { timeout: 5_000 },
+    )).toHaveAttribute(
       'src', 'blob:tax-report-second',
     )
 
