@@ -385,8 +385,35 @@ export class ReportAttestationService {
     return serializeStatus(queued)
   }
 
+  /**
+   * Product flow: publish the exact report commitment and then ask the
+   * independently configured reviewer runtime to decide it. The caller never
+   * supplies or overrides the review outcome.
+   */
+  async queueSubmissionAndReview(
+    ownerId: string,
+    reportId: string,
+  ) {
+    const status = await this.queueSubmission(ownerId, reportId)
+    this.#enqueue(async () => {
+      const current = await this.#store.get(ownerId, reportId)
+      if (current?.lifecycle === 'SUBMITTED') {
+        await this.#queueReview(ownerId, reportId, true)
+      }
+    })
+    return status
+  }
+
   async queueReview(ownerId: string, reportId: string) {
     this.#assertOpen()
+    return this.#queueReview(ownerId, reportId, false)
+  }
+
+  async #queueReview(
+    ownerId: string,
+    reportId: string,
+    runInline: boolean,
+  ) {
     const target = await this.#store.get(ownerId, reportId)
     if (!target) {
       throw new ReportAttestationConflictError('NOT_PREPARED')
@@ -448,9 +475,13 @@ export class ReportAttestationService {
       return serializeStatus(current)
     }
 
-    this.#enqueue(async () =>
-      this.#runReviewer(ownerId, reportId, queued.revision),
-    )
+    if (runInline) {
+      await this.#runReviewer(ownerId, reportId, queued.revision)
+    } else {
+      this.#enqueue(async () =>
+        this.#runReviewer(ownerId, reportId, queued.revision),
+      )
+    }
     return serializeStatus(queued)
   }
 

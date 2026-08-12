@@ -475,14 +475,27 @@ func taxReportModelFixture(t *testing.T) (taxreportstore.StoredReport, []byte) {
 	return report, value
 }
 
+func taxReportModelV2Fixture(t *testing.T) (taxreportstore.StoredReport, []byte) {
+	t.Helper()
+	report, _ := taxReportModelFixture(t)
+	report.ID = "tax-report-v2:" + strings.Repeat("a", 64)
+	value := taxReportModelJSON(t, report, "generation-1")
+	report.ReportArtifactDigest = digestBytes(value)
+	return report, value
+}
+
 func taxReportModelJSON(
 	t *testing.T,
 	report taxreportstore.StoredReport,
 	generationID string,
 ) []byte {
 	t.Helper()
+	contract, valid := taxReportArtifactContractForID(report.ID)
+	if !valid {
+		t.Fatalf("invalid report ID in fixture: %q", report.ID)
+	}
 	value, err := json.Marshal(map[string]any{
-		"schemaVersion":       taxReportModelSchemaV1,
+		"schemaVersion":       contract.reportSchema,
 		"reportId":            report.ID,
 		"inputDigest":         report.InputDigest,
 		"subjectId":           report.SubjectID,
@@ -515,20 +528,29 @@ func digestBytes(value []byte) string {
 }
 
 func taxReportArtifact(report taxreportstore.StoredReport, value []byte) artifactstore.Object {
+	contract, _ := taxReportArtifactContractForID(report.ID)
 	return artifactstore.Object{
 		Ref:          artifactstore.Ref{Algorithm: "sha256", Digest: report.ReportArtifactDigest},
 		Bytes:        value,
-		MediaType:    taxReportModelMediaType,
+		MediaType:    contract.reportMediaType,
 		PrivacyClass: artifactstore.PrivacySubjectPrivate,
 	}
 }
 
 func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, []byte) {
+	return taxEvidencePackFixtureForVersion(t, false)
+}
+
+func taxEvidencePackFixtureForVersion(t *testing.T, v2 bool) (taxreportstore.StoredReport, []byte, []byte) {
 	t.Helper()
+	reportIDPrefix := "tax-report:"
+	if v2 {
+		reportIDPrefix = "tax-report-v2:"
+	}
 	report := taxreportstore.StoredReport{
 		SubjectID: queryTestSubjectID,
 		Report: taxreportstore.Report{
-			ID:                  "tax-report:" + strings.Repeat("b", 64),
+			ID:                  reportIDPrefix + strings.Repeat("b", 64),
 			ResidentID:          "resident-1",
 			TaxYear:             2027,
 			TaxInventoryRunID:   "tax-inventory-run-1",
@@ -546,8 +568,12 @@ func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, 
 			IssuedAt: time.Date(2028, 1, 10, 0, 0, 0, 0, time.UTC),
 		},
 	}
+	contract, valid := taxReportArtifactContractForID(report.ID)
+	if !valid {
+		t.Fatalf("invalid report ID in fixture: %q", report.ID)
+	}
 	value, err := json.Marshal(map[string]any{
-		"schemaVersion":     taxEvidencePackSchemaV1,
+		"schemaVersion":     contract.evidenceSchema,
 		"manifestId":        expectedTaxEvidencePackManifestID(report),
 		"reportId":          report.ID,
 		"subjectId":         report.SubjectID,
@@ -580,10 +606,11 @@ func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, 
 }
 
 func taxEvidencePackArtifact(report taxreportstore.StoredReport, value []byte) artifactstore.Object {
+	contract, _ := taxReportArtifactContractForID(report.ID)
 	return artifactstore.Object{
 		Ref:          artifactstore.Ref{Algorithm: "sha256", Digest: report.EvidencePackDigest},
 		Bytes:        value,
-		MediaType:    taxEvidencePackMediaType,
+		MediaType:    contract.evidenceMediaType,
 		PrivacyClass: artifactstore.PrivacySubjectPrivate,
 	}
 }
@@ -861,9 +888,47 @@ func TestGetTaxReportModelReturnsExactSubjectScopedCanonicalArtifact(t *testing.
 	}
 	if response.GetReportId() != report.ID ||
 		response.GetArtifactDigest() != report.ReportArtifactDigest ||
-		response.GetMediaType() != taxReportModelMediaType ||
+		response.GetMediaType() != taxReportModelMediaTypeV1 ||
 		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
 		t.Fatalf("unexpected exact report model response: %#v", response)
+	}
+}
+
+func TestGetTaxReportModelReturnsV2ArtifactWithMatchingContract(t *testing.T) {
+	report, canonicalJSON := taxReportModelV2Fixture(t)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{
+			object: taxReportArtifact(report, canonicalJSON), found: true,
+		},
+	}
+
+	response, err := service.GetTaxReportModel(context.Background(), &enginev1.GetTaxReportModelRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetReportId() != report.ID || response.GetMediaType() != taxReportModelMediaTypeV2 ||
+		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
+		t.Fatalf("unexpected V2 report model response: %#v", response)
+	}
+}
+
+func TestGetTaxReportModelRejectsV1MediaTypeForV2ReportID(t *testing.T) {
+	report, canonicalJSON := taxReportModelV2Fixture(t)
+	object := taxReportArtifact(report, canonicalJSON)
+	object.MediaType = taxReportModelMediaTypeV1
+	service := &Service{
+		TaxReports:         &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{object: object, found: true},
+	}
+
+	_, err := service.GetTaxReportModel(context.Background(), &enginev1.GetTaxReportModelRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if status.Code(err) != codes.DataLoss {
+		t.Fatalf("status=%s, want DATA_LOSS: %v", status.Code(err), err)
 	}
 }
 
@@ -923,9 +988,31 @@ func TestGetTaxEvidencePackReturnsExactSubjectScopedCanonicalArtifact(t *testing
 	}
 	if response.GetReportId() != report.ID ||
 		response.GetArtifactDigest() != report.EvidencePackDigest ||
-		response.GetMediaType() != taxEvidencePackMediaType ||
+		response.GetMediaType() != taxEvidencePackMediaTypeV1 ||
 		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
 		t.Fatalf("unexpected exact evidence pack response: %#v", response)
+	}
+}
+
+func TestGetTaxEvidencePackReturnsV2ArtifactWithMatchingContract(t *testing.T) {
+	report, reportModelJSON, canonicalJSON := taxEvidencePackFixtureForVersion(t, true)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{objects: map[string]artifactstore.Object{
+			report.EvidencePackDigest:   taxEvidencePackArtifact(report, canonicalJSON),
+			report.ReportArtifactDigest: taxReportArtifact(report, reportModelJSON),
+		}},
+	}
+
+	response, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetReportId() != report.ID || response.GetMediaType() != taxEvidencePackMediaTypeV2 ||
+		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
+		t.Fatalf("unexpected V2 evidence pack response: %#v", response)
 	}
 }
 
@@ -978,6 +1065,8 @@ func TestGetTaxEvidencePackRejectsNonCanonicalReportID(t *testing.T) {
 		"tax-report:ABCDEF",
 		"tax-report:" + strings.Repeat("A", 64),
 		"tax-report:" + strings.Repeat("a", 63),
+		"tax-report-v2:" + strings.Repeat("A", 64),
+		"tax-report-v2:" + strings.Repeat("a", 63),
 	} {
 		_, err := service.GetTaxEvidencePack(
 			context.Background(),
@@ -1039,7 +1128,7 @@ func TestGetTaxEvidencePackFailsClosedOnArtifactMismatch(t *testing.T) {
 			object.Ref.Digest = strings.Repeat("0", 64)
 		},
 		"media type": func(object *artifactstore.Object) {
-			object.MediaType = taxReportModelMediaType
+			object.MediaType = taxReportModelMediaTypeV1
 		},
 		"privacy": func(object *artifactstore.Object) {
 			object.PrivacyClass = artifactstore.PrivacyPublicChain

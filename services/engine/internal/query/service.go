@@ -63,11 +63,15 @@ type Service struct {
 }
 
 const (
-	taxReportModelMediaType   = "application/vnd.giwa.tax-report-model.v1+json"
-	taxReportModelSchemaV1    = "giwa.tax-report-model.v1"
-	taxEvidencePackMediaType  = "application/vnd.giwa.tax-evidence-pack.v1+json"
-	taxEvidencePackSchemaV1   = "giwa.tax-evidence-pack.v1"
-	maxTaxReportArtifactBytes = 16 << 20
+	taxReportModelMediaTypeV1  = "application/vnd.giwa.tax-report-model.v1+json"
+	taxReportModelMediaTypeV2  = "application/vnd.giwa.tax-report-model.v2+json"
+	taxReportModelSchemaV1     = "giwa.tax-report-model.v1"
+	taxReportModelSchemaV2     = "giwa.tax-report-model.v2"
+	taxEvidencePackMediaTypeV1 = "application/vnd.giwa.tax-evidence-pack.v1+json"
+	taxEvidencePackMediaTypeV2 = "application/vnd.giwa.tax-evidence-pack.v2+json"
+	taxEvidencePackSchemaV1    = "giwa.tax-evidence-pack.v1"
+	taxEvidencePackSchemaV2    = "giwa.tax-evidence-pack.v2"
+	maxTaxReportArtifactBytes  = 16 << 20
 )
 
 func (s *Service) GetDashboard(ctx context.Context, req *enginev1.GetDashboardRequest) (*enginev1.GetDashboardResponse, error) {
@@ -775,17 +779,45 @@ func (s *Service) GetTaxEvidencePack(ctx context.Context, req *enginev1.GetTaxEv
 }
 
 func validTaxReportID(value string) bool {
-	const prefix = "tax-report:"
-	if len(value) != len(prefix)+64 || !strings.HasPrefix(value, prefix) {
-		return false
+	_, valid := taxReportArtifactContractForID(value)
+	return valid
+}
+
+type taxReportArtifactContract struct {
+	reportIDPrefix    string
+	reportSchema      string
+	reportMediaType   string
+	evidenceIDPrefix  string
+	evidenceSchema    string
+	evidenceMediaType string
+}
+
+func taxReportArtifactContractForID(value string) (taxReportArtifactContract, bool) {
+	contracts := []taxReportArtifactContract{
+		{
+			reportIDPrefix: "tax-report-v2:", reportSchema: taxReportModelSchemaV2,
+			reportMediaType: taxReportModelMediaTypeV2, evidenceIDPrefix: "tax-evidence-pack-v2",
+			evidenceSchema: taxEvidencePackSchemaV2, evidenceMediaType: taxEvidencePackMediaTypeV2,
+		},
+		{
+			reportIDPrefix: "tax-report:", reportSchema: taxReportModelSchemaV1,
+			reportMediaType: taxReportModelMediaTypeV1, evidenceIDPrefix: "tax-evidence-pack",
+			evidenceSchema: taxEvidencePackSchemaV1, evidenceMediaType: taxEvidencePackMediaTypeV1,
+		},
 	}
-	for _, character := range value[len(prefix):] {
-		if (character < '0' || character > '9') &&
-			(character < 'a' || character > 'f') {
-			return false
+	for _, contract := range contracts {
+		if len(value) != len(contract.reportIDPrefix)+64 || !strings.HasPrefix(value, contract.reportIDPrefix) {
+			continue
 		}
+		for _, character := range value[len(contract.reportIDPrefix):] {
+			if (character < '0' || character > '9') &&
+				(character < 'a' || character > 'f') {
+				return taxReportArtifactContract{}, false
+			}
+		}
+		return contract, true
 	}
-	return true
+	return taxReportArtifactContract{}, false
 }
 
 type taxReportModelIdentity struct {
@@ -831,8 +863,12 @@ type taxArtifactProducerIdentity struct {
 }
 
 func expectedTaxEvidencePackManifestID(report taxreportstore.StoredReport) string {
+	contract, valid := taxReportArtifactContractForID(report.ID)
+	if !valid {
+		return ""
+	}
 	digest := sha256.Sum256([]byte(report.ID + "\x00" + report.InputDigest))
-	return "tax-evidence-pack:" + fmt.Sprintf("%x", digest)
+	return contract.evidenceIDPrefix + ":" + fmt.Sprintf("%x", digest)
 }
 
 func sameTaxReportIssuedAt(artifactTime, storedTime time.Time) bool {
@@ -849,10 +885,14 @@ func validateTaxReportModelArtifact(
 	report taxreportstore.StoredReport,
 	object artifactstore.Object,
 ) (taxReportModelIdentity, error) {
+	contract, valid := taxReportArtifactContractForID(report.ID)
+	if !valid {
+		return taxReportModelIdentity{}, errors.New("stored report ID is invalid")
+	}
 	if len(object.Bytes) == 0 {
 		return taxReportModelIdentity{}, errors.New("artifact bytes are empty")
 	}
-	if object.MediaType != taxReportModelMediaType {
+	if object.MediaType != contract.reportMediaType {
 		return taxReportModelIdentity{}, fmt.Errorf("unexpected media type %q", object.MediaType)
 	}
 	if object.PrivacyClass != artifactstore.PrivacySubjectPrivate {
@@ -869,7 +909,7 @@ func validateTaxReportModelArtifact(
 	if err := json.Unmarshal(object.Bytes, &identity); err != nil {
 		return taxReportModelIdentity{}, fmt.Errorf("decode report model identity: %w", err)
 	}
-	if identity.SchemaVersion != taxReportModelSchemaV1 ||
+	if identity.SchemaVersion != contract.reportSchema ||
 		identity.ReportID != report.ID ||
 		identity.InputDigest != report.InputDigest ||
 		identity.SubjectID != subject ||
@@ -899,10 +939,14 @@ func validateTaxEvidencePackArtifact(
 	report taxreportstore.StoredReport,
 	object artifactstore.Object,
 ) (taxEvidencePackIdentity, error) {
+	contract, valid := taxReportArtifactContractForID(report.ID)
+	if !valid {
+		return taxEvidencePackIdentity{}, errors.New("stored report ID is invalid")
+	}
 	if len(object.Bytes) == 0 {
 		return taxEvidencePackIdentity{}, errors.New("artifact bytes are empty")
 	}
-	if object.MediaType != taxEvidencePackMediaType {
+	if object.MediaType != contract.evidenceMediaType {
 		return taxEvidencePackIdentity{}, fmt.Errorf("unexpected media type %q", object.MediaType)
 	}
 	if object.PrivacyClass != artifactstore.PrivacySubjectPrivate {
@@ -919,7 +963,7 @@ func validateTaxEvidencePackArtifact(
 	if err := json.Unmarshal(object.Bytes, &identity); err != nil {
 		return taxEvidencePackIdentity{}, fmt.Errorf("decode evidence pack identity: %w", err)
 	}
-	if identity.SchemaVersion != taxEvidencePackSchemaV1 ||
+	if identity.SchemaVersion != contract.evidenceSchema ||
 		identity.ManifestID != expectedTaxEvidencePackManifestID(report) ||
 		identity.ReportID != report.ID ||
 		identity.SubjectID != subject ||

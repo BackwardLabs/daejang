@@ -42,23 +42,62 @@ const reportRow = {
 } as const
 const generationStatusRow = {
   subject_id: 'subject-1',
+  resident_id: 'resident-1',
   generation_id: 'b'.repeat(64),
+  pointer_version: '2',
   state: 'ACTIVE',
   tax_year: 2027,
+  finality: 'PROVISIONAL',
   outcome: 'REPORT',
+  period_start: '2027-01-01',
+  period_end: '2027-12-31',
+  coverage_from: '2027-01-01',
+  coverage_through: '2027-06-30',
+  calculated_as_of: new Date('2027-07-01T00:00:00.000Z'),
+  coverage_status: 'PARTIAL',
+  coverage_assurance: 'DOCUMENT_METADATA_VERIFIED',
+  coverage_declaration_id: 'coverage-1',
+  tax_year_close_status: 'OPEN',
+  source_coverage_interval_count: '1',
+  source_coverage_summary_status: 'PARTIAL',
+  source_coverage_snapshot: [{
+    fragmentId: 'fragment-1', sourceArtifactId: 'source-1', coverageOrdinal: 0,
+    sourceKind: 'FILE', systemName: 'Upbit', declaredFrom: '2027-01-01',
+    declaredThrough: '2027-06-30', completeness: 'PARTIAL',
+    assurance: 'DOCUMENT_METADATA_VERIFIED',
+  }],
   created_at: new Date('2028-01-09T00:00:00.000Z'),
   completed_at: new Date('2028-01-10T00:00:00.000Z'),
+  failed_at: null,
+  failure_code: null,
   blocked_reason_code: null,
   has_current_report: true,
 } as const
 const applicationPendingStatusRow = {
   subject_id: 'subject-1',
+  resident_id: 'resident-1',
   generation_id: null,
+  pointer_version: '0',
   state: 'NOT_STARTED',
   tax_year: 2027,
+  finality: 'PROVISIONAL',
   outcome: null,
+  period_start: '2027-01-01',
+  period_end: '2027-12-31',
+  coverage_from: null,
+  coverage_through: null,
+  calculated_as_of: null,
+  coverage_status: 'UNKNOWN',
+  coverage_assurance: 'UNKNOWN',
+  coverage_declaration_id: null,
+  tax_year_close_status: 'OPEN',
+  source_coverage_interval_count: '0',
+  source_coverage_summary_status: 'UNKNOWN',
+  source_coverage_snapshot: [],
   created_at: null,
   completed_at: null,
+  failed_at: null,
+  failure_code: null,
   blocked_reason_code: 'APPLICATION_PENDING',
   has_current_report: false,
 } as const
@@ -126,6 +165,15 @@ const readerWithRows = (rows: unknown[]) => {
   }
 }
 
+const readerWithResultSequence = (...resultRows: unknown[][]) => {
+  const query = vi.fn()
+  for (const rows of resultRows) query.mockResolvedValueOnce({ rows })
+  return {
+    query,
+    reader: new PostgresTaxReportReader({ query } as unknown as Pool),
+  }
+}
+
 describe('PostgresTaxReportReader', () => {
   it('reads one subject-scoped summary using only the two reporting tables', async () => {
     const { query, reader } = readerWithRows([reportRow])
@@ -133,9 +181,9 @@ describe('PostgresTaxReportReader', () => {
 
     expect(query).toHaveBeenCalledTimes(1)
     const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]]
-    expect(sql).toContain('reporting.current_tax_report_read_v1')
+    expect(sql).toContain('reporting.current_tax_report_read_v2')
     expect(sql).not.toMatch(/FROM\s+reporting\.current_tax_report\s/)
-    expect(sql).toContain('reporting.activated_tax_report_read_v1')
+    expect(sql).not.toContain('reporting.activated_tax_report_read_v1')
     expect(sql).not.toMatch(/JOIN\s+reporting\.tax_report\s/)
     expect(sql).not.toMatch(/(?:FROM|JOIN)\s+tax\./)
     expect(params).toEqual(['subject-1', 2027, 'FINAL', 'resident-1'])
@@ -179,68 +227,129 @@ describe('PostgresTaxReportReader', () => {
     )
   })
 
-  it('reads one subject-scoped status using only the Web-safe generation view', async () => {
+  it('reads one explicit resident status using only the parameterized Web-safe contract', async () => {
     const { query, reader } = readerWithRows([generationStatusRow])
-    const status = await reader.getGenerationStatus('subject-1', 2027)
+    const status = await reader.getGenerationStatus(
+      'subject-1', 2027, 'PROVISIONAL', 'resident-1',
+    )
 
     const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]]
     expect(sql).toContain(
-      'reporting.current_tax_report_generation_status_read_v1',
+      'reporting.tax_report_generation_status_v2',
     )
     expect(sql).not.toMatch(
       /(?:FROM|JOIN)\s+reporting\.(?:tax_report_generation|current_tax_report_generation|tax_report)\s/,
     )
-    expect(params).toEqual(['subject-1', 2027])
+    expect(params).toEqual(['subject-1', 'resident-1', 2027, 'PROVISIONAL'])
     expect(status).toEqual({
       generationId: 'b'.repeat(64),
       state: 'ACTIVE',
       taxYear: 2027,
+      finality: 'PROVISIONAL',
+      pointerVersion: 2,
       outcome: 'REPORT',
+      periodStart: '2027-01-01',
+      periodEnd: '2027-12-31',
+      coverageFrom: '2027-01-01',
+      coverageThrough: '2027-06-30',
+      calculatedAsOf: '2027-07-01T00:00:00.000Z',
+      coverageStatus: 'PARTIAL',
+      coverageAssurance: 'DOCUMENT_METADATA_VERIFIED',
+      coverageDeclarationId: 'coverage-1',
+      taxYearCloseStatus: 'OPEN',
+      sourceCoverageIntervalCount: 1,
+      sourceCoverageSummaryStatus: 'PARTIAL',
+      sourceCoverageSnapshot: [{
+        fragmentId: 'fragment-1', sourceArtifactId: 'source-1', coverageOrdinal: 0,
+        sourceKind: 'FILE', systemName: 'Upbit', declaredFrom: '2027-01-01',
+        declaredThrough: '2027-06-30', completeness: 'PARTIAL',
+        assurance: 'DOCUMENT_METADATA_VERIFIED',
+      }],
       createdAt: '2028-01-09T00:00:00.000Z',
       completedAt: '2028-01-10T00:00:00.000Z',
+      failedAt: null,
+      failureCode: null,
       blockedReasonCode: null,
       hasCurrentReport: true,
     })
   })
 
-  it('returns no status when the subject has no current generation', async () => {
-    const { reader } = readerWithRows([])
+  it('returns NOT_STARTED when subject resident resolution has no scope', async () => {
+    const { reader } = readerWithRows([{
+      resident_id: '', resident_count: '0', eligibility_status: null,
+    }])
     await expect(
       reader.getGenerationStatus('subject-1', 2025),
-    ).resolves.toBeUndefined()
+    ).resolves.toMatchObject({
+      generationId: null,
+      state: 'NOT_STARTED',
+      finality: 'PROVISIONAL',
+      blockedReasonCode: 'NOT_STARTED',
+    })
   })
 
-  it('reads an explicit pointerless application-pending status', async () => {
-    const { reader } = readerWithRows([applicationPendingStatusRow])
+  it('returns subject-level APPLICATION_PENDING without a resident or report lookup', async () => {
+    const { query, reader } = readerWithRows([{
+      resident_id: '', resident_count: '0', eligibility_status: 'APPLICATION_PENDING',
+    }])
 
     await expect(
       reader.getGenerationStatus('subject-1', 2027),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       generationId: null,
       state: 'NOT_STARTED',
       taxYear: 2027,
-      outcome: null,
-      createdAt: null,
-      completedAt: null,
       blockedReasonCode: 'APPLICATION_PENDING',
       hasCurrentReport: false,
     })
+    expect(query).toHaveBeenCalledTimes(1)
+    const [sql] = query.mock.calls[0] as unknown as [string, unknown[]?]
+    expect(sql).toContain(
+      'reporting.tax_report_subject_resident_v2',
+    )
   })
 
   it('reads an explicit pointerless not-started status', async () => {
     const { reader } = readerWithRows([{
       ...applicationPendingStatusRow,
       tax_year: 2025,
+      period_start: '2025-01-01',
+      period_end: '2025-12-31',
       blocked_reason_code: 'NOT_STARTED',
     }])
 
     await expect(
-      reader.getGenerationStatus('subject-1', 2025),
+      reader.getGenerationStatus('subject-1', 2025, 'PROVISIONAL', 'resident-1'),
     ).resolves.toMatchObject({
       generationId: null,
       state: 'NOT_STARTED',
       blockedReasonCode: 'NOT_STARTED',
     })
+  })
+
+  it('resolves exactly one resident before reading its parameterized status', async () => {
+    const { query, reader } = readerWithResultSequence(
+      [{ resident_id: 'resident-1', resident_count: '1', eligibility_status: 'ELIGIBLE' }],
+      [generationStatusRow],
+    )
+
+    await expect(reader.getGenerationStatus('subject-1', 2027)).resolves.toMatchObject({
+      state: 'ACTIVE', finality: 'PROVISIONAL', hasCurrentReport: true,
+    })
+    expect(query).toHaveBeenCalledTimes(2)
+    const [resolverSql] = query.mock.calls[0] as unknown as [string, unknown[]?]
+    const [statusSql] = query.mock.calls[1] as unknown as [string, unknown[]?]
+    expect(resolverSql).toContain('tax_report_subject_resident_v2')
+    expect(statusSql).toContain('tax_report_generation_status_v2')
+  })
+
+  it('fails with ambiguity when more than one resident is in scope', async () => {
+    const { reader } = readerWithRows([{
+      resident_id: 'resident-1', resident_count: '2', eligibility_status: 'ELIGIBLE',
+    }])
+    await expect(reader.getGenerationStatus('subject-1', 2027)).rejects.toBeInstanceOf(
+      AmbiguousCurrentTaxReportError,
+    )
   })
 
   it('fails closed for invalid status enums, nullability, or subject scope', async () => {
@@ -265,7 +374,7 @@ describe('PostgresTaxReportReader', () => {
     for (const row of invalidRows) {
       const { reader } = readerWithRows([row])
       await expect(
-        reader.getGenerationStatus('subject-1', 2027),
+        reader.getGenerationStatus('subject-1', 2027, 'PROVISIONAL', 'resident-1'),
       ).rejects.toBeInstanceOf(InconsistentTaxReportGenerationStatusError)
     }
   })

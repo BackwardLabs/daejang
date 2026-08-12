@@ -128,6 +128,7 @@ const failureCodes = new Set([
   'REVIEWER_RESULT_REJECTED',
   'REVIEW_RECONCILIATION_FAILED',
   'REVIEW_OUTCOME_MISMATCH',
+  'INTERRUPTED_WRITE_REQUIRES_RECONCILIATION',
   'RUNTIME_CLOSED',
 ])
 const preparationFailureCodes = new Set([
@@ -223,7 +224,11 @@ const parseReceipt = (value: unknown): ParsedReceipt | null => {
     if (
       !isNullableHex32(value.transactionHash) ||
       !isNullableHex32(value.attestationUID) ||
-      value.reasonCode !== null
+      !(
+        value.reasonCode === null ||
+        (typeof value.reasonCode === 'string' &&
+          reasonCodePattern.test(value.reasonCode))
+      )
     ) {
       return invalidStatusResponse()
     }
@@ -321,6 +326,22 @@ const hasLifecycleInvariant = (
         failureCode === 'REVIEW_RECONCILIATION_FAILED'
       ) {
         return true
+      }
+      if (
+        lifecycle === 'RECONCILIATION_REQUIRED' &&
+        failureCode === 'INTERRUPTED_WRITE_REQUIRES_RECONCILIATION'
+      ) {
+        if (!submissionConfirmed) {
+          return (
+            submission?.kind === 'non-terminal' &&
+            submission.status === 'RECONCILIATION_REQUIRED' &&
+            review === null
+          )
+        }
+        return (
+          review?.kind === 'non-terminal' &&
+          review.status === 'RECONCILIATION_REQUIRED'
+        )
       }
       if (failureCode !== null) {
         return false

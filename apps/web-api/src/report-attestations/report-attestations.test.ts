@@ -696,6 +696,36 @@ describe('local report attestation fixture', () => {
     expect(harness.fake.close).toHaveBeenCalledTimes(1)
   })
 
+  it('automatically runs the trusted review after a product submission', async () => {
+    const harness = await createHarness()
+    try {
+      const prepared = await harness.request('A', {
+        method: 'POST',
+        url: '/api/v1/dev/reports/attestation-fixture',
+      })
+      expect(prepared.statusCode).toBe(201)
+
+      await expect(
+        harness.context.reportAttestationService?.queueSubmissionAndReview(
+          OWNER_A,
+          MOCK_REPORT_ID,
+        ),
+      ).resolves.toMatchObject({ lifecycle: 'SUBMISSION_QUEUED' })
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      await expect(
+        harness.context.reportAttestationService?.getStatus(
+          OWNER_A,
+          MOCK_REPORT_ID,
+        ),
+      ).resolves.toMatchObject({ lifecycle: 'APPROVED' })
+      expect(harness.fake.executeIssuer).toHaveBeenCalledTimes(1)
+      expect(harness.fake.executeReviewer).toHaveBeenCalledTimes(1)
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
   it('derives isolated identities per user while keeping the mock artifact identical', async () => {
     const harness = await createHarness()
     try {

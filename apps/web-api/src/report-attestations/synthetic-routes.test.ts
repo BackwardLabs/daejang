@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { buildApp } from '../app.js'
 import { loadConfig } from '../config.js'
 import {
+  SYNTHETIC_TESTNET_REPORT_ID,
+  SyntheticTestnetReportAttestationPublicationSource,
+} from './synthetic-testnet-publication-source.js'
+import {
   GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND,
   LOCAL_REPORT_ATTESTATION_RUNTIME_KIND,
   type GiwaSepoliaReportAttestationRuntime,
@@ -158,6 +162,8 @@ const createHarness = async (
       reviewOutcome: approved ? 'APPROVE' : 'REJECT',
       identityKey: IDENTITY_KEY,
       reconciliationEnabled,
+      publicationSource:
+        new SyntheticTestnetReportAttestationPublicationSource(),
     },
   })
   const sessions = {
@@ -199,6 +205,42 @@ describe('GIWA Sepolia synthetic report attestation routes', () => {
 
       expect(response.statusCode).toBe(404)
       expect(harness.context.reportAttestationService).toBeDefined()
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
+  it('runs the owner-scoped product submission and trusted review as one flow', async () => {
+    const harness = await createHarness(true, {
+      ...enabledConfig,
+      reportsUiMode: 'product',
+    })
+    try {
+      const prepared = await harness.request(
+        'A',
+        'POST',
+        `/api/v1/reports/${SYNTHETIC_TESTNET_REPORT_ID}/attestation-preparation`,
+      )
+      expect(prepared.statusCode).toBe(201)
+
+      const queued = await harness.request(
+        'A',
+        'POST',
+        `/api/v1/reports/${SYNTHETIC_TESTNET_REPORT_ID}/attestations`,
+      )
+      expect(queued.statusCode).toBe(202)
+      await harness.context.reportAttestationService?.waitForIdle()
+
+      const status = await harness.request(
+        'A',
+        'GET',
+        `/api/v1/reports/${SYNTHETIC_TESTNET_REPORT_ID}/attestation`,
+      )
+      expect(status.json()).toMatchObject({
+        lifecycle: 'APPROVED',
+      })
+      expect(harness.fake.executeIssuer).toHaveBeenCalledTimes(1)
+      expect(harness.fake.executeReviewer).toHaveBeenCalledTimes(1)
     } finally {
       await harness.context.app.close()
     }

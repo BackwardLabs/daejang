@@ -13,6 +13,10 @@ import {
   InvalidTaxEvidencePackError,
   publicTaxEvidencePackSchema,
 } from '../tax-report/evidence-pack.js'
+import {
+  InvalidTaxEvidencePackV2Error,
+  publicTaxEvidencePackV2Schema,
+} from '../tax-report/evidence-pack-v2.js'
 import type { TaxEvidencePackReader } from '../tax-report/model-reader.js'
 
 type TaxReportEvidenceRoutesOptions = {
@@ -41,7 +45,7 @@ export const registerTaxReportEvidenceRoutes = async (
           properties: {
             reportId: {
               type: 'string',
-              pattern: '^tax-report:[0-9a-f]{64}$',
+              pattern: '^tax-report(?:-v2)?:[0-9a-f]{64}$',
             },
           },
         },
@@ -50,7 +54,14 @@ export const registerTaxReportEvidenceRoutes = async (
             type: 'object',
             additionalProperties: false,
             required: ['evidencePack'],
-            properties: { evidencePack: publicTaxEvidencePackSchema },
+            properties: {
+              evidencePack: {
+                anyOf: [
+                  publicTaxEvidencePackSchema,
+                  publicTaxEvidencePackV2Schema,
+                ],
+              },
+            },
           },
         },
       },
@@ -92,7 +103,10 @@ export const registerTaxReportEvidenceRoutes = async (
           )
           throw inconsistentEvidencePack()
         }
-        if (error instanceof InvalidTaxEvidencePackError) {
+        if (
+          error instanceof InvalidTaxEvidencePackError ||
+          error instanceof InvalidTaxEvidencePackV2Error
+        ) {
           request.log.error(
             { validationError: error.message },
             'tax evidence pack validation failed',

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import { loadPretendardFont } from './font.js'
 import {
+  formatKstTimestamp,
   formatCostMethod,
   formatReportAmount,
   reportCalculationKeyValues,
@@ -128,6 +129,11 @@ const model = (
 })
 
 describe('tax report PDF renderer', () => {
+  it('renders tax dates at the Korea tax-day boundary', () => {
+    expect(formatKstTimestamp('2026-12-31T15:00:00Z')).toBe(
+      '2027-01-01 00:00:00 KST',
+    )
+  })
   it('renders deterministic Korean A4 PDF bytes for an exact report', async () => {
     const fontBytes = await loadPretendardFont()
     const input = model()
@@ -146,6 +152,123 @@ describe('tax report PDF renderer', () => {
       createHash('sha256').update(second).digest('hex'),
     )
     expect(first.byteLength).toBeGreaterThan(15_000)
+  })
+
+  it('renders V2 coverage, annual-average, income, fee, and legal sections', async () => {
+    const fontBytes = await loadPretendardFont()
+    const known = (amount: string) => ({
+      status: 'KNOWN' as const, amount, hasAmount: true as const,
+    })
+    const input = model({
+      reportId: `tax-report-v2:${digest('report-v2')}`,
+      v2: {
+        calculationStatus: 'COMPLETE',
+        taxOutcome: 'ESTIMATED_TAX_DUE',
+        filingAction: 'REVIEW_REQUIRED',
+        filingSubmissionStatus: 'NOT_SUBMITTED',
+        calculatedAsOf: '2027-07-01T00:00:00Z',
+        inputPeriod: {
+          from: '2026-12-31T15:00:00Z',
+          through: '2027-12-31T14:59:59Z',
+        },
+        dataCoverage: {
+          status: 'PARTIAL',
+          assurance: 'DOCUMENT_METADATA_VERIFIED',
+          from: '2026-12-31T15:00:00Z',
+          through: '2027-06-30T14:59:59Z',
+          declaration: null,
+          coveredIntervals: [{
+            from: '2026-12-31T15:00:00Z',
+            through: '2027-06-30T14:59:59Z',
+          }],
+          uncoveredIntervals: [{
+            from: '2027-06-30T15:00:00Z',
+            through: '2027-12-31T14:59:59Z',
+          }],
+        },
+        summary: {
+          grossProceeds: known('22500000'),
+          disposedBasis: known('18000000'),
+          deductibleExpense: known('1000'),
+          incurredExpense: known('1000'),
+          disposalGainLoss: known('4500000'),
+          lendingIncome: known('500000'),
+          lendingExpense: known('100000'),
+          netLendingIncome: known('400000'),
+          taxableIncome: known('4900000'),
+          taxableBase: known('2400000'),
+          nationalTax: known('480000'),
+          localTax: known('48000'),
+          totalTax: known('528000'),
+          calculationRule: {
+            poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
+            costMethods: ['ANNUAL_TOTAL_AVERAGE'],
+            basicDeductionAmount: '2500000',
+            deductionUsedAmount: '2500000',
+            nationalRate: { numerator: '20', denominator: '100' },
+            localRate: { numerator: '2', denominator: '100' },
+            taxRounding: 'FLOOR',
+            basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+          },
+        },
+        assetSummaries: [{
+          taxAssetId: 'BTC', openingQuantity: '0', openingBasis: known('0'),
+          acquiredQuantity: '100000000', acquisitionCost: known('70000000'),
+          annualAverage: {
+            status: 'KNOWN', numerator: '70000000', denominator: '100000000',
+            unitCost: '0', unitCostNumerator: '70000000',
+            unitCostDenominator: '100000000', rounding: 'FLOOR',
+          },
+          disposedQuantity: '25000000', grossProceeds: known('22500000'),
+          incurredExpense: known('1000'), deductibleExpense: known('1000'),
+          disposedBasis: known('18000000'), gainLoss: known('4499000'),
+          endingQuantity: '75000000', endingCost: known('52500000'),
+          basisMode: 'ACTUAL_TOTAL_AVERAGE', basisEvidenceDigest: null,
+        }],
+        disposals: [],
+        feeAssetDisposals: [],
+        acquisitions: [],
+        incomeRows: [],
+        transfers: [],
+        nonTaxableTransfers: [],
+        sourceCoverage: [{
+          sourceArtifactId: 'source-upbit-1',
+          sourceKind: 'FILE',
+          assurance: 'DOCUMENT_METADATA_VERIFIED',
+          status: 'PARTIAL',
+          evidenceDigest: digest('source-evidence'),
+          fragmentIds: ['fragment-1'],
+          coveredIntervals: [{
+            from: '2026-12-31T15:00:00Z',
+            through: '2027-06-30T14:59:59Z',
+          }],
+          uncoveredIntervals: [{
+            from: '2027-06-30T15:00:00Z',
+            through: '2027-12-31T14:59:59Z',
+          }],
+        }],
+        policy: {
+          name: 'kr-virtual-asset-tax', version: '2027.1',
+          artifactDigest: digest('v2-policy'), sourceSetDigest: digest('v2-sources'),
+          applicationMode: 'ENACTED', effectiveFrom: '2027-01-01T00:00:00Z',
+          effectiveThrough: '2027-12-31T23:59:59Z',
+          legalReferences: [{
+            law: '소득세법', article: '제37조', paragraphs: ['제1항'],
+            purpose: '필요경비 계산 기준',
+          }],
+        },
+      },
+    })
+
+    const output = await renderTaxReportPdf(input, {
+      fontBytes,
+      rendererVersion: 'test-v2-1',
+    })
+    expect(output.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    expect(output.byteLength).toBeGreaterThan(15_000)
+    expect(reportStatusKeyValues(input)).toContainEqual([
+      '세금 결과', 'ESTIMATED_TAX_DUE',
+    ])
   })
 
   it('keeps unknown amounts unknown instead of presenting zero', () => {

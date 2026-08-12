@@ -3,8 +3,13 @@ import { TextDecoder } from 'node:util'
 
 import {
   TAX_REPORT_MODEL_V1_MEDIA_TYPE,
+  TAX_REPORT_MODEL_V2_MEDIA_TYPE,
   type TaxReportModelArtifact,
 } from './model-reader.js'
+import {
+  decodeAndProjectTaxReportModelV2,
+  type PublicTaxReportV2Detail,
+} from './public-model-v2.js'
 
 const REPORT_SCHEMA_V1 = 'giwa.tax-report-model.v1'
 const REPORT_ID_PATTERN = /^tax-report:[0-9a-f]{64}$/
@@ -1311,7 +1316,10 @@ const publicProjection = (
 export const decodeAndProjectTaxReportModel = (
   artifact: TaxReportModelArtifact,
   expectedReportId: string,
-): PublicTaxReportDetail => {
+): PublicTaxReportDetail | PublicTaxReportV2Detail => {
+  if (artifact.mediaType === TAX_REPORT_MODEL_V2_MEDIA_TYPE) {
+    return decodeAndProjectTaxReportModelV2(artifact, expectedReportId)
+  }
   try {
     if (!REPORT_ID_PATTERN.test(expectedReportId)) {
       invalid('expectedReportId', 'must be a canonical tax report ID')

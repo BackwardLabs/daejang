@@ -10,7 +10,7 @@ const mode = process.env.VITE_REPORTS_UI_MODE ?? 'product'
 const profiles = {
   product: {
     required: [
-      'REPORT WORKSPACE',
+      'TAX LEDGER',
       '신고 준비 자료 PDF',
       '검토용 PDF',
       '장부 revision',
@@ -29,7 +29,7 @@ const profiles = {
       '/report-attestations/synthetic-publication',
     ],
     forbidden: [
-      'REPORT WORKSPACE',
+      'TAX LEDGER',
       '/tax-reports/',
       '신고 준비 자료 PDF',
       '검토용 PDF',

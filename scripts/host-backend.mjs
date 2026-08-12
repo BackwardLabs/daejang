@@ -1962,6 +1962,13 @@ const createTaxRuntime = async (queryURL) => {
 
   const ownership = canonicalJSON({ assertions: [] })
   const quotes = canonicalJSON(upbitConfig)
+  const taxPolicy = readFileSync(
+    join(
+      taxRepository,
+      'config',
+      'kr-virtual-asset-tax-policy-set.v2.json',
+    ),
+  )
   const trustKey = decodePublicationTrustKey(
     process.env.DAEJANG_PUBLICATION_POLICY_TRUST_KEY,
   )
@@ -1996,6 +2003,7 @@ const createTaxRuntime = async (queryURL) => {
       policy: sha256(policy),
       profiles: sha256(profiles),
       quotes: sha256(quotes),
+      taxPolicy: sha256(taxPolicy),
       trustKey: sha256(trustKey),
     },
   }
@@ -2007,6 +2015,7 @@ const createTaxRuntime = async (queryURL) => {
     activation: join(candidateDirectory, 'activation.json'),
     profiles: join(candidateDirectory, 'profiles.json'),
     quotes: join(candidateDirectory, 'quotes.json'),
+    taxPolicy: join(candidateDirectory, 'tax-policy-set.v2.json'),
     trustKey: join(candidateDirectory, 'trust-key.pub'),
   }
   const subjectIDs = profileSet.profiles
@@ -2035,6 +2044,7 @@ const createTaxRuntime = async (queryURL) => {
     [files.activation, activation, fileMode],
     [files.profiles, profiles, fileMode],
     [files.quotes, quotes, fileMode],
+    [files.taxPolicy, taxPolicy, fileMode],
     [files.trustKey, trustKey, 0o600],
     [manifestPath, `${manifest}\n`, fileMode],
   ]
@@ -2113,6 +2123,7 @@ const taxCandidateFileNames = [
   'profiles.json',
   'quotes.json',
   'runtime.json',
+  'tax-policy-set.v2.json',
   'trust-key.pub',
 ]
 
@@ -2207,6 +2218,7 @@ const loadActiveTaxRuntime = (state) => {
     'policy',
     'profiles',
     'quotes',
+    'taxPolicy',
     'trustKey',
   ]
   if (
@@ -2294,7 +2306,7 @@ const loadActiveTaxRuntime = (state) => {
   }
 }
 
-export const hostTaxDBMigrationVersion = '73'
+export const hostTaxDBMigrationVersion = '76'
 
 export const hostTaxQuoteRuntimeControls = (archiveOnly) => {
   if (typeof archiveOnly !== 'boolean') {
@@ -2321,6 +2333,7 @@ const taxEnvironment = (
   DAEJANG_TAXD_ACTIVATION_SET_FILE: runtime.files.activation,
   DAEJANG_TAXD_ACTIVATION_SET_SHA256: runtime.activationDigest,
   DAEJANG_TAXD_DOWNSTREAM_PROFILE_FILE: runtime.files.profiles,
+  DAEJANG_TAXD_TAX_POLICY_FILE: runtime.files.taxPolicy,
   DAEJANG_TAXD_UPBIT_QUOTE_CONFIG_FILE: runtime.files.quotes,
   DAEJANG_TAXD_QUOTE_ARCHIVE_ROOT: join(runtimeRoot, 'quote-archive', 'upbit'),
   ...hostTaxQuoteRuntimeControls(archiveOnly),
@@ -2343,6 +2356,25 @@ const taxEnvironment = (
 })
 
 export const hostTaxSimulationYears = Object.freeze([2025, 2026, 2027])
+
+export const currentKstTaxYear = (now = new Date()) => {
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new Error('KST tax year requires a valid Date')
+  }
+  const year = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+  }).formatToParts(now).find(({ type }) => type === 'year')?.value
+  if (!year || !/^[0-9]{4}$/.test(year)) {
+    throw new Error('KST tax year could not be resolved')
+  }
+  return Number(year)
+}
+
+export const hostTaxRebuildYears = (now = new Date()) => {
+  const currentTaxYear = currentKstTaxYear(now)
+  return hostTaxSimulationYears.filter((taxYear) => taxYear <= currentTaxYear)
+}
 
 const normalizeTaxRuntimeYear = (taxYearInput, operation) => {
   const taxYear = String(taxYearInput)
@@ -3103,6 +3135,7 @@ const prefetchTaxQuotes = (
   taxURL,
   runtime,
   subjectIDs = runtime.subjectIDs,
+  now = new Date(),
 ) => {
   const totals = {
     subjects: 0,
@@ -3131,21 +3164,31 @@ const prefetchTaxQuotes = (
     }
     return result.stdout
   }
+  const rebuildYears = hostTaxRebuildYears(now)
+  const rebuildYearSet = new Set(rebuildYears)
+  const quotePrefetchYear = rebuildYears.at(-1)
   for (const [index, subjectID] of subjectIDs.entries()) {
     try {
-      const summary = validateTaxQuotePrefetchResult(
-        runBackfill(
-          taxQuotePrefetchArgs(subjectID),
-          `Tax quote prefetch at subject ${index + 1}/${subjectIDs.length}`,
-        ),
-        subjectID,
-      )
       totals.subjects++
-      totals.archiveCoverageEvents += summary.archiveCoverageEvents
-      totals.archiveCoverageLegs += summary.archiveCoverageLegs
-      totals.persistedValuations += summary.persistedValuations
+      if (quotePrefetchYear !== undefined) {
+        const summary = validateTaxQuotePrefetchResult(
+          runBackfill(
+            taxQuotePrefetchArgs(subjectID, quotePrefetchYear),
+            `Tax quote prefetch at subject ${index + 1}/${subjectIDs.length}`,
+          ),
+          subjectID,
+          quotePrefetchYear,
+        )
+        totals.archiveCoverageEvents += summary.archiveCoverageEvents
+        totals.archiveCoverageLegs += summary.archiveCoverageLegs
+        totals.persistedValuations += summary.persistedValuations
+      }
       const outcomes = []
       for (const taxYear of hostTaxSimulationYears) {
+        if (!rebuildYearSet.has(taxYear)) {
+          outcomes.push({ taxYear, report: null })
+          continue
+        }
         const rebuilt = validateTaxSubjectRebuildResult(
           runBackfill(
             taxSubjectRebuildArgs(subjectID, taxYear),

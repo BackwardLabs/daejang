@@ -1,0 +1,114 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+
+import { ReportAttestationControl } from './ReportAttestationControl.tsx'
+import type {
+  LocalReportAttestationApi,
+  ReportAttestationStatus,
+  ReportVerification,
+} from './reportAttestationApi.ts'
+
+const reportId = `tax-report-v2:${'a'.repeat(64)}`
+const digest = 'b'.repeat(64)
+const transactionHash = `0x${'1'.repeat(64)}`
+const attestationUID = `0x${'2'.repeat(64)}`
+const status = (
+  lifecycle: ReportAttestationStatus['lifecycle'],
+): ReportAttestationStatus => ({
+  reportId,
+  lifecycle,
+  failureCode: null,
+  submissionConfirmed: lifecycle === 'APPROVED',
+  reviewConfirmed: lifecycle === 'APPROVED',
+  submissionEvidence: lifecycle === 'APPROVED'
+    ? { transactionHash, attestationUID }
+    : null,
+  reviewEvidence: null,
+})
+
+describe('ReportAttestationControl', () => {
+  it('uses only the generic product prepare, submit, status, and verification API', async () => {
+    const api: LocalReportAttestationApi = {
+      prepare: vi.fn(async () => status('PREPARED')),
+      prepareFixture: vi.fn(async () => status('PREPARED')),
+      submit: vi.fn(async () => status('APPROVED')),
+      review: vi.fn(async () => status('APPROVED')),
+      getStatus: vi.fn(async () => status('PREPARED')),
+      getVerification: vi.fn(async (): Promise<ReportVerification> => ({
+        lifecycle: 'APPROVED', result: 'USABLE', reasonCode: null,
+      })),
+    }
+
+    render(
+      <ReportAttestationControl
+        reportId={reportId}
+        reportModelDigest={digest}
+        pointerVersion={3}
+        eligible
+        api={api}
+      />,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '상태 갱신·검증' }))
+    expect(api.prepare).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '변경 불가 증명 대상 확인' })).toBeInTheDocument()
+    expect(screen.getByText('GIWA Sepolia · eip155:91342')).toBeInTheDocument()
+    expect(screen.getByText(digest)).toBeInTheDocument()
+    expect(screen.getByText('장부 pointer version')).toBeInTheDocument()
+    expect(screen.getByText('3')).toBeInTheDocument()
+    expect(screen.getByText(/1 · 불변 reportId의 첫 증명/u)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '변경 불가 증명 제출' }))
+    expect(await screen.findByText('검증 가능한 승인본')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '온체인 증명 완료' })).toBeInTheDocument()
+    expect(screen.getByText(transactionHash)).toBeInTheDocument()
+    expect(screen.getByText(attestationUID)).toBeInTheDocument()
+    expect(screen.getByLabelText(`transaction ${transactionHash}`)).toBeInTheDocument()
+    expect(screen.getByLabelText(`attestation UID ${attestationUID}`)).toBeInTheDocument()
+    expect(api.prepare).toHaveBeenCalledWith(reportId, expect.any(AbortSignal))
+    expect(api.submit).toHaveBeenCalledWith(reportId, expect.any(AbortSignal))
+    expect(api.getVerification).toHaveBeenCalledWith(
+      reportId,
+      expect.any(AbortSignal),
+    )
+    expect(api.prepareFixture).not.toHaveBeenCalled()
+    expect(api.review).not.toHaveBeenCalled()
+  })
+
+  it('reads immutable attestation evidence for an ineligible historical report without allowing a new write', async () => {
+    const api: LocalReportAttestationApi = {
+      prepare: vi.fn(async () => status('PREPARED')),
+      prepareFixture: vi.fn(async () => status('PREPARED')),
+      submit: vi.fn(async () => status('APPROVED')),
+      review: vi.fn(async () => status('APPROVED')),
+      getStatus: vi.fn(async () => status('APPROVED')),
+      getVerification: vi.fn(async (): Promise<ReportVerification> => ({
+        lifecycle: 'APPROVED', result: 'USABLE', reasonCode: null,
+      })),
+    }
+
+    render(
+      <ReportAttestationControl
+        reportId={reportId}
+        reportModelDigest={digest}
+        pointerVersion={2}
+        eligible={false}
+        api={api}
+      />,
+    )
+
+    expect(await screen.findByText('검증 가능한 승인본')).toBeInTheDocument()
+    expect(screen.getByLabelText(`transaction ${transactionHash}`)).toBeInTheDocument()
+    expect(screen.getByLabelText(`attestation UID ${attestationUID}`)).toBeInTheDocument()
+    expect(screen.getByText('이 발행본에 남은 온체인 증명을 읽기 전용으로 확인합니다.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '새 증명 제출 불가' })).toBeDisabled()
+    expect(api.getStatus).toHaveBeenCalledWith(reportId, expect.any(AbortSignal))
+    expect(api.getVerification).toHaveBeenCalledWith(
+      reportId,
+      expect.any(AbortSignal),
+    )
+    expect(api.prepare).not.toHaveBeenCalled()
+    expect(api.submit).not.toHaveBeenCalled()
+    expect(api.prepareFixture).not.toHaveBeenCalled()
+    expect(api.review).not.toHaveBeenCalled()
+  })
+})
