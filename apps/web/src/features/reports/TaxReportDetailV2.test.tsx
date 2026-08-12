@@ -1,8 +1,41 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TaxReportDetailV2 } from './TaxReportDetailV2.tsx'
 import type { TaxReportV2DetailModel } from './taxReportApi.ts'
+
+let createObjectURL: ReturnType<typeof vi.fn>
+let revokeObjectURL: ReturnType<typeof vi.fn>
+
+beforeEach(() => {
+  createObjectURL = vi.fn(() => 'blob:tax-report-pdf')
+  revokeObjectURL = vi.fn()
+  const NativeURL = globalThis.URL
+  class TestURL extends NativeURL {}
+  Object.defineProperties(TestURL, {
+    createObjectURL: { value: createObjectURL },
+    revokeObjectURL: { value: revokeObjectURL },
+  })
+  vi.stubGlobal('URL', TestURL)
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const url = String(input)
+    if (url.endsWith('/artifacts/pdf')) {
+      return new Response(new Blob(['%PDF-1.7'], { type: 'application/pdf' }), {
+        status: 200,
+        headers: { 'content-type': 'application/pdf' },
+      })
+    }
+    return new Response(JSON.stringify({ error: { code: 'RESOURCE_NOT_FOUND' } }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    })
+  }))
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 const known = (amount: string) => ({
   status: 'KNOWN' as const,
@@ -124,7 +157,8 @@ const report: TaxReportV2DetailModel = {
     transactionType: 'OTHER_ACQUISITION', movementId: 'acquisition-1', relatedMovementId: 'income-1',
     eventId: 'event-2', revisionId: 'revision-2', legId: 'leg-2',
     kind: 'OTHER_ACQUISITION', taxAssetId: 'ETH', ledgerAssetId: 'ethereum',
-    quantity: '1000', valuationId: 'valuation-2', acquisitionCost: known('500000'),
+    quantity: '1000', valuationId: 'valuation-2', consideration: known('490000'),
+    acquisitionAncillaryExpense: known('10000'), acquisitionCost: known('500000'),
     occurredAt: '2027-02-01T00:00:00Z',
     account: { status: 'KNOWN', accountId: 'wallet-1', accountKind: 'EVM_WALLET', displayNameStatus: 'UNKNOWN', displayName: null },
     valuation: { status: 'KNOWN', valuationId: 'valuation-2', kind: 'MARKET_QUOTE', effectiveAt: '2027-02-01T00:00:00Z', quoteId: 'quote-2', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '1000', quoteAtomicUnits: '500000', rounding: 'FLOOR' },
@@ -177,6 +211,7 @@ const report: TaxReportV2DetailModel = {
   }],
   sourceCoverage: [{
     sourceArtifactId: 'source-1', sourceKind: 'FILE',
+    systemName: 'UPBIT',
     assurance: 'DOCUMENT_METADATA_VERIFIED', status: 'PARTIAL',
     evidenceDigest: '4'.repeat(64), fragmentIds: ['fragment-1'],
     coveredIntervals: [{
@@ -194,9 +229,13 @@ const report: TaxReportV2DetailModel = {
       artifactDigest: '6'.repeat(64), sourceSetDigest: '7'.repeat(64),
       applicationMode: 'ENACTED', effectiveFrom: '2027-01-01T00:00:00Z',
       effectiveThrough: '2027-12-31T23:59:59Z',
+      roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
+      roundingProfileEvidenceDigest: null,
       legalReferences: [{
         law: '소득세법', article: '제37조', paragraphs: ['제1항'],
         purpose: '필요경비 계산 기준',
+        sourceLocators: ['https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=280405'],
+        sourceCheckedAt: '2026-08-03T15:00:00Z',
       }],
     },
     engine: {
@@ -207,7 +246,7 @@ const report: TaxReportV2DetailModel = {
 }
 
 describe('TaxReportDetailV2', () => {
-  it('shows a compact partial-year summary and all engine-owned detail tabs', () => {
+  it('shows a compact partial-year summary and all engine-owned detail tabs', async () => {
     render(<TaxReportDetailV2 report={report} pointerVersion={3} isCurrent />)
 
     expect(screen.getByText(/현재 확보된 데이터 범위로 계산한/u)).toBeInTheDocument()
@@ -226,11 +265,22 @@ describe('TaxReportDetailV2', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기' }))
     expect(screen.getByRole('dialog', { name: 'PDF 미리보기' })).toBeInTheDocument()
-    expect(screen.getByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
-      'src',
+    expect(screen.getByRole('status')).toHaveTextContent('PDF를 안전하게 불러오는 중입니다.')
+    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
+      'src', 'blob:tax-report-pdf',
+    )
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
       `/api/v1/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`,
+      expect.objectContaining({
+        credentials: 'include',
+        headers: expect.objectContaining({ accept: 'application/pdf' }),
+      }),
     )
     fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기 닫기' }))
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith(
+      'blob:tax-report-pdf',
+    ))
 
     fireEvent.click(screen.getByRole('tab', { name: '자산별 장부' }))
     const assetTab = screen.getByRole('tab', { name: '자산별 장부' })
@@ -256,15 +306,79 @@ describe('TaxReportDetailV2', () => {
     expect(screen.getAllByText(/FILE · 원본 결합 완료/u).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/fragment fragment-1/u).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/원천 최소단위 수량/u).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByText(/OTHER_ACQUISITION · ETH/u))
+    expect(screen.getByText('취득 대가')).toBeInTheDocument()
+    expect(screen.getByText('취득 부대비용')).toBeInTheDocument()
+    expect(screen.getByText('총 취득가액')).toBeInTheDocument()
     expect(screen.getByText(/TRANSFER · BTC/u)).toBeInTheDocument()
     expect(screen.getByText(/SELF_TRANSFER · ETH/u)).toBeInTheDocument()
     expect(screen.getByText('relation relation-1')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '계산·법적 근거' }))
     expect(screen.getByText('거주자 × 과세연도 × 세무자산')).toBeInTheDocument()
+    expect(screen.getByText('승인 전 · 현재 세액은 추정치')).toBeInTheDocument()
+    expect(screen.getByText('UPBIT')).toBeInTheDocument()
     expect(screen.getByText(/소득세법 제37조/u)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '국가법령정보센터 원문' })).toHaveAttribute(
+      'href', 'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=280405',
+    )
     expect(screen.getByText('7월 이후 자료가 없습니다.')).toBeInTheDocument()
     expect(screen.getAllByText(/누락:/u).length).toBeGreaterThan(0)
+  })
+
+  it('revokes each PDF blob when the report changes and when it unmounts', async () => {
+    createObjectURL
+      .mockReturnValueOnce('blob:tax-report-first')
+      .mockReturnValueOnce('blob:tax-report-second')
+    const { rerender, unmount } = render(<TaxReportDetailV2 report={report} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기' }))
+    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
+      'src', 'blob:tax-report-first',
+    )
+
+    rerender(<TaxReportDetailV2 report={{
+      ...report,
+      reportId: `tax-report-v2:${'b'.repeat(64)}`,
+    }} />)
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith(
+      'blob:tax-report-first',
+    ))
+    expect(await screen.findByTitle('2027년 세무 장부 PDF')).toHaveAttribute(
+      'src', 'blob:tax-report-second',
+    )
+
+    unmount()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:tax-report-second')
+  })
+
+  it('shows a recoverable preview error without replacing the download link', async () => {
+    vi.mocked(fetch).mockImplementation(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.endsWith('/artifacts/pdf')) {
+        return new Response(JSON.stringify({ error: { code: 'PDF_UNAVAILABLE' } }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ error: { code: 'RESOURCE_NOT_FOUND' } }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    render(<TaxReportDetailV2 report={report} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'PDF 미리보기를 불러오지 못했습니다.',
+    )
+    expect(screen.queryByTitle('2027년 세무 장부 PDF')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'PDF 내려받기' })[0]).toHaveAttribute(
+      'href',
+      `/api/v1/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`,
+    )
+    expect(createObjectURL).not.toHaveBeenCalled()
   })
 
   it('formats Upbit KRW atomic amounts instead of exposing raw integers', () => {

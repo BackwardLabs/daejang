@@ -117,6 +117,25 @@ const timestamp = (value: unknown, path: string) => {
   return parsed
 }
 
+const legalSourceLocator = (value: unknown, path: string): string => {
+  const parsed = string(value, path)
+  let url: URL
+  try {
+    url = new URL(parsed)
+  } catch {
+    return invalid(path, 'must be an absolute URL')
+  }
+  if (
+    url.protocol !== 'https:' ||
+    (url.hostname !== 'law.go.kr' && url.hostname !== 'www.law.go.kr') ||
+    url.username !== '' ||
+    url.password !== ''
+  ) {
+    invalid(path, 'must be an official HTTPS law.go.kr URL')
+  }
+  return parsed
+}
+
 const oneOf = <T extends string>(
   value: unknown,
   path: string,
@@ -161,10 +180,11 @@ const sourceCoverage = (
   const row = record(value, path, [
     'sourceArtifactId', 'sourceKind', 'assurance', 'status', 'evidenceDigest',
     'fragmentIds', 'coveredIntervals', 'uncoveredIntervals',
-  ])
+  ], ['systemName'])
   return {
     sourceArtifactId: string(row.sourceArtifactId, `${path}.sourceArtifactId`),
     sourceKind: string(row.sourceKind, `${path}.sourceKind`),
+    systemName: optionalString(row.systemName, `${path}.systemName`),
     assurance: oneOf(row.assurance, `${path}.assurance`, [
       'UNKNOWN', 'USER_DECLARED', 'DOCUMENT_METADATA_VERIFIED', 'CHAIN_VERIFIED',
     ]),
@@ -188,13 +208,25 @@ const producer = (value: unknown, path: string) => {
 const policy = (value: unknown, path: string): PublicTaxReportV2Policy => {
   const row = record(value, path, [
     'name', 'version', 'artifactDigest', 'sourceSetDigest',
-    'applicationMode', 'effectiveFrom', 'effectiveThrough', 'legalReferences',
-  ])
+    'applicationMode', 'effectiveFrom', 'effectiveThrough',
+    'roundingProfileStatus', 'legalReferences',
+  ], ['roundingProfileEvidenceDigest'])
   const legalReferences = array(
     row.legalReferences,
     `${path}.legalReferences`,
     (value, legalPath) => {
-      const ref = record(value, legalPath, ['law', 'article', 'purpose'], ['paragraphs'])
+      const ref = record(
+        value,
+        legalPath,
+        ['law', 'article', 'purpose'],
+        ['paragraphs', 'sourceLocators', 'sourceCheckedAt'],
+      )
+      const sourceLocators = ref.sourceLocators === undefined
+        ? []
+        : array(ref.sourceLocators, `${legalPath}.sourceLocators`, legalSourceLocator)
+      if (new Set(sourceLocators).size !== sourceLocators.length) {
+        invalid(`${legalPath}.sourceLocators`, 'must be unique')
+      }
       return {
         law: string(ref.law, `${legalPath}.law`),
         article: string(ref.article, `${legalPath}.article`),
@@ -202,10 +234,29 @@ const policy = (value: unknown, path: string): PublicTaxReportV2Policy => {
           ? []
           : stringArray(ref.paragraphs, `${legalPath}.paragraphs`),
         purpose: string(ref.purpose, `${legalPath}.purpose`),
+        sourceLocators,
+        sourceCheckedAt: ref.sourceCheckedAt === undefined
+          ? null
+          : timestamp(ref.sourceCheckedAt, `${legalPath}.sourceCheckedAt`),
       }
     },
   )
   if (legalReferences.length === 0) invalid(`${path}.legalReferences`, 'must not be empty')
+  const roundingProfileStatus = oneOf(
+    row.roundingProfileStatus,
+    `${path}.roundingProfileStatus`,
+    ['APPROVED', 'ESTIMATE_ONLY_UNAPPROVED'],
+  )
+  const roundingProfileEvidenceDigest = row.roundingProfileEvidenceDigest === undefined
+    ? null
+    : digest(row.roundingProfileEvidenceDigest, `${path}.roundingProfileEvidenceDigest`)
+  if (
+    (roundingProfileStatus === 'APPROVED' && roundingProfileEvidenceDigest === null) ||
+    (roundingProfileStatus === 'ESTIMATE_ONLY_UNAPPROVED' &&
+      roundingProfileEvidenceDigest !== null)
+  ) {
+    invalid(path, 'rounding profile approval and evidence disagree')
+  }
   return {
     name: string(row.name, `${path}.name`),
     version: string(row.version, `${path}.version`),
@@ -214,6 +265,8 @@ const policy = (value: unknown, path: string): PublicTaxReportV2Policy => {
     applicationMode: oneOf(row.applicationMode, `${path}.applicationMode`, ['ENACTED', 'SIMULATION']),
     effectiveFrom: timestamp(row.effectiveFrom, `${path}.effectiveFrom`),
     effectiveThrough: timestamp(row.effectiveThrough, `${path}.effectiveThrough`),
+    roundingProfileStatus,
+    roundingProfileEvidenceDigest,
     legalReferences,
   }
 }

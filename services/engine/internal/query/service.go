@@ -46,9 +46,80 @@ type ObservationReadStore interface {
 }
 type TaxReportStore interface {
 	GetCurrentReportForYear(context.Context, string, int) (taxreportstore.CurrentReportDetail, bool, error)
+	GetCurrentReportV2ForSubject(context.Context, string, int, string) (taxreportstore.CurrentReportDetailV2, bool, error)
 	ListReportHistory(context.Context, string, int, int32) ([]taxreportstore.StoredReport, error)
+	ListActivatedReportHistoryV2(context.Context, string, int, string, int32) ([]taxreportstore.ActivatedReportDetailV2, error)
 	GetReport(context.Context, string, string) (taxreportstore.StoredReport, bool, error)
+	GetActivatedReportV2(context.Context, string, string) (taxreportstore.ActivatedReportDetailV2, bool, error)
 }
+
+func (s *Service) getActivatedTaxReport(ctx context.Context, subject, reportID string) (taxreportstore.StoredReport, bool, error) {
+	if strings.HasPrefix(reportID, "tax-report-v2:") {
+		value, found, err := s.TaxReports.GetActivatedReportV2(ctx, subject, reportID)
+		return value.StoredReport, found, err
+	}
+	return s.TaxReports.GetReport(ctx, subject, reportID)
+}
+
+func (s *Service) getCurrentTaxReport(ctx context.Context, subject string, taxYear int) (taxreportstore.CurrentReportDetail, bool, error) {
+	v2Candidates := make([]taxreportstore.CurrentReportDetail, 0, 2)
+	for _, finality := range []string{"FINAL", "PROVISIONAL"} {
+		value, found, err := s.TaxReports.GetCurrentReportV2ForSubject(ctx, subject, taxYear, finality)
+		if err != nil {
+			return taxreportstore.CurrentReportDetail{}, false, err
+		}
+		if found {
+			v2Candidates = append(v2Candidates, taxreportstore.CurrentReportDetail{
+				StoredReport: value.StoredReport, PointerVersion: value.PointerVersion, UpdatedAt: value.UpdatedAt,
+			})
+		}
+	}
+	if len(v2Candidates) > 0 {
+		sort.Slice(v2Candidates, func(i, j int) bool {
+			if !v2Candidates[i].UpdatedAt.Equal(v2Candidates[j].UpdatedAt) {
+				return v2Candidates[i].UpdatedAt.After(v2Candidates[j].UpdatedAt)
+			}
+			if !v2Candidates[i].IssuedAt.Equal(v2Candidates[j].IssuedAt) {
+				return v2Candidates[i].IssuedAt.After(v2Candidates[j].IssuedAt)
+			}
+			return v2Candidates[i].Finality == "FINAL" && v2Candidates[j].Finality != "FINAL"
+		})
+		return v2Candidates[0], true, nil
+	}
+	return s.TaxReports.GetCurrentReportForYear(ctx, subject, taxYear)
+}
+
+func (s *Service) listTaxReportHistory(ctx context.Context, subject string, taxYear int, limit int32) ([]taxreportstore.StoredReport, error) {
+	legacy, err := s.TaxReports.ListReportHistory(ctx, subject, taxYear, limit)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]taxreportstore.StoredReport, len(legacy))
+	for _, value := range legacy {
+		byID[value.ID] = value
+	}
+	for _, finality := range []string{"FINAL", "PROVISIONAL"} {
+		values, err := s.TaxReports.ListActivatedReportHistoryV2(ctx, subject, taxYear, finality, limit)
+		if err != nil {
+			return nil, err
+		}
+		for _, value := range values {
+			byID[value.ID] = value.StoredReport
+		}
+	}
+	result := make([]taxreportstore.StoredReport, 0, len(byID))
+	for _, value := range byID {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].IssuedAt.After(result[j].IssuedAt) || result[i].IssuedAt.Equal(result[j].IssuedAt) && result[i].ID > result[j].ID
+	})
+	if len(result) > int(limit) {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
 type TaxReportArtifactStore interface {
 	GetTaxReportArtifact(context.Context, string, string, string) (artifactstore.Object, bool, error)
 }
@@ -609,7 +680,7 @@ func (s *Service) GetCurrentTaxReport(ctx context.Context, req *enginev1.GetCurr
 	if s.TaxReports == nil {
 		return nil, status.Error(codes.Unavailable, "tax report query is unavailable")
 	}
-	value, found, err := s.TaxReports.GetCurrentReportForYear(ctx, subject, int(req.GetTaxYear()))
+	value, found, err := s.getCurrentTaxReport(ctx, subject, int(req.GetTaxYear()))
 	if errors.Is(err, taxreportstore.ErrAmbiguousResident) {
 		return nil, status.Error(codes.FailedPrecondition, "AMBIGUOUS_TAX_RESIDENCY")
 	}
@@ -640,7 +711,7 @@ func (s *Service) ListTaxReportHistory(ctx context.Context, req *enginev1.ListTa
 	if s.TaxReports == nil {
 		return nil, status.Error(codes.Unavailable, "tax report query is unavailable")
 	}
-	values, err := s.TaxReports.ListReportHistory(ctx, subject, int(req.GetTaxYear()), limit)
+	values, err := s.listTaxReportHistory(ctx, subject, int(req.GetTaxYear()), limit)
 	if errors.Is(err, taxreportstore.ErrAmbiguousResident) {
 		return nil, status.Error(codes.FailedPrecondition, "AMBIGUOUS_TAX_RESIDENCY")
 	}
@@ -665,7 +736,7 @@ func (s *Service) GetTaxReportModel(ctx context.Context, req *enginev1.GetTaxRep
 	if s.TaxReports == nil || s.TaxReportArtifacts == nil {
 		return nil, status.Error(codes.Unavailable, "tax report model query is unavailable")
 	}
-	value, found, err := s.TaxReports.GetReport(ctx, subject, req.GetReportId())
+	value, found, err := s.getActivatedTaxReport(ctx, subject, req.GetReportId())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "tax report query failed")
 	}
@@ -714,7 +785,7 @@ func (s *Service) GetTaxEvidencePack(ctx context.Context, req *enginev1.GetTaxEv
 	if s.TaxReports == nil || s.TaxReportArtifacts == nil {
 		return nil, status.Error(codes.Unavailable, "tax evidence pack query is unavailable")
 	}
-	value, found, err := s.TaxReports.GetReport(ctx, subject, req.GetReportId())
+	value, found, err := s.getActivatedTaxReport(ctx, subject, req.GetReportId())
 	if err != nil {
 		return nil, status.Error(codes.Internal, "tax report query failed")
 	}
@@ -766,7 +837,8 @@ func (s *Service) GetTaxEvidencePack(ctx context.Context, req *enginev1.GetTaxEv
 		log.Printf("tax evidence pack report model integrity verification failed: report=%q err=%v", value.ID, err)
 		return nil, status.Error(codes.DataLoss, "tax evidence pack integrity verification failed")
 	}
-	if evidenceIdentity.GenerationID != reportIdentity.GenerationID {
+	contract, _ := taxReportArtifactContractForID(value.ID)
+	if !sameTaxArtifactLedgerGeneration(contract, evidenceIdentity, reportIdentity) {
 		log.Printf("tax evidence pack generation verification failed: report=%q", value.ID)
 		return nil, status.Error(codes.DataLoss, "tax evidence pack integrity verification failed")
 	}
@@ -776,6 +848,13 @@ func (s *Service) GetTaxEvidencePack(ctx context.Context, req *enginev1.GetTaxEv
 		MediaType:      object.MediaType,
 		CanonicalJson:  append([]byte(nil), object.Bytes...),
 	}, nil
+}
+
+func sameTaxArtifactLedgerGeneration(contract taxReportArtifactContract, evidence taxEvidencePackIdentity, report taxReportModelIdentity) bool {
+	if contract.reportSchema == taxReportModelSchemaV2 {
+		return evidence.SourceLedgerGenerationID != "" && evidence.SourceLedgerGenerationID == report.SourceLedgerGenerationID
+	}
+	return evidence.GenerationID != "" && evidence.GenerationID == report.GenerationID
 }
 
 func validTaxReportID(value string) bool {
@@ -821,39 +900,41 @@ func taxReportArtifactContractForID(value string) (taxReportArtifactContract, bo
 }
 
 type taxReportModelIdentity struct {
-	SchemaVersion       string                      `json:"schemaVersion"`
-	ReportID            string                      `json:"reportId"`
-	InputDigest         string                      `json:"inputDigest"`
-	SubjectID           string                      `json:"subjectId"`
-	ResidentID          string                      `json:"residentId"`
-	TaxYear             int                         `json:"taxYear"`
-	TaxInventoryRunID   string                      `json:"taxInventoryRunId"`
-	TaxEstimateID       string                      `json:"taxEstimateId"`
-	LotRunID            string                      `json:"lotRunId"`
-	GenerationID        string                      `json:"generationId"`
-	SchemaDigest        string                      `json:"schemaDigest"`
-	DenominationAssetID string                      `json:"denominationAssetId"`
-	EvidencePackDigest  string                      `json:"evidencePackDigest"`
-	Policy              taxArtifactProducerIdentity `json:"policy"`
-	Engine              taxArtifactProducerIdentity `json:"engine"`
-	IssuedAt            time.Time                   `json:"issuedAt"`
+	SchemaVersion            string                      `json:"schemaVersion"`
+	ReportID                 string                      `json:"reportId"`
+	InputDigest              string                      `json:"inputDigest"`
+	SubjectID                string                      `json:"subjectId"`
+	ResidentID               string                      `json:"residentId"`
+	TaxYear                  int                         `json:"taxYear"`
+	TaxInventoryRunID        string                      `json:"taxInventoryRunId"`
+	TaxEstimateID            string                      `json:"taxEstimateId"`
+	LotRunID                 string                      `json:"lotRunId"`
+	GenerationID             string                      `json:"generationId"`
+	SourceLedgerGenerationID string                      `json:"sourceLedgerGenerationId"`
+	SchemaDigest             string                      `json:"schemaDigest"`
+	DenominationAssetID      string                      `json:"denominationAssetId"`
+	EvidencePackDigest       string                      `json:"evidencePackDigest"`
+	Policy                   taxArtifactProducerIdentity `json:"policy"`
+	Engine                   taxArtifactProducerIdentity `json:"engine"`
+	IssuedAt                 time.Time                   `json:"issuedAt"`
 }
 
 type taxEvidencePackIdentity struct {
-	SchemaVersion     string                      `json:"schemaVersion"`
-	ManifestID        string                      `json:"manifestId"`
-	ReportID          string                      `json:"reportId"`
-	SubjectID         string                      `json:"subjectId"`
-	ResidentID        string                      `json:"residentId"`
-	TaxYear           int                         `json:"taxYear"`
-	TaxInventoryRunID string                      `json:"taxInventoryRunId"`
-	TaxEstimateID     string                      `json:"taxEstimateId"`
-	LotRunID          string                      `json:"lotRunId"`
-	GenerationID      string                      `json:"generationId"`
-	SchemaDigest      string                      `json:"schemaDigest"`
-	Policy            taxArtifactProducerIdentity `json:"policy"`
-	Engine            taxArtifactProducerIdentity `json:"engine"`
-	IssuedAt          time.Time                   `json:"issuedAt"`
+	SchemaVersion            string                      `json:"schemaVersion"`
+	ManifestID               string                      `json:"manifestId"`
+	ReportID                 string                      `json:"reportId"`
+	SubjectID                string                      `json:"subjectId"`
+	ResidentID               string                      `json:"residentId"`
+	TaxYear                  int                         `json:"taxYear"`
+	TaxInventoryRunID        string                      `json:"taxInventoryRunId"`
+	TaxEstimateID            string                      `json:"taxEstimateId"`
+	LotRunID                 string                      `json:"lotRunId"`
+	GenerationID             string                      `json:"generationId"`
+	SourceLedgerGenerationID string                      `json:"sourceLedgerGenerationId"`
+	SchemaDigest             string                      `json:"schemaDigest"`
+	Policy                   taxArtifactProducerIdentity `json:"policy"`
+	Engine                   taxArtifactProducerIdentity `json:"engine"`
+	IssuedAt                 time.Time                   `json:"issuedAt"`
 }
 
 type taxArtifactProducerIdentity struct {
@@ -878,6 +959,13 @@ func sameTaxReportIssuedAt(artifactTime, storedTime time.Time) bool {
 	return artifactTime.UTC().Truncate(time.Microsecond).Equal(
 		storedTime.UTC().Truncate(time.Microsecond),
 	)
+}
+
+func validTaxArtifactLedgerGeneration(contract taxReportArtifactContract, generationID, sourceLedgerGenerationID string) bool {
+	if contract.reportSchema == taxReportModelSchemaV2 {
+		return generationID == "" && sourceLedgerGenerationID != ""
+	}
+	return generationID != "" && sourceLedgerGenerationID == ""
 }
 
 func validateTaxReportModelArtifact(
@@ -918,7 +1006,7 @@ func validateTaxReportModelArtifact(
 		identity.TaxInventoryRunID != report.TaxInventoryRunID ||
 		identity.TaxEstimateID != report.TaxEstimateID ||
 		identity.LotRunID != report.LotRunID ||
-		identity.GenerationID == "" ||
+		!validTaxArtifactLedgerGeneration(contract, identity.GenerationID, identity.SourceLedgerGenerationID) ||
 		identity.SchemaDigest != report.SchemaDigest ||
 		identity.DenominationAssetID != report.DenominationAssetID ||
 		identity.EvidencePackDigest != report.EvidencePackDigest ||
@@ -972,7 +1060,7 @@ func validateTaxEvidencePackArtifact(
 		identity.TaxInventoryRunID != report.TaxInventoryRunID ||
 		identity.TaxEstimateID != report.TaxEstimateID ||
 		identity.LotRunID != report.LotRunID ||
-		identity.GenerationID == "" ||
+		!validTaxArtifactLedgerGeneration(contract, identity.GenerationID, identity.SourceLedgerGenerationID) ||
 		identity.SchemaDigest != report.SchemaDigest ||
 		identity.Policy.Name != report.Policy.Name ||
 		identity.Policy.Version != report.Policy.Version ||

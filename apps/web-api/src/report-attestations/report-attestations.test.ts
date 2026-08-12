@@ -253,6 +253,63 @@ describe('local report attestation fixture', () => {
     }
   })
 
+  it('does not submit a prepared report after it stops being the current publication', async () => {
+    const reportId = 'report-engine-stale-after-prepare'
+    let isCurrent = true
+    const publication = {
+      reportId,
+      sourceVersion: 'report-engine-publication-v2',
+      revision: 1,
+      previousSubmissionUID: `0x${'0'.repeat(64)}` as Hex32,
+      safeArtifactBytes: new TextEncoder().encode(
+        JSON.stringify({ reportId, pointerVersion: 1 }),
+      ),
+    }
+    const publicationSource: ReportAttestationPublicationSource = {
+      getPublication: vi.fn(async (ownerId, requestedReportId) =>
+        ownerId === OWNER_A && requestedReportId === reportId && isCurrent
+          ? publication
+          : undefined),
+    }
+    const fake = createFakeRuntime()
+    const harness = await createHarness('APPROVE', fake, publicationSource)
+    try {
+      const prepared = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${encodeURIComponent(reportId)}/attestation-preparation`,
+      })
+      expect(prepared.statusCode).toBe(201)
+
+      isCurrent = false
+      const staleSubmission = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${encodeURIComponent(reportId)}/attestations`,
+      })
+      expect(staleSubmission.statusCode).toBe(404)
+      expect(fake.executeIssuer).not.toHaveBeenCalled()
+      expect(await harness.context.reportAttestationService?.getStatus(
+        OWNER_A,
+        reportId,
+      )).toMatchObject({ lifecycle: 'PREPARED' })
+
+      isCurrent = true
+      publication.safeArtifactBytes = new TextEncoder().encode(
+        JSON.stringify({ reportId, pointerVersion: 2 }),
+      )
+      const changedSubmission = await harness.request('A', {
+        method: 'POST',
+        url: `/api/v1/reports/${encodeURIComponent(reportId)}/attestations`,
+      })
+      expect(changedSubmission.statusCode).toBe(409)
+      expect(changedSubmission.json()).toMatchObject({
+        error: { code: 'REPORT_ATTESTATION_PUBLICATION_CHANGED' },
+      })
+      expect(fake.executeIssuer).not.toHaveBeenCalled()
+    } finally {
+      await harness.context.app.close()
+    }
+  })
+
   it('keeps one contract report ID while creating a distinct prepared record for the next revision', async () => {
     const reportId = 'report-engine-result-2027'
     let revision = 1

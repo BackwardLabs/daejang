@@ -234,6 +234,7 @@ describe('tax report PDF renderer', () => {
         sourceCoverage: [{
           sourceArtifactId: 'source-upbit-1',
           sourceKind: 'FILE',
+          systemName: 'UPBIT',
           assurance: 'DOCUMENT_METADATA_VERIFIED',
           status: 'PARTIAL',
           evidenceDigest: digest('source-evidence'),
@@ -252,9 +253,13 @@ describe('tax report PDF renderer', () => {
           artifactDigest: digest('v2-policy'), sourceSetDigest: digest('v2-sources'),
           applicationMode: 'ENACTED', effectiveFrom: '2027-01-01T00:00:00Z',
           effectiveThrough: '2027-12-31T23:59:59Z',
+          roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
+          roundingProfileEvidenceDigest: null,
           legalReferences: [{
             law: '소득세법', article: '제37조', paragraphs: ['제1항'],
             purpose: '필요경비 계산 기준',
+            sourceLocators: ['https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=280405'],
+            sourceCheckedAt: '2026-08-03T15:00:00Z',
           }],
         },
       },

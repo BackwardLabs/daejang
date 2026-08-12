@@ -76,7 +76,11 @@ const serializeStatus = (
 })
 
 export class ReportAttestationConflictError extends Error {
-  constructor(readonly code: 'NOT_PREPARED' | 'NOT_SUBMITTED' | 'ALREADY_STARTED') {
+  constructor(readonly code:
+    | 'NOT_PREPARED'
+    | 'NOT_SUBMITTED'
+    | 'ALREADY_STARTED'
+    | 'PUBLICATION_CHANGED') {
     super(code)
     this.name = 'ReportAttestationConflictError'
   }
@@ -335,11 +339,29 @@ export class ReportAttestationService {
     return record ? serializeStatus(record) : undefined
   }
 
-  async queueSubmission(ownerId: string, reportId: string) {
+  async queueSubmission(
+    ownerId: string,
+    reportId: string,
+    currentPublication?: ReportAttestationPublication,
+  ) {
     this.#assertOpen()
     const target = await this.#store.get(ownerId, reportId)
     if (!target) {
       throw new ReportAttestationConflictError('NOT_PREPARED')
+    }
+    if (
+      currentPublication &&
+      (
+        currentPublication.reportId !== target.reportId ||
+        currentPublication.revision !== target.revision ||
+        (currentPublication.sourceVersion ?? 'legacy-report-publication-v1') !==
+          target.publicationSourceVersion ||
+        !Buffer.from(currentPublication.safeArtifactBytes).equals(
+          Buffer.from(target.safeArtifactBytes),
+        )
+      )
+    ) {
+      throw new ReportAttestationConflictError('PUBLICATION_CHANGED')
     }
     const queued = await this.#store.update(
       ownerId,
@@ -393,8 +415,13 @@ export class ReportAttestationService {
   async queueSubmissionAndReview(
     ownerId: string,
     reportId: string,
+    currentPublication?: ReportAttestationPublication,
   ) {
-    const status = await this.queueSubmission(ownerId, reportId)
+    const status = await this.queueSubmission(
+      ownerId,
+      reportId,
+      currentPublication,
+    )
     this.#enqueue(async () => {
       const current = await this.#store.get(ownerId, reportId)
       if (current?.lifecycle === 'SUBMITTED') {

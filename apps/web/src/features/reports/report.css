@@ -3444,6 +3444,24 @@
   border-radius: 8px;
 }
 
+.tax-report-v2__pdf-state {
+  display: grid;
+  min-height: min(70vh, 760px);
+  margin: 14px 0;
+  place-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  color: #4b5563;
+  background: #f9fafb;
+  font-size: 13px;
+}
+
+.tax-report-v2__pdf-state.is-error {
+  color: #991b1b;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
 @media (max-width: 900px) {
   .report-generation-state {
     grid-template-columns: 36px minmax(0, 1fr);

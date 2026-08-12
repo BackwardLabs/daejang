@@ -170,10 +170,14 @@ const mapServiceError = (error: unknown): never => {
       409,
       error.code === 'NOT_SUBMITTED'
         ? 'REPORT_ATTESTATION_NOT_SUBMITTED'
-        : 'REPORT_ATTESTATION_ALREADY_STARTED',
+        : error.code === 'PUBLICATION_CHANGED'
+          ? 'REPORT_ATTESTATION_PUBLICATION_CHANGED'
+          : 'REPORT_ATTESTATION_ALREADY_STARTED',
       error.code === 'NOT_SUBMITTED'
         ? '보고서 제출 증명이 아직 완료되지 않았습니다.'
-        : '보고서 증명 작업이 이미 시작되었습니다.',
+        : error.code === 'PUBLICATION_CHANGED'
+          ? '준비 후 보고서가 변경되어 다시 확인해야 합니다.'
+          : '보고서 증명 작업이 이미 시작되었습니다.',
     )
   }
   throw new ApiError(
@@ -289,15 +293,28 @@ export const registerReportAttestationRoutes = async (
       assertEmptyBody(request.body)
       const ownerId = assertAuthenticatedOwner(request)
       try {
+        const currentPublication =
+          await options.publicationSource.getPublication(
+            ownerId,
+            request.params.reportId,
+          )
+        if (
+          !currentPublication ||
+          currentPublication.reportId !== request.params.reportId
+        ) {
+          throw resourceNotFound()
+        }
         await consumeWrite(request, ownerId)
         const status = options.automaticReview
           ? await options.service.queueSubmissionAndReview(
               ownerId,
               request.params.reportId,
+              currentPublication,
             )
           : await options.service.queueSubmission(
               ownerId,
               request.params.reportId,
+              currentPublication,
             )
         return reply.status(202).send(status)
       } catch (error) {

@@ -638,7 +638,7 @@ export async function renderTaxReportPdf(
         { header: '누락 구간', width: 195 },
       ],
       rows: model.v2.sourceCoverage.map((source) => [
-        `${source.sourceKind} · ${source.status}\n${source.assurance}\n${shortId(source.sourceArtifactId)}`,
+        `${source.systemName ?? source.sourceKind} · ${source.status}\n${source.sourceKind} · ${source.assurance}\n${shortId(source.sourceArtifactId)}`,
         source.coveredIntervals.length === 0
           ? '확인된 구간 없음'
           : source.coveredIntervals.map((row) =>
@@ -802,7 +802,7 @@ export async function renderTaxReportPdf(
       columns: [
         { header: '구분', width: 112 },
         { header: '자산 / 원천 최소단위', width: 112 },
-        { header: '원화 평가액', width: 112, align: 'right' },
+        { header: '원화 금액 구성', width: 112, align: 'right' },
         { header: 'Movement', width: 175 },
       ],
       rows: [
@@ -815,7 +815,11 @@ export async function renderTaxReportPdf(
         ...model.v2.acquisitions.map((row) => [
           `${formatKstTimestamp(row.occurredAt)}\n${row.transactionType}`,
           `${row.taxAssetId}\n${formatDecimal(row.quantity)}`,
-          formatReportAmount(row.acquisitionCost, model.denominationAssetId),
+          [
+            `취득대금 ${formatReportAmount(row.consideration, model.denominationAssetId)}`,
+            `취득수수료 ${formatReportAmount(row.acquisitionAncillaryExpense, model.denominationAssetId)}`,
+            `총취득가액 ${formatReportAmount(row.acquisitionCost, model.denominationAssetId)}`,
+          ].join('\n'),
           `${reportRowAccountLabel(row.account)}\n${reportRowSourceLabel(row)}\n${row.review.status}`,
         ]),
       ],
@@ -892,10 +896,22 @@ export async function renderTaxReportPdf(
     drawKeyValues([
       ['정책 적용 모드', model.v2.policy.applicationMode],
       ['정책 적용기간', `${formatKstTimestamp(model.v2.policy.effectiveFrom)} ~ ${formatKstTimestamp(model.v2.policy.effectiveThrough)}`],
+      [
+        '신고용 반올림 기준',
+        model.v2.policy.roundingProfileStatus === 'APPROVED'
+          ? '승인됨'
+          : '승인 전 · 현재 세액은 추정치',
+      ],
       ['정책 source-set hash', model.v2.policy.sourceSetDigest],
       ...model.v2.policy.legalReferences.map((reference) => [
         `${reference.law} ${reference.article}${reference.paragraphs.length ? ` ${reference.paragraphs.join(', ')}` : ''}`,
-        reference.purpose,
+        [
+          reference.purpose,
+          ...reference.sourceLocators,
+          reference.sourceCheckedAt === null
+            ? null
+            : `근거 확인: ${formatKstTimestamp(reference.sourceCheckedAt)}`,
+        ].filter((value): value is string => value !== null).join('\n'),
       ] as const),
     ], '적용 정책과 법령 근거')
   }

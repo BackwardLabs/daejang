@@ -361,8 +361,15 @@ export const assertTaxReportSchema = async (pool: Pool) => {
     activated_read_view: string | null
     current_read_view: string | null
     generation_status_read_view: string | null
+    v2_activated_read_view: string | null
+    v2_current_read_view: string | null
+    v2_generation_status_read_view: string | null
+    v2_status_function: string | null
+    v2_subject_resident_function: string | null
     contract_version: string | null
     migration_version: string | null
+    generation_contract_version: string | null
+    generation_migration_version: string | null
     reporting_usage: boolean
     reporting_create: boolean
     report_select: boolean
@@ -375,6 +382,14 @@ export const assertTaxReportSchema = async (pool: Pool) => {
     current_read_write: boolean
     generation_status_read_select: boolean
     generation_status_read_write: boolean
+    v2_activated_read_select: boolean
+    v2_activated_read_write: boolean
+    v2_current_read_select: boolean
+    v2_current_read_write: boolean
+    v2_generation_status_read_select: boolean
+    v2_generation_status_read_write: boolean
+    v2_status_execute: boolean
+    v2_subject_resident_execute: boolean
   }>(`
     SELECT
       to_regclass('reporting.tax_report')::text AS report_table,
@@ -382,8 +397,15 @@ export const assertTaxReportSchema = async (pool: Pool) => {
       to_regclass('reporting.activated_tax_report_read_v1')::text AS activated_read_view,
       to_regclass('reporting.current_tax_report_read_v1')::text AS current_read_view,
       to_regclass('reporting.current_tax_report_generation_status_read_v1')::text AS generation_status_read_view,
+      to_regclass('reporting.activated_tax_report_read_v2')::text AS v2_activated_read_view,
+      to_regclass('reporting.current_tax_report_read_v2')::text AS v2_current_read_view,
+      to_regclass('reporting.current_tax_report_generation_status_read_v2')::text AS v2_generation_status_read_view,
+      to_regprocedure('reporting.tax_report_generation_status_v2(text,text,integer,text)')::text AS v2_status_function,
+      to_regprocedure('reporting.tax_report_subject_resident_v2(text,integer,text)')::text AS v2_subject_resident_function,
       (SELECT contract_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS contract_version,
       (SELECT migration_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-persistence') AS migration_version,
+      (SELECT contract_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-generation-persistence') AS generation_contract_version,
+      (SELECT migration_version::text FROM daejang_meta.schema_contract WHERE component='tax-report-generation-persistence') AS generation_migration_version,
       has_schema_privilege(current_user, 'reporting', 'USAGE') AS reporting_usage,
       has_schema_privilege(current_user, 'reporting', 'CREATE') AS reporting_create,
       has_table_privilege(current_user, 'reporting.tax_report', 'SELECT') AS report_select,
@@ -395,7 +417,15 @@ export const assertTaxReportSchema = async (pool: Pool) => {
       has_table_privilege(current_user, 'reporting.current_tax_report_read_v1', 'SELECT') AS current_read_select,
       has_table_privilege(current_user, 'reporting.current_tax_report_read_v1', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS current_read_write,
       has_table_privilege(current_user, 'reporting.current_tax_report_generation_status_read_v1', 'SELECT') AS generation_status_read_select,
-      has_table_privilege(current_user, 'reporting.current_tax_report_generation_status_read_v1', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS generation_status_read_write
+      has_table_privilege(current_user, 'reporting.current_tax_report_generation_status_read_v1', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS generation_status_read_write,
+      has_table_privilege(current_user, 'reporting.activated_tax_report_read_v2', 'SELECT') AS v2_activated_read_select,
+      has_table_privilege(current_user, 'reporting.activated_tax_report_read_v2', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS v2_activated_read_write,
+      has_table_privilege(current_user, 'reporting.current_tax_report_read_v2', 'SELECT') AS v2_current_read_select,
+      has_table_privilege(current_user, 'reporting.current_tax_report_read_v2', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS v2_current_read_write,
+      has_table_privilege(current_user, 'reporting.current_tax_report_generation_status_read_v2', 'SELECT') AS v2_generation_status_read_select,
+      has_table_privilege(current_user, 'reporting.current_tax_report_generation_status_read_v2', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS v2_generation_status_read_write,
+      has_function_privilege(current_user, 'reporting.tax_report_generation_status_v2(text,text,integer,text)', 'EXECUTE') AS v2_status_execute,
+      has_function_privilege(current_user, 'reporting.tax_report_subject_resident_v2(text,integer,text)', 'EXECUTE') AS v2_subject_resident_execute
   `)
   const row = result.rows[0]
   if (
@@ -405,8 +435,18 @@ export const assertTaxReportSchema = async (pool: Pool) => {
     row.current_read_view !== 'reporting.current_tax_report_read_v1' ||
     row.generation_status_read_view !==
       'reporting.current_tax_report_generation_status_read_v1' ||
+    row.v2_activated_read_view !== 'reporting.activated_tax_report_read_v2' ||
+    row.v2_current_read_view !== 'reporting.current_tax_report_read_v2' ||
+    row.v2_generation_status_read_view !==
+      'reporting.current_tax_report_generation_status_read_v2' ||
+    row.v2_status_function !==
+      'reporting.tax_report_generation_status_v2(text,text,integer,text)' ||
+    row.v2_subject_resident_function !==
+      'reporting.tax_report_subject_resident_v2(text,integer,text)' ||
     row.contract_version !== '1' ||
     row.migration_version !== '73' ||
+    row.generation_contract_version !== '2' ||
+    row.generation_migration_version !== '76' ||
     !row.reporting_usage ||
     row.reporting_create ||
     row.report_select ||
@@ -418,7 +458,15 @@ export const assertTaxReportSchema = async (pool: Pool) => {
     !row.current_read_select ||
     row.current_read_write ||
     !row.generation_status_read_select ||
-    row.generation_status_read_write
+    row.generation_status_read_write ||
+    !row.v2_activated_read_select ||
+    row.v2_activated_read_write ||
+    !row.v2_current_read_select ||
+    row.v2_current_read_write ||
+    !row.v2_generation_status_read_select ||
+    row.v2_generation_status_read_write ||
+    !row.v2_status_execute ||
+    !row.v2_subject_resident_execute
   ) {
     throw new Error('tax report persistence migration contract is invalid')
   }

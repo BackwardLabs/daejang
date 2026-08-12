@@ -43,6 +43,7 @@ const evidenceFixture = () => ({
   sourceCoverage: [{
     sourceArtifactId: 'source-1',
     sourceKind: 'FILE',
+    systemName: 'UPBIT',
     assurance: 'DOCUMENT_METADATA_VERIFIED',
     status: 'PARTIAL',
     evidenceDigest: digest('3'),
@@ -64,8 +65,11 @@ const evidenceFixture = () => ({
     applicationMode: 'ENACTED',
     effectiveFrom: '2027-01-01T00:00:00Z',
     effectiveThrough: '2027-12-31T23:59:59Z',
+    roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
     legalReferences: [{
       law: '소득세법', article: '제37조', purpose: '필요경비 계산 기준',
+      sourceLocators: ['https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=280405'],
+      sourceCheckedAt: '2026-08-03T15:00:00Z',
     }],
   },
   engine: {
@@ -93,10 +97,20 @@ describe('EvidencePack V2 public projection', () => {
 
     expect(projected).toMatchObject({
       reportId,
-      sourceCoverage: [{ sourceArtifactId: 'source-1', status: 'PARTIAL' }],
+      sourceCoverage: [{
+        sourceArtifactId: 'source-1', systemName: 'UPBIT', status: 'PARTIAL',
+      }],
       methodology: {
         sourceLedgerGenerationId: 'ledger-generation-1',
-        policy: { legalReferences: [{ law: '소득세법' }] },
+        policy: {
+          roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
+          roundingProfileEvidenceDigest: null,
+          legalReferences: [{
+            law: '소득세법',
+            sourceLocators: ['https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=280405'],
+            sourceCheckedAt: '2026-08-03T15:00:00Z',
+          }],
+        },
       },
     })
     expect(projected).not.toHaveProperty('subjectId')
@@ -115,6 +129,17 @@ describe('EvidencePack V2 public projection', () => {
       artifact({ ...evidenceFixture(), generationId: 'db-generation-1' }),
       reportId,
     )).toThrow(InvalidTaxEvidencePackV2Error)
+  })
+
+  it('rejects unapproved rounding when an approval digest is attached', () => {
+    const pack = evidenceFixture()
+    expect(() => decodeAndProjectTaxEvidencePackV2(
+      artifact({
+        ...pack,
+        policy: { ...pack.policy, roundingProfileEvidenceDigest: digest('9') },
+      }),
+      reportId,
+    )).toThrow(/rounding profile approval and evidence disagree/u)
   })
 
   it('serializes the exact public evidence allowlist', async () => {

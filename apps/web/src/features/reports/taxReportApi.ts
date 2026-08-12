@@ -395,6 +395,7 @@ export type TaxReportV2DetailModel = {
   sourceCoverage: Array<{
     sourceArtifactId: string
     sourceKind: string
+    systemName: string | null
     assurance: string
     status: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE'
     evidenceDigest: string
@@ -413,11 +414,15 @@ export type TaxReportV2DetailModel = {
       applicationMode: 'ENACTED' | 'SIMULATION'
       effectiveFrom: string
       effectiveThrough: string
+      roundingProfileStatus: 'APPROVED' | 'ESTIMATE_ONLY_UNAPPROVED'
+      roundingProfileEvidenceDigest: string | null
       legalReferences: Array<{
         law: string
         article: string
         paragraphs: string[]
         purpose: string
+        sourceLocators: string[]
+        sourceCheckedAt: string | null
       }>
     }
     engine: TaxReportProducerModel
@@ -502,6 +507,8 @@ export type TaxReportV2TransferModel = TaxReportTransferModel & {
 }
 
 export type TaxReportV2AcquisitionModel = TaxReportV2MovementModel & {
+  consideration: TaxReportV2AmountModel
+  acquisitionAncillaryExpense: TaxReportV2AmountModel
   acquisitionCost: TaxReportV2AmountModel
 }
 

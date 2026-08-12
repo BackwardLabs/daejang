@@ -87,7 +87,20 @@ const canReadCurrent = (status: TaxReportGenerationStatusModel) =>
   (status.blockedReasonCode === null ||
     status.blockedReasonCode === 'REVIEW_REQUIRED')
 
-const generationPresentation = (status: TaxReportGenerationStatusModel) => {
+const blocksAllReportReads = (status: TaxReportGenerationStatusModel) =>
+  status.blockedReasonCode === 'APPLICATION_PENDING' ||
+  status.state === 'BUILDING' ||
+  status.state === 'FAILED' ||
+  (
+    status.state === 'ACTIVE' &&
+    status.outcome === 'NO_TAX_EVENTS' &&
+    status.finality === 'FINAL'
+  )
+
+const generationPresentation = (
+  status: TaxReportGenerationStatusModel,
+  hasReadableCurrent: boolean,
+) => {
   const hasAuthoritativeNoTaxEvents =
     status.state === 'ACTIVE' &&
     status.outcome === 'NO_TAX_EVENTS' &&
@@ -116,6 +129,15 @@ const generationPresentation = (status: TaxReportGenerationStatusModel) => {
       ? `오류 코드 ${status.failureCode}를 기준으로 서버 작업 상태를 확인해 주세요.`
       : '계산 파이프라인 상태를 확인한 뒤 다시 생성해야 합니다.',
   }
+  if (
+    status.state === 'REVIEW_REQUIRED' &&
+    canReadCurrent(status) &&
+    hasReadableCurrent
+  ) return {
+    tone: 'review', eyebrow: 'REVIEW REQUIRED',
+    title: '검토가 필요한 잠정 장부입니다',
+    body: '현재 확보된 데이터로 계산한 추정 결과는 계속 확인할 수 있습니다. 누락 구간과 검토 항목을 보완한 뒤 전체 연도를 다시 계산해야 확정할 수 있습니다.',
+  }
   if (hasAuthoritativeNoTaxEvents) return {
     tone: 'empty', eyebrow: 'NO TAX EVENTS',
     title: `${status.taxYear}년 과세 이벤트가 없습니다`,
@@ -128,7 +150,7 @@ const generationPresentation = (status: TaxReportGenerationStatusModel) => {
     )
   ) return {
     tone: 'review', eyebrow: 'REVIEW REQUIRED', title: '최신 장부를 다시 확인해야 합니다',
-    body: '원장 변경, 데이터 범위 또는 계산 결과 정합성 문제로 현재 결과 대신 검토 상태를 표시합니다.',
+    body: '원장 변경, 데이터 범위 또는 계산 결과 정합성 문제로 읽을 수 있는 최신 장부가 없습니다. 검토를 마치고 다시 계산해 주세요.',
   }
   return {
     tone: 'empty', eyebrow: 'NOT STARTED', title: '아직 생성된 장부가 없습니다',
@@ -139,11 +161,13 @@ const generationPresentation = (status: TaxReportGenerationStatusModel) => {
 function ReportGenerationState({
   status,
   onRetry,
+  hasReadableCurrent = false,
 }: {
   status: TaxReportGenerationStatusModel
   onRetry: () => void
+  hasReadableCurrent?: boolean
 }) {
-  const presentation = generationPresentation(status)
+  const presentation = generationPresentation(status, hasReadableCurrent)
   const action = status.blockedReasonCode === 'APPLICATION_PENDING' ||
     ['NOT_STARTED', 'GENERATION_NOT_ACTIVE'].includes(
       status.blockedReasonCode ?? '',
@@ -233,35 +257,36 @@ export function ReportWorkspacePage() {
           throw rejectedStatus?.reason ?? new Error('tax report status unavailable')
         }
 
-        const applicationPending = statuses.some(
-          (status) => status.blockedReasonCode === 'APPLICATION_PENDING',
-        )
-        const readableStatuses = applicationPending
+        const blockingStatus = [...statuses]
+          .sort((left, right) => statusPriority(left) - statusPriority(right))
+          .find(blocksAllReportReads)
+        const readableStatuses = blockingStatus
           ? []
           : statuses.filter(canReadCurrent)
-        const [currentResults, historyResult] = await Promise.all([
-          Promise.allSettled(readableStatuses.map((status) =>
-            loadCurrentTaxReport(year, status.finality, controller.signal)),
+        const canReadReportData = readableStatuses.length > 0
+        const currentResults = await Promise.allSettled(
+          readableStatuses.map((status) =>
+            loadCurrentTaxReport(year, status.finality, controller.signal),
           ),
-          !applicationPending
-            ? loadTaxReportHistory(year, controller.signal)
-                .then((value) => ({ status: 'fulfilled' as const, value }))
-                .catch((reason: unknown) => ({ status: 'rejected' as const, reason }))
-            : Promise.resolve({
-                status: 'fulfilled' as const,
-                value: { items: [] as TaxReportModel[] },
-              }),
-        ])
+        )
         if (controller.signal.aborted) return
-        const history =
-          historyResult.status === 'fulfilled'
-            ? historyResult.value.items
-            : []
         const availableCurrents = currentResults
           .filter((result): result is PromiseFulfilledResult<{ report: TaxReportModel }> =>
             result.status === 'fulfilled')
           .map((result) => result.value.report)
         const latestCurrent = availableCurrents.sort(newestFirst)[0] ?? null
+        const historyResult = canReadReportData && latestCurrent
+          ? await loadTaxReportHistory(year, controller.signal)
+              .then((value) => ({ status: 'fulfilled' as const, value }))
+              .catch((reason: unknown) => ({ status: 'rejected' as const, reason }))
+          : {
+              status: 'fulfilled' as const,
+              value: { items: [] as TaxReportModel[] },
+            }
+        if (controller.signal.aborted) return
+        const history = historyResult.status === 'fulfilled'
+          ? historyResult.value.items
+          : []
         const availableRevisions = mergeRevisions(
           history,
           ...availableCurrents,
@@ -270,19 +295,17 @@ export function ReportWorkspacePage() {
           (result) => result.status === 'rejected',
         )
         if (
-          availableRevisions.length === 0 &&
-          (rejectedCurrent || historyResult.status === 'rejected') &&
-          readableStatuses.length > 0
+          !latestCurrent &&
+          rejectedCurrent &&
+          readableStatuses.some((status) => status.state !== 'REVIEW_REQUIRED')
         ) {
-          throw rejectedCurrent?.status === 'rejected'
-            ? rejectedCurrent.reason
-            : historyResult.status === 'rejected'
-              ? historyResult.reason
-              : new Error('tax report unavailable')
+          throw rejectedCurrent.reason
         }
 
         setCurrentReport(latestCurrent)
-        setGenerationStatus(selectGenerationStatus(statuses, latestCurrent))
+        setGenerationStatus(
+          blockingStatus ?? selectGenerationStatus(statuses, latestCurrent),
+        )
         setRevisions(availableRevisions)
         setSelectedReportId(
           latestCurrent?.reportId ?? availableRevisions[0]?.reportId,
@@ -408,10 +431,11 @@ export function ReportWorkspacePage() {
             <ReportGenerationState
               status={generationStatus}
               onRetry={() => setStatusRequestVersion((value) => value + 1)}
+              hasReadableCurrent={Boolean(currentReport)}
             />
           ) : null}
 
-          {generationStatus && canReadCurrent(generationStatus) &&
+          {currentReport && generationStatus && canReadCurrent(generationStatus) &&
           generationStatus.coverageStatus !== 'COMPLETE' ? (
             <aside className="report-coverage-notice" role="note">
               <strong>전체 연도 중 현재 확보된 데이터까지만 반영했습니다.</strong>

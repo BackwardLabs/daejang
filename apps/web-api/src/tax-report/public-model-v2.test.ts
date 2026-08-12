@@ -85,12 +85,12 @@ const reportFixture = () => ({
     assetSummaries: 1,
     disposals: 1,
     feeAssetDisposals: 0,
-    acquisitions: 0,
+    acquisitions: 1,
     incomeRows: 0,
     transfers: 1,
     nonTaxableTransfers: 1,
     limitations: 0,
-    sourceArtifacts: 0,
+    sourceArtifacts: 1,
   },
   summary: {
     grossProceeds: known('2250000000000000'),
@@ -154,7 +154,15 @@ const reportFixture = () => ({
     account, valuation, sourceEvidence, review: clearReview,
   }],
   feeAssetDisposals: [],
-  acquisitions: [],
+  acquisitions: [{
+    transactionType: 'OTHER_ACQUISITION', movementId: 'acquisition-1',
+    eventId: 'event-4', revisionId: 'revision-1', legId: 'leg-acquisition',
+    kind: 'OTHER_ACQUISITION', taxAssetId: 'ETH', ledgerAssetId: 'ethereum',
+    quantity: '1000', valuationId: 'valuation-1', occurredAt: '2027-02-01T00:00:00Z',
+    consideration: known('500000'), acquisitionAncillaryExpense: known('1000'),
+    acquisitionCost: known('501000'), account, valuation, sourceEvidence,
+    review: clearReview,
+  }],
   incomeRows: [],
   transfers: [{
     transactionType: 'TRANSFER', movementId: 'transfer-1', eventId: 'event-2',
@@ -177,7 +185,23 @@ const reportFixture = () => ({
   }],
   excludedConversions: [],
   limitations: [],
-  sourceCoverage: [],
+  sourceCoverage: [{
+    sourceArtifactId: 'source-1',
+    sourceKind: 'FILE',
+    systemName: 'UPBIT',
+    assurance: 'DOCUMENT_METADATA_VERIFIED',
+    status: 'PARTIAL',
+    evidenceDigest: digest('7'),
+    fragmentIds: ['fragment-1'],
+    coveredIntervals: [{
+      from: '2026-12-31T15:00:00Z',
+      through: '2027-06-30T14:59:59.999999999Z',
+    }],
+    uncoveredIntervals: [{
+      from: '2027-06-30T15:00:00Z',
+      through: '2027-12-31T14:59:59.999999999Z',
+    }],
+  }],
   policy: {
     name: 'kr-virtual-asset-tax',
     version: '2027.1',
@@ -186,11 +210,14 @@ const reportFixture = () => ({
     applicationMode: 'ENACTED',
     effectiveFrom: '2027-01-01T00:00:00Z',
     effectiveThrough: '2027-12-31T23:59:59Z',
+    roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
     legalReferences: [{
       law: '소득세법',
       article: '제37조',
       paragraphs: ['제1항'],
       purpose: '필요경비 계산 기준',
+      sourceLocators: ['https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=280405'],
+      sourceCheckedAt: '2026-08-03T15:00:00Z',
     }],
   },
   engine: {
@@ -235,10 +262,24 @@ describe('ReportModel V2 public projection', () => {
       nonTaxableTransfers: [{
         transactionType: 'SELF_TRANSFER', movementId: 'self-transfer-1',
       }],
+      acquisitions: [{
+        consideration: { amount: '500000' },
+        acquisitionAncillaryExpense: { amount: '1000' },
+        acquisitionCost: { amount: '501000' },
+      }],
       methodology: {
         sourceLedgerGenerationId: 'ledger-generation-1',
-        policy: { legalReferences: [{ law: '소득세법' }] },
+        policy: {
+          roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
+          roundingProfileEvidenceDigest: null,
+          legalReferences: [{
+            law: '소득세법',
+            sourceLocators: ['https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=280405'],
+            sourceCheckedAt: '2026-08-03T15:00:00Z',
+          }],
+        },
       },
+      sourceCoverage: [{ systemName: 'UPBIT' }],
       summary: {
         grossProceeds: { amount: '2250000000000000' },
         disposedBasis: { amount: '1750000000000000' },
@@ -257,11 +298,51 @@ describe('ReportModel V2 public projection', () => {
     )).toThrow(InvalidTaxReportModelV2Error)
   })
 
+  it('rejects an acquisition whose consideration and fee do not equal total cost', () => {
+    const report = reportFixture()
+    report.acquisitions[0]!.acquisitionCost = known('999999')
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(InvalidTaxReportModelV2Error)
+  })
+
   it('rejects the DB report generation field at the artifact boundary', () => {
     expect(() => decodeAndProjectTaxReportModelV2(
       artifact({ ...reportFixture(), generationId: 'db-generation-1' }),
       reportId,
     )).toThrow(InvalidTaxReportModelV2Error)
+  })
+
+  it('rejects a claimed approved rounding profile without evidence', () => {
+    const report = reportFixture()
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact({
+        ...report,
+        policy: { ...report.policy, roundingProfileStatus: 'APPROVED' },
+      }),
+      reportId,
+    )).toThrow(/rounding profile approval and evidence disagree/u)
+  })
+
+  it('rejects a zero-time trace attached to an unknown valuation', () => {
+    const report = reportFixture()
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact({
+        ...report,
+        acquisitions: report.acquisitions.map((row) => {
+          const { valuationId: _valuationId, ...withoutValuationId } = row
+          return {
+            ...withoutValuationId,
+            valuation: {
+              status: 'UNKNOWN',
+              effectiveAt: '0001-01-01T00:00:00Z',
+            },
+          }
+        }),
+      }),
+      reportId,
+    )).toThrow(/valuation completeness fields disagree/u)
   })
 
   it('fails closed when materialized counts do not match their arrays', () => {

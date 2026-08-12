@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import { requestRaw } from '../../api/client.ts'
 import type {
   TaxReportModel,
   TaxReportV2AmountModel,
@@ -233,8 +234,13 @@ export function TaxReportDetailV2({
 }) {
   const [activeTab, setActiveTab] = useState<V2Tab>('summary')
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
+  const [pdfPreviewStatus, setPdfPreviewStatus] =
+    useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const pdfPath =
+    `/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`
   const pdfHref =
-    `/api/v1/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`
+    `/api/v1${pdfPath}`
   const partialCoverage = report.dataCoverage.status !== 'COMPLETE'
   const policy = report.methodology.policy
   const verifiedCoverage = [
@@ -251,6 +257,52 @@ export function TaxReportDetailV2({
     report.taxYearCloseStatus === 'CLOSED' &&
     report.dataCoverage.status === 'COMPLETE' &&
     verifiedCoverage
+
+  useEffect(() => {
+    if (!pdfPreviewOpen) {
+      setPdfPreviewUrl(null)
+      setPdfPreviewStatus('idle')
+      return
+    }
+
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    setPdfPreviewUrl(null)
+    setPdfPreviewStatus('loading')
+
+    void requestRaw(pdfPath, {
+      signal: controller.signal,
+      headers: { accept: 'application/pdf' },
+    })
+      .then((response) => {
+        if (!response.headers.get('content-type')?.toLowerCase().startsWith(
+          'application/pdf',
+        )) {
+          throw new Error('tax report PDF response has an invalid media type')
+        }
+        return response.blob()
+      })
+      .then((pdf) => {
+        if (controller.signal.aborted) return
+        objectUrl = URL.createObjectURL(pdf)
+        setPdfPreviewUrl(objectUrl)
+        setPdfPreviewStatus('ready')
+      })
+      .catch((error: unknown) => {
+        if (
+          controller.signal.aborted ||
+          (error instanceof DOMException && error.name === 'AbortError')
+        ) {
+          return
+        }
+        setPdfPreviewStatus('error')
+      })
+
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [pdfPath, pdfPreviewOpen])
 
   return (
     <article className="tax-report-v2" aria-labelledby="tax-report-v2-title">
@@ -447,7 +499,12 @@ export function TaxReportDetailV2({
                   amount={amountLabel(row.acquisitionCost, report.denominationAssetId)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
-                  sourceEvidence={row.sourceEvidence} review={row.review} />
+                  sourceEvidence={row.sourceEvidence} review={row.review}
+                  financials={[
+                    { label: '취득 대가', value: amountLabel(row.consideration, report.denominationAssetId) },
+                    { label: '취득 부대비용', value: amountLabel(row.acquisitionAncillaryExpense, report.denominationAssetId) },
+                    { label: '총 취득가액', value: amountLabel(row.acquisitionCost, report.denominationAssetId) },
+                  ]} />
               ))}
             </section>
             <section>
@@ -537,6 +594,14 @@ export function TaxReportDetailV2({
                 <div><dt>국세율</dt><dd>{report.summary.calculationRule.nationalRate.numerator} / {report.summary.calculationRule.nationalRate.denominator}</dd></div>
                 <div><dt>지방세율</dt><dd>{report.summary.calculationRule.localRate.numerator} / {report.summary.calculationRule.localRate.denominator}</dd></div>
                 <div><dt>세액 반올림</dt><dd>{report.summary.calculationRule.taxRounding}</dd></div>
+                <div>
+                  <dt>신고용 반올림 기준</dt>
+                  <dd>
+                    {policy.roundingProfileStatus === 'APPROVED'
+                      ? '승인됨'
+                      : '승인 전 · 현재 세액은 추정치'}
+                  </dd>
+                </div>
                 <div><dt>원가 배분 반올림</dt><dd>{report.summary.calculationRule.basisAllocationRounding}</dd></div>
               </dl>
             </section>
@@ -548,6 +613,19 @@ export function TaxReportDetailV2({
                   <li key={`${reference.law}-${reference.article}-${reference.paragraphs.join('-')}`}>
                     <strong>{reference.law} {reference.article}{reference.paragraphs.length > 0 ? ` ${reference.paragraphs.join(', ')}` : ''}</strong>
                     <span>{reference.purpose}</span>
+                    {reference.sourceLocators.map((locator, locatorIndex) => (
+                      <a
+                        key={locator}
+                        href={locator}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        국가법령정보센터 원문{reference.sourceLocators.length > 1 ? ` ${locatorIndex + 1}` : ''}
+                      </a>
+                    ))}
+                    {reference.sourceCheckedAt ? (
+                      <small>근거 확인일: {dateLabel(reference.sourceCheckedAt)}</small>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -557,7 +635,8 @@ export function TaxReportDetailV2({
             <h4>실제 계산 데이터 범위</h4>
             {report.sourceCoverage.map((source) => (
               <div key={source.sourceArtifactId}>
-                <strong>{source.sourceKind}</strong>
+                <strong>{source.systemName ?? source.sourceKind}</strong>
+                {source.systemName ? <small>{source.sourceKind}</small> : null}
                 <span>{source.status} · {source.assurance}</span>
                 <small>포함: {source.coveredIntervals.map(intervalLabel).join(', ') || '검증된 구간 없음'}</small>
                 <small>누락: {source.uncoveredIntervals.map(intervalLabel).join(', ') || '없음'}</small>
@@ -584,7 +663,22 @@ export function TaxReportDetailV2({
               <h3 id="tax-report-v2-pdf-title">PDF 미리보기</h3>
               <button type="button" onClick={() => setPdfPreviewOpen(false)} aria-label="PDF 미리보기 닫기">닫기</button>
             </header>
-            <iframe title={`${report.taxYear}년 세무 장부 PDF`} src={pdfHref} />
+            {pdfPreviewStatus === 'loading' ? (
+              <p className="tax-report-v2__pdf-state" role="status">
+                PDF를 안전하게 불러오는 중입니다.
+              </p>
+            ) : null}
+            {pdfPreviewStatus === 'error' ? (
+              <p className="tax-report-v2__pdf-state is-error" role="alert">
+                PDF 미리보기를 불러오지 못했습니다. 내려받기로 다시 확인해 주세요.
+              </p>
+            ) : null}
+            {pdfPreviewStatus === 'ready' && pdfPreviewUrl ? (
+              <iframe
+                title={`${report.taxYear}년 세무 장부 PDF`}
+                src={pdfPreviewUrl}
+              />
+            ) : null}
             <a className="tax-report-v2__pdf" href={pdfHref} download>PDF 내려받기</a>
           </div>
         </div>
