@@ -164,7 +164,6 @@ test('writes JIT artifacts to the same durable paths consumed by posting', () =>
     }),
     '. as $item ireduce ({}; . * $item) | ' +
       '.selection.driver = "etherscan-v2" | ' +
-      '.selection.chainDrivers."eip155:10" = "indexer" | ' +
       '.server.listen = "unix:///private/tmp/giwa/jit.sock" | ' +
       '.persistence.artifact.root = "/runtime with spaces/artifacts/jit/root" | ' +
       '.persistence.artifact.temp = "/runtime with spaces/artifacts/jit/tmp"',
