@@ -2306,7 +2306,7 @@ const loadActiveTaxRuntime = (state) => {
   }
 }
 
-export const hostTaxDBMigrationVersion = '76'
+export const hostTaxDBMigrationVersion = '77'
 
 export const hostTaxQuoteRuntimeControls = (archiveOnly) => {
   if (typeof archiveOnly !== 'boolean') {

@@ -51,6 +51,7 @@ const reportFixture = () => ({
   calculationStatus: 'COMPLETE',
   taxOutcome: 'ESTIMATED_TAX_DUE',
   filingAction: 'REVIEW_REQUIRED',
+  filingStatus: 'BLOCKED',
   filingSubmissionStatus: 'NOT_SUBMITTED',
   inputPeriod: {
     from: '2026-12-31T15:00:00Z',
@@ -323,6 +324,14 @@ describe('ReportModel V2 public projection', () => {
       }),
       reportId,
     )).toThrow(/rounding profile approval and evidence disagree/u)
+  })
+
+  it('rejects a filing-ready flag that contradicts the canonical action', () => {
+    const report = reportFixture()
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact({ ...report, filingStatus: 'READY' }),
+      reportId,
+    )).toThrow(/must agree with the canonical filing action/u)
   })
 
   it('rejects a zero-time trace attached to an unknown valuation', () => {

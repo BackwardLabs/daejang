@@ -163,6 +163,7 @@ export type ReportPrintModelV1 = {
     calculationStatus: PublicTaxReportV2Detail['calculationStatus']
     taxOutcome: PublicTaxReportV2Detail['taxOutcome']
     filingAction: PublicTaxReportV2Detail['filingAction']
+    filingStatus: PublicTaxReportV2Detail['filingStatus']
     filingSubmissionStatus: PublicTaxReportV2Detail['filingSubmissionStatus']
     calculatedAsOf: string
     inputPeriod: PublicTaxReportV2Detail['inputPeriod']
@@ -353,8 +354,7 @@ const createReportPrintModelV2 = (
     report.taxYearCloseStatus === 'CLOSED' ? 'CLOSED' : 'UNVERIFIED',
   finality: report.reportFinality,
   status: report.status,
-  filingStatus:
-    report.filingAction === 'FILING_ACTION_REQUIRED' ? 'READY' : 'BLOCKED',
+  filingStatus: report.filingStatus,
   denominationAssetId: report.denominationAssetId,
   issuedAt: report.issuedAt,
   counts: {
@@ -465,6 +465,7 @@ const createReportPrintModelV2 = (
     calculationStatus: report.calculationStatus,
     taxOutcome: report.taxOutcome,
     filingAction: report.filingAction,
+    filingStatus: report.filingStatus,
     filingSubmissionStatus: report.filingSubmissionStatus,
     calculatedAsOf: report.calculatedAsOf,
     inputPeriod: report.inputPeriod,

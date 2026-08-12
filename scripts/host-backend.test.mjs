@@ -108,13 +108,13 @@ import {
 } from './host-backend.mjs'
 
 test('pins taxd to the current required database migration', () => {
-  assert.equal(hostTaxDBMigrationVersion, '76')
+  assert.equal(hostTaxDBMigrationVersion, '77')
   assert.match(
     readFileSync(
       new URL('../deploy/workers.runtime.env.example', import.meta.url),
       'utf8',
     ),
-    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=76$/mu,
+    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=77$/mu,
   )
 })
 

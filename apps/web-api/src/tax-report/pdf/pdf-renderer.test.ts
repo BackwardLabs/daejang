@@ -165,6 +165,7 @@ describe('tax report PDF renderer', () => {
         calculationStatus: 'COMPLETE',
         taxOutcome: 'ESTIMATED_TAX_DUE',
         filingAction: 'REVIEW_REQUIRED',
+        filingStatus: 'BLOCKED',
         filingSubmissionStatus: 'NOT_SUBMITTED',
         calculatedAsOf: '2027-07-01T00:00:00Z',
         inputPeriod: {

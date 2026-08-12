@@ -164,6 +164,7 @@ export type PublicTaxReportV2Detail = {
     | 'REVIEW_REQUIRED'
     | 'FILING_ACTION_REQUIRED'
     | 'FILING_NOT_APPLICABLE'
+  filingStatus: 'READY' | 'BLOCKED'
   filingSubmissionStatus:
     | 'NOT_SUBMITTED'
     | 'NOT_APPLICABLE'
@@ -1066,7 +1067,7 @@ export const decodeAndProjectTaxReportModelV2 = (
   const root = record(parsed, '$', [
     'schemaVersion', 'reportId', 'inputDigest', 'subjectId', 'residentId',
     'taxYear', 'status', 'calculationStatus', 'taxOutcome', 'filingAction',
-    'filingSubmissionStatus', 'inputPeriod', 'dataCoverage', 'calculatedAsOf',
+    'filingStatus', 'filingSubmissionStatus', 'inputPeriod', 'dataCoverage', 'calculatedAsOf',
     'taxYearCloseStatus', 'valuationFinality', 'reportFinality',
     'taxInventoryRunId', 'taxEstimateId', 'lotRunId',
     'sourceLedgerGenerationId',
@@ -1144,6 +1145,16 @@ export const decodeAndProjectTaxReportModelV2 = (
   )) {
     invalid('$.feeAssetDisposals', 'must contain only FEE_ASSET_DISPOSAL rows')
   }
+  const filingAction = oneOf(root.filingAction, '$.filingAction', [
+    'BLOCKED', 'REVIEW_REQUIRED', 'FILING_ACTION_REQUIRED', 'FILING_NOT_APPLICABLE',
+  ])
+  const filingStatus = oneOf(root.filingStatus, '$.filingStatus', ['READY', 'BLOCKED'])
+  if (
+    (filingAction === 'FILING_ACTION_REQUIRED') !==
+    (filingStatus === 'READY')
+  ) {
+    invalid('$.filingStatus', 'must agree with the canonical filing action')
+  }
 
   return {
     schemaVersion: REPORT_SCHEMA_V2,
@@ -1162,9 +1173,8 @@ export const decodeAndProjectTaxReportModelV2 = (
       'INCOMPLETE', 'NO_TAX_EVENTS', 'TAX_ZERO', 'ESTIMATED_TAX_DUE',
       'TAX_DUE', 'SIMULATED_TAX_ZERO', 'SIMULATED_TAX_DUE',
     ]),
-    filingAction: oneOf(root.filingAction, '$.filingAction', [
-      'BLOCKED', 'REVIEW_REQUIRED', 'FILING_ACTION_REQUIRED', 'FILING_NOT_APPLICABLE',
-    ]),
+    filingAction,
+    filingStatus,
     filingSubmissionStatus: oneOf(root.filingSubmissionStatus, '$.filingSubmissionStatus', [
       'NOT_SUBMITTED', 'NOT_APPLICABLE', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'UNKNOWN',
     ]),
@@ -1646,7 +1656,7 @@ export const publicTaxReportV2DetailSchema = {
   required: [
     'schemaVersion', 'reportId', 'reportModelDigest', 'inputDigest',
     'evidencePackDigest', 'taxYear', 'status', 'calculationStatus',
-    'taxOutcome', 'filingAction', 'filingSubmissionStatus', 'inputPeriod',
+    'taxOutcome', 'filingAction', 'filingStatus', 'filingSubmissionStatus', 'inputPeriod',
     'dataCoverage', 'calculatedAsOf', 'taxYearCloseStatus',
     'valuationFinality', 'reportFinality', 'denominationAssetId', 'counts',
     'summary', 'assetSummaries', 'disposals', 'feeAssetDisposals',
@@ -1677,6 +1687,7 @@ export const publicTaxReportV2DetailSchema = {
         'FILING_NOT_APPLICABLE',
       ],
     },
+    filingStatus: { type: 'string', enum: ['READY', 'BLOCKED'] },
     filingSubmissionStatus: {
       type: 'string',
       enum: [

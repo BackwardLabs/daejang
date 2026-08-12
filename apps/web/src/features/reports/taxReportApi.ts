@@ -301,6 +301,7 @@ export type TaxReportV2DetailModel = {
   calculationStatus: 'COMPLETE' | 'BLOCKED'
   taxOutcome: string
   filingAction: string
+  filingStatus: 'READY' | 'BLOCKED'
   filingSubmissionStatus: string
   inputPeriod: TaxReportV2IntervalModel
   dataCoverage: {

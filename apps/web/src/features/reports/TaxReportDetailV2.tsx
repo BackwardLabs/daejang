@@ -429,6 +429,7 @@ export function TaxReportDetailV2({
               <h4>현재 장부 판단</h4>
               <dl>
                 <div><dt>신고 조치</dt><dd>{report.filingAction}</dd></div>
+                <div><dt>신고 준비 상태</dt><dd>{report.filingStatus === 'READY' ? '신고 가능' : '신고 불가 · 확인 필요'}</dd></div>
                 <div><dt>신고 제출</dt><dd>{report.filingSubmissionStatus}</dd></div>
                 <div><dt>가격 확정성</dt><dd>{statusLabel[report.valuationFinality] ?? report.valuationFinality}</dd></div>
                 <div><dt>마지막 계산</dt><dd>{dateTimeLabel(report.calculatedAsOf)}</dd></div>

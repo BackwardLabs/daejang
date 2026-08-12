@@ -57,6 +57,7 @@ const report: TaxReportV2DetailModel = {
   calculationStatus: 'COMPLETE',
   taxOutcome: 'ESTIMATED_TAX_DUE',
   filingAction: 'REVIEW_REQUIRED',
+  filingStatus: 'BLOCKED',
   filingSubmissionStatus: 'NOT_SUBMITTED',
   inputPeriod: {
     from: '2026-12-31T15:00:00Z',
