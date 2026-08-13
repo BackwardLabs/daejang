@@ -1041,6 +1041,23 @@ test('rebuilds only tax years that have started in KST while preserving the simu
   )
 })
 
+test('lets Tax V2 own the scoped report generation lifecycle', () => {
+  const source = readFileSync(
+    new URL('./host-backend.mjs', import.meta.url),
+    'utf8',
+  )
+  const start = source.indexOf('const prepareStableTaxRuntime = async')
+  const end = source.indexOf('const startTaxdRuntime = async', start)
+  assert.ok(start >= 0 && end > start)
+  const prepare = source.slice(start, end)
+
+  assert.match(prepare, /filterTaxReportGenerationEligibleSubjects/)
+  assert.match(prepare, /prefetchTaxQuotes/)
+  assert.doesNotMatch(prepare, /beginTaxReportGenerations/)
+  assert.doesNotMatch(prepare, /activateTaxReportGenerations/)
+  assert.doesNotMatch(prepare, /retireMissingTaxReportGenerations/)
+})
+
 test('accepts only the exact ready Tax candidate identity', () => {
   const candidateDigest = 'a'.repeat(64)
   const identity = {
