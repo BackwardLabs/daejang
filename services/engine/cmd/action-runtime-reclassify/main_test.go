@@ -69,6 +69,35 @@ func TestEnqueueActionRuntimeReclassificationRetriesAnExistingFailedJob(t *testi
 	}
 }
 
+func TestEnqueueActionRuntimeReclassificationAdvancesPastFailedRetryChain(t *testing.T) {
+	runtimeID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	store := &recordingReclassificationStore{
+		targets: []sourcejobstore.ActionRuntimeReclassificationTarget{{
+			SubjectID: "00000000-0000-4000-8000-000000000001",
+			SourceID:  "00000000-0000-4000-8000-000000000002",
+		}},
+		jobs: []sourcejobstore.SyncJob{
+			{ID: "00000000-0000-4000-8000-000000000003", State: "FAILED"},
+			{ID: "00000000-0000-4000-8000-000000000004", State: "FAILED"},
+			{ID: "00000000-0000-4000-8000-000000000005", State: "QUEUED"},
+		},
+	}
+	count, err := enqueueActionRuntimeReclassification(context.Background(), store, runtimeID)
+	if err != nil || count != 1 || len(store.params) != 3 {
+		t.Fatalf("unexpected retry-chain result: count=%d params=%#v error=%v", count, store.params, err)
+	}
+	want := []string{
+		"action-runtime:" + runtimeID + ":00000000-0000-4000-8000-000000000002",
+		"action-runtime-retry:" + runtimeID + ":00000000-0000-4000-8000-000000000003",
+		"action-runtime-retry:" + runtimeID + ":00000000-0000-4000-8000-000000000004",
+	}
+	for index, params := range store.params {
+		if params.IdempotencyKey != want[index] {
+			t.Fatalf("retry chain stopped at the wrong job: got=%q want=%q", params.IdempotencyKey, want[index])
+		}
+	}
+}
+
 func TestEnqueueActionRuntimeReclassificationRejectsUnpinnedRuntime(t *testing.T) {
 	if _, err := enqueueActionRuntimeReclassification(context.Background(), &recordingReclassificationStore{}, "latest"); err == nil {
 		t.Fatal("unpinned action runtime was accepted")
