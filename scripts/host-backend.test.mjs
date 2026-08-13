@@ -677,6 +677,12 @@ test('limits production Tax profiles and epochs to canonical Web user IDs', () =
     ),
     true,
   )
+  assert.equal(
+    currentTaxReportGenerationRowsQuery.includes(
+      `current.subject_id ~ '${canonicalWebSubjectIDPattern}'`,
+    ),
+    true,
+  )
 })
 
 test('builds profiles for every subject from canonical quote-supported assets', () => {
