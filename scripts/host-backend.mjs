@@ -448,6 +448,93 @@ const loadRuntimeEnvironment = () => {
   }
 }
 
+const productionRPCDefinitions = Object.freeze([
+  {
+    name: 'Ethereum Mainnet',
+    host: 'eth-mainnet.g.alchemy.com',
+    expectedChainID: '0x1',
+  },
+  {
+    name: 'Optimism Mainnet',
+    host: 'opt-mainnet.g.alchemy.com',
+    expectedChainID: '0xa',
+  },
+])
+
+const productionRPCCredentialDigest = (value, definition) => {
+  let parsed
+  try {
+    parsed = new URL(value)
+  } catch {
+    throw new Error(`${definition.name} RPC URL is invalid`)
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== definition.host) {
+    throw new Error(
+      `${definition.name} RPC must use the approved ${definition.host} HTTPS endpoint`,
+    )
+  }
+  const credential = parsed.pathname.split('/').filter(Boolean).at(-1)
+  if (!credential) {
+    throw new Error(`${definition.name} RPC credential is missing`)
+  }
+  return createHash('sha256').update(credential).digest('hex')
+}
+
+export const assertProductionRPCConfiguration = ({
+  ethereumURL,
+  optimismURL,
+  sharedCredentialSHA256,
+}) => {
+  if (!/^[a-f0-9]{64}$/u.test(sharedCredentialSHA256 ?? '')) {
+    throw new Error('GIWA_RPC_SHARED_CREDENTIAL_SHA256 must be a lowercase SHA-256 digest')
+  }
+  const urls = [ethereumURL, optimismURL]
+  const digests = productionRPCDefinitions.map((definition, index) =>
+    productionRPCCredentialDigest(urls[index], definition),
+  )
+  if (new Set(digests).size !== 1 || digests[0] !== sharedCredentialSHA256) {
+    throw new Error('Production RPC credentials do not match the pinned shared credential')
+  }
+}
+
+export const preflightProductionRPCs = async ({
+  ethereumURL,
+  optimismURL,
+  request = fetch,
+}) => {
+  const urls = [ethereumURL, optimismURL]
+  for (const [index, definition] of productionRPCDefinitions.entries()) {
+    let response
+    try {
+      response = await request(urls[index], {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_chainId',
+          params: [],
+        }),
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch {
+      throw new Error(`${definition.name} RPC preflight request failed`)
+    }
+    if (!response.ok) {
+      throw new Error(`${definition.name} RPC preflight returned HTTP ${response.status}`)
+    }
+    let payload
+    try {
+      payload = await response.json()
+    } catch {
+      throw new Error(`${definition.name} RPC preflight returned invalid JSON`)
+    }
+    if (payload?.result !== definition.expectedChainID) {
+      throw new Error(`${definition.name} RPC preflight returned the wrong chain ID`)
+    }
+  }
+}
+
 const allServiceOrder = [
   'pdf-parser',
   'jit',
@@ -3672,6 +3759,17 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
   }
   loadRuntimeEnvironment()
 
+  const ethereumRPC = process.env.ENV_RPC_URL_ETHEREUM_MAINNET
+  const optimismRPC = process.env.ENV_RPC_URL_OPTIMISM_MAINNET
+  if (!ethereumRPC) throw new Error('ENV_RPC_URL_ETHEREUM_MAINNET is missing')
+  if (!optimismRPC) throw new Error('ENV_RPC_URL_OPTIMISM_MAINNET is missing')
+  assertProductionRPCConfiguration({
+    ethereumURL: ethereumRPC,
+    optimismURL: optimismRPC,
+    sharedCredentialSHA256: process.env.GIWA_RPC_SHARED_CREDENTIAL_SHA256,
+  })
+  await preflightProductionRPCs({ ethereumURL: ethereumRPC, optimismURL: optimismRPC })
+
   try {
     run('docker', ['compose', 'up', '-d', 'postgres'], {
       cwd: databaseRepository,
@@ -3737,11 +3835,6 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       'daejang_tax_app',
       process.env.DAEJANG_TAX_APP_PASSWORD,
     )
-    const ethereumRPC = process.env.ENV_RPC_URL_ETHEREUM_MAINNET
-    const optimismRPC =
-      process.env.ENV_RPC_URL_OPTIMISM_MAINNET ?? 'https://mainnet.optimism.io'
-    if (!ethereumRPC) throw new Error('ENV_RPC_URL_ETHEREUM_MAINNET is missing')
-
     const jitConfig = createCombinedJITConfig()
     const subjectACLSource = resolveRuntimeSubjectACLSource(
       join(jitRuntime, 'configs', 'subject-acl.json'),

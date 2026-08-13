@@ -91,6 +91,9 @@ npm run mac-studio:deploy-indexer
 - `backwardlabs` 사용자의 GitHub read-only 배포 인증
 - `/Users/Shared/Projects/00_Backlight`와 `01_Daejang` 소유권·그룹 권한
 - 운영 env, mTLS 인증서, JIT bridge, publication policy와 암호화키
+- 팀 소유 Alchemy 앱의 Ethereum·Optimism RPC URL과 동일 자격증명의
+  `GIWA_RPC_SHARED_CREDENTIAL_SHA256` 핀. 개인 RPC나 체인이 다른 endpoint는
+  supervisor가 코어 서비스를 시작하기 전에 거부한다.
 - 운영 runtime과 DB의 checkout 외부 백업
 - 로그인 전에도 필요한 서비스는 LaunchAgent가 아니라 시스템 부팅 경계에서 실행
 - 공동 임시 비밀번호 폐기와 사용자별 SSH 공개키 적용
