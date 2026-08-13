@@ -100,6 +100,12 @@ export const deemedExpenseEvidenceRows = (
   .filter((row) => row.basisEvidenceDigest !== null)
   .map((row) => [row.taxAssetId, row.basisEvidenceDigest!]) ?? []
 
+export const formatValuationMarket = (
+  valuation: { marketStatus: string; market: string | null },
+) => valuation.marketStatus === 'NOT_APPLICABLE'
+  ? '직접 평가 · 시장 코드 해당 없음'
+  : valuation.market ?? 'market 미확정'
+
 export const formatKstTimestamp = (value: string) => {
   const timestamp = Date.parse(value)
   if (!Number.isFinite(timestamp)) return value
@@ -753,7 +759,7 @@ export async function renderTaxReportPdf(
         reportRowAccountLabel(row.account),
         row.valuation.status === 'UNKNOWN'
           ? '평가 미확정'
-          : `${row.valuation.kind ?? '종류 미확인'}\n${row.valuation.effectiveAt ? formatKstTimestamp(row.valuation.effectiveAt) : '시점 미확인'}\n${row.valuation.provider ?? 'provider 미확정'} · ${row.valuation.datasetVersion ?? 'dataset 미확정'} · ${row.valuation.market ?? 'market 미확정'}\n${row.valuation.quoteId ?? shortId(row.valuation.valuationId ?? '')}`,
+          : `${row.valuation.kind ?? '종류 미확인'}\n${row.valuation.effectiveAt ? formatKstTimestamp(row.valuation.effectiveAt) : '시점 미확인'}\n${row.valuation.provider ?? 'provider 미확정'} · ${row.valuation.datasetVersion ?? 'dataset 미확정'} · ${formatValuationMarket(row.valuation)}\n${row.valuation.quoteId ?? shortId(row.valuation.valuationId ?? '')}`,
         `${reportRowSourceLabel(row)}\n${row.review.status}${row.basisEvidenceDigest === null ? '' : `\n50% 근거 ${shortId(row.basisEvidenceDigest)}`}`,
       ]),
     })

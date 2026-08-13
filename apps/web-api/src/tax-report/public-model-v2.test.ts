@@ -372,6 +372,62 @@ describe('ReportModel V2 public projection', () => {
     )).toThrow(/valuation completeness fields disagree/u)
   })
 
+  it('accepts a canonical direct valuation without an exchange market', () => {
+    const report = reportFixture()
+    const acquisition = report.acquisitions[0]!
+    const { market: _market, ...withoutMarket } = acquisition.valuation
+    report.acquisitions[0] = {
+      ...acquisition,
+      valuation: {
+        ...withoutMarket,
+        marketStatus: 'NOT_APPLICABLE',
+      } as typeof acquisition.valuation,
+    }
+
+    const projected = decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )
+
+    expect(projected.acquisitions[0]!.valuation).toMatchObject({
+      status: 'KNOWN',
+      marketStatus: 'NOT_APPLICABLE',
+      market: null,
+    })
+  })
+
+  it('rejects NOT_APPLICABLE market status when a market is present', () => {
+    const report = reportFixture()
+    const acquisition = report.acquisitions[0]!
+    report.acquisitions[0] = {
+      ...acquisition,
+      valuation: {
+        ...acquisition.valuation,
+        marketStatus: 'NOT_APPLICABLE',
+      },
+    }
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/valuation completeness fields disagree/u)
+  })
+
+  it('rejects KNOWN market status when its market is absent', () => {
+    const report = reportFixture()
+    const acquisition = report.acquisitions[0]!
+    const { market: _market, ...withoutMarket } = acquisition.valuation
+    report.acquisitions[0] = {
+      ...acquisition,
+      valuation: withoutMarket as typeof acquisition.valuation,
+    }
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/valuation completeness fields disagree/u)
+  })
+
   it('rejects a row whose valuation identity disagrees with its nested trace', () => {
     const report = reportFixture()
     report.acquisitions[0] = {

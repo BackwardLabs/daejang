@@ -469,4 +469,24 @@ describe('TaxReportDetailV2', () => {
     fireEvent.click(screen.getByText(/DISPOSAL · BTC · 50% 필요경비 특례/u))
     expect(screen.getAllByText(evidenceDigest).length).toBeGreaterThan(0)
   })
+
+  it('labels a direct valuation as market-not-applicable instead of unresolved', () => {
+    const directReport = structuredClone(report)
+    directReport.acquisitions[0] = {
+      ...directReport.acquisitions[0]!,
+      valuation: {
+        ...directReport.acquisitions[0]!.valuation,
+        marketStatus: 'NOT_APPLICABLE',
+        market: null,
+      },
+    }
+
+    render(<TaxReportDetailV2 report={directReport} />)
+    fireEvent.click(screen.getByRole('tab', { name: '소득·처분' }))
+    fireEvent.click(screen.getByText(/OTHER_ACQUISITION · ETH/u))
+
+    expect(screen.getByText(
+      'UPBIT · fixture-v1 · 직접 평가 · 시장 코드 해당 없음',
+    )).toBeInTheDocument()
+  })
 })

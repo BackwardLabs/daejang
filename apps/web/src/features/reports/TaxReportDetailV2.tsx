@@ -112,6 +112,11 @@ const accountLabel = (account: TaxReportV2AccountModel) => [
   account.accountId,
 ].filter((value): value is string => value !== null).join(' · ') || '계정 미확인'
 
+const valuationMarketLabel = (valuation: TaxReportV2ValuationModel) =>
+  valuation.marketStatus === 'NOT_APPLICABLE'
+    ? '직접 평가 · 시장 코드 해당 없음'
+    : valuation.market ?? 'market 미확정'
+
 function EventEvidence({
   reportId,
   occurredAt,
@@ -147,7 +152,7 @@ function EventEvidence({
       {valuation ? <>
         <div><dt>적용 가격·환율 시점</dt><dd>{valuation.effectiveAt ? dateTimeLabel(valuation.effectiveAt) : '미확정'} · {valuation.kind ?? '평가 종류 미확정'}</dd></div>
         <div><dt>평가 근거</dt><dd>{valuation.quoteId ?? valuation.valuationId ?? '미확정'} · {valuation.status}</dd></div>
-        <div><dt>가격 데이터</dt><dd>{valuation.provider ?? 'provider 미확정'} · {valuation.datasetVersion ?? 'dataset 미확정'} · {valuation.market ?? 'market 미확정'}</dd></div>
+        <div><dt>가격 데이터</dt><dd>{valuation.provider ?? 'provider 미확정'} · {valuation.datasetVersion ?? 'dataset 미확정'} · {valuationMarketLabel(valuation)}</dd></div>
       </> : null}
       {financials.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}
       <div><dt>데이터 출처</dt><dd>{sourceKinds.join(', ') || '출처 미확인'} · {allBound ? '원본 결합 완료' : '원본 결합 검토 필요'}</dd></div>

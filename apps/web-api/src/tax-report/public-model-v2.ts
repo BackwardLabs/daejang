@@ -118,7 +118,7 @@ export type PublicTaxReportV2Valuation = {
   provider: string | null
   datasetVersionStatus: 'UNKNOWN' | 'KNOWN'
   datasetVersion: string | null
-  marketStatus: 'UNKNOWN' | 'KNOWN'
+  marketStatus: 'UNKNOWN' | 'KNOWN' | 'NOT_APPLICABLE'
   market: string | null
 }
 
@@ -749,7 +749,7 @@ const valuation = (
     marketStatus: oneOf(
       row.marketStatus,
       `${path}.marketStatus`,
-      ['UNKNOWN', 'KNOWN'],
+      ['UNKNOWN', 'KNOWN', 'NOT_APPLICABLE'],
     ),
     market: optionalString(row.market, `${path}.market`),
   }
@@ -764,10 +764,14 @@ const valuation = (
     result.rounding,
     result.provider,
     result.datasetVersion,
-    result.market,
   ]
+  const allTraceFields = [...exactFields, result.market]
   if (
-    (status === 'UNKNOWN' && exactFields.some((field) => field !== null)) ||
+    (status === 'UNKNOWN' &&
+      (allTraceFields.some((field) => field !== null) ||
+        result.providerStatus !== 'UNKNOWN' ||
+        result.datasetVersionStatus !== 'UNKNOWN' ||
+        result.marketStatus !== 'UNKNOWN')) ||
     (status !== 'UNKNOWN' && result.valuationId === null) ||
     (result.providerStatus === 'KNOWN') !== (result.provider !== null) ||
     (result.datasetVersionStatus === 'KNOWN') !==
@@ -777,7 +781,7 @@ const valuation = (
       (exactFields.some((field) => field === null) ||
         result.providerStatus !== 'KNOWN' ||
         result.datasetVersionStatus !== 'KNOWN' ||
-        result.marketStatus !== 'KNOWN'))
+        result.marketStatus === 'UNKNOWN'))
   ) {
     invalid(path, 'valuation completeness fields disagree')
   }
@@ -1796,7 +1800,10 @@ const publicValuationSchema = {
     provider: publicNullableStringSchema,
     datasetVersionStatus: { type: 'string', enum: ['UNKNOWN', 'KNOWN'] },
     datasetVersion: publicNullableStringSchema,
-    marketStatus: { type: 'string', enum: ['UNKNOWN', 'KNOWN'] },
+    marketStatus: {
+      type: 'string',
+      enum: ['UNKNOWN', 'KNOWN', 'NOT_APPLICABLE'],
+    },
     market: publicNullableStringSchema,
   },
 } as const

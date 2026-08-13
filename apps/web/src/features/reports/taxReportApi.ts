@@ -498,7 +498,7 @@ export type TaxReportV2ValuationModel = {
   provider: string | null
   datasetVersionStatus: 'UNKNOWN' | 'KNOWN'
   datasetVersion: string | null
-  marketStatus: 'UNKNOWN' | 'KNOWN'
+  marketStatus: 'UNKNOWN' | 'KNOWN' | 'NOT_APPLICABLE'
   market: string | null
 }
 

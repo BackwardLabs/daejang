@@ -8,6 +8,7 @@ import {
   formatKstTimestamp,
   formatCostMethod,
   formatReportAmount,
+  formatValuationMarket,
   reportCalculationKeyValues,
   reportDocumentPresentation,
   reportStatusKeyValues,
@@ -505,6 +506,17 @@ describe('tax report PDF renderer', () => {
     expect(reportCalculationKeyValues(scaled)).not.toContainEqual([
       '기본공제', '250,000,000,000,000 KRW',
     ])
+  })
+
+  it('labels a direct valuation as market-not-applicable in the PDF', () => {
+    expect(formatValuationMarket({
+      marketStatus: 'NOT_APPLICABLE',
+      market: null,
+    })).toBe('직접 평가 · 시장 코드 해당 없음')
+    expect(formatValuationMarket({
+      marketStatus: 'UNKNOWN',
+      market: null,
+    })).toBe('market 미확정')
   })
 
   it('renders a deterministic 2026 PDF', async () => {
