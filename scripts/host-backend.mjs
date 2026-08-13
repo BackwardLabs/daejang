@@ -2149,6 +2149,16 @@ export const loadTaxActionRegistryRuntime = (
   }
 }
 
+// Authenticated Web user IDs are stored as PostgreSQL UUIDs. Keep fixture and
+// service-only ledger subjects out of the production Tax profile runtime.
+export const canonicalWebSubjectIDPattern =
+  '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+const canonicalWebSubjectIDRegex = new RegExp(canonicalWebSubjectIDPattern)
+
+export const isCanonicalWebSubjectID = (value) =>
+  typeof value === 'string' &&
+  canonicalWebSubjectIDRegex.test(value)
+
 export const currentTaxProfileRowsQuery = `
   SELECT DISTINCT
     event.subject_id,
@@ -2201,6 +2211,7 @@ export const currentTaxProfileRowsQuery = `
       AND evidence.kind = 'ASSERTION'
   ) AS tax_identity ON TRUE
   WHERE event.current_revision_id IS NOT NULL
+    AND event.subject_id ~ '${canonicalWebSubjectIDPattern}'
   ORDER BY
     event.subject_id,
     posting.account_id,
@@ -2221,9 +2232,13 @@ const createTaxRuntime = async (queryURL) => {
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
     const result = await client.query(currentTaxProfileRowsQuery)
-    rows = result.rows
+    rows = result.rows.filter(({ subject_id: subjectID }) =>
+      isCanonicalWebSubjectID(subjectID))
     const epochResult = await client.query(currentTaxProfileEpochRowsQuery)
-    subjectEpochs = normalizeTaxSubjectEpochs(epochResult.rows)
+    subjectEpochs = normalizeTaxSubjectEpochs(
+      epochResult.rows.filter(({ subject_id: subjectID }) =>
+        isCanonicalWebSubjectID(subjectID)),
+    )
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
@@ -2823,6 +2838,7 @@ export const currentTaxProfileEpochRowsQuery = `
     ) AS ledger_epoch
   FROM ledger.interpreted_event
   WHERE current_revision_id IS NOT NULL
+    AND subject_id ~ '${canonicalWebSubjectIDPattern}'
   GROUP BY subject_id
   ORDER BY subject_id
 `

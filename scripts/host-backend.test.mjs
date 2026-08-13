@@ -32,6 +32,7 @@ import {
   createRuntimeSubjectACL,
   createActionRuntimeIdentity,
   createTaxProfiles,
+  canonicalWebSubjectIDPattern,
   currentTaxProfileRowsQuery,
   currentTaxProfileEpochRowsQuery,
   currentTaxReportGenerationRowsQuery,
@@ -55,6 +56,7 @@ import {
   hostTaxQuoteRuntimeControls,
   eligibleTaxReportGenerationSubjectIDs,
   isPrivateRuntimePath,
+  isCanonicalWebSubjectID,
   hostWebAPIForwardedEnvironmentNames,
   hostWebAPIForwardedEnvironmentPrefixes,
   hostWebAPIEngineEnvironment,
@@ -647,6 +649,33 @@ test('loads canonical tax identities only from exact current posting legs', () =
   assert.match(
     currentTaxProfileRowsQuery,
     /target\.kind = 'ASSET'[\s\S]*target\.target_id = posting\.asset_id/,
+  )
+  assert.equal(
+    currentTaxProfileRowsQuery.includes(
+      `event.subject_id ~ '${canonicalWebSubjectIDPattern}'`,
+    ),
+    true,
+  )
+})
+
+test('limits production Tax profiles and epochs to canonical Web user IDs', () => {
+  assert.equal(
+    isCanonicalWebSubjectID('07b00c30-277e-4876-bc3d-e77b4dfed73d'),
+    true,
+  )
+  for (const subjectID of [
+    'cex-posting-e2e-subject-tax-ledger-e2e-20260810',
+    'posting-e2e-subject-codex-e2e',
+    '07B00C30-277E-4876-BC3D-E77B4DFED73D',
+    '07b00c30-277e-4876-bc3d-e77b4dfed73d-extra',
+  ]) {
+    assert.equal(isCanonicalWebSubjectID(subjectID), false, subjectID)
+  }
+  assert.equal(
+    currentTaxProfileEpochRowsQuery.includes(
+      `subject_id ~ '${canonicalWebSubjectIDPattern}'`,
+    ),
+    true,
   )
 })
 
