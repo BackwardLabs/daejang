@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  EVM_WALLET_DEFAULT_CHAIN_IDS,
+  EVM_WALLET_SUPPORTED_CHAIN_IDS,
   evmWalletNetworkMetadata,
   evmWalletNetworks,
   getEvmWalletNetwork,
@@ -13,6 +15,14 @@ describe('EVM wallet networks', () => {
       10,
     ])
     expect(evmWalletNetworkMetadata.map((network) => network.chainId)).toEqual([
+      'eip155:1',
+      'eip155:10',
+    ])
+    expect(EVM_WALLET_SUPPORTED_CHAIN_IDS).toEqual([
+      'eip155:1',
+      'eip155:10',
+    ])
+    expect(EVM_WALLET_DEFAULT_CHAIN_IDS).toEqual([
       'eip155:1',
       'eip155:10',
     ])
