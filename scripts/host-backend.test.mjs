@@ -58,6 +58,7 @@ import {
   handoffSupervisorAfterSignal,
   loadTaxActionRegistryRuntime,
   loadVerifiedActionRuntimeRelease,
+  materializeVerifiedActionRuntime,
   launchdServiceDomains,
   normalizeJITBridgeTimeouts,
   normalizeMultichainSnapshotIds,
@@ -367,6 +368,70 @@ test('fails closed when the Action runtime signed release is not valid', () => {
     })),
     /signed release verification failed/,
   )
+})
+
+test('materializes Action runtime scripts from the signed exporter commit without a worktree', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'giwa-pinned-action-runtime-test-'))
+  try {
+    const repository = join(parent, 'repository')
+    const runtimeRoot = join(parent, 'runtime')
+    const exporterContractCommit = '2'.repeat(40)
+    const scripts = new Map([
+      ['scripts/registry.py', Buffer.from('pinned-registry')],
+      ['scripts/transaction_adapter.py', Buffer.from('pinned-adapter')],
+      ['scripts/action_evaluator.py', Buffer.from('pinned-evaluator')],
+    ])
+    const bundle = Buffer.from(JSON.stringify({
+      schemaVersion: 'defi-label.action-registry.v1',
+      registrySourceRepository: 'BackwardLabs/DeFi-Label',
+      registrySourceCommit: '1'.repeat(40),
+      exporterContractRepository: 'BackwardLabs/DeFi-Label',
+      exporterContractCommit,
+      sourceDigests: Object.fromEntries(
+        [...scripts].map(([path, payload]) => [
+          path,
+          createHash('sha256').update(payload).digest('hex'),
+        ]),
+      ),
+    }))
+    const bundleSha256 = createHash('sha256').update(bundle).digest('hex')
+    for (const [path, payload] of [
+      ['releases/action-registry-v1.json', bundle],
+      ['releases/action-registry-v1.json.sha256', Buffer.from(`${bundleSha256}\n`)],
+      ['releases/action-registry-v1.json.receipt.json', Buffer.from('{}')],
+      ['releases/action-registry-v1.signature.json', Buffer.from('{}')],
+      ['releases/action-registry-v1.public-key.pem', Buffer.from('public-key')],
+    ]) {
+      mkdirSync(dirname(join(repository, path)), { recursive: true })
+      writeFileSync(join(repository, path), payload)
+    }
+    const calls = []
+    const destination = materializeVerifiedActionRuntime(
+      repository,
+      {
+        repository: 'BackwardLabs/DeFi-Label',
+        commit: exporterContractCommit,
+        bundleSha256,
+      },
+      runtimeRoot,
+      (command, args) => {
+        calls.push([command, args])
+        return { status: 0, stdout: scripts.get(args[1].split(':', 2)[1]) }
+      },
+    )
+
+    assert.equal(destination, join(runtimeRoot, bundleSha256))
+    assert.deepEqual(
+      calls.map(([, args]) => args),
+      [...scripts.keys()].map((path) => ['show', `${exporterContractCommit}:${path}`]),
+    )
+    for (const [path, payload] of scripts) {
+      assert.deepEqual(readFileSync(join(destination, path)), payload)
+    }
+    assert.equal(readdirSync(runtimeRoot).some((name) => name.includes('.tmp-')), false)
+  } finally {
+    rmSync(parent, { recursive: true, force: true })
+  }
 })
 
 test('stages PDF assets where the flattened host Web API runtime resolves them', () => {
