@@ -39,6 +39,11 @@ bridge JSON은 기본적으로 아래 경로에 두며 secret으로 취급하지
 
 실행기는 bridge의 `endpoint`를 실제 통합 JIT Unix socket으로 자동 교체한다.
 현재 coverage 범위와 chain metadata는 입력 JSON을 그대로 사용한다.
+시작 전에 Ethereum(`eip155:1`)과 Optimism(`eip155:10`)이 정확히 하나씩 있고,
+두 체인이 동일한 `coverageStart`/`coverageEnd` 구간을 하나 이상 공유하는지 검사한다.
+필수 체인이나 공통 구간이 없으면 일부 체인만 조용히 누락된 상태로 서비스하지 않고
+backend 시작 자체를 실패시킨다. 주소 후보 발견은 Etherscan을 사용하되, 후보 거래의
+receipt/trace 검증에만 RPC를 사용하여 중복 조회 비용을 제한한다.
 
 ### JIT subject ACL
 

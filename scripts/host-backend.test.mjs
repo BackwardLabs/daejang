@@ -62,6 +62,7 @@ import {
   launchdServiceDomains,
   normalizeJITBridgeTimeouts,
   normalizeMultichainSnapshotIds,
+  validateJITBridgeCoverage,
   normalizeTaxSubjectEpochs,
   normalizeTaxReportGenerationPointers,
   normalizeTaxReportGenerationEligibility,
@@ -1530,6 +1531,68 @@ test('pins same-period multichain coverage to one deterministic snapshot', () =>
       .coverage[0].indexSnapshotId,
     snapshotIds[0],
   )
+})
+
+test('rejects a JIT bridge config missing a required chain', () => {
+  assert.throws(
+    () => validateJITBridgeCoverage({
+      chains: [{
+        chainId: 'eip155:1',
+        coverage: [{
+          coverageStart: '2025-01-01',
+          coverageEnd: '2026-08-13',
+        }],
+      }],
+    }),
+    /exactly one eip155:10 chain; found 0/,
+  )
+})
+
+test('rejects a JIT bridge config without a shared multichain coverage period', () => {
+  assert.throws(
+    () => validateJITBridgeCoverage({
+      chains: [
+        {
+          chainId: 'eip155:1',
+          coverage: [{
+            coverageStart: '2025-01-01',
+            coverageEnd: '2026-08-13',
+          }],
+        },
+        {
+          chainId: 'eip155:10',
+          coverage: [{
+            coverageStart: '2026-01-01',
+            coverageEnd: '2026-08-13',
+          }],
+        },
+      ],
+    }),
+    /shared coverage period for eip155:1, eip155:10/,
+  )
+})
+
+test('accepts one required chain each with a shared coverage period', () => {
+  const input = {
+    chains: [
+      {
+        chainId: 'eip155:1',
+        coverage: [{
+          coverageStart: '2025-01-01',
+          coverageEnd: '2026-08-13',
+        }],
+      },
+      {
+        chainId: 'eip155:10',
+        coverage: [{
+          coverageStart: '2025-01-01',
+          coverageEnd: '2026-08-13',
+        }],
+      },
+    ],
+  }
+
+  assert.equal(validateJITBridgeCoverage(input), input)
 })
 
 test('preserves a single-chain snapshot identity', () => {
