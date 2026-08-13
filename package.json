@@ -29,6 +29,7 @@
     "mac-studio:preflight": "bash scripts/mac-studio-release.sh preflight",
     "mac-studio:sync": "bash scripts/mac-studio-release.sh sync",
     "mac-studio:deploy-indexer": "bash scripts/mac-studio-release.sh deploy-indexer",
+    "mac-studio:deploy-backend": "bash scripts/mac-studio-release.sh deploy-backend",
     "mac-studio:deploy": "bash scripts/mac-studio-release.sh deploy",
     "build": "npm run build --workspace @daejang/web --workspace @daejang/web-api --workspace @daejang/edge --if-present",
     "lint": "npm run lint --workspaces --if-present",
