@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import { loadPretendardFont } from './font.js'
 import {
+  deemedExpenseEvidenceRows,
   formatKstTimestamp,
   formatCostMethod,
   formatReportAmount,
@@ -31,6 +32,7 @@ const model = (
   status: 'PARTIAL',
   filingStatus: 'BLOCKED',
   denominationAssetId: 'KRW',
+  denominationAtomicDecimals: null,
   issuedAt: '2028-02-14T01:32:00.000Z',
   counts: {
     disposals: 1,
@@ -166,7 +168,7 @@ describe('tax report PDF renderer', () => {
         taxOutcome: 'ESTIMATED_TAX_DUE',
         filingAction: 'REVIEW_REQUIRED',
         filingStatus: 'BLOCKED',
-        filingSubmissionStatus: 'NOT_SUBMITTED',
+        filingSubmissionStatus: 'UNKNOWN',
         calculatedAsOf: '2027-07-01T00:00:00Z',
         inputPeriod: {
           from: '2026-12-31T15:00:00Z',
@@ -214,6 +216,11 @@ describe('tax report PDF renderer', () => {
         },
         assetSummaries: [{
           taxAssetId: 'BTC', openingQuantity: '0', openingBasis: known('0'),
+          openingBasisProvenance: {
+            status: 'NOT_APPLICABLE', basisRule: null,
+            actualAcquisitionAmount: null, marketValueAt2026End: null,
+            sourceRunId: null,
+          },
           acquiredQuantity: '100000000', acquisitionCost: known('70000000'),
           annualAverage: {
             status: 'KNOWN', numerator: '70000000', denominator: '100000000',
@@ -254,6 +261,7 @@ describe('tax report PDF renderer', () => {
           artifactDigest: digest('v2-policy'), sourceSetDigest: digest('v2-sources'),
           applicationMode: 'ENACTED', effectiveFrom: '2027-01-01T00:00:00Z',
           effectiveThrough: '2027-12-31T23:59:59Z',
+          denominationAtomicDecimals: 8,
           roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
           roundingProfileEvidenceDigest: null,
           legalReferences: [{
@@ -275,6 +283,37 @@ describe('tax report PDF renderer', () => {
     expect(reportStatusKeyValues(input)).toContainEqual([
       '세금 결과', 'ESTIMATED_TAX_DUE',
     ])
+    expect(deemedExpenseEvidenceRows(input)).toEqual([])
+
+    const evidenceDigest = digest('deemed-expense-evidence')
+    const deemedInput: ReportPrintModelV1 = {
+      ...input,
+      v2: {
+        ...input.v2!,
+        assetSummaries: input.v2!.assetSummaries.map((row) => ({
+          ...row,
+          annualAverage: {
+            status: 'NOT_APPLICABLE',
+            numerator: null,
+            denominator: null,
+            unitCost: null,
+            unitCostNumerator: null,
+            unitCostDenominator: null,
+            rounding: null,
+          },
+          basisMode: 'DEEMED_EXPENSE_50' as const,
+          basisEvidenceDigest: evidenceDigest,
+        })),
+      },
+    }
+    expect(deemedExpenseEvidenceRows(deemedInput)).toEqual([
+      ['BTC', evidenceDigest],
+    ])
+    const deemedOutput = await renderTaxReportPdf(deemedInput, {
+      fontBytes,
+      rendererVersion: 'test-v2-deemed',
+    })
+    expect(deemedOutput.subarray(0, 5).toString('ascii')).toBe('%PDF-')
   })
 
   it('keeps unknown amounts unknown instead of presenting zero', () => {
@@ -443,6 +482,29 @@ describe('tax report PDF renderer', () => {
       { status: 'KNOWN', amount: '1' },
       'asset-krw-upbit',
     )).toBe('0.00000001 KRW')
+  })
+
+  it('uses the sealed report scale in the PDF calculation table', () => {
+    const base = model()
+    const scaled = model({
+      denominationAssetId: 'KRW',
+      denominationAtomicDecimals: 8,
+      summary: {
+        ...base.summary,
+        calculationRule: {
+          ...base.summary.calculationRule!,
+          basicDeductionAmount: '250000000000000',
+          deductionUsedAmount: '250000000000000',
+        },
+      },
+    })
+
+    expect(reportCalculationKeyValues(scaled)).toContainEqual([
+      '기본공제', '2,500,000 KRW',
+    ])
+    expect(reportCalculationKeyValues(scaled)).not.toContainEqual([
+      '기본공제', '250,000,000,000,000 KRW',
+    ])
   })
 
   it('renders a deterministic 2026 PDF', async () => {

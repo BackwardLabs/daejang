@@ -42,7 +42,7 @@ afterEach(() => {
 
 const known = (amount: string) => ({
   status: 'KNOWN' as const,
-  amount,
+  amount: (BigInt(amount) * 100_000_000n).toString(),
   hasAmount: true as const,
 })
 
@@ -58,7 +58,7 @@ const report: TaxReportV2DetailModel = {
   taxOutcome: 'ESTIMATED_TAX_DUE',
   filingAction: 'REVIEW_REQUIRED',
   filingStatus: 'BLOCKED',
-  filingSubmissionStatus: 'NOT_SUBMITTED',
+  filingSubmissionStatus: 'UNKNOWN',
   inputPeriod: {
     from: '2026-12-31T15:00:00Z',
     through: '2027-12-31T14:59:59Z',
@@ -83,6 +83,7 @@ const report: TaxReportV2DetailModel = {
   valuationFinality: 'PROVISIONAL',
   reportFinality: 'PROVISIONAL',
   denominationAssetId: 'KRW',
+  denominationAtomicDecimals: 8,
   counts: {
     assetSummaries: 1, disposals: 1, feeAssetDisposals: 1,
     acquisitions: 1, incomeRows: 1, transfers: 1, nonTaxableTransfers: 1,
@@ -105,8 +106,8 @@ const report: TaxReportV2DetailModel = {
     calculationRule: {
       poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET',
       costMethods: ['ANNUAL_TOTAL_AVERAGE'],
-      basicDeductionAmount: '2500000',
-      deductionUsedAmount: '2500000',
+      basicDeductionAmount: '250000000000000',
+      deductionUsedAmount: '250000000000000',
       nationalRate: { numerator: '20', denominator: '100' },
       localRate: { numerator: '2', denominator: '100' },
       taxRounding: 'FLOOR',
@@ -115,6 +116,11 @@ const report: TaxReportV2DetailModel = {
   },
   assetSummaries: [{
     taxAssetId: 'BTC', openingQuantity: '0', openingBasis: known('0'),
+    openingBasisProvenance: {
+      status: 'NOT_APPLICABLE', basisRule: null,
+      actualAcquisitionAmount: null, marketValueAt2026End: null,
+      sourceRunId: null,
+    },
     acquiredQuantity: '100000000', acquisitionCost: known('70000000'),
     annualAverage: {
       status: 'KNOWN', numerator: '70000000', denominator: '100000000',
@@ -134,11 +140,12 @@ const report: TaxReportV2DetailModel = {
     grossProceeds: known('22500000'), ancillaryExpense: known('1000'),
     incurredExpense: known('1000'), basis: known('18000000'),
     gainLoss: known('4499000'), valuationId: 'valuation-1',
-    costMethod: 'ANNUAL_TOTAL_AVERAGE', rounding: 'FLOOR',
+    costMethod: 'ANNUAL_TOTAL_AVERAGE',
+    rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
     basisMode: 'ACTUAL_TOTAL_AVERAGE', basisEvidenceDigest: null,
     occurredAt: '2027-03-01T00:00:00Z',
     account: { status: 'KNOWN', accountId: 'upbit-1', accountKind: 'CEX', displayNameStatus: 'UNKNOWN', displayName: null },
-    valuation: { status: 'KNOWN', valuationId: 'valuation-1', kind: 'MARKET_QUOTE', effectiveAt: '2027-03-01T00:00:00Z', quoteId: 'quote-1', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '25000000', quoteAtomicUnits: '22500000', rounding: 'FLOOR' },
+    valuation: { status: 'KNOWN', valuationId: 'valuation-1', kind: 'MARKET_QUOTE', effectiveAt: '2027-03-01T00:00:00Z', quoteId: 'quote-1', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '25000000', quoteAtomicUnits: '22500000', rounding: 'FLOOR', providerStatus: 'KNOWN', provider: 'UPBIT', datasetVersionStatus: 'KNOWN', datasetVersion: 'fixture-v1', marketStatus: 'KNOWN', market: 'KRW-ETH' },
     sourceEvidence: [{ legId: 'leg-1', relationId: null, fragmentId: 'fragment-1', observationId: 'observation-1', sourceArtifactBindingStatus: 'BOUND', sourceArtifactIds: ['source-1'], sourceKinds: ['FILE'] }],
     review: { status: 'CLEAR', limitations: [] },
   }],
@@ -149,11 +156,12 @@ const report: TaxReportV2DetailModel = {
     grossProceeds: known('1000'), ancillaryExpense: known('0'),
     incurredExpense: known('0'), basis: known('800'), gainLoss: known('200'),
     valuationId: 'valuation-fee', costMethod: 'ANNUAL_TOTAL_AVERAGE',
-    rounding: 'FLOOR', basisMode: 'ACTUAL_TOTAL_AVERAGE',
+    rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+    basisMode: 'ACTUAL_TOTAL_AVERAGE',
     basisEvidenceDigest: null,
     occurredAt: '2027-03-01T00:00:00Z',
     account: { status: 'KNOWN', accountId: 'upbit-1', accountKind: 'CEX', displayNameStatus: 'UNKNOWN', displayName: null },
-    valuation: { status: 'KNOWN', valuationId: 'valuation-fee', kind: 'MARKET_QUOTE', effectiveAt: '2027-03-01T00:00:00Z', quoteId: 'quote-fee', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '100', quoteAtomicUnits: '1000', rounding: 'FLOOR' },
+    valuation: { status: 'KNOWN', valuationId: 'valuation-fee', kind: 'MARKET_QUOTE', effectiveAt: '2027-03-01T00:00:00Z', quoteId: 'quote-fee', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '100', quoteAtomicUnits: '1000', rounding: 'FLOOR', providerStatus: 'KNOWN', provider: 'UPBIT', datasetVersionStatus: 'KNOWN', datasetVersion: 'fixture-v1', marketStatus: 'KNOWN', market: 'KRW-ETH' },
     sourceEvidence: [{ legId: 'fee-leg', relationId: null, fragmentId: 'fragment-1', observationId: 'observation-fee', sourceArtifactBindingStatus: 'BOUND', sourceArtifactIds: ['source-1'], sourceKinds: ['FILE'] }],
     review: { status: 'CLEAR', limitations: [] },
   }],
@@ -165,7 +173,7 @@ const report: TaxReportV2DetailModel = {
     acquisitionAncillaryExpense: known('10000'), acquisitionCost: known('500000'),
     occurredAt: '2027-02-01T00:00:00Z',
     account: { status: 'KNOWN', accountId: 'wallet-1', accountKind: 'EVM_WALLET', displayNameStatus: 'UNKNOWN', displayName: null },
-    valuation: { status: 'KNOWN', valuationId: 'valuation-2', kind: 'MARKET_QUOTE', effectiveAt: '2027-02-01T00:00:00Z', quoteId: 'quote-2', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '1000', quoteAtomicUnits: '500000', rounding: 'FLOOR' },
+    valuation: { status: 'KNOWN', valuationId: 'valuation-2', kind: 'MARKET_QUOTE', effectiveAt: '2027-02-01T00:00:00Z', quoteId: 'quote-2', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '1000', quoteAtomicUnits: '500000', rounding: 'FLOOR', providerStatus: 'KNOWN', provider: 'UPBIT', datasetVersionStatus: 'KNOWN', datasetVersion: 'fixture-v1', marketStatus: 'KNOWN', market: 'KRW-ETH' },
     sourceEvidence: [{ legId: 'leg-2', relationId: null, fragmentId: 'fragment-1', observationId: 'observation-2', sourceArtifactBindingStatus: 'BOUND', sourceArtifactIds: ['source-1'], sourceKinds: ['FILE'] }],
     review: { status: 'CLEAR', limitations: [] },
   }],
@@ -177,7 +185,7 @@ const report: TaxReportV2DetailModel = {
     ancillaryExpense: known('0'),
     occurredAt: '2027-02-01T00:00:00Z',
     account: { status: 'KNOWN', accountId: 'wallet-1', accountKind: 'EVM_WALLET', displayNameStatus: 'UNKNOWN', displayName: null },
-    valuation: { status: 'KNOWN', valuationId: 'valuation-2', kind: 'MARKET_QUOTE', effectiveAt: '2027-02-01T00:00:00Z', quoteId: 'quote-2', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '1000', quoteAtomicUnits: '500000', rounding: 'FLOOR' },
+    valuation: { status: 'KNOWN', valuationId: 'valuation-2', kind: 'MARKET_QUOTE', effectiveAt: '2027-02-01T00:00:00Z', quoteId: 'quote-2', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '1000', quoteAtomicUnits: '500000', rounding: 'FLOOR', providerStatus: 'KNOWN', provider: 'UPBIT', datasetVersionStatus: 'KNOWN', datasetVersion: 'fixture-v1', marketStatus: 'KNOWN', market: 'KRW-ETH' },
     sourceEvidence: [{ legId: 'leg-2', relationId: null, fragmentId: 'fragment-1', observationId: 'observation-2', sourceArtifactBindingStatus: 'BOUND', sourceArtifactIds: ['source-1'], sourceKinds: ['FILE'] }],
     review: { status: 'CLEAR', limitations: [] },
   }],
@@ -233,6 +241,7 @@ const report: TaxReportV2DetailModel = {
       artifactDigest: '6'.repeat(64), sourceSetDigest: '7'.repeat(64),
       applicationMode: 'ENACTED', effectiveFrom: '2027-01-01T00:00:00Z',
       effectiveThrough: '2027-12-31T23:59:59Z',
+      denominationAtomicDecimals: 8,
       roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
       roundingProfileEvidenceDigest: null,
       legalReferences: [{
@@ -296,6 +305,7 @@ describe('TaxReportDetailV2', () => {
     expect(screen.getByText('총평균 분자 · 연간 취득가액(원천 정수)')).toBeInTheDocument()
     expect(screen.getAllByText('70,000,000', { exact: false }).length).toBeGreaterThan(0)
     expect(screen.getByText('실제 취득가액 · 연간 총평균')).toBeInTheDocument()
+    expect(screen.getByText('해당 없음')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '소득·처분' }))
     expect(screen.getByText(/LENDING_INCOME_ASSET/u)).toBeInTheDocument()
@@ -310,6 +320,7 @@ describe('TaxReportDetailV2', () => {
     expect(screen.getAllByText(/FILE · 원본 결합 완료/u).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/fragment fragment-1/u).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/원천 최소단위 수량/u).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/UPBIT · fixture-v1 · KRW-ETH/u).length).toBeGreaterThan(0)
     fireEvent.click(screen.getByText(/OTHER_ACQUISITION · ETH/u))
     expect(screen.getByText('취득 대가')).toBeInTheDocument()
     expect(screen.getByText('취득 부대비용')).toBeInTheDocument()
@@ -391,7 +402,7 @@ describe('TaxReportDetailV2', () => {
       denominationAssetId: 'asset-krw-upbit',
       summary: {
         ...report.summary,
-        totalTax: known('52800000000000'),
+        totalTax: known('528000'),
         calculationRule: {
           ...report.summary.calculationRule,
           basicDeductionAmount: '250000000000000',
@@ -405,5 +416,57 @@ describe('TaxReportDetailV2', () => {
     expect(screen.getByText('528,000 KRW')).toBeInTheDocument()
     expect(screen.getByText('2,500,000 KRW / 2,500,000 KRW')).toBeInTheDocument()
     expect(screen.queryByText('52,800,000,000,000 KRW')).not.toBeInTheDocument()
+  })
+
+  it('formats amounts from the report scale instead of a frontend asset constant', () => {
+    const scaledReport: TaxReportV2DetailModel = {
+      ...report,
+      denominationAssetId: 'KRW',
+      denominationAtomicDecimals: 2,
+      summary: {
+        ...report.summary,
+        totalTax: { status: 'KNOWN', hasAmount: true, amount: '52800' },
+      },
+    }
+
+    render(<TaxReportDetailV2 report={scaledReport} />)
+
+    expect(screen.getByText('528 KRW')).toBeInTheDocument()
+    expect(screen.queryByText('0.000528 KRW')).not.toBeInTheDocument()
+  })
+
+  it('shows the statutory evidence only for a sealed 50% deemed-expense decision', () => {
+    const deemedReport = structuredClone(report)
+    const evidenceDigest = 'b'.repeat(64)
+    deemedReport.assetSummaries[0] = {
+      ...deemedReport.assetSummaries[0]!,
+      annualAverage: {
+        status: 'NOT_APPLICABLE',
+        numerator: null,
+        denominator: null,
+        unitCost: null,
+        unitCostNumerator: null,
+        unitCostDenominator: null,
+        rounding: null,
+      },
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: evidenceDigest,
+    }
+    deemedReport.disposals[0] = {
+      ...deemedReport.disposals[0]!,
+      rounding: 'CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS',
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: evidenceDigest,
+    }
+
+    render(<TaxReportDetailV2 report={deemedReport} />)
+    fireEvent.click(screen.getByRole('tab', { name: '자산별 장부' }))
+    expect(screen.getAllByText('해당 없음 · 50% 필요경비 특례').length)
+      .toBeGreaterThan(0)
+    expect(screen.getByText(evidenceDigest)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '소득·처분' }))
+    fireEvent.click(screen.getByText(/DISPOSAL · BTC · 50% 필요경비 특례/u))
+    expect(screen.getAllByText(evidenceDigest).length).toBeGreaterThan(0)
   })
 })

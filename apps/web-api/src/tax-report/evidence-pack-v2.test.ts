@@ -65,6 +65,7 @@ const evidenceFixture = () => ({
     applicationMode: 'ENACTED',
     effectiveFrom: '2027-01-01T00:00:00Z',
     effectiveThrough: '2027-12-31T23:59:59Z',
+    denominationAtomicDecimals: 8,
     roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
     legalReferences: [{
       law: '소득세법', article: '제37조', purpose: '필요경비 계산 기준',

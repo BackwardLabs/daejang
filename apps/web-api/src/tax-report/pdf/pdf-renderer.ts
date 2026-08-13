@@ -68,24 +68,37 @@ const formatAtomicAmount = (value: string, decimals: number) => {
   )
 }
 
-export const formatReportAmount = (
+const formatReportAmountWithScale = (
   amount: ReportPrintAmountV1,
   denominationAssetId: string,
+  denominationAtomicDecimals?: number,
 ) => {
   if (amount.status !== 'KNOWN') return '미확정(0원이 아님)'
   const presentation = reportDenominations[denominationAssetId]
-  if (presentation) {
+  const decimals = denominationAtomicDecimals ?? presentation?.decimals
+  if (decimals !== undefined) {
     return `${formatAtomicAmount(
       amount.amount,
-      presentation.decimals,
-    )} ${presentation.symbol}`
+      decimals,
+    )} ${presentation?.symbol ?? denominationAssetId}`
   }
   return `${formatDecimal(amount.amount)} ${denominationAssetId}`
 }
 
+export const formatReportAmount = (
+  amount: ReportPrintAmountV1,
+  denominationAssetId: string,
+) => formatReportAmountWithScale(amount, denominationAssetId)
+
 const shortId = (value: string) => value.length <= 28
   ? value
   : `${value.slice(0, 12)}…${value.slice(-12)}`
+
+export const deemedExpenseEvidenceRows = (
+  model: Pick<ReportPrintModelV1, 'v2'>,
+): Array<readonly [string, string]> => model.v2?.assetSummaries
+  .filter((row) => row.basisEvidenceDigest !== null)
+  .map((row) => [row.taxAssetId, row.basisEvidenceDigest!]) ?? []
 
 export const formatKstTimestamp = (value: string) => {
   const timestamp = Date.parse(value)
@@ -292,7 +305,7 @@ export const reportStatusKeyValues = (
 
 type CalculationSource = Pick<
   ReportPrintModelV1,
-  'summary' | 'denominationAssetId'
+  'summary' | 'denominationAssetId' | 'denominationAtomicDecimals'
 >
 
 export const reportCalculationKeyValues = (
@@ -317,18 +330,20 @@ export const reportCalculationKeyValues = (
     ],
     [
       '기본공제',
-      formatReportAmount(
+      formatReportAmountWithScale(
         { status: 'KNOWN', amount: rule.basicDeductionAmount },
         model.denominationAssetId,
+        model.denominationAtomicDecimals ?? undefined,
       ),
     ],
   )
   if (rule.deductionUsedAmount !== undefined) {
     rows.push([
       '실제 적용 공제',
-      formatReportAmount(
+      formatReportAmountWithScale(
         { status: 'KNOWN', amount: rule.deductionUsedAmount },
         model.denominationAssetId,
+        model.denominationAtomicDecimals ?? undefined,
       ),
     ])
   }
@@ -362,6 +377,14 @@ export async function renderTaxReportPdf(
   const presentation = reportDocumentPresentation(model)
   const documentTitle = presentation.title
   const rendererVersion = options.rendererVersion ?? '1'
+  const formatReportAmount = (
+    amount: ReportPrintAmountV1,
+    denominationAssetId: string,
+  ) => formatReportAmountWithScale(
+    amount,
+    denominationAssetId,
+    model.denominationAtomicDecimals ?? undefined,
+  )
   const doc = new PDFDocument({
     autoFirstPage: false,
     bufferPages: true,
@@ -730,8 +753,8 @@ export async function renderTaxReportPdf(
         reportRowAccountLabel(row.account),
         row.valuation.status === 'UNKNOWN'
           ? '평가 미확정'
-          : `${row.valuation.kind ?? '종류 미확인'}\n${row.valuation.effectiveAt ? formatKstTimestamp(row.valuation.effectiveAt) : '시점 미확인'}\n${row.valuation.quoteId ?? shortId(row.valuation.valuationId ?? '')}`,
-        `${reportRowSourceLabel(row)}\n${row.review.status}`,
+          : `${row.valuation.kind ?? '종류 미확인'}\n${row.valuation.effectiveAt ? formatKstTimestamp(row.valuation.effectiveAt) : '시점 미확인'}\n${row.valuation.provider ?? 'provider 미확정'} · ${row.valuation.datasetVersion ?? 'dataset 미확정'} · ${row.valuation.market ?? 'market 미확정'}\n${row.valuation.quoteId ?? shortId(row.valuation.valuationId ?? '')}`,
+        `${reportRowSourceLabel(row)}\n${row.review.status}${row.basisEvidenceDigest === null ? '' : `\n50% 근거 ${shortId(row.basisEvidenceDigest)}`}`,
       ]),
     })
 
@@ -747,10 +770,62 @@ export async function renderTaxReportPdf(
       ],
       rows: model.v2.assetSummaries.map((row) => [
         `${row.taxAssetId}\n${row.basisMode}`,
-        row.annualAverage.numerator ?? '미확정',
-        row.annualAverage.denominator ?? '미확정',
-        row.annualAverage.unitCost ?? '미확정',
-        row.annualAverage.rounding ?? '기록 없음',
+        row.annualAverage.status === 'NOT_APPLICABLE'
+          ? '해당 없음(50% 특례)'
+          : row.annualAverage.numerator ?? '미확정',
+        row.annualAverage.status === 'NOT_APPLICABLE'
+          ? '해당 없음(50% 특례)'
+          : row.annualAverage.denominator ?? '미확정',
+        row.annualAverage.status === 'NOT_APPLICABLE'
+          ? '해당 없음(50% 특례)'
+          : row.annualAverage.unitCost ?? '미확정',
+        row.annualAverage.status === 'NOT_APPLICABLE'
+          ? '해당 없음'
+          : row.annualAverage.rounding ?? '기록 없음',
+      ]),
+    })
+
+    const deemedEvidence = deemedExpenseEvidenceRows(model)
+    if (deemedEvidence.length > 0) {
+      drawTable({
+        title: '50% 필요경비 특례 증거',
+        emptyLabel: '50% 필요경비 특례를 적용한 자산이 없습니다.',
+        columns: [
+          { header: '자산', width: 112 },
+          { header: '법정 적용 증거 digest', width: 399 },
+        ],
+        rows: deemedEvidence,
+      })
+    }
+
+    drawTable({
+      title: '기초가액 적용 근거',
+      emptyLabel: '기록된 기초가액 근거가 없습니다.',
+      columns: [
+        { header: '자산 / 상태', width: 108 },
+        { header: '적용 규칙', width: 125 },
+        { header: '실제취득가', width: 102, align: 'right' },
+        { header: '2026년 말 시가', width: 102, align: 'right' },
+        { header: '이전 확정 run', width: 76 },
+      ],
+      rows: model.v2.assetSummaries.map((row) => [
+        `${row.taxAssetId}\n${row.openingBasisProvenance.status}`,
+        row.openingBasisProvenance.basisRule ?? '해당 없음',
+        row.openingBasisProvenance.actualAcquisitionAmount === null
+          ? '해당 없음'
+          : formatReportAmount(
+            { status: 'KNOWN', amount: row.openingBasisProvenance.actualAcquisitionAmount },
+            model.denominationAssetId,
+          ),
+        row.openingBasisProvenance.marketValueAt2026End === null
+          ? '해당 없음'
+          : formatReportAmount(
+            { status: 'KNOWN', amount: row.openingBasisProvenance.marketValueAt2026End },
+            model.denominationAssetId,
+          ),
+        row.openingBasisProvenance.sourceRunId === null
+          ? '해당 없음'
+          : shortId(row.openingBasisProvenance.sourceRunId),
       ]),
     })
   }
@@ -792,7 +867,7 @@ export async function renderTaxReportPdf(
         formatReportAmount(row.grossProceeds, model.denominationAssetId),
         formatReportAmount(row.basis, model.denominationAssetId),
         formatReportAmount(row.gainLoss, model.denominationAssetId),
-        `${row.basisMode}\n${reportRowSourceLabel(row)}\n${row.review.status}`,
+        `${row.basisMode}\n${reportRowSourceLabel(row)}\n${row.review.status}${row.basisEvidenceDigest === null ? '' : `\n50% 근거 ${shortId(row.basisEvidenceDigest)}`}`,
       ]),
     })
 

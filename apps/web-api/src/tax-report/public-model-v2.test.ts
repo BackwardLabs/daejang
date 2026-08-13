@@ -25,6 +25,9 @@ const valuation = {
   effectiveAt: '2027-03-01T00:00:00Z', quoteId: 'quote-1',
   snapshotArtifactDigest: digest('9'), baseAtomicUnits: '25000000',
   quoteAtomicUnits: '2250000000000000', rounding: 'FLOOR',
+  providerStatus: 'KNOWN', provider: 'UPBIT',
+  datasetVersionStatus: 'KNOWN', datasetVersion: 'fixture-v1',
+  marketStatus: 'KNOWN', market: 'KRW-BTC',
 }
 const sourceEvidence = [{
   legId: 'leg-1', fragmentId: 'fragment-1', observationId: 'observation-1',
@@ -52,7 +55,7 @@ const reportFixture = () => ({
   taxOutcome: 'ESTIMATED_TAX_DUE',
   filingAction: 'REVIEW_REQUIRED',
   filingStatus: 'BLOCKED',
-  filingSubmissionStatus: 'NOT_SUBMITTED',
+  filingSubmissionStatus: 'UNKNOWN',
   inputPeriod: {
     from: '2026-12-31T15:00:00Z',
     through: '2027-12-31T14:59:59.999999999Z',
@@ -81,6 +84,7 @@ const reportFixture = () => ({
   sourceLedgerGenerationId: 'ledger-generation-1',
   schemaDigest: digest('2'),
   denominationAssetId: 'asset-krw-upbit',
+  denominationAtomicDecimals: 8,
   evidencePackDigest: digest('3'),
   counts: {
     assetSummaries: 1,
@@ -122,6 +126,7 @@ const reportFixture = () => ({
     taxAssetId: 'BTC',
     openingQuantity: '0',
     openingBasis: known('0'),
+    openingBasisProvenance: { status: 'NOT_APPLICABLE' },
     acquiredQuantity: '100000000',
     acquisitionCost: known('7000000000000000'),
     annualAverage: {
@@ -150,7 +155,8 @@ const reportFixture = () => ({
     grossProceeds: known('2250000000000000'), ancillaryExpense: known('0'),
     incurredExpense: known('0'), basis: known('1750000000000000'),
     gainLoss: known('500000000000000'), valuationId: 'valuation-1',
-    costMethod: 'ANNUAL_TOTAL_AVERAGE', rounding: 'FLOOR',
+    costMethod: 'ANNUAL_TOTAL_AVERAGE',
+    rounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
     basisMode: 'ACTUAL_TOTAL_AVERAGE', occurredAt: '2027-03-01T00:00:00Z',
     account, valuation, sourceEvidence, review: clearReview,
   }],
@@ -211,6 +217,7 @@ const reportFixture = () => ({
     applicationMode: 'ENACTED',
     effectiveFrom: '2027-01-01T00:00:00Z',
     effectiveThrough: '2027-12-31T23:59:59Z',
+    denominationAtomicDecimals: 8,
     roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
     legalReferences: [{
       law: '소득세법',
@@ -249,9 +256,11 @@ describe('ReportModel V2 public projection', () => {
     expect(projected).toMatchObject({
       schemaVersion: 'giwa.tax-report-model.v2',
       reportId,
+      denominationAtomicDecimals: 8,
       dataCoverage: { status: 'PARTIAL' },
       assetSummaries: [{
         taxAssetId: 'BTC',
+        openingBasisProvenance: { status: 'NOT_APPLICABLE' },
         basisMode: 'ACTUAL_TOTAL_AVERAGE',
         annualAverage: {
           numerator: '7000000000000000',
@@ -267,10 +276,16 @@ describe('ReportModel V2 public projection', () => {
         consideration: { amount: '500000' },
         acquisitionAncillaryExpense: { amount: '1000' },
         acquisitionCost: { amount: '501000' },
+        valuation: {
+          provider: 'UPBIT',
+          datasetVersion: 'fixture-v1',
+          market: 'KRW-BTC',
+        },
       }],
       methodology: {
         sourceLedgerGenerationId: 'ledger-generation-1',
         policy: {
+          denominationAtomicDecimals: 8,
           roundingProfileStatus: 'ESTIMATE_ONLY_UNAPPROVED',
           roundingProfileEvidenceDigest: null,
           legalReferences: [{
@@ -326,6 +341,269 @@ describe('ReportModel V2 public projection', () => {
     )).toThrow(/rounding profile approval and evidence disagree/u)
   })
 
+  it('rejects a denomination scale that disagrees with the sealed policy', () => {
+    const report = reportFixture()
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact({ ...report, denominationAtomicDecimals: 6 }),
+      reportId,
+    )).toThrow(/must equal the exact policy denomination scale/u)
+  })
+
+  it('accepts the canonical provisional zero-tax outcome', () => {
+    const report = reportFixture()
+    const projected = decodeAndProjectTaxReportModelV2(
+      artifact({ ...report, taxOutcome: 'ESTIMATED_TAX_ZERO' }),
+      reportId,
+    )
+
+    expect(projected.taxOutcome).toBe('ESTIMATED_TAX_ZERO')
+  })
+
+  it('rejects a KNOWN valuation whose immutable quote trace is incomplete', () => {
+    const report = reportFixture()
+    const { quoteId: _quoteId, ...valuationWithoutQuote } =
+      report.acquisitions[0]!.valuation
+    report.acquisitions[0]!.valuation = valuationWithoutQuote as
+      typeof report.acquisitions[0]['valuation']
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/valuation completeness fields disagree/u)
+  })
+
+  it('rejects a row whose valuation identity disagrees with its nested trace', () => {
+    const report = reportFixture()
+    report.acquisitions[0] = {
+      ...report.acquisitions[0]!,
+      valuationId: 'valuation-other',
+    }
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/valuation identity and nested trace must match exactly/u)
+  })
+
+  it('rejects an opening balance without its canonical transition evidence', () => {
+    const report = reportFixture()
+    report.assetSummaries[0]!.openingQuantity = '1'
+    Object.assign(report.assetSummaries[0]!.openingBasisProvenance, {
+      status: 'KNOWN',
+      basisRule: 'PRE_EFFECTIVE_MAX_ACTUAL_MARKET',
+      actualAcquisitionAmount: '100',
+    })
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/KNOWN provenance is missing the evidence required by its basis rule/u)
+  })
+
+  it('rejects opening basis that contradicts the sealed transition evidence', () => {
+    const report = reportFixture()
+    Object.assign(report.assetSummaries[0]!, {
+      openingQuantity: '1',
+      openingBasis: known('150'),
+      openingBasisProvenance: {
+        status: 'KNOWN',
+        basisRule: 'PRE_EFFECTIVE_MAX_ACTUAL_MARKET',
+        actualAcquisitionAmount: '100',
+        marketValueAt2026End: '200',
+      },
+    })
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/does not match the canonical opening-basis transition evidence/u)
+  })
+
+  it('rejects a transition rule that is unavailable in the report tax year', () => {
+    const report = reportFixture()
+    Object.assign(report.assetSummaries[0]!, {
+      openingQuantity: '1',
+      openingBasis: known('100'),
+      openingBasisProvenance: {
+        status: 'KNOWN',
+        basisRule: 'ACTUAL_ACQUISITION',
+        actualAcquisitionAmount: '100',
+      },
+    })
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/must be PRE_EFFECTIVE_MAX_ACTUAL_MARKET for tax year 2027/u)
+  })
+
+  it('rejects a 50% deemed-expense asset decision without statutory evidence', () => {
+    const report = reportFixture()
+    report.assetSummaries[0]!.basisMode = 'DEEMED_EXPENSE_50'
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/50% deemed-expense mode and its statutory evidence must appear together/u)
+  })
+
+  it('rejects actual-cost disposal rows that carry deemed-expense evidence', () => {
+    const report = reportFixture()
+    Object.assign(report.disposals[0]!, {
+      basisEvidenceDigest: digest('b'),
+    })
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/50% deemed-expense mode and its statutory evidence must appear together/u)
+  })
+
+  it('accepts one sealed 50% deemed-expense decision across the asset year', () => {
+    const report = reportFixture()
+    const evidence = digest('b')
+    Object.assign(report.assetSummaries[0]!, {
+      annualAverage: {
+        status: 'NOT_APPLICABLE',
+      },
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: evidence,
+    })
+    Object.assign(report.disposals[0]!, {
+      rounding: 'CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS',
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: evidence,
+    })
+
+    const projected = decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )
+    expect(projected.assetSummaries[0]).toMatchObject({
+      annualAverage: { status: 'NOT_APPLICABLE' },
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: evidence,
+    })
+  })
+
+  it('rejects a 50% average that carries total-average values', () => {
+    const report = reportFixture()
+    const evidence = digest('b')
+    Object.assign(report.assetSummaries[0]!, {
+      annualAverage: {
+        status: 'NOT_APPLICABLE',
+        numerator: '1',
+      },
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: evidence,
+    })
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/NOT_APPLICABLE average must omit exact values/u)
+  })
+
+  it('rejects a disposal decision that differs from its asset-year election', () => {
+    const report = reportFixture()
+    Object.assign(report.disposals[0]!, {
+      rounding: 'CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS',
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: digest('b'),
+    })
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/must match the asset-year basis decision exactly/u)
+  })
+
+  it('rejects a deemed-expense decision before tax year 2027', () => {
+    const report = reportFixture()
+    report.taxYear = 2026
+    Object.assign(report.assetSummaries[0]!, {
+      annualAverage: { status: 'NOT_APPLICABLE' },
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: digest('b'),
+    })
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/unavailable before tax year 2027/u)
+  })
+
+  it('rejects a disposal rounding rule that contradicts its basis mode', () => {
+    const report = reportFixture()
+    report.disposals[0] = {
+      ...report.disposals[0]!,
+      rounding: 'CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS',
+    }
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/rounding/u)
+  })
+
+  it('rejects unknown acquisition and income classifications', () => {
+    const acquisitionReport = reportFixture()
+    acquisitionReport.acquisitions[0] = {
+      ...acquisitionReport.acquisitions[0]!,
+      transactionType: 'AIRDROP',
+      kind: 'AIRDROP',
+    }
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(acquisitionReport),
+      reportId,
+    )).toThrow(/acquisitions\[0\]\.kind/u)
+
+    const incomeReport = reportFixture()
+    const acquisition = incomeReport.acquisitions[0]!
+    incomeReport.incomeRows.push({
+      transactionType: 'STAKING_REWARD',
+      movementId: acquisition.movementId,
+      eventId: acquisition.eventId,
+      revisionId: acquisition.revisionId,
+      legId: acquisition.legId,
+      kind: 'STAKING_REWARD',
+      taxAssetId: acquisition.taxAssetId,
+      ledgerAssetId: acquisition.ledgerAssetId,
+      quantity: acquisition.quantity,
+      valuationId: acquisition.valuationId,
+      occurredAt: acquisition.occurredAt,
+      account: acquisition.account,
+      valuation: acquisition.valuation,
+      sourceEvidence: acquisition.sourceEvidence,
+      review: acquisition.review,
+      income: known('1'),
+      ancillaryExpense: known('0'),
+    } as never)
+    incomeReport.counts.incomeRows = 1
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(incomeReport),
+      reportId,
+    )).toThrow(/incomeRows\[0\]\.kind/u)
+  })
+
+  it('requires filing submission status to match policy mode', () => {
+    const enacted = reportFixture()
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact({ ...enacted, filingSubmissionStatus: 'NOT_APPLICABLE' }),
+      reportId,
+    )).toThrow(/must match the report policy application mode/u)
+
+    const simulation = reportFixture()
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact({
+        ...simulation,
+        filingSubmissionStatus: 'UNKNOWN',
+        policy: { ...simulation.policy, applicationMode: 'SIMULATION' },
+      }),
+      reportId,
+    )).toThrow(/must match the report policy application mode/u)
+  })
+
   it('rejects a filing-ready flag that contradicts the canonical action', () => {
     const report = reportFixture()
     expect(() => decodeAndProjectTaxReportModelV2(
@@ -346,6 +624,9 @@ describe('ReportModel V2 public projection', () => {
             valuation: {
               status: 'UNKNOWN',
               effectiveAt: '0001-01-01T00:00:00Z',
+              providerStatus: 'UNKNOWN',
+              datasetVersionStatus: 'UNKNOWN',
+              marketStatus: 'UNKNOWN',
             },
           }
         }),

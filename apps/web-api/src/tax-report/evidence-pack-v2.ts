@@ -209,7 +209,7 @@ const policy = (value: unknown, path: string): PublicTaxReportV2Policy => {
   const row = record(value, path, [
     'name', 'version', 'artifactDigest', 'sourceSetDigest',
     'applicationMode', 'effectiveFrom', 'effectiveThrough',
-    'roundingProfileStatus', 'legalReferences',
+    'denominationAtomicDecimals', 'roundingProfileStatus', 'legalReferences',
   ], ['roundingProfileEvidenceDigest'])
   const legalReferences = array(
     row.legalReferences,
@@ -257,6 +257,13 @@ const policy = (value: unknown, path: string): PublicTaxReportV2Policy => {
   ) {
     invalid(path, 'rounding profile approval and evidence disagree')
   }
+  if (
+    !Number.isSafeInteger(row.denominationAtomicDecimals) ||
+    Number(row.denominationAtomicDecimals) < 1 ||
+    Number(row.denominationAtomicDecimals) > 18
+  ) {
+    invalid(`${path}.denominationAtomicDecimals`, 'must be between 1 and 18')
+  }
   return {
     name: string(row.name, `${path}.name`),
     version: string(row.version, `${path}.version`),
@@ -265,6 +272,7 @@ const policy = (value: unknown, path: string): PublicTaxReportV2Policy => {
     applicationMode: oneOf(row.applicationMode, `${path}.applicationMode`, ['ENACTED', 'SIMULATION']),
     effectiveFrom: timestamp(row.effectiveFrom, `${path}.effectiveFrom`),
     effectiveThrough: timestamp(row.effectiveThrough, `${path}.effectiveThrough`),
+    denominationAtomicDecimals: Number(row.denominationAtomicDecimals),
     roundingProfileStatus,
     roundingProfileEvidenceDigest,
     legalReferences,

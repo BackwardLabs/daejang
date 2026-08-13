@@ -302,7 +302,7 @@ export type TaxReportV2DetailModel = {
   taxOutcome: string
   filingAction: string
   filingStatus: 'READY' | 'BLOCKED'
-  filingSubmissionStatus: string
+  filingSubmissionStatus: 'UNKNOWN' | 'NOT_APPLICABLE'
   inputPeriod: TaxReportV2IntervalModel
   dataCoverage: {
     status: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE'
@@ -318,6 +318,7 @@ export type TaxReportV2DetailModel = {
   valuationFinality: 'FINAL' | 'PROVISIONAL'
   reportFinality: 'FINAL' | 'PROVISIONAL'
   denominationAssetId: string
+  denominationAtomicDecimals: number
   counts: {
     assetSummaries: number
     disposals: number
@@ -349,10 +350,17 @@ export type TaxReportV2DetailModel = {
     taxAssetId: string
     openingQuantity: string
     openingBasis: TaxReportV2AmountModel
+    openingBasisProvenance: {
+      status: 'NOT_APPLICABLE' | 'UNKNOWN' | 'KNOWN'
+      basisRule: string | null
+      actualAcquisitionAmount: string | null
+      marketValueAt2026End: string | null
+      sourceRunId: string | null
+    }
     acquiredQuantity: string
     acquisitionCost: TaxReportV2AmountModel
     annualAverage: {
-      status: 'KNOWN' | 'UNKNOWN'
+      status: 'KNOWN' | 'UNKNOWN' | 'NOT_APPLICABLE'
       numerator: string | null
       denominator: string | null
       unitCost: string | null
@@ -415,6 +423,7 @@ export type TaxReportV2DetailModel = {
       applicationMode: 'ENACTED' | 'SIMULATION'
       effectiveFrom: string
       effectiveThrough: string
+      denominationAtomicDecimals: number
       roundingProfileStatus: 'APPROVED' | 'ESTIMATE_ONLY_UNAPPROVED'
       roundingProfileEvidenceDigest: string | null
       legalReferences: Array<{
@@ -437,6 +446,10 @@ export type TaxReportV2DisposalModel = TaxReportDisposalModel & {
   incurredExpense: TaxReportV2AmountModel
   basisMode: 'ACTUAL_TOTAL_AVERAGE' | 'DEEMED_EXPENSE_50'
   basisEvidenceDigest: string | null
+  costMethod: 'ANNUAL_TOTAL_AVERAGE'
+  rounding:
+    | 'CUMULATIVE_FLOOR_ANNUAL_POOL'
+    | 'CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS'
   occurredAt: string
   account: TaxReportV2AccountModel
   valuation: TaxReportV2ValuationModel
@@ -481,6 +494,12 @@ export type TaxReportV2ValuationModel = {
   baseAtomicUnits: string | null
   quoteAtomicUnits: string | null
   rounding: string | null
+  providerStatus: 'UNKNOWN' | 'KNOWN'
+  provider: string | null
+  datasetVersionStatus: 'UNKNOWN' | 'KNOWN'
+  datasetVersion: string | null
+  marketStatus: 'UNKNOWN' | 'KNOWN'
+  market: string | null
 }
 
 export type TaxReportV2SourceEvidenceModel = {
@@ -508,12 +527,16 @@ export type TaxReportV2TransferModel = TaxReportTransferModel & {
 }
 
 export type TaxReportV2AcquisitionModel = TaxReportV2MovementModel & {
+  transactionType: 'ACQUIRE' | 'OTHER_ACQUISITION'
+  kind: 'ACQUIRE' | 'OTHER_ACQUISITION'
   consideration: TaxReportV2AmountModel
   acquisitionAncillaryExpense: TaxReportV2AmountModel
   acquisitionCost: TaxReportV2AmountModel
 }
 
 export type TaxReportV2IncomeModel = TaxReportV2MovementModel & {
+  transactionType: 'LENDING_INCOME_CASH' | 'LENDING_INCOME_ASSET'
+  kind: 'LENDING_INCOME_CASH' | 'LENDING_INCOME_ASSET'
   income: TaxReportV2AmountModel
   ancillaryExpense: TaxReportV2AmountModel
 }

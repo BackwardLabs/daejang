@@ -30,26 +30,22 @@ const decimalLabel = (value: string) => {
   return `${sign}${grouped}${fraction === undefined ? '' : `.${fraction}`}`
 }
 
-const reportDenominations: Record<
-  string,
-  { symbol: string; decimals: number }
-> = {
-  'asset-krw-upbit': { symbol: 'KRW', decimals: 8 },
+const reportDenominationSymbols: Record<string, string> = {
+  'asset-krw-upbit': 'KRW',
+  KRW: 'KRW',
 }
 
 const amountLabel = (
   value: TaxReportV2AmountModel,
   denomination: string,
+  denominationAtomicDecimals: number,
 ) => {
   if (!value.hasAmount || value.amount === null) return '미확정'
-  const presentation = reportDenominations[denomination]
-  if (presentation) {
-    return `${formatLedgerQuantity(
-      value.amount,
-      presentation.decimals,
-    )} ${presentation.symbol}`
-  }
-  return `${decimalLabel(value.amount)} ${denomination}`
+  const symbol = reportDenominationSymbols[denomination] ?? denomination
+  return `${formatLedgerQuantity(
+    value.amount,
+    denominationAtomicDecimals,
+  )} ${symbol}`
 }
 
 const dateLabel = (value: string) =>
@@ -83,6 +79,7 @@ const statusLabel: Record<string, string> = {
   TAX_DUE: '신고 예상 세액 있음',
   ESTIMATED_TAX_DUE: '추정 세액 있음',
   TAX_ZERO: '예상 세액 없음',
+  ESTIMATED_TAX_ZERO: '추정 세액 없음',
   SIMULATED_TAX_DUE: '시뮬레이션 세액 있음',
   SIMULATED_TAX_ZERO: '시뮬레이션 세액 없음',
   NO_TAX_EVENTS: '과세 이벤트 없음',
@@ -96,13 +93,15 @@ const statusLabel: Record<string, string> = {
 function Amount({
   value,
   denomination,
+  denominationAtomicDecimals,
 }: {
   value: TaxReportV2AmountModel
   denomination: string
+  denominationAtomicDecimals: number
 }) {
   return (
     <strong data-certainty={value.status}>
-      {amountLabel(value, denomination)}
+      {amountLabel(value, denomination, denominationAtomicDecimals)}
     </strong>
   )
 }
@@ -148,6 +147,7 @@ function EventEvidence({
       {valuation ? <>
         <div><dt>적용 가격·환율 시점</dt><dd>{valuation.effectiveAt ? dateTimeLabel(valuation.effectiveAt) : '미확정'} · {valuation.kind ?? '평가 종류 미확정'}</dd></div>
         <div><dt>평가 근거</dt><dd>{valuation.quoteId ?? valuation.valuationId ?? '미확정'} · {valuation.status}</dd></div>
+        <div><dt>가격 데이터</dt><dd>{valuation.provider ?? 'provider 미확정'} · {valuation.datasetVersion ?? 'dataset 미확정'} · {valuation.market ?? 'market 미확정'}</dd></div>
       </> : null}
       {financials.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}
       <div><dt>데이터 출처</dt><dd>{sourceKinds.join(', ') || '출처 미확인'} · {allBound ? '원본 결합 완료' : '원본 결합 검토 필요'}</dd></div>
@@ -243,6 +243,11 @@ export function TaxReportDetailV2({
     `/api/v1${pdfPath}`
   const partialCoverage = report.dataCoverage.status !== 'COMPLETE'
   const policy = report.methodology.policy
+  const formatAmount = (value: TaxReportV2AmountModel) => amountLabel(
+    value,
+    report.denominationAssetId,
+    report.denominationAtomicDecimals,
+  )
   const verifiedCoverage = [
     'DOCUMENT_METADATA_VERIFIED',
     'CHAIN_VERIFIED',
@@ -390,39 +395,39 @@ export function TaxReportDetailV2({
           <div className="tax-report-v2__kpis">
             <article className="is-primary">
               <span>예상 총세액</span>
-              <Amount value={report.summary.totalTax} denomination={report.denominationAssetId} />
+              <Amount value={report.summary.totalTax} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
               <small>{statusLabel[report.taxOutcome] ?? report.taxOutcome}</small>
             </article>
             <article>
               <span>연간 처분손익</span>
-              <Amount value={report.summary.disposalGainLoss} denomination={report.denominationAssetId} />
+              <Amount value={report.summary.disposalGainLoss} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
             </article>
             <article>
               <span>대여 순소득</span>
-              <Amount value={report.summary.netLendingIncome} denomination={report.denominationAssetId} />
+              <Amount value={report.summary.netLendingIncome} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
             </article>
             <article>
               <span>과세소득</span>
-              <Amount value={report.summary.taxableIncome} denomination={report.denominationAssetId} />
+              <Amount value={report.summary.taxableIncome} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
             </article>
           </div>
           <div className="tax-report-v2__summary-grid">
             <section>
               <h4>연간 처분 금액</h4>
               <dl>
-                <div><dt>총 처분가액</dt><dd><Amount value={report.summary.grossProceeds} denomination={report.denominationAssetId} /></dd></div>
-                <div><dt>총 취득가액 · 처분 취득원가</dt><dd><Amount value={report.summary.disposedBasis} denomination={report.denominationAssetId} /></dd></div>
-                <div><dt>총 필요경비</dt><dd><Amount value={report.summary.deductibleExpense} denomination={report.denominationAssetId} /></dd></div>
-                <div><dt>원천 실제 발생비용</dt><dd><Amount value={report.summary.incurredExpense} denomination={report.denominationAssetId} /></dd></div>
+                <div><dt>총 처분가액</dt><dd><Amount value={report.summary.grossProceeds} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
+                <div><dt>총 취득가액 · 처분 취득원가</dt><dd><Amount value={report.summary.disposedBasis} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
+                <div><dt>총 필요경비</dt><dd><Amount value={report.summary.deductibleExpense} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
+                <div><dt>원천 실제 발생비용</dt><dd><Amount value={report.summary.incurredExpense} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
               </dl>
             </section>
             <section>
               <h4>세액 구성</h4>
               <dl>
-                <div><dt>과세표준</dt><dd><Amount value={report.summary.taxableBase} denomination={report.denominationAssetId} /></dd></div>
-                <div><dt>국세</dt><dd><Amount value={report.summary.nationalTax} denomination={report.denominationAssetId} /></dd></div>
-                <div><dt>지방세</dt><dd><Amount value={report.summary.localTax} denomination={report.denominationAssetId} /></dd></div>
-                <div><dt>기본공제 / 실제 적용</dt><dd>{amountLabel({ status: 'KNOWN', hasAmount: true, amount: report.summary.calculationRule.basicDeductionAmount }, report.denominationAssetId)} / {report.summary.calculationRule.deductionUsedAmount === null ? '미확정' : amountLabel({ status: 'KNOWN', hasAmount: true, amount: report.summary.calculationRule.deductionUsedAmount }, report.denominationAssetId)}</dd></div>
+                <div><dt>과세표준</dt><dd><Amount value={report.summary.taxableBase} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
+                <div><dt>국세</dt><dd><Amount value={report.summary.nationalTax} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
+                <div><dt>지방세</dt><dd><Amount value={report.summary.localTax} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
+                <div><dt>기본공제 / 실제 적용</dt><dd>{formatAmount({ status: 'KNOWN', hasAmount: true, amount: report.summary.calculationRule.basicDeductionAmount })} / {report.summary.calculationRule.deductionUsedAmount === null ? '미확정' : formatAmount({ status: 'KNOWN', hasAmount: true, amount: report.summary.calculationRule.deductionUsedAmount })}</dd></div>
               </dl>
             </section>
             <section>
@@ -451,19 +456,24 @@ export function TaxReportDetailV2({
                 <article key={asset.taxAssetId}>
                   <header><h4>{asset.taxAssetId}</h4><span>{statusLabel[asset.basisMode] ?? asset.basisMode}</span></header>
                   <div className="tax-report-v2__average">
-                    <div><span>총평균 분자 · 연간 취득가액(원천 정수)</span><strong>{asset.annualAverage.numerator ? decimalLabel(asset.annualAverage.numerator) : '미확정'}</strong></div>
-                    <div><span>총평균 분모 · 연간 취득수량(원천 정수)</span><strong>{asset.annualAverage.denominator ? decimalLabel(asset.annualAverage.denominator) : '미확정'}</strong></div>
-                    <div><span>연간 총평균 단가(원천 정수)</span><strong>{asset.annualAverage.unitCost ? decimalLabel(asset.annualAverage.unitCost) : '미확정'}</strong></div>
-                    <div><span>정확 단가 비율(원천 정수)</span><strong>{asset.annualAverage.unitCostNumerator ? decimalLabel(asset.annualAverage.unitCostNumerator) : '—'} / {asset.annualAverage.unitCostDenominator ? decimalLabel(asset.annualAverage.unitCostDenominator) : '—'}</strong></div>
+                    <div><span>총평균 분자 · 연간 취득가액(원천 정수)</span><strong>{asset.annualAverage.status === 'NOT_APPLICABLE' ? '해당 없음 · 50% 필요경비 특례' : asset.annualAverage.numerator ? decimalLabel(asset.annualAverage.numerator) : '미확정'}</strong></div>
+                    <div><span>총평균 분모 · 연간 취득수량(원천 정수)</span><strong>{asset.annualAverage.status === 'NOT_APPLICABLE' ? '해당 없음 · 50% 필요경비 특례' : asset.annualAverage.denominator ? decimalLabel(asset.annualAverage.denominator) : '미확정'}</strong></div>
+                    <div><span>연간 총평균 단가(원천 정수)</span><strong>{asset.annualAverage.status === 'NOT_APPLICABLE' ? '해당 없음 · 50% 필요경비 특례' : asset.annualAverage.unitCost ? decimalLabel(asset.annualAverage.unitCost) : '미확정'}</strong></div>
+                    <div><span>정확 단가 비율(원천 정수)</span><strong>{asset.annualAverage.status === 'NOT_APPLICABLE' ? '해당 없음 · 50% 필요경비 특례' : <>{asset.annualAverage.unitCostNumerator ? decimalLabel(asset.annualAverage.unitCostNumerator) : '—'} / {asset.annualAverage.unitCostDenominator ? decimalLabel(asset.annualAverage.unitCostDenominator) : '—'}</>}</strong></div>
                   </div>
                   <dl>
-                    <div><dt>기초수량(원천 최소단위) · 기초가액</dt><dd>{asset.openingQuantity} · {amountLabel(asset.openingBasis, report.denominationAssetId)}</dd></div>
-                    <div><dt>연간 취득수량(원천 최소단위) · 취득가액</dt><dd>{asset.acquiredQuantity} · {amountLabel(asset.acquisitionCost, report.denominationAssetId)}</dd></div>
-                    <div><dt>처분수량(원천 최소단위) · 처분가액</dt><dd>{asset.disposedQuantity} · {amountLabel(asset.grossProceeds, report.denominationAssetId)}</dd></div>
-                    <div><dt>처분 취득가액</dt><dd>{amountLabel(asset.disposedBasis, report.denominationAssetId)}</dd></div>
-                    <div><dt>수수료·필요경비</dt><dd>{amountLabel(asset.deductibleExpense, report.denominationAssetId)}</dd></div>
-                    <div><dt>자산별 손익</dt><dd>{amountLabel(asset.gainLoss, report.denominationAssetId)}</dd></div>
-                    <div><dt>기말수량(원천 최소단위) · 기말가액</dt><dd>{asset.endingQuantity} · {amountLabel(asset.endingCost, report.denominationAssetId)}</dd></div>
+                    <div><dt>기초수량(원천 최소단위) · 기초가액</dt><dd>{asset.openingQuantity} · {formatAmount(asset.openingBasis)}</dd></div>
+                    <div><dt>기초가액 적용 근거</dt><dd>{asset.openingBasisProvenance.status === 'NOT_APPLICABLE' ? '해당 없음' : `${asset.openingBasisProvenance.basisRule ?? '규칙 미확정'} · ${asset.openingBasisProvenance.status}`}</dd></div>
+                    {asset.openingBasisProvenance.actualAcquisitionAmount !== null ? <div><dt>기초 실제취득가</dt><dd>{formatAmount({ status: 'KNOWN', hasAmount: true, amount: asset.openingBasisProvenance.actualAcquisitionAmount })}</dd></div> : null}
+                    {asset.openingBasisProvenance.marketValueAt2026End !== null ? <div><dt>2026년 말 시가</dt><dd>{formatAmount({ status: 'KNOWN', hasAmount: true, amount: asset.openingBasisProvenance.marketValueAt2026End })}</dd></div> : null}
+                    {asset.openingBasisProvenance.sourceRunId !== null ? <div><dt>이전 확정 run</dt><dd>{asset.openingBasisProvenance.sourceRunId}</dd></div> : null}
+                    {asset.basisEvidenceDigest !== null ? <div><dt>50% 특례 증거 digest</dt><dd><code>{asset.basisEvidenceDigest}</code></dd></div> : null}
+                    <div><dt>연간 취득수량(원천 최소단위) · 취득가액</dt><dd>{asset.acquiredQuantity} · {formatAmount(asset.acquisitionCost)}</dd></div>
+                    <div><dt>처분수량(원천 최소단위) · 처분가액</dt><dd>{asset.disposedQuantity} · {formatAmount(asset.grossProceeds)}</dd></div>
+                    <div><dt>처분 취득가액</dt><dd>{formatAmount(asset.disposedBasis)}</dd></div>
+                    <div><dt>수수료·필요경비</dt><dd>{formatAmount(asset.deductibleExpense)}</dd></div>
+                    <div><dt>자산별 손익</dt><dd>{formatAmount(asset.gainLoss)}</dd></div>
+                    <div><dt>기말수량(원천 최소단위) · 기말가액</dt><dd>{asset.endingQuantity} · {formatAmount(asset.endingCost)}</dd></div>
                   </dl>
                 </article>
               ))}
@@ -485,7 +495,7 @@ export function TaxReportDetailV2({
                 <EventRow key={row.movementId}
                   reportId={report.reportId}
                   label={`${row.transactionType} · ${row.taxAssetId}`}
-                  amount={amountLabel(row.income, report.denominationAssetId)}
+                  amount={formatAmount(row.income)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
                   sourceEvidence={row.sourceEvidence} review={row.review} />
@@ -497,14 +507,14 @@ export function TaxReportDetailV2({
                 <EventRow key={row.movementId}
                   reportId={report.reportId}
                   label={`${row.transactionType} · ${row.taxAssetId}`}
-                  amount={amountLabel(row.acquisitionCost, report.denominationAssetId)}
+                  amount={formatAmount(row.acquisitionCost)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
                   sourceEvidence={row.sourceEvidence} review={row.review}
                   financials={[
-                    { label: '취득 대가', value: amountLabel(row.consideration, report.denominationAssetId) },
-                    { label: '취득 부대비용', value: amountLabel(row.acquisitionAncillaryExpense, report.denominationAssetId) },
-                    { label: '총 취득가액', value: amountLabel(row.acquisitionCost, report.denominationAssetId) },
+                    { label: '취득 대가', value: formatAmount(row.consideration) },
+                    { label: '취득 부대비용', value: formatAmount(row.acquisitionAncillaryExpense) },
+                    { label: '총 취득가액', value: formatAmount(row.acquisitionCost) },
                   ]} />
               ))}
             </section>
@@ -514,16 +524,19 @@ export function TaxReportDetailV2({
                 <EventRow key={row.movementId}
                   reportId={report.reportId}
                   label={`${row.transactionType} · ${row.taxAssetId} · ${statusLabel[row.basisMode] ?? row.basisMode}`}
-                  amount={amountLabel(row.gainLoss, report.denominationAssetId)}
+                  amount={formatAmount(row.gainLoss)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
                   sourceEvidence={row.sourceEvidence} review={row.review}
                   financials={[
-                    { label: '총 처분가액', value: amountLabel(row.grossProceeds, report.denominationAssetId) },
-                    { label: '취득원가', value: amountLabel(row.basis, report.denominationAssetId) },
-                    { label: '필요경비', value: amountLabel(row.ancillaryExpense, report.denominationAssetId) },
-                    { label: '원천 실제 발생비용', value: amountLabel(row.incurredExpense, report.denominationAssetId) },
-                    { label: '처분 손익', value: amountLabel(row.gainLoss, report.denominationAssetId) },
+                    { label: '총 처분가액', value: formatAmount(row.grossProceeds) },
+                    { label: '취득원가', value: formatAmount(row.basis) },
+                    { label: '필요경비', value: formatAmount(row.ancillaryExpense) },
+                    { label: '원천 실제 발생비용', value: formatAmount(row.incurredExpense) },
+                    { label: '처분 손익', value: formatAmount(row.gainLoss) },
+                    ...(row.basisEvidenceDigest === null ? [] : [{
+                      label: '50% 특례 증거 digest', value: row.basisEvidenceDigest,
+                    }]),
                   ]} />
               ))}
             </section>
@@ -533,14 +546,17 @@ export function TaxReportDetailV2({
                 <EventRow key={row.movementId}
                   reportId={report.reportId}
                   label={`${row.taxAssetId} · ${row.transactionType}`}
-                  amount={amountLabel(row.gainLoss, report.denominationAssetId)}
+                  amount={formatAmount(row.gainLoss)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
                   sourceEvidence={row.sourceEvidence} review={row.review}
                   financials={[
-                    { label: '수수료 자산 처분가액', value: amountLabel(row.grossProceeds, report.denominationAssetId) },
-                    { label: '수수료 자산 취득원가', value: amountLabel(row.basis, report.denominationAssetId) },
-                    { label: '처분 손익', value: amountLabel(row.gainLoss, report.denominationAssetId) },
+                    { label: '수수료 자산 처분가액', value: formatAmount(row.grossProceeds) },
+                    { label: '수수료 자산 취득원가', value: formatAmount(row.basis) },
+                    { label: '처분 손익', value: formatAmount(row.gainLoss) },
+                    ...(row.basisEvidenceDigest === null ? [] : [{
+                      label: '50% 특례 증거 digest', value: row.basisEvidenceDigest,
+                    }]),
                   ]} />
               ))}
             </section>
@@ -549,11 +565,11 @@ export function TaxReportDetailV2({
               {report.transfers.length === 0 ? <p>해당 내역이 없습니다.</p> : report.transfers.map((row) => (
                 <EventRow key={row.movementId} reportId={report.reportId}
                   label={`${row.transactionType} · ${row.taxAssetId}`}
-                  amount={amountLabel(row.basis, report.denominationAssetId)}
+                  amount={formatAmount(row.basis)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   from={row.from} to={row.to}
                   sourceEvidence={row.sourceEvidence} review={row.review}
-                  financials={[{ label: '이어받은 취득원가', value: amountLabel(row.basis, report.denominationAssetId) }]} />
+                  financials={[{ label: '이어받은 취득원가', value: formatAmount(row.basis) }]} />
               ))}
             </section>
             <section>

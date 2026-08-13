@@ -33,6 +33,7 @@ export type PublicTaxReportV2Policy = {
   applicationMode: 'ENACTED' | 'SIMULATION'
   effectiveFrom: string
   effectiveThrough: string
+  denominationAtomicDecimals: number
   roundingProfileStatus: 'APPROVED' | 'ESTIMATE_ONLY_UNAPPROVED'
   roundingProfileEvidenceDigest: string | null
   legalReferences: Array<{
@@ -65,10 +66,17 @@ export type PublicTaxReportV2AssetSummary = {
   taxAssetId: string
   openingQuantity: string
   openingBasis: PublicTaxReportV2Amount
+  openingBasisProvenance: {
+    status: 'NOT_APPLICABLE' | 'UNKNOWN' | 'KNOWN'
+    basisRule: string | null
+    actualAcquisitionAmount: string | null
+    marketValueAt2026End: string | null
+    sourceRunId: string | null
+  }
   acquiredQuantity: string
   acquisitionCost: PublicTaxReportV2Amount
   annualAverage: {
-    status: 'KNOWN' | 'UNKNOWN'
+    status: 'KNOWN' | 'UNKNOWN' | 'NOT_APPLICABLE'
     numerator: string | null
     denominator: string | null
     unitCost: string | null
@@ -106,6 +114,12 @@ export type PublicTaxReportV2Valuation = {
   baseAtomicUnits: string | null
   quoteAtomicUnits: string | null
   rounding: string | null
+  providerStatus: 'UNKNOWN' | 'KNOWN'
+  provider: string | null
+  datasetVersionStatus: 'UNKNOWN' | 'KNOWN'
+  datasetVersion: string | null
+  marketStatus: 'UNKNOWN' | 'KNOWN'
+  market: string | null
 }
 
 export type PublicTaxReportV2SourceEvidence = {
@@ -142,6 +156,9 @@ type PublicMovementBase = {
   review: PublicTaxReportV2RowReview
 }
 
+type PublicAcquisitionKind = 'ACQUIRE' | 'OTHER_ACQUISITION'
+type PublicIncomeKind = 'LENDING_INCOME_CASH' | 'LENDING_INCOME_ASSET'
+
 export type PublicTaxReportV2Detail = {
   schemaVersion: typeof REPORT_SCHEMA_V2
   reportId: string
@@ -155,6 +172,7 @@ export type PublicTaxReportV2Detail = {
     | 'INCOMPLETE'
     | 'NO_TAX_EVENTS'
     | 'TAX_ZERO'
+    | 'ESTIMATED_TAX_ZERO'
     | 'ESTIMATED_TAX_DUE'
     | 'TAX_DUE'
     | 'SIMULATED_TAX_ZERO'
@@ -165,13 +183,7 @@ export type PublicTaxReportV2Detail = {
     | 'FILING_ACTION_REQUIRED'
     | 'FILING_NOT_APPLICABLE'
   filingStatus: 'READY' | 'BLOCKED'
-  filingSubmissionStatus:
-    | 'NOT_SUBMITTED'
-    | 'NOT_APPLICABLE'
-    | 'SUBMITTED'
-    | 'ACCEPTED'
-    | 'REJECTED'
-    | 'UNKNOWN'
+  filingSubmissionStatus: 'UNKNOWN' | 'NOT_APPLICABLE'
   inputPeriod: PublicTaxReportV2Interval
   dataCoverage: {
     status: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE'
@@ -191,6 +203,7 @@ export type PublicTaxReportV2Detail = {
   valuationFinality: 'FINAL' | 'PROVISIONAL'
   reportFinality: 'FINAL' | 'PROVISIONAL'
   denominationAssetId: string
+  denominationAtomicDecimals: number
   counts: {
     assetSummaries: number
     disposals: number
@@ -257,11 +270,15 @@ export type PublicTaxReportV2Detail = {
   }>
   feeAssetDisposals: PublicTaxReportV2Detail['disposals']
   acquisitions: Array<PublicMovementBase & {
+    transactionType: PublicAcquisitionKind
+    kind: PublicAcquisitionKind
     consideration: PublicTaxReportV2Amount
     acquisitionAncillaryExpense: PublicTaxReportV2Amount
     acquisitionCost: PublicTaxReportV2Amount
   }>
   incomeRows: Array<PublicMovementBase & {
+    transactionType: PublicIncomeKind
+    kind: PublicIncomeKind
     income: PublicTaxReportV2Amount
     ancillaryExpense: PublicTaxReportV2Amount
   }>
@@ -490,7 +507,7 @@ const policy = (value: unknown, path: string): PublicTaxReportV2Policy => {
   const row = record(value, path, [
     'name', 'version', 'artifactDigest', 'sourceSetDigest',
     'applicationMode', 'effectiveFrom', 'effectiveThrough',
-    'roundingProfileStatus', 'legalReferences',
+    'denominationAtomicDecimals', 'roundingProfileStatus', 'legalReferences',
   ], ['roundingProfileEvidenceDigest'])
   const legalReferences = array(
     row.legalReferences,
@@ -546,6 +563,16 @@ const policy = (value: unknown, path: string): PublicTaxReportV2Policy => {
     applicationMode: oneOf(row.applicationMode, `${path}.applicationMode`, ['ENACTED', 'SIMULATION']),
     effectiveFrom: timestamp(row.effectiveFrom, `${path}.effectiveFrom`),
     effectiveThrough: timestamp(row.effectiveThrough, `${path}.effectiveThrough`),
+    denominationAtomicDecimals: (() => {
+      const decimals = integer(
+        row.denominationAtomicDecimals,
+        `${path}.denominationAtomicDecimals`,
+      )
+      if (decimals < 1 || decimals > 18) {
+        invalid(`${path}.denominationAtomicDecimals`, 'must be between 1 and 18')
+      }
+      return decimals
+    })(),
     roundingProfileStatus,
     roundingProfileEvidenceDigest,
     legalReferences,
@@ -594,7 +621,9 @@ const average = (value: unknown, path: string) => {
     'numerator', 'denominator', 'unitCost', 'unitCostNumerator',
     'unitCostDenominator', 'rounding',
   ])
-  const status = oneOf(row.status, `${path}.status`, ['KNOWN', 'UNKNOWN'])
+  const status = oneOf(row.status, `${path}.status`, [
+    'KNOWN', 'UNKNOWN', 'NOT_APPLICABLE',
+  ])
   const result = {
     status,
     numerator: optionalString(row.numerator, `${path}.numerator`),
@@ -608,14 +637,32 @@ const average = (value: unknown, path: string) => {
   if (status === 'KNOWN' && values.some((item) => item === null)) {
     invalid(path, 'KNOWN average requires exact numerator, denominator and rounding')
   }
-  if (status === 'UNKNOWN' && values.some((item) => item !== null)) {
-    invalid(path, 'UNKNOWN average must omit exact values')
+  if (status !== 'KNOWN' && values.some((item) => item !== null)) {
+    invalid(path, `${status} average must omit exact values`)
   }
   return result
 }
 
 const basisMode = (value: unknown, path: string) =>
   oneOf(value, path, ['ACTUAL_TOTAL_AVERAGE', 'DEEMED_EXPENSE_50'])
+
+const basisDecision = (
+  modeValue: unknown,
+  evidenceValue: unknown,
+  path: string,
+) => {
+  const mode = basisMode(modeValue, `${path}.basisMode`)
+  const evidence = evidenceValue === undefined
+    ? null
+    : digest(evidenceValue, `${path}.basisEvidenceDigest`)
+  if ((mode === 'DEEMED_EXPENSE_50') !== (evidence !== null)) {
+    invalid(
+      path,
+      '50% deemed-expense mode and its statutory evidence must appear together',
+    )
+  }
+  return { mode, evidence }
+}
 
 const account = (
   value: unknown,
@@ -660,7 +707,8 @@ const valuation = (
   const row = record(value, path, ['status'], [
     'valuationId', 'kind', 'effectiveAt', 'quoteId',
     'snapshotArtifactDigest', 'baseAtomicUnits', 'quoteAtomicUnits',
-    'rounding',
+    'rounding', 'providerStatus', 'provider', 'datasetVersionStatus',
+    'datasetVersion', 'marketStatus', 'market',
   ])
   const status = oneOf(row.status, `${path}.status`, [
     'UNKNOWN', 'PARTIAL', 'KNOWN',
@@ -683,6 +731,27 @@ const valuation = (
       ? null
       : numeric(row.quoteAtomicUnits, `${path}.quoteAtomicUnits`, true),
     rounding: optionalString(row.rounding, `${path}.rounding`),
+    providerStatus: oneOf(
+      row.providerStatus,
+      `${path}.providerStatus`,
+      ['UNKNOWN', 'KNOWN'],
+    ),
+    provider: optionalString(row.provider, `${path}.provider`),
+    datasetVersionStatus: oneOf(
+      row.datasetVersionStatus,
+      `${path}.datasetVersionStatus`,
+      ['UNKNOWN', 'KNOWN'],
+    ),
+    datasetVersion: optionalString(
+      row.datasetVersion,
+      `${path}.datasetVersion`,
+    ),
+    marketStatus: oneOf(
+      row.marketStatus,
+      `${path}.marketStatus`,
+      ['UNKNOWN', 'KNOWN'],
+    ),
+    market: optionalString(row.market, `${path}.market`),
   }
   const exactFields = [
     result.valuationId,
@@ -693,16 +762,35 @@ const valuation = (
     result.baseAtomicUnits,
     result.quoteAtomicUnits,
     result.rounding,
+    result.provider,
+    result.datasetVersion,
+    result.market,
   ]
   if (
     (status === 'UNKNOWN' && exactFields.some((field) => field !== null)) ||
     (status !== 'UNKNOWN' && result.valuationId === null) ||
+    (result.providerStatus === 'KNOWN') !== (result.provider !== null) ||
+    (result.datasetVersionStatus === 'KNOWN') !==
+      (result.datasetVersion !== null) ||
+    (result.marketStatus === 'KNOWN') !== (result.market !== null) ||
     (status === 'KNOWN' &&
-      (result.kind === null || result.effectiveAt === null))
+      (exactFields.some((field) => field === null) ||
+        result.providerStatus !== 'KNOWN' ||
+        result.datasetVersionStatus !== 'KNOWN' ||
+        result.marketStatus !== 'KNOWN'))
   ) {
     invalid(path, 'valuation completeness fields disagree')
   }
   return result
+}
+
+const valuationPair = (row: JsonRecord, path: string) => {
+  const valuationId = optionalString(row.valuationId, `${path}.valuationId`)
+  const trace = valuation(row.valuation, `${path}.valuation`)
+  if (valuationId !== trace.valuationId) {
+    invalid(path, 'valuation identity and nested trace must match exactly')
+  }
+  return { valuationId, valuation: trace }
 }
 
 const sourceEvidence = (
@@ -758,23 +846,156 @@ const rowReview = (
   return { status, limitations }
 }
 
-const assetSummary = (value: unknown, path: string): PublicTaxReportV2AssetSummary => {
+const assetSummary = (
+  value: unknown,
+  path: string,
+  taxYear: number,
+): PublicTaxReportV2AssetSummary => {
   const row = record(value, path, [
-    'taxAssetId', 'openingQuantity', 'openingBasis', 'acquiredQuantity',
+    'taxAssetId', 'openingQuantity', 'openingBasis',
+    'openingBasisProvenance', 'acquiredQuantity',
     'acquisitionCost', 'annualAverage', 'disposedQuantity', 'grossProceeds',
     'incurredExpense', 'deductibleExpense', 'disposedBasis', 'gainLoss',
     'endingQuantity', 'endingCost', 'basisMode',
   ], ['basisEvidenceDigest'])
-  const evidence = row.basisEvidenceDigest === undefined
-    ? null
-    : digest(row.basisEvidenceDigest, `${path}.basisEvidenceDigest`)
+  const { mode, evidence } = basisDecision(
+    row.basisMode,
+    row.basisEvidenceDigest,
+    path,
+  )
+  const openingQuantity = numeric(
+    row.openingQuantity,
+    `${path}.openingQuantity`,
+    true,
+  )
+  const provenanceRow = record(
+    row.openingBasisProvenance,
+    `${path}.openingBasisProvenance`,
+    ['status'],
+    [
+      'basisRule', 'actualAcquisitionAmount', 'marketValueAt2026End',
+      'sourceRunId',
+    ],
+  )
+  const openingBasisProvenance = {
+    status: oneOf(
+      provenanceRow.status,
+      `${path}.openingBasisProvenance.status`,
+      ['NOT_APPLICABLE', 'UNKNOWN', 'KNOWN'],
+    ),
+    basisRule: optionalString(
+      provenanceRow.basisRule,
+      `${path}.openingBasisProvenance.basisRule`,
+    ),
+    actualAcquisitionAmount: provenanceRow.actualAcquisitionAmount === undefined
+      ? null
+      : numeric(
+        provenanceRow.actualAcquisitionAmount,
+        `${path}.openingBasisProvenance.actualAcquisitionAmount`,
+        true,
+      ),
+    marketValueAt2026End: provenanceRow.marketValueAt2026End === undefined
+      ? null
+      : numeric(
+        provenanceRow.marketValueAt2026End,
+        `${path}.openingBasisProvenance.marketValueAt2026End`,
+        true,
+      ),
+    sourceRunId: optionalString(
+      provenanceRow.sourceRunId,
+      `${path}.openingBasisProvenance.sourceRunId`,
+    ),
+  } as PublicTaxReportV2AssetSummary['openingBasisProvenance']
+  if (
+    openingBasisProvenance.status === 'NOT_APPLICABLE' &&
+    Object.entries(openingBasisProvenance).some(
+      ([key, entry]) => key !== 'status' && entry !== null,
+    )
+  ) {
+    invalid(`${path}.openingBasisProvenance`, 'NOT_APPLICABLE must not carry values')
+  }
+  if (
+    (openingQuantity === '0') !==
+    (openingBasisProvenance.status === 'NOT_APPLICABLE')
+  ) {
+    invalid(
+      `${path}.openingBasisProvenance`,
+      'must be NOT_APPLICABLE exactly when opening quantity is zero',
+    )
+  }
+  if (openingBasisProvenance.status === 'KNOWN') {
+    const knownRule =
+      (openingBasisProvenance.basisRule === 'ACTUAL_ACQUISITION' &&
+        openingBasisProvenance.actualAcquisitionAmount !== null) ||
+      (openingBasisProvenance.basisRule === 'PRE_EFFECTIVE_MAX_ACTUAL_MARKET' &&
+        openingBasisProvenance.actualAcquisitionAmount !== null &&
+        openingBasisProvenance.marketValueAt2026End !== null) ||
+      (openingBasisProvenance.basisRule === 'PRIOR_FINAL_RUN' &&
+        openingBasisProvenance.sourceRunId !== null)
+    if (!knownRule) {
+      invalid(
+        `${path}.openingBasisProvenance`,
+        'KNOWN provenance is missing the evidence required by its basis rule',
+      )
+    }
+    const expectedRule = taxYear < 2027
+      ? 'ACTUAL_ACQUISITION'
+      : taxYear === 2027
+        ? 'PRE_EFFECTIVE_MAX_ACTUAL_MARKET'
+        : 'PRIOR_FINAL_RUN'
+    if (openingBasisProvenance.basisRule !== expectedRule) {
+      invalid(
+        `${path}.openingBasisProvenance.basisRule`,
+        `must be ${expectedRule} for tax year ${taxYear}`,
+      )
+    }
+  }
+  const openingBasis = amount(row.openingBasis, `${path}.openingBasis`)
+  if (
+    openingQuantity === '0' &&
+    (openingBasis.status !== 'KNOWN' || openingBasis.amount !== '0')
+  ) {
+    invalid(
+      `${path}.openingBasis`,
+      'zero opening quantity must carry a known zero opening basis',
+    )
+  }
+  if (openingBasisProvenance.status === 'KNOWN' && openingBasis.status === 'KNOWN') {
+    let expectedBasis: bigint | null = null
+    if (openingBasisProvenance.basisRule === 'ACTUAL_ACQUISITION') {
+      expectedBasis = BigInt(openingBasisProvenance.actualAcquisitionAmount!)
+    } else if (
+      openingBasisProvenance.basisRule === 'PRE_EFFECTIVE_MAX_ACTUAL_MARKET'
+    ) {
+      const actual = BigInt(openingBasisProvenance.actualAcquisitionAmount!)
+      const market = BigInt(openingBasisProvenance.marketValueAt2026End!)
+      expectedBasis = actual > market ? actual : market
+    }
+    if (expectedBasis !== null && BigInt(openingBasis.amount) !== expectedBasis) {
+      invalid(
+        `${path}.openingBasis`,
+        'does not match the canonical opening-basis transition evidence',
+      )
+    }
+  }
+  const annualAverage = average(row.annualAverage, `${path}.annualAverage`)
+  if (
+    (mode === 'DEEMED_EXPENSE_50') !==
+    (annualAverage.status === 'NOT_APPLICABLE')
+  ) {
+    invalid(
+      `${path}.annualAverage`,
+      'must be NOT_APPLICABLE exactly for the 50% deemed-expense mode',
+    )
+  }
   return {
     taxAssetId: string(row.taxAssetId, `${path}.taxAssetId`),
-    openingQuantity: numeric(row.openingQuantity, `${path}.openingQuantity`, true),
-    openingBasis: amount(row.openingBasis, `${path}.openingBasis`),
+    openingQuantity,
+    openingBasis,
+    openingBasisProvenance,
     acquiredQuantity: numeric(row.acquiredQuantity, `${path}.acquiredQuantity`, true),
     acquisitionCost: amount(row.acquisitionCost, `${path}.acquisitionCost`),
-    annualAverage: average(row.annualAverage, `${path}.annualAverage`),
+    annualAverage,
     disposedQuantity: numeric(row.disposedQuantity, `${path}.disposedQuantity`, true),
     grossProceeds: amount(row.grossProceeds, `${path}.grossProceeds`),
     incurredExpense: amount(row.incurredExpense, `${path}.incurredExpense`),
@@ -783,7 +1004,7 @@ const assetSummary = (value: unknown, path: string): PublicTaxReportV2AssetSumma
     gainLoss: amount(row.gainLoss, `${path}.gainLoss`),
     endingQuantity: numeric(row.endingQuantity, `${path}.endingQuantity`, true),
     endingCost: amount(row.endingCost, `${path}.endingCost`),
-    basisMode: basisMode(row.basisMode, `${path}.basisMode`),
+    basisMode: mode,
     basisEvidenceDigest: evidence,
   }
 }
@@ -796,6 +1017,24 @@ const disposal = (value: unknown, path: string) => {
     'incurredExpense', 'basisMode', 'occurredAt', 'account', 'valuation',
     'sourceEvidence', 'review',
   ], ['valuationId', 'rounding', 'relatedMovementId', 'basisEvidenceDigest'])
+  const { mode, evidence } = basisDecision(
+    row.basisMode,
+    row.basisEvidenceDigest,
+    path,
+  )
+  const parsedValuation = valuationPair(row, path)
+  const costMethod = oneOf(
+    row.costMethod,
+    `${path}.costMethod`,
+    ['ANNUAL_TOTAL_AVERAGE'],
+  )
+  const rounding = oneOf(
+    row.rounding,
+    `${path}.rounding`,
+    mode === 'ACTUAL_TOTAL_AVERAGE'
+      ? ['CUMULATIVE_FLOOR_ANNUAL_POOL']
+      : ['CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS'],
+  )
   return {
     transactionType: oneOf(
       row.transactionType,
@@ -816,16 +1055,14 @@ const disposal = (value: unknown, path: string) => {
     incurredExpense: amount(row.incurredExpense, `${path}.incurredExpense`),
     basis: amount(row.basis, `${path}.basis`),
     gainLoss: amount(row.gainLoss, `${path}.gainLoss`),
-    valuationId: optionalString(row.valuationId, `${path}.valuationId`),
-    costMethod: string(row.costMethod, `${path}.costMethod`),
-    rounding: optionalString(row.rounding, `${path}.rounding`),
-    basisMode: basisMode(row.basisMode, `${path}.basisMode`),
-    basisEvidenceDigest: row.basisEvidenceDigest === undefined
-      ? null
-      : digest(row.basisEvidenceDigest, `${path}.basisEvidenceDigest`),
+    valuationId: parsedValuation.valuationId,
+    costMethod,
+    rounding,
+    basisMode: mode,
+    basisEvidenceDigest: evidence,
     occurredAt: timestamp(row.occurredAt, `${path}.occurredAt`),
     account: account(row.account, `${path}.account`),
-    valuation: valuation(row.valuation, `${path}.valuation`),
+    valuation: parsedValuation.valuation,
     sourceEvidence: array(
       row.sourceEvidence,
       `${path}.sourceEvidence`,
@@ -835,28 +1072,31 @@ const disposal = (value: unknown, path: string) => {
   }
 }
 
-const movementBase = (row: JsonRecord, path: string): PublicMovementBase => ({
-  transactionType: string(row.transactionType, `${path}.transactionType`),
-  movementId: string(row.movementId, `${path}.movementId`),
-  relatedMovementId: optionalString(row.relatedMovementId, `${path}.relatedMovementId`),
-  eventId: string(row.eventId, `${path}.eventId`),
-  revisionId: string(row.revisionId, `${path}.revisionId`),
-  legId: string(row.legId, `${path}.legId`),
-  kind: string(row.kind, `${path}.kind`),
-  taxAssetId: string(row.taxAssetId, `${path}.taxAssetId`),
-  ledgerAssetId: string(row.ledgerAssetId, `${path}.ledgerAssetId`),
-  quantity: numeric(row.quantity, `${path}.quantity`, true),
-  valuationId: optionalString(row.valuationId, `${path}.valuationId`),
-  occurredAt: timestamp(row.occurredAt, `${path}.occurredAt`),
-  account: account(row.account, `${path}.account`),
-  valuation: valuation(row.valuation, `${path}.valuation`),
-  sourceEvidence: array(
-    row.sourceEvidence,
-    `${path}.sourceEvidence`,
-    sourceEvidence,
-  ),
-  review: rowReview(row.review, `${path}.review`),
-})
+const movementBase = (row: JsonRecord, path: string): PublicMovementBase => {
+  const parsedValuation = valuationPair(row, path)
+  return {
+    transactionType: string(row.transactionType, `${path}.transactionType`),
+    movementId: string(row.movementId, `${path}.movementId`),
+    relatedMovementId: optionalString(row.relatedMovementId, `${path}.relatedMovementId`),
+    eventId: string(row.eventId, `${path}.eventId`),
+    revisionId: string(row.revisionId, `${path}.revisionId`),
+    legId: string(row.legId, `${path}.legId`),
+    kind: string(row.kind, `${path}.kind`),
+    taxAssetId: string(row.taxAssetId, `${path}.taxAssetId`),
+    ledgerAssetId: string(row.ledgerAssetId, `${path}.ledgerAssetId`),
+    quantity: numeric(row.quantity, `${path}.quantity`, true),
+    valuationId: parsedValuation.valuationId,
+    occurredAt: timestamp(row.occurredAt, `${path}.occurredAt`),
+    account: account(row.account, `${path}.account`),
+    valuation: parsedValuation.valuation,
+    sourceEvidence: array(
+      row.sourceEvidence,
+      `${path}.sourceEvidence`,
+      sourceEvidence,
+    ),
+    review: rowReview(row.review, `${path}.review`),
+  }
+}
 
 const acquisition = (value: unknown, path: string) => {
   const row = record(value, path, [
@@ -874,6 +1114,14 @@ const acquisition = (value: unknown, path: string) => {
     ),
     acquisitionCost: amount(row.acquisitionCost, `${path}.acquisitionCost`),
   }
+  const kind = oneOf(result.kind, `${path}.kind`, [
+    'ACQUIRE', 'OTHER_ACQUISITION',
+  ])
+  const transactionType = oneOf(
+    result.transactionType,
+    `${path}.transactionType`,
+    ['ACQUIRE', 'OTHER_ACQUISITION'],
+  )
   if (
     result.consideration.status === 'KNOWN' &&
     result.acquisitionAncillaryExpense.status === 'KNOWN' &&
@@ -884,10 +1132,10 @@ const acquisition = (value: unknown, path: string) => {
   ) {
     invalid(path, 'consideration plus acquisition ancillary expense must equal acquisition cost')
   }
-  if (result.transactionType !== result.kind) {
+  if (transactionType !== kind) {
     invalid(`${path}.transactionType`, 'must equal acquisition kind')
   }
-  return result
+  return { ...result, transactionType, kind }
 }
 
 const income = (value: unknown, path: string) => {
@@ -901,10 +1149,18 @@ const income = (value: unknown, path: string) => {
     income: amount(row.income, `${path}.income`),
     ancillaryExpense: amount(row.ancillaryExpense, `${path}.ancillaryExpense`),
   }
-  if (result.transactionType !== result.kind) {
+  const kind = oneOf(result.kind, `${path}.kind`, [
+    'LENDING_INCOME_CASH', 'LENDING_INCOME_ASSET',
+  ])
+  const transactionType = oneOf(
+    result.transactionType,
+    `${path}.transactionType`,
+    ['LENDING_INCOME_CASH', 'LENDING_INCOME_ASSET'],
+  )
+  if (transactionType !== kind) {
     invalid(`${path}.transactionType`, 'must equal income kind')
   }
-  return result
+  return { ...result, transactionType, kind }
 }
 
 const transfer = (value: unknown, path: string) => {
@@ -1071,7 +1327,8 @@ export const decodeAndProjectTaxReportModelV2 = (
     'taxYearCloseStatus', 'valuationFinality', 'reportFinality',
     'taxInventoryRunId', 'taxEstimateId', 'lotRunId',
     'sourceLedgerGenerationId',
-    'schemaDigest', 'denominationAssetId', 'evidencePackDigest', 'counts',
+    'schemaDigest', 'denominationAssetId', 'denominationAtomicDecimals',
+    'evidencePackDigest', 'counts',
     'summary', 'assetSummaries', 'disposals', 'feeAssetDisposals',
     'acquisitions', 'incomeRows', 'transfers', 'excludedConversions',
     'nonTaxableTransfers', 'limitations', 'sourceCoverage', 'policy',
@@ -1083,6 +1340,8 @@ export const decodeAndProjectTaxReportModelV2 = (
   // from the browser projection.
   string(root.subjectId, '$.subjectId')
   string(root.residentId, '$.residentId')
+  const taxYear = integer(root.taxYear, '$.taxYear')
+  if (taxYear < 2025) invalid('$.taxYear', 'is unsupported')
 
   const countsRow = record(root.counts, '$.counts', [
     'assetSummaries', 'disposals', 'feeAssetDisposals', 'acquisitions',
@@ -1113,7 +1372,11 @@ export const decodeAndProjectTaxReportModelV2 = (
     'status', 'assurance', 'from', 'through', 'coveredIntervals',
     'uncoveredIntervals',
   ], ['declaration'])
-  const assetSummaries = array(root.assetSummaries, '$.assetSummaries', assetSummary)
+  const assetSummaries = array(
+    root.assetSummaries,
+    '$.assetSummaries',
+    (row, path) => assetSummary(row, path, taxYear),
+  )
   const disposals = array(root.disposals, '$.disposals', disposal)
   const feeAssetDisposals = array(root.feeAssetDisposals, '$.feeAssetDisposals', disposal)
   const acquisitions = array(root.acquisitions, '$.acquisitions', acquisition)
@@ -1145,6 +1408,51 @@ export const decodeAndProjectTaxReportModelV2 = (
   )) {
     invalid('$.feeAssetDisposals', 'must contain only FEE_ASSET_DISPOSAL rows')
   }
+  const assetDecisionById = new Map<
+    string,
+    Pick<PublicTaxReportV2AssetSummary, 'basisMode' | 'basisEvidenceDigest'>
+  >()
+  for (const [index, summary] of assetSummaries.entries()) {
+    if (assetDecisionById.has(summary.taxAssetId)) {
+      invalid(
+        `$.assetSummaries[${index}].taxAssetId`,
+        'must be unique within the resident annual pool',
+      )
+    }
+    if (taxYear < 2027 && summary.basisMode === 'DEEMED_EXPENSE_50') {
+      invalid(
+        `$.assetSummaries[${index}].basisMode`,
+        '50% deemed-expense mode is unavailable before tax year 2027',
+      )
+    }
+    assetDecisionById.set(summary.taxAssetId, summary)
+  }
+  for (const [collection, rows] of [
+    ['disposals', disposals],
+    ['feeAssetDisposals', feeAssetDisposals],
+  ] as const) {
+    for (const [index, row] of rows.entries()) {
+      const summary = assetDecisionById.get(row.taxAssetId) ?? invalid(
+          `$.${collection}[${index}].taxAssetId`,
+          'must have exactly one matching asset-year basis decision',
+        )
+      if (
+        summary.basisMode !== row.basisMode ||
+        summary.basisEvidenceDigest !== row.basisEvidenceDigest
+      ) {
+        invalid(
+          `$.${collection}[${index}].basisMode`,
+          'must match the asset-year basis decision exactly',
+        )
+      }
+      if (taxYear < 2027 && row.basisMode === 'DEEMED_EXPENSE_50') {
+        invalid(
+          `$.${collection}[${index}].basisMode`,
+          '50% deemed-expense mode is unavailable before tax year 2027',
+        )
+      }
+    }
+  }
   const filingAction = oneOf(root.filingAction, '$.filingAction', [
     'BLOCKED', 'REVIEW_REQUIRED', 'FILING_ACTION_REQUIRED', 'FILING_NOT_APPLICABLE',
   ])
@@ -1155,6 +1463,36 @@ export const decodeAndProjectTaxReportModelV2 = (
   ) {
     invalid('$.filingStatus', 'must agree with the canonical filing action')
   }
+  const denominationAtomicDecimals = integer(
+    root.denominationAtomicDecimals,
+    '$.denominationAtomicDecimals',
+  )
+  if (denominationAtomicDecimals < 1 || denominationAtomicDecimals > 18) {
+    invalid('$.denominationAtomicDecimals', 'must be between 1 and 18')
+  }
+  const parsedPolicy = policy(root.policy, '$.policy')
+  if (parsedPolicy.denominationAtomicDecimals !== denominationAtomicDecimals) {
+    invalid(
+      '$.denominationAtomicDecimals',
+      'must equal the exact policy denomination scale',
+    )
+  }
+  const filingSubmissionStatus = oneOf(
+    root.filingSubmissionStatus,
+    '$.filingSubmissionStatus',
+    ['UNKNOWN', 'NOT_APPLICABLE'],
+  )
+  if (
+    (parsedPolicy.applicationMode === 'ENACTED' &&
+      filingSubmissionStatus !== 'UNKNOWN') ||
+    (parsedPolicy.applicationMode === 'SIMULATION' &&
+      filingSubmissionStatus !== 'NOT_APPLICABLE')
+  ) {
+    invalid(
+      '$.filingSubmissionStatus',
+      'must match the report policy application mode',
+    )
+  }
 
   return {
     schemaVersion: REPORT_SCHEMA_V2,
@@ -1162,22 +1500,17 @@ export const decodeAndProjectTaxReportModelV2 = (
     reportModelDigest: artifactDigest,
     inputDigest: digest(root.inputDigest, '$.inputDigest'),
     evidencePackDigest: digest(root.evidencePackDigest, '$.evidencePackDigest'),
-    taxYear: (() => {
-      const year = integer(root.taxYear, '$.taxYear')
-      if (year < 2025) invalid('$.taxYear', 'is unsupported')
-      return year
-    })(),
+    taxYear,
     status: oneOf(root.status, '$.status', ['FINAL', 'PARTIAL']),
     calculationStatus: oneOf(root.calculationStatus, '$.calculationStatus', ['COMPLETE', 'BLOCKED']),
     taxOutcome: oneOf(root.taxOutcome, '$.taxOutcome', [
-      'INCOMPLETE', 'NO_TAX_EVENTS', 'TAX_ZERO', 'ESTIMATED_TAX_DUE',
+      'INCOMPLETE', 'NO_TAX_EVENTS', 'TAX_ZERO', 'ESTIMATED_TAX_ZERO',
+      'ESTIMATED_TAX_DUE',
       'TAX_DUE', 'SIMULATED_TAX_ZERO', 'SIMULATED_TAX_DUE',
     ]),
     filingAction,
     filingStatus,
-    filingSubmissionStatus: oneOf(root.filingSubmissionStatus, '$.filingSubmissionStatus', [
-      'NOT_SUBMITTED', 'NOT_APPLICABLE', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'UNKNOWN',
-    ]),
+    filingSubmissionStatus,
     inputPeriod: interval(root.inputPeriod, '$.inputPeriod'),
     dataCoverage: {
       status: oneOf(coverageRow.status, '$.dataCoverage.status', ['UNKNOWN', 'PARTIAL', 'COMPLETE']),
@@ -1195,6 +1528,7 @@ export const decodeAndProjectTaxReportModelV2 = (
     valuationFinality: oneOf(root.valuationFinality, '$.valuationFinality', ['FINAL', 'PROVISIONAL']),
     reportFinality: oneOf(root.reportFinality, '$.reportFinality', ['FINAL', 'PROVISIONAL']),
     denominationAssetId: string(root.denominationAssetId, '$.denominationAssetId'),
+    denominationAtomicDecimals,
     counts,
     summary: {
       grossProceeds: amount(summaryRow.grossProceeds, '$.summary.grossProceeds'),
@@ -1237,7 +1571,7 @@ export const decodeAndProjectTaxReportModelV2 = (
         '$.sourceLedgerGenerationId',
       ),
       schemaDigest: digest(root.schemaDigest, '$.schemaDigest'),
-      policy: policy(root.policy, '$.policy'),
+      policy: parsedPolicy,
       engine: producer(root.engine, '$.engine'),
     },
     issuedAt: timestamp(root.issuedAt, '$.issuedAt'),
@@ -1279,7 +1613,8 @@ export const publicTaxReportV2PolicySchema = {
   additionalProperties: false,
   required: [
     'name', 'version', 'artifactDigest', 'sourceSetDigest', 'applicationMode',
-    'effectiveFrom', 'effectiveThrough', 'roundingProfileStatus',
+    'effectiveFrom', 'effectiveThrough', 'denominationAtomicDecimals',
+    'roundingProfileStatus',
     'roundingProfileEvidenceDigest', 'legalReferences',
   ],
   properties: {
@@ -1290,6 +1625,11 @@ export const publicTaxReportV2PolicySchema = {
     applicationMode: { type: 'string', enum: ['ENACTED', 'SIMULATION'] },
     effectiveFrom: publicStringSchema,
     effectiveThrough: publicStringSchema,
+    denominationAtomicDecimals: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 18,
+    },
     roundingProfileStatus: {
       type: 'string',
       enum: ['APPROVED', 'ESTIMATE_ONLY_UNAPPROVED'],
@@ -1385,7 +1725,10 @@ const publicAnnualAverageSchema = {
     'unitCostDenominator', 'rounding',
   ],
   properties: {
-    status: { type: 'string', enum: ['KNOWN', 'UNKNOWN'] },
+    status: {
+      type: 'string',
+      enum: ['KNOWN', 'UNKNOWN', 'NOT_APPLICABLE'],
+    },
     numerator: publicNullableStringSchema,
     denominator: publicNullableStringSchema,
     unitCost: publicNullableStringSchema,
@@ -1434,7 +1777,8 @@ const publicValuationSchema = {
   required: [
     'status', 'valuationId', 'kind', 'effectiveAt', 'quoteId',
     'snapshotArtifactDigest', 'baseAtomicUnits', 'quoteAtomicUnits',
-    'rounding',
+    'rounding', 'providerStatus', 'provider', 'datasetVersionStatus',
+    'datasetVersion', 'marketStatus', 'market',
   ],
   properties: {
     status: { type: 'string', enum: ['UNKNOWN', 'PARTIAL', 'KNOWN'] },
@@ -1448,6 +1792,12 @@ const publicValuationSchema = {
     baseAtomicUnits: publicNullableStringSchema,
     quoteAtomicUnits: publicNullableStringSchema,
     rounding: publicNullableStringSchema,
+    providerStatus: { type: 'string', enum: ['UNKNOWN', 'KNOWN'] },
+    provider: publicNullableStringSchema,
+    datasetVersionStatus: { type: 'string', enum: ['UNKNOWN', 'KNOWN'] },
+    datasetVersion: publicNullableStringSchema,
+    marketStatus: { type: 'string', enum: ['UNKNOWN', 'KNOWN'] },
+    market: publicNullableStringSchema,
   },
 } as const
 
@@ -1486,7 +1836,8 @@ const publicAssetSummarySchema = {
   type: 'object',
   additionalProperties: false,
   required: [
-    'taxAssetId', 'openingQuantity', 'openingBasis', 'acquiredQuantity',
+    'taxAssetId', 'openingQuantity', 'openingBasis',
+    'openingBasisProvenance', 'acquiredQuantity',
     'acquisitionCost', 'annualAverage', 'disposedQuantity', 'grossProceeds',
     'incurredExpense', 'deductibleExpense', 'disposedBasis', 'gainLoss',
     'endingQuantity', 'endingCost', 'basisMode', 'basisEvidenceDigest',
@@ -1495,6 +1846,24 @@ const publicAssetSummarySchema = {
     taxAssetId: publicStringSchema,
     openingQuantity: publicStringSchema,
     openingBasis: publicTaxReportV2AmountSchema,
+    openingBasisProvenance: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'status', 'basisRule', 'actualAcquisitionAmount',
+        'marketValueAt2026End', 'sourceRunId',
+      ],
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['NOT_APPLICABLE', 'UNKNOWN', 'KNOWN'],
+        },
+        basisRule: publicNullableStringSchema,
+        actualAcquisitionAmount: publicNullableStringSchema,
+        marketValueAt2026End: publicNullableStringSchema,
+        sourceRunId: publicNullableStringSchema,
+      },
+    },
     acquiredQuantity: publicStringSchema,
     acquisitionCost: publicTaxReportV2AmountSchema,
     annualAverage: publicAnnualAverageSchema,
@@ -1547,8 +1916,14 @@ const publicDisposalSchema = {
     basis: publicTaxReportV2AmountSchema,
     gainLoss: publicTaxReportV2AmountSchema,
     valuationId: publicNullableStringSchema,
-    costMethod: publicStringSchema,
-    rounding: publicNullableStringSchema,
+    costMethod: { type: 'string', const: 'ANNUAL_TOTAL_AVERAGE' },
+    rounding: {
+      type: 'string',
+      enum: [
+        'CUMULATIVE_FLOOR_ANNUAL_POOL',
+        'CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS',
+      ],
+    },
     basisMode: {
       type: 'string',
       enum: ['ACTUAL_TOTAL_AVERAGE', 'DEEMED_EXPENSE_50'],
@@ -1658,7 +2033,8 @@ export const publicTaxReportV2DetailSchema = {
     'evidencePackDigest', 'taxYear', 'status', 'calculationStatus',
     'taxOutcome', 'filingAction', 'filingStatus', 'filingSubmissionStatus', 'inputPeriod',
     'dataCoverage', 'calculatedAsOf', 'taxYearCloseStatus',
-    'valuationFinality', 'reportFinality', 'denominationAssetId', 'counts',
+    'valuationFinality', 'reportFinality', 'denominationAssetId',
+    'denominationAtomicDecimals', 'counts',
     'summary', 'assetSummaries', 'disposals', 'feeAssetDisposals',
     'acquisitions', 'incomeRows', 'transfers', 'excludedConversions',
     'nonTaxableTransfers', 'limitations', 'sourceCoverage', 'methodology',
@@ -1676,7 +2052,8 @@ export const publicTaxReportV2DetailSchema = {
     taxOutcome: {
       type: 'string',
       enum: [
-        'INCOMPLETE', 'NO_TAX_EVENTS', 'TAX_ZERO', 'ESTIMATED_TAX_DUE',
+        'INCOMPLETE', 'NO_TAX_EVENTS', 'TAX_ZERO', 'ESTIMATED_TAX_ZERO',
+        'ESTIMATED_TAX_DUE',
         'TAX_DUE', 'SIMULATED_TAX_ZERO', 'SIMULATED_TAX_DUE',
       ],
     },
@@ -1690,10 +2067,7 @@ export const publicTaxReportV2DetailSchema = {
     filingStatus: { type: 'string', enum: ['READY', 'BLOCKED'] },
     filingSubmissionStatus: {
       type: 'string',
-      enum: [
-        'NOT_SUBMITTED', 'NOT_APPLICABLE', 'SUBMITTED', 'ACCEPTED',
-        'REJECTED', 'UNKNOWN',
-      ],
+      enum: ['UNKNOWN', 'NOT_APPLICABLE'],
     },
     inputPeriod: publicTaxReportV2IntervalSchema,
     dataCoverage: {
@@ -1730,6 +2104,11 @@ export const publicTaxReportV2DetailSchema = {
     valuationFinality: { type: 'string', enum: ['FINAL', 'PROVISIONAL'] },
     reportFinality: { type: 'string', enum: ['FINAL', 'PROVISIONAL'] },
     denominationAssetId: publicStringSchema,
+    denominationAtomicDecimals: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 18,
+    },
     counts: {
       type: 'object',
       additionalProperties: false,
@@ -1772,6 +2151,14 @@ export const publicTaxReportV2DetailSchema = {
         ],
         properties: {
           ...publicMovementProperties,
+          transactionType: {
+            type: 'string',
+            enum: ['ACQUIRE', 'OTHER_ACQUISITION'],
+          },
+          kind: {
+            type: 'string',
+            enum: ['ACQUIRE', 'OTHER_ACQUISITION'],
+          },
           consideration: publicTaxReportV2AmountSchema,
           acquisitionAncillaryExpense: publicTaxReportV2AmountSchema,
           acquisitionCost: publicTaxReportV2AmountSchema,
@@ -1786,6 +2173,14 @@ export const publicTaxReportV2DetailSchema = {
         required: [...publicMovementRequired, 'income', 'ancillaryExpense'],
         properties: {
           ...publicMovementProperties,
+          transactionType: {
+            type: 'string',
+            enum: ['LENDING_INCOME_CASH', 'LENDING_INCOME_ASSET'],
+          },
+          kind: {
+            type: 'string',
+            enum: ['LENDING_INCOME_CASH', 'LENDING_INCOME_ASSET'],
+          },
           income: publicTaxReportV2AmountSchema,
           ancillaryExpense: publicTaxReportV2AmountSchema,
         },

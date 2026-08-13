@@ -127,6 +127,7 @@ export type ReportPrintModelV1 = {
   status: 'FINAL' | 'PARTIAL'
   filingStatus: 'READY' | 'BLOCKED'
   denominationAssetId: string
+  denominationAtomicDecimals: number | null
   issuedAt: string
   counts: ReportPrintCountsV1
   summary: {
@@ -237,6 +238,8 @@ export const createReportPrintModel = (
   status: report.status,
   filingStatus: report.filingStatus,
   denominationAssetId: report.denominationAssetId,
+  denominationAtomicDecimals:
+    report.denominationAssetId === 'asset-krw-upbit' ? 8 : null,
   issuedAt: report.issuedAt,
   counts: {
     disposals: report.counts.disposals,
@@ -356,6 +359,7 @@ const createReportPrintModelV2 = (
   status: report.status,
   filingStatus: report.filingStatus,
   denominationAssetId: report.denominationAssetId,
+  denominationAtomicDecimals: report.denominationAtomicDecimals,
   issuedAt: report.issuedAt,
   counts: {
     disposals: report.counts.disposals + report.counts.feeAssetDisposals,
