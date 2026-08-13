@@ -44,6 +44,9 @@ bridge JSON은 기본적으로 아래 경로에 두며 secret으로 취급하지
 필수 체인이나 공통 구간이 없으면 일부 체인만 조용히 누락된 상태로 서비스하지 않고
 backend 시작 자체를 실패시킨다. 주소 후보 발견은 Etherscan을 사용하되, 후보 거래의
 receipt/trace 검증에만 RPC를 사용하여 중복 조회 비용을 제한한다.
+Etherscan 기반 공통 snapshot은 정규화 뒤에도 `etherscan-v2:` source kind를
+보존하므로, 검증된 넓은 coverage 안의 짧은 사용자 요청을 새 snapshot 추정 없이
+처리할 수 있다.
 
 ### JIT subject ACL
 

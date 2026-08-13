@@ -1617,6 +1617,39 @@ test('preserves a single-chain snapshot identity', () => {
   )
 })
 
+test('preserves Etherscan containing-coverage semantics for a multichain snapshot', () => {
+  const input = {
+    chains: [
+      {
+        chainId: 'eip155:1',
+        chainStore: 'ethereum-mainnet',
+        coverage: [{
+          coverageStart: '2025-01-01',
+          coverageEnd: '2026-08-11',
+          indexSnapshotId: 'etherscan-v2:eip155:1:ethereum-mainnet:v2',
+        }],
+      },
+      {
+        chainId: 'eip155:10',
+        chainStore: 'optimism-mainnet',
+        coverage: [{
+          coverageStart: '2025-01-01',
+          coverageEnd: '2026-08-11',
+          indexSnapshotId: 'etherscan-v2:eip155:10:optimism-mainnet:v2',
+        }],
+      },
+    ],
+  }
+
+  const normalized = normalizeMultichainSnapshotIds(structuredClone(input))
+  const snapshotIds = normalized.chains.map(
+    (chain) => chain.coverage[0].indexSnapshotId,
+  )
+
+  assert.match(snapshotIds[0], /^etherscan-v2:multichain:[0-9a-f]{64}$/)
+  assert.equal(snapshotIds[0], snapshotIds[1])
+})
+
 test('keeps the JIT bridge deadline long enough for Etherscan selection', () => {
   assert.deepEqual(
     normalizeJITBridgeTimeouts({ requestTimeout: '10s', awaitTimeout: '15m' }),
