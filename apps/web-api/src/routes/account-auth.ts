@@ -35,7 +35,6 @@ import {
   accountUnavailable,
   invalidOAuthTransaction,
   legalDocumentsUnavailable,
-  oauthAccountNotFound,
   oauthProviderUnavailable,
   signupAuthenticationRequired,
   signupUnavailable,
@@ -371,10 +370,7 @@ export const registerAccountAuthRoutes = async (
           completed.identity.providerSubject,
         )
 
-        if (completed.transaction.intent === 'login') {
-          if (!user) {
-            throw oauthAccountNotFound()
-          }
+        if (completed.transaction.intent === 'login' && user) {
           if (user.status === 'pending') {
             assertSignupEnabled(options)
             await setSignupCookieForUser(reply, user, options)
@@ -399,6 +395,10 @@ export const registerAccountAuthRoutes = async (
             normalizeReturnPath(completed.transaction.returnPath),
             302,
           )
+        }
+
+        if (completed.transaction.intent === 'login' && !user) {
+          assertSignupEnabled(options)
         }
 
         if (user?.status === 'active') {

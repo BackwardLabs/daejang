@@ -213,7 +213,7 @@ describe('account authentication routes', () => {
     ).toMatchObject({ id: created?.id, status: 'active' })
   })
 
-  it('does not create a user for login intent when the provider identity is unknown', async () => {
+  it('continues unknown social login identities as pending signups', async () => {
     const start = await startOAuth('login')
     const response = await context.app.inject({
       method: 'GET',
@@ -222,12 +222,26 @@ describe('account authentication routes', () => {
     })
 
     expect(response.statusCode).toBe(302)
-    expect(response.headers.location).toBe(
-      '/login?auth_error=oauth_account_not_found',
+    expect(response.headers.location).toBe('/?onboarding=terms')
+    expect(cookieHeaderText(response.headers['set-cookie'])).toContain(
+      'daejang_signup=',
     )
     expect(
       await store.findUserByIdentity('naver', 'unknown-subject'),
-    ).toBeUndefined()
+    ).toMatchObject({ status: 'pending' })
+  })
+
+  it('reports an unknown email account so the client can continue signup', async () => {
+    const unknown = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email/login',
+      headers: { origin: config.publicOrigin },
+      payload: { email: 'unknown@example.com', password: 'Password1!' },
+    })
+    expect(unknown.statusCode).toBe(404)
+    expect(unknown.json()).toMatchObject({
+      error: { code: 'EMAIL_ACCOUNT_NOT_FOUND' },
+    })
   })
 
   it('issues a normal session only for an active linked provider identity', async () => {

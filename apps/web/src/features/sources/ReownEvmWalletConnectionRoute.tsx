@@ -246,6 +246,18 @@ function ConfiguredReownRoute({
     async ({ provider, signal }) => {
       try {
         duplicateWalletAttempt.current = false
+        const currentConnection = readCurrentEvmConnection()
+        if (
+          currentConnection &&
+          await isActiveWalletSource(currentConnection.address, signal)
+        ) {
+          duplicateWalletAttempt.current = true
+          return {
+            error: { code: 'SOURCE_ALREADY_CONNECTED' },
+            ok: false,
+          }
+        }
+
         const directWalletName = getDirectWalletName(provider)
         let connection: { address: string; chainId: string }
 

@@ -558,6 +558,43 @@ describe('authentication flows', () => {
     expect(window.location.pathname).toBe('/')
   })
 
+  it('opens the prefilled email signup screen when login has no account', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/auth/capabilities')) {
+          return jsonResponse(signupCapabilities)
+        }
+        if (url.includes('/auth/email/login')) {
+          return jsonResponse({
+            error: {
+              code: 'EMAIL_ACCOUNT_NOT_FOUND',
+              message: '가입된 이메일 계정을 찾을 수 없습니다.',
+            },
+          }, 404)
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      }),
+    )
+    window.history.replaceState(null, '', '/login')
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '이메일로 로그인' }))
+    fireEvent.change(screen.getByLabelText('이메일 주소'), {
+      target: { value: 'new@example.com' },
+    })
+    fireEvent.change(screen.getByLabelText('비밀번호'), {
+      target: { value: 'Password1!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }))
+
+    expect(
+      await screen.findByRole('heading', { name: '이메일 계정 만들기' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('이메일 주소')).toHaveValue('new@example.com')
+  })
+
   it('clears email credentials after leaving the email signup screen', async () => {
     render(<App />)
     await openSignupMethodsFromLanding()

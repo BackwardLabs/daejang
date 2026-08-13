@@ -121,6 +121,13 @@ export const invalidCredentials = () =>
     '이메일 또는 비밀번호를 확인해 주세요.',
   )
 
+export const emailAccountNotFound = () =>
+  new ApiError(
+    404,
+    'EMAIL_ACCOUNT_NOT_FOUND',
+    '가입된 이메일 계정을 찾을 수 없습니다.',
+  )
+
 export const invalidPassword = () =>
   new ApiError(
     400,
