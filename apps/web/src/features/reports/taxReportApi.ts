@@ -12,6 +12,66 @@ export type TaxAmountModel =
       status: 'UNKNOWN'
     }
 
+export type TaxReportGenerationStatusModel = {
+  generationId: string | null
+  state:
+    | 'NOT_STARTED'
+    | 'BUILDING'
+    | 'ACTIVE'
+    | 'REVIEW_REQUIRED'
+    | 'FAILED'
+    | 'SUPERSEDED'
+  taxYear: number
+  finality: 'FINAL' | 'PROVISIONAL'
+  pointerVersion: number
+  outcome: 'REPORT' | 'NO_TAX_EVENTS' | null
+  periodStart: string
+  periodEnd: string
+  coverageFrom: string | null
+  coverageThrough: string | null
+  calculatedAsOf: string | null
+  coverageStatus: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE'
+  coverageAssurance:
+    | 'UNKNOWN'
+    | 'USER_DECLARED'
+    | 'DOCUMENT_METADATA_VERIFIED'
+    | 'CHAIN_VERIFIED'
+  taxYearCloseStatus: 'OPEN' | 'CLOSED'
+  sourceCoverageIntervalCount: number
+  sourceCoverageSummaryStatus: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE'
+  sourceCoverage: Array<{
+    sourceKind: 'API' | 'FILE' | 'MANUAL' | 'OTHER'
+    systemName: string
+    declaredFrom: string | null
+    declaredThrough: string | null
+    completeness: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE'
+    assurance:
+      | 'UNKNOWN'
+      | 'USER_DECLARED'
+      | 'DOCUMENT_METADATA_VERIFIED'
+      | 'CHAIN_VERIFIED'
+  }>
+  createdAt: string | null
+  completedAt: string | null
+  failedAt: string | null
+  failureCode: string | null
+  blockedReasonCode:
+    | 'NOT_STARTED'
+    | 'APPLICATION_PENDING'
+    | 'GENERATION_BUILDING'
+    | 'GENERATION_FAILED'
+    | 'GENERATION_NOT_ACTIVE'
+    | 'LEDGER_STALE'
+    | 'SOURCE_COVERAGE_INVALID'
+    | 'TAX_RESULT_STALE'
+    | 'REVIEW_REQUIRED'
+    | 'GENERATION_INCOMPLETE'
+    | 'NO_TAX_EVENTS'
+    | 'REPORT_NOT_CURRENT'
+    | null
+  hasCurrentReport: boolean
+}
+
 export type TaxReportDetailAmountModel =
   | Extract<TaxAmountModel, { status: 'KNOWN' }>
   | {
@@ -67,6 +127,16 @@ export type TaxReportCalculationRuleModel = {
   nationalRate: TaxReportRateModel
   poolScope: 'ADDRESS' | 'RESIDENT_TAX_YEAR_TAX_ASSET'
   taxRounding: 'FLOOR'
+}
+
+export type TaxReportV2CalculationRuleModel = Omit<
+  TaxReportCalculationRuleModel,
+  'basisAllocationRounding' | 'costMethods' | 'deductionUsedAmount' | 'poolScope'
+> & {
+  basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL'
+  costMethods: ['ANNUAL_TOTAL_AVERAGE']
+  deductionUsedAmount: string | null
+  poolScope: 'RESIDENT_TAX_YEAR_TAX_ASSET'
 }
 
 export type TaxEvidenceCoordinateModel = {
@@ -216,6 +286,274 @@ export type TaxReportDetailModel = {
   transfers: TaxReportTransferModel[]
 }
 
+export type TaxReportV2AmountModel = TaxReportDetailAmountModel
+
+export type TaxReportV2IntervalModel = { from: string; through: string }
+
+export type TaxReportV2DetailModel = {
+  schemaVersion: 'giwa.tax-report-model.v2'
+  reportId: string
+  reportModelDigest: string
+  inputDigest: string
+  evidencePackDigest: string
+  taxYear: number
+  status: 'FINAL' | 'PARTIAL'
+  calculationStatus: 'COMPLETE' | 'BLOCKED'
+  taxOutcome: string
+  filingAction: string
+  filingStatus: 'READY' | 'BLOCKED'
+  filingSubmissionStatus: 'UNKNOWN' | 'NOT_APPLICABLE'
+  inputPeriod: TaxReportV2IntervalModel
+  dataCoverage: {
+    status: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE'
+    assurance: string
+    from: string
+    through: string
+    declaration: string | null
+    coveredIntervals: TaxReportV2IntervalModel[]
+    uncoveredIntervals: TaxReportV2IntervalModel[]
+  }
+  calculatedAsOf: string
+  taxYearCloseStatus: 'OPEN' | 'CLOSED'
+  valuationFinality: 'FINAL' | 'PROVISIONAL'
+  reportFinality: 'FINAL' | 'PROVISIONAL'
+  denominationAssetId: string
+  denominationAtomicDecimals: number
+  counts: {
+    assetSummaries: number
+    disposals: number
+    feeAssetDisposals: number
+    acquisitions: number
+    incomeRows: number
+    transfers: number
+    nonTaxableTransfers: number
+    limitations: number
+    sourceArtifacts: number
+  }
+  summary: {
+    grossProceeds: TaxReportV2AmountModel
+    disposedBasis: TaxReportV2AmountModel
+    deductibleExpense: TaxReportV2AmountModel
+    incurredExpense: TaxReportV2AmountModel
+    disposalGainLoss: TaxReportV2AmountModel
+    lendingIncome: TaxReportV2AmountModel
+    lendingExpense: TaxReportV2AmountModel
+    netLendingIncome: TaxReportV2AmountModel
+    taxableIncome: TaxReportV2AmountModel
+    taxableBase: TaxReportV2AmountModel
+    nationalTax: TaxReportV2AmountModel
+    localTax: TaxReportV2AmountModel
+    totalTax: TaxReportV2AmountModel
+    calculationRule: TaxReportV2CalculationRuleModel
+  }
+  assetSummaries: Array<{
+    taxAssetId: string
+    openingQuantity: string
+    openingBasis: TaxReportV2AmountModel
+    openingBasisProvenance: {
+      status: 'NOT_APPLICABLE' | 'UNKNOWN' | 'KNOWN'
+      basisRule: string | null
+      actualAcquisitionAmount: string | null
+      marketValueAt2026End: string | null
+      sourceRunId: string | null
+    }
+    acquiredQuantity: string
+    acquisitionCost: TaxReportV2AmountModel
+    annualAverage: {
+      status: 'KNOWN' | 'UNKNOWN' | 'NOT_APPLICABLE'
+      numerator: string | null
+      denominator: string | null
+      unitCost: string | null
+      unitCostNumerator: string | null
+      unitCostDenominator: string | null
+      rounding: string | null
+    }
+    disposedQuantity: string
+    grossProceeds: TaxReportV2AmountModel
+    incurredExpense: TaxReportV2AmountModel
+    deductibleExpense: TaxReportV2AmountModel
+    disposedBasis: TaxReportV2AmountModel
+    gainLoss: TaxReportV2AmountModel
+    endingQuantity: string
+    endingCost: TaxReportV2AmountModel
+    basisMode: 'ACTUAL_TOTAL_AVERAGE' | 'DEEMED_EXPENSE_50'
+    basisApplicationReasonCode: string | null
+    basisEvidenceDigest: string | null
+    ntsDesignationId: string | null
+    ntsDesignationPolicyVersion: string | null
+  }>
+  disposals: TaxReportV2DisposalModel[]
+  feeAssetDisposals: TaxReportV2DisposalModel[]
+  acquisitions: TaxReportV2AcquisitionModel[]
+  incomeRows: TaxReportV2IncomeModel[]
+  transfers: TaxReportV2TransferModel[]
+  nonTaxableTransfers: Array<{
+    transactionType: 'SELF_TRANSFER'
+    movementId: string
+    eventId: string
+    revisionId: string
+    fromLegId: string
+    toLegId: string
+    taxAssetId: string
+    quantity: string
+    occurredAt: string
+    from: TaxReportV2AccountModel
+    to: TaxReportV2AccountModel
+    sourceEvidence: TaxReportV2SourceEvidenceModel[]
+    review: TaxReportV2RowReviewModel
+  }>
+  excludedConversions: TaxReportExcludedConversionModel[]
+  limitations: TaxReportLimitationModel[]
+  sourceCoverage: Array<{
+    sourceArtifactId: string
+    sourceKind: string
+    systemName: string | null
+    assurance: string
+    status: 'UNKNOWN' | 'PARTIAL' | 'COMPLETE'
+    evidenceDigest: string
+    fragmentIds: string[]
+    coveredIntervals: TaxReportV2IntervalModel[]
+    uncoveredIntervals: TaxReportV2IntervalModel[]
+  }>
+  methodology: {
+    taxInventoryRunId: string
+    taxEstimateId: string
+    lotRunId: string
+    sourceLedgerGenerationId: string
+    schemaDigest: string
+    policy: TaxReportProducerModel & {
+      sourceSetDigest: string
+      applicationMode: 'ENACTED' | 'SIMULATION'
+      effectiveFrom: string
+      effectiveThrough: string
+      denominationAtomicDecimals: number
+      roundingProfileStatus: 'APPROVED' | 'ESTIMATE_ONLY_UNAPPROVED'
+      roundingProfileEvidenceDigest: string | null
+      legalReferences: Array<{
+        law: string
+        article: string
+        paragraphs: string[]
+        purpose: string
+        sourceLocators: string[]
+        sourceCheckedAt: string | null
+      }>
+    }
+    engine: TaxReportProducerModel
+  }
+  issuedAt: string
+}
+
+export type TaxReportV2DisposalModel = TaxReportDisposalModel & {
+  transactionType: 'DISPOSAL' | 'FEE_ASSET_DISPOSAL'
+  relatedMovementId: string | null
+  incurredExpense: TaxReportV2AmountModel
+  basisMode: 'ACTUAL_TOTAL_AVERAGE' | 'DEEMED_EXPENSE_50'
+  basisEvidenceDigest: string | null
+  costMethod: 'ANNUAL_TOTAL_AVERAGE'
+  rounding:
+    | 'CUMULATIVE_FLOOR_ANNUAL_POOL'
+    | 'CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS'
+  occurredAt: string
+  account: TaxReportV2AccountModel
+  valuation: TaxReportV2ValuationModel
+  sourceEvidence: TaxReportV2SourceEvidenceModel[]
+  review: TaxReportV2RowReviewModel
+}
+
+type TaxReportV2MovementModel = {
+  transactionType: string
+  movementId: string
+  relatedMovementId: string | null
+  eventId: string
+  revisionId: string
+  legId: string
+  kind: string
+  taxAssetId: string
+  ledgerAssetId: string
+  quantity: string
+  valuationId: string | null
+  occurredAt: string
+  account: TaxReportV2AccountModel
+  valuation: TaxReportV2ValuationModel
+  sourceEvidence: TaxReportV2SourceEvidenceModel[]
+  review: TaxReportV2RowReviewModel
+}
+
+export type TaxReportV2AccountModel = {
+  status: 'UNKNOWN' | 'PARTIAL' | 'KNOWN'
+  accountId: string | null
+  accountKind: string | null
+  displayNameStatus: 'UNKNOWN'
+  displayName: string | null
+}
+
+export type TaxReportV2ValuationModel = {
+  status: 'UNKNOWN' | 'PARTIAL' | 'KNOWN'
+  valuationId: string | null
+  kind: string | null
+  effectiveAt: string | null
+  quoteId: string | null
+  snapshotArtifactDigest: string | null
+  baseAtomicUnits: string | null
+  quoteAtomicUnits: string | null
+  rounding: string | null
+  providerStatus: 'UNKNOWN' | 'KNOWN'
+  provider: string | null
+  datasetVersionStatus: 'UNKNOWN' | 'KNOWN'
+  datasetVersion: string | null
+  marketStatus: 'UNKNOWN' | 'KNOWN' | 'NOT_APPLICABLE'
+  market: string | null
+}
+
+export type TaxReportV2SourceEvidenceModel = {
+  legId: string | null
+  relationId: string | null
+  fragmentId: string
+  observationId: string
+  sourceArtifactBindingStatus: 'BOUND' | 'UNBOUND'
+  sourceArtifactIds: string[]
+  sourceKinds: string[]
+}
+
+export type TaxReportV2RowReviewModel = {
+  status: 'CLEAR' | 'REVIEW_REQUIRED'
+  limitations: TaxReportLimitationModel[]
+}
+
+export type TaxReportV2TransferModel = TaxReportTransferModel & {
+  transactionType: 'TRANSFER'
+  occurredAt: string
+  from: TaxReportV2AccountModel
+  to: TaxReportV2AccountModel
+  sourceEvidence: TaxReportV2SourceEvidenceModel[]
+  review: TaxReportV2RowReviewModel
+}
+
+export type TaxReportV2AcquisitionModel = TaxReportV2MovementModel & {
+  transactionType: 'ACQUIRE' | 'OTHER_ACQUISITION'
+  kind: 'ACQUIRE' | 'OTHER_ACQUISITION'
+  consideration: TaxReportV2AmountModel
+  acquisitionAncillaryExpense: TaxReportV2AmountModel
+  acquisitionCost: TaxReportV2AmountModel
+  incomePolicyMapping: {
+    eventSubtype: string
+    treatment: 'OTHER_ACQUISITION_ONLY'
+    policyVersion: string
+    policyArtifactDigest: string
+  } | null
+}
+
+export type TaxReportV2IncomeModel = TaxReportV2MovementModel & {
+  transactionType: 'LENDING_INCOME_CASH' | 'LENDING_INCOME_ASSET'
+  kind: 'LENDING_INCOME_CASH' | 'LENDING_INCOME_ASSET'
+  income: TaxReportV2AmountModel
+  ancillaryExpense: TaxReportV2AmountModel
+}
+
+export type AnyTaxReportDetailModel =
+  | TaxReportDetailModel
+  | TaxReportV2DetailModel
+
 type CompatibleTaxReportDetailModel = Omit<
   TaxReportDetailModel,
   'summary' | 'taxYearCloseStatus'
@@ -253,6 +591,15 @@ export const loadCurrentTaxReport = (
     { signal },
   )
 
+export const loadTaxReportGenerationStatus = (
+  taxYear: string,
+  finality: 'FINAL' | 'PROVISIONAL',
+  signal?: AbortSignal,
+) => requestApi<{ status: TaxReportGenerationStatusModel }>(
+  `/tax-reports/${encodeURIComponent(taxYear)}/status?finality=${finality}`,
+  { signal },
+)
+
 export const loadTaxReportHistory = (
   taxYear: string,
   signal?: AbortSignal,
@@ -265,12 +612,16 @@ export const loadTaxReportDetail = async (
   reportId: string,
   signal?: AbortSignal,
 ) => {
-  const response = await requestApi<{ report: CompatibleTaxReportDetailModel }>(
+  const response = await requestApi<{
+    report: CompatibleTaxReportDetailModel | TaxReportV2DetailModel
+  }>(
     `/tax-reports/${encodeURIComponent(reportId)}`,
     { signal },
   )
 
-  return { report: normalizeTaxReportDetail(response.report) }
+  return response.report.schemaVersion === 'giwa.tax-report-model.v2'
+    ? { report: response.report }
+    : { report: normalizeTaxReportDetail(response.report) }
 }
 
 export const loadTaxReportEvidence = (

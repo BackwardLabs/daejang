@@ -2,6 +2,10 @@ import type {
   PublicAmount,
   PublicTaxReportDetail,
 } from '../public-model.js'
+import type {
+  PublicTaxReportV2Amount,
+  PublicTaxReportV2Detail,
+} from '../public-model-v2.js'
 
 export type ReportPrintAmountV1 =
   | {
@@ -123,6 +127,7 @@ export type ReportPrintModelV1 = {
   status: 'FINAL' | 'PARTIAL'
   filingStatus: 'READY' | 'BLOCKED'
   denominationAssetId: string
+  denominationAtomicDecimals: number | null
   issuedAt: string
   counts: ReportPrintCountsV1
   summary: {
@@ -149,14 +154,42 @@ export type ReportPrintModelV1 = {
     taxInventoryRunId: string
     taxEstimateId: string
     lotRunId: string
-    generationId: string
+    generationId?: string
+    sourceLedgerGenerationId?: string
     schemaDigest: string
     policy: ReportPrintProducerV1
     engine: ReportPrintProducerV1
   }
+  v2?: {
+    calculationStatus: PublicTaxReportV2Detail['calculationStatus']
+    taxOutcome: PublicTaxReportV2Detail['taxOutcome']
+    filingAction: PublicTaxReportV2Detail['filingAction']
+    filingStatus: PublicTaxReportV2Detail['filingStatus']
+    filingSubmissionStatus: PublicTaxReportV2Detail['filingSubmissionStatus']
+    calculatedAsOf: string
+    inputPeriod: PublicTaxReportV2Detail['inputPeriod']
+    dataCoverage: PublicTaxReportV2Detail['dataCoverage']
+    summary: PublicTaxReportV2Detail['summary']
+    assetSummaries: PublicTaxReportV2Detail['assetSummaries']
+    feeAssetDisposals: PublicTaxReportV2Detail['feeAssetDisposals']
+    acquisitions: PublicTaxReportV2Detail['acquisitions']
+    incomeRows: PublicTaxReportV2Detail['incomeRows']
+    nonTaxableTransfers: PublicTaxReportV2Detail['nonTaxableTransfers']
+    sourceCoverage: PublicTaxReportV2Detail['sourceCoverage']
+    disposals: PublicTaxReportV2Detail['disposals']
+    transfers: PublicTaxReportV2Detail['transfers']
+    policy: PublicTaxReportV2Detail['methodology']['policy']
+  }
 }
 
 const printAmount = (value: PublicAmount): ReportPrintAmountV1 =>
+  value.status === 'KNOWN'
+    ? { status: 'KNOWN', amount: value.amount }
+    : { status: 'UNKNOWN' }
+
+const printAmountV2 = (
+  value: PublicTaxReportV2Amount,
+): ReportPrintAmountV1 =>
   value.status === 'KNOWN'
     ? { status: 'KNOWN', amount: value.amount }
     : { status: 'UNKNOWN' }
@@ -190,8 +223,10 @@ const printCalculationRule = (
  * publication/payment 필드가 추가되더라도 PDF로 자동 유입되지 않습니다.
  */
 export const createReportPrintModel = (
-  report: PublicTaxReportDetail,
-): ReportPrintModelV1 => ({
+  report: PublicTaxReportDetail | PublicTaxReportV2Detail,
+): ReportPrintModelV1 => report.schemaVersion === 'giwa.tax-report-model.v2'
+  ? createReportPrintModelV2(report)
+  : ({
   schemaVersion: 'giwa.tax-report-print-model.v1',
   reportId: report.reportId,
   reportModelDigest: report.reportModelDigest,
@@ -203,6 +238,8 @@ export const createReportPrintModel = (
   status: report.status,
   filingStatus: report.filingStatus,
   denominationAssetId: report.denominationAssetId,
+  denominationAtomicDecimals:
+    report.denominationAssetId === 'asset-krw-upbit' ? 8 : null,
   issuedAt: report.issuedAt,
   counts: {
     disposals: report.counts.disposals,
@@ -304,5 +341,148 @@ export const createReportPrintModel = (
       version: report.methodology.engine.version,
       artifactDigest: report.methodology.engine.artifactDigest,
     },
+  },
+})
+
+const createReportPrintModelV2 = (
+  report: PublicTaxReportV2Detail,
+): ReportPrintModelV1 => ({
+  schemaVersion: 'giwa.tax-report-print-model.v1',
+  reportId: report.reportId,
+  reportModelDigest: report.reportModelDigest,
+  inputDigest: report.inputDigest,
+  evidencePackDigest: report.evidencePackDigest,
+  taxYear: report.taxYear,
+  taxYearCloseStatus:
+    report.taxYearCloseStatus === 'CLOSED' ? 'CLOSED' : 'UNVERIFIED',
+  finality: report.reportFinality,
+  status: report.status,
+  filingStatus: report.filingStatus,
+  denominationAssetId: report.denominationAssetId,
+  denominationAtomicDecimals: report.denominationAtomicDecimals,
+  issuedAt: report.issuedAt,
+  counts: {
+    disposals: report.counts.disposals + report.counts.feeAssetDisposals,
+    transfers: report.counts.transfers,
+    excludedConversions: report.excludedConversions.length,
+    limitations: report.counts.limitations,
+  },
+  summary: {
+    gainLoss: printAmountV2(report.summary.disposalGainLoss),
+    taxableBase: printAmountV2(report.summary.taxableBase),
+    nationalTax: printAmountV2(report.summary.nationalTax),
+    localTax: printAmountV2(report.summary.localTax),
+    totalTax: printAmountV2(report.summary.totalTax),
+    calculationRule: {
+      poolScope: report.summary.calculationRule.poolScope,
+      costMethods: report.summary.calculationRule.costMethods,
+      basicDeductionAmount:
+        report.summary.calculationRule.basicDeductionAmount,
+      ...(report.summary.calculationRule.deductionUsedAmount === null
+        ? {}
+        : {
+            deductionUsedAmount:
+              report.summary.calculationRule.deductionUsedAmount,
+          }),
+      nationalRate: report.summary.calculationRule.nationalRate,
+      localRate: report.summary.calculationRule.localRate,
+      taxRounding: report.summary.calculationRule.taxRounding,
+      basisAllocationRounding:
+        report.summary.calculationRule.basisAllocationRounding,
+    },
+    calculationContract: 'ANNUAL_TOTAL_AVERAGE',
+  },
+  // V2 supplies these annual aggregates as Tax Engine-owned values. Never
+  // reconstruct them from asset/disposal rows in the BFF.
+  totals: {
+    grossProceeds: printAmountV2(report.summary.grossProceeds),
+    acquisitionCost: printAmountV2(report.summary.disposedBasis),
+    ancillaryExpense: printAmountV2(report.summary.deductibleExpense),
+    gainLoss: printAmountV2(report.summary.disposalGainLoss),
+  },
+  assetSummaries: report.assetSummaries.map((row) => ({
+    taxAssetId: row.taxAssetId,
+    disposalCount: [
+      ...report.disposals,
+      ...report.feeAssetDisposals,
+    ].filter((disposal) => disposal.taxAssetId === row.taxAssetId).length,
+    quantity: row.disposedQuantity,
+    grossProceeds: printAmountV2(row.grossProceeds),
+    acquisitionCost: printAmountV2(row.disposedBasis),
+    ancillaryExpense: printAmountV2(row.deductibleExpense),
+    gainLoss: printAmountV2(row.gainLoss),
+  })),
+  disposals: [...report.disposals, ...report.feeAssetDisposals].map((row) => ({
+    movementId: row.movementId,
+    eventId: row.eventId,
+    taxAssetId: row.taxAssetId,
+    ledgerAssetId: row.ledgerAssetId,
+    quantity: row.quantity,
+    grossProceeds: printAmountV2(row.grossProceeds),
+    ancillaryExpense: printAmountV2(row.ancillaryExpense),
+    basis: printAmountV2(row.basis),
+    gainLoss: printAmountV2(row.gainLoss),
+    costMethod: row.costMethod,
+    ...(row.valuationId === null ? {} : { valuationId: row.valuationId }),
+  })),
+  transfers: report.transfers.map((row) => ({
+    movementId: row.movementId,
+    eventId: row.eventId,
+    taxAssetId: row.taxAssetId,
+    quantity: row.quantity,
+    basis: printAmountV2(row.basis),
+    fromCostMethod: row.fromCostMethod,
+    toCostMethod: row.toCostMethod,
+  })),
+  excludedConversions: report.excludedConversions.map((row) => ({
+    eventId: row.eventId,
+    relationId: row.relationId,
+    taxAssetId: row.taxAssetId,
+    fromQuantity: row.fromQuantity,
+    toQuantity: row.toQuantity,
+  })),
+  limitations: report.limitations.map((row) => ({
+    code: row.code,
+    reason: row.reason,
+    ...(row.taxAddressId === null ? {} : { taxAddressId: row.taxAddressId }),
+    ...(row.taxAssetId === null ? {} : { taxAssetId: row.taxAssetId }),
+    ...(row.movementId === null ? {} : { movementId: row.movementId }),
+    ...(row.reviewId === null ? {} : { reviewId: row.reviewId }),
+    ...(row.reviewRevisionId === null
+      ? {}
+      : { reviewRevisionId: row.reviewRevisionId }),
+  })),
+  methodology: {
+    taxInventoryRunId: report.methodology.taxInventoryRunId,
+    taxEstimateId: report.methodology.taxEstimateId,
+    lotRunId: report.methodology.lotRunId,
+    sourceLedgerGenerationId: report.methodology.sourceLedgerGenerationId,
+    schemaDigest: report.methodology.schemaDigest,
+    policy: {
+      name: report.methodology.policy.name,
+      version: report.methodology.policy.version,
+      artifactDigest: report.methodology.policy.artifactDigest,
+    },
+    engine: report.methodology.engine,
+  },
+  v2: {
+    calculationStatus: report.calculationStatus,
+    taxOutcome: report.taxOutcome,
+    filingAction: report.filingAction,
+    filingStatus: report.filingStatus,
+    filingSubmissionStatus: report.filingSubmissionStatus,
+    calculatedAsOf: report.calculatedAsOf,
+    inputPeriod: report.inputPeriod,
+    dataCoverage: report.dataCoverage,
+    summary: report.summary,
+    assetSummaries: report.assetSummaries,
+    feeAssetDisposals: report.feeAssetDisposals,
+    acquisitions: report.acquisitions,
+    incomeRows: report.incomeRows,
+    nonTaxableTransfers: report.nonTaxableTransfers,
+    sourceCoverage: report.sourceCoverage,
+    disposals: report.disposals,
+    transfers: report.transfers,
+    policy: report.methodology.policy,
   },
 })

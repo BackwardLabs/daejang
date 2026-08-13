@@ -87,6 +87,8 @@ class FakeTaxReportReader
   statusCalls: Array<{
     subjectId: string
     taxYear: 2025 | 2026 | 2027
+    finality: TaxReportFinality
+    residentId?: string
   }> = []
   value: CurrentTaxReport | undefined = fixture
   statusValue: TaxReportGenerationStatus | undefined = generationStatusFixture
@@ -102,8 +104,12 @@ class FakeTaxReportReader
   async getGenerationStatus(
     subjectId: string,
     taxYear: 2025 | 2026 | 2027,
+    finality: TaxReportFinality = 'PROVISIONAL',
+    residentId?: string,
   ) {
-    this.statusCalls.push({ subjectId, taxYear })
+    this.statusCalls.push({
+      subjectId, taxYear, finality, ...(residentId ? { residentId } : {}),
+    })
     if (this.statusFailure) throw this.statusFailure
     return this.statusValue
   }
@@ -169,11 +175,11 @@ describe('current tax report route', () => {
     expect(reader.calls).toHaveLength(2)
   })
 
-  it('allows an explicit resident selector but still scopes the lookup to the session subject', async () => {
+  it('rejects a client-supplied resident selector before storage access', async () => {
     const { token } = await createSession()
     const response = await context.app.inject({ method: 'GET', url: '/api/v1/tax-reports/2027/current?residentId=resident-1', headers: { cookie: `${config.sessionCookieName}=${token}` } })
-    expect(response.statusCode).toBe(200)
-    expect(reader.calls).toEqual([{ subjectId: USER_ID, taxYear: 2027, finality: 'FINAL', residentId: 'resident-1' }])
+    expect(response.statusCode).toBe(400)
+    expect(reader.calls).toEqual([])
   })
 
   it('returns 404 without leaking whether another subject has a report', async () => {
@@ -188,7 +194,7 @@ describe('current tax report route', () => {
     const { token } = await createSession()
     const response = await context.app.inject({
       method: 'GET',
-      url: '/api/v1/tax-reports/2027/current?residentId=resident-1',
+      url: '/api/v1/tax-reports/2027/current',
       headers: { cookie: `${config.sessionCookieName}=${token}` },
     })
 
@@ -210,9 +216,15 @@ describe('current tax report route', () => {
 
     expect(response.statusCode).toBe(200)
     expect(reader.statusCalls).toEqual([
-      { subjectId: USER_ID, taxYear: 2027 },
+      { subjectId: USER_ID, taxYear: 2027, finality: 'PROVISIONAL' },
     ])
-    expect(response.json()).toEqual({ status: generationStatusFixture })
+    expect(response.json()).toMatchObject({ status: generationStatusFixture })
+    expect(response.json().status).toMatchObject({
+      finality: 'PROVISIONAL',
+      periodStart: '2027-01-01',
+      periodEnd: '2027-12-31',
+      sourceCoverage: [],
+    })
     expect(response.body).not.toContain(USER_ID)
     expect(response.body).not.toContain(OTHER_USER_ID)
   })
@@ -227,7 +239,7 @@ describe('current tax report route', () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       status: {
         generationId: null,
         state: 'NOT_STARTED',
@@ -260,7 +272,7 @@ describe('current tax report route', () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({ status: reader.statusValue })
+    expect(response.json()).toMatchObject({ status: reader.statusValue })
   })
 
   it('rejects unsupported status years before storage access', async () => {

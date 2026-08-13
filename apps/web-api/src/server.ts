@@ -27,6 +27,10 @@ import {
 import { PostgresWalletSourceStore } from './sources/postgres-wallet-source-store.js'
 import { PostgresTaxReportReader } from './tax-report/postgres-tax-report-reader.js'
 import {
+  PostgresTaxReportAttestationPublicationSource,
+  TAX_REPORT_DERIVATION_RULE_DIGEST,
+} from './report-attestations/tax-report-publication-source.js'
+import {
   assertPrivateObjectRoot,
   PostgresFileUploadStore,
 } from './uploads/postgres-file-upload-store.js'
@@ -145,6 +149,12 @@ const start = async () => {
           pool,
           deployment: config.reportAttestationDeployment,
           writer: config.reportAttestationSyntheticTestnet,
+          publicationSource:
+            new PostgresTaxReportAttestationPublicationSource(
+              pool,
+            ),
+          derivationRuleDigest:
+            TAX_REPORT_DERIVATION_RULE_DIGEST,
         })
     }
 

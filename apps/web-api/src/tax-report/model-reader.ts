@@ -2,8 +2,12 @@ import type { SourceRequestContext } from '../sources/wallet-source-store.js'
 
 export const TAX_REPORT_MODEL_V1_MEDIA_TYPE =
   'application/vnd.giwa.tax-report-model.v1+json'
+export const TAX_REPORT_MODEL_V2_MEDIA_TYPE =
+  'application/vnd.giwa.tax-report-model.v2+json'
 export const TAX_EVIDENCE_PACK_V1_MEDIA_TYPE =
   'application/vnd.giwa.tax-evidence-pack.v1+json'
+export const TAX_EVIDENCE_PACK_V2_MEDIA_TYPE =
+  'application/vnd.giwa.tax-evidence-pack.v2+json'
 
 export type TaxReportModelArtifact = {
   reportId: string

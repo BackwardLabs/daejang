@@ -3,9 +3,15 @@ import type {
   FastifyRequest,
 } from 'fastify'
 
-import { ApiError, resourceNotFound, unauthorized } from '../errors.js'
+import {
+  ApiError,
+  rateLimitExceeded,
+  resourceNotFound,
+  unauthorized,
+} from '../errors.js'
 import { MOCK_REPORT_ID } from './mock-publication-source.js'
 import type { ReportAttestationPublicationSource } from './publication-source.js'
+import type { ReportAttestationWriteRateLimiter } from './write-rate-limit.js'
 import {
   ReportAttestationConflictError,
   LocalReportFixtureUnavailableError,
@@ -139,7 +145,7 @@ const mapServiceError = (error: unknown): never => {
     throw new ApiError(
       503,
       'REPORT_ATTESTATION_RUNTIME_UNAVAILABLE',
-      '로컬 증명 실행 환경을 사용할 수 없습니다.',
+      '보고서 증명 실행 환경을 사용할 수 없습니다.',
     )
   }
   if (error instanceof LocalReportFixtureUnavailableError) {
@@ -153,7 +159,7 @@ const mapServiceError = (error: unknown): never => {
     throw new ApiError(
       503,
       'REPORT_ATTESTATION_PREPARATION_FAILED',
-      '로컬 보고서 fixture를 준비하지 못했습니다.',
+      '보고서 증명 자료를 준비하지 못했습니다.',
     )
   }
   if (error instanceof ReportAttestationConflictError) {
@@ -164,16 +170,20 @@ const mapServiceError = (error: unknown): never => {
       409,
       error.code === 'NOT_SUBMITTED'
         ? 'REPORT_ATTESTATION_NOT_SUBMITTED'
-        : 'REPORT_ATTESTATION_ALREADY_STARTED',
+        : error.code === 'PUBLICATION_CHANGED'
+          ? 'REPORT_ATTESTATION_PUBLICATION_CHANGED'
+          : 'REPORT_ATTESTATION_ALREADY_STARTED',
       error.code === 'NOT_SUBMITTED'
         ? '보고서 제출 증명이 아직 완료되지 않았습니다.'
-        : '보고서 증명 작업이 이미 시작되었습니다.',
+        : error.code === 'PUBLICATION_CHANGED'
+          ? '준비 후 보고서가 변경되어 다시 확인해야 합니다.'
+          : '보고서 증명 작업이 이미 시작되었습니다.',
     )
   }
   throw new ApiError(
     503,
     'REPORT_ATTESTATION_RUNTIME_UNAVAILABLE',
-    '로컬 증명 실행 환경을 사용할 수 없습니다.',
+    '보고서 증명 실행 환경을 사용할 수 없습니다.',
   )
 }
 
@@ -182,6 +192,9 @@ export const registerReportAttestationRoutes = async (
   options: {
     service: ReportAttestationService
     publicationSource: ReportAttestationPublicationSource
+    devRoutesEnabled?: boolean
+    automaticReview?: boolean
+    writeRateLimiter?: ReportAttestationWriteRateLimiter
   },
 ) => {
   const preparePublication = async (
@@ -198,25 +211,44 @@ export const registerReportAttestationRoutes = async (
     return options.service.preparePublication(ownerId, publication)
   }
 
-  app.post<{ Body: unknown }>(
-    '/api/v1/dev/reports/attestation-fixture',
-    {
-      schema: {
-        querystring: emptyQuerySchema,
-        response: { 201: statusResponseSchema },
+  const consumeWrite = async (
+    request: FastifyRequest,
+    ownerId: string,
+  ) => {
+    const decision = await options.writeRateLimiter?.consume({
+      userId: ownerId,
+      ip: request.ip,
+      action: 'SUBMIT',
+    })
+    if (decision && !decision.allowed) {
+      throw rateLimitExceeded(decision.retryAfterSeconds)
+    }
+  }
+
+  if (options.devRoutesEnabled === true) {
+    app.post<{ Body: unknown }>(
+      '/api/v1/dev/reports/attestation-fixture',
+      {
+        schema: {
+          querystring: emptyQuerySchema,
+          response: { 201: statusResponseSchema },
+        },
       },
-    },
-    async (request, reply) => {
-      assertEmptyBody(request.body)
-      const ownerId = assertAuthenticatedOwner(request)
-      try {
-        const status = await preparePublication(ownerId, MOCK_REPORT_ID)
-        return reply.status(201).send(status)
-      } catch (error) {
-        return mapServiceError(error)
-      }
-    },
-  )
+      async (request, reply) => {
+        assertEmptyBody(request.body)
+        const ownerId = assertAuthenticatedOwner(request)
+        try {
+          const status = await preparePublication(
+            ownerId,
+            MOCK_REPORT_ID,
+          )
+          return reply.status(201).send(status)
+        } catch (error) {
+          return mapServiceError(error)
+        }
+      },
+    )
+  }
 
   app.post<{
     Params: { reportId: string }
@@ -261,10 +293,29 @@ export const registerReportAttestationRoutes = async (
       assertEmptyBody(request.body)
       const ownerId = assertAuthenticatedOwner(request)
       try {
-        const status = await options.service.queueSubmission(
-          ownerId,
-          request.params.reportId,
-        )
+        const currentPublication =
+          await options.publicationSource.getPublication(
+            ownerId,
+            request.params.reportId,
+          )
+        if (
+          !currentPublication ||
+          currentPublication.reportId !== request.params.reportId
+        ) {
+          throw resourceNotFound()
+        }
+        await consumeWrite(request, ownerId)
+        const status = options.automaticReview
+          ? await options.service.queueSubmissionAndReview(
+              ownerId,
+              request.params.reportId,
+              currentPublication,
+            )
+          : await options.service.queueSubmission(
+              ownerId,
+              request.params.reportId,
+              currentPublication,
+            )
         return reply.status(202).send(status)
       } catch (error) {
         return mapServiceError(error)
@@ -272,32 +323,34 @@ export const registerReportAttestationRoutes = async (
     },
   )
 
-  app.post<{
-    Params: { reportId: string }
-    Body: unknown
-  }>(
-    '/api/v1/dev/reports/:reportId/attestation-review',
-    {
-      schema: {
-        params: reportParamsSchema,
-        querystring: emptyQuerySchema,
-        response: { 202: statusResponseSchema },
+  if (options.devRoutesEnabled === true) {
+    app.post<{
+      Params: { reportId: string }
+      Body: unknown
+    }>(
+      '/api/v1/dev/reports/:reportId/attestation-review',
+      {
+        schema: {
+          params: reportParamsSchema,
+          querystring: emptyQuerySchema,
+          response: { 202: statusResponseSchema },
+        },
       },
-    },
-    async (request, reply) => {
-      assertEmptyBody(request.body)
-      const ownerId = assertAuthenticatedOwner(request)
-      try {
-        const status = await options.service.queueReview(
-          ownerId,
-          request.params.reportId,
-        )
-        return reply.status(202).send(status)
-      } catch (error) {
-        return mapServiceError(error)
-      }
-    },
-  )
+      async (request, reply) => {
+        assertEmptyBody(request.body)
+        const ownerId = assertAuthenticatedOwner(request)
+        try {
+          const status = await options.service.queueReview(
+            ownerId,
+            request.params.reportId,
+          )
+          return reply.status(202).send(status)
+        } catch (error) {
+          return mapServiceError(error)
+        }
+      },
+    )
+  }
 
   app.get<{ Params: { reportId: string } }>(
     '/api/v1/reports/:reportId/attestation',

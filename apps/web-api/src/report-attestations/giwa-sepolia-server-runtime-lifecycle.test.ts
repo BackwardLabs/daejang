@@ -9,6 +9,10 @@ import type {
   GiwaSepoliaTrustedReviewDecisionSource,
 } from './giwa-sepolia-runtime-adapter.js'
 import { PostgresReportAttestationStore } from './postgres-store.js'
+import {
+  SYNTHETIC_TESTNET_DERIVATION_RULE_DIGEST,
+  SyntheticTestnetReportAttestationPublicationSource,
+} from './synthetic-testnet-publication-source.js'
 
 const mocks = vi.hoisted(() => ({
   acquireLease: vi.fn(),
@@ -86,6 +90,16 @@ const writer: ReportAttestationSyntheticTestnetConfig = {
 }
 
 const pool = {} as Pool
+const runtimeSource =
+  new SyntheticTestnetReportAttestationPublicationSource()
+const runtimeOptions = {
+  pool,
+  deployment,
+  writer,
+  publicationSource: runtimeSource,
+  derivationRuleDigest:
+    SYNTHETIC_TESTNET_DERIVATION_RULE_DIGEST,
+} as const
 
 describe('GIWA Sepolia server runtime writer lease', () => {
   beforeEach(() => {
@@ -130,9 +144,7 @@ describe('GIWA Sepolia server runtime writer lease', () => {
   it('checks the lease for preflight and readiness and releases it through runtime close', async () => {
     const resources =
       await createGiwaSepoliaReportAttestationServerRuntime({
-        pool,
-        deployment,
-        writer,
+        ...runtimeOptions,
       })
 
     await resources.preflight()
@@ -183,9 +195,7 @@ describe('GIWA Sepolia server runtime writer lease', () => {
       } as never)
     const resources =
       await createGiwaSepoliaReportAttestationServerRuntime({
-        pool,
-        deployment,
-        writer,
+        ...runtimeOptions,
       })
 
     try {
@@ -210,7 +220,7 @@ describe('GIWA Sepolia server runtime writer lease', () => {
           }),
       ).resolves.toEqual({
         outcome: 'REJECT',
-        reasonCode: 'SYNTHETIC_POLICY_PASS',
+        reasonCode: 'TAX_REPORT_POLICY_PASS',
       })
       await expect(
         runtimeInput.reviewDecisionSource
@@ -247,9 +257,7 @@ describe('GIWA Sepolia server runtime writer lease', () => {
 
     await expect(
       createGiwaSepoliaReportAttestationServerRuntime({
-        pool,
-        deployment,
-        writer,
+        ...runtimeOptions,
       }),
     ).rejects.toThrow('reviewer keystore unavailable')
 

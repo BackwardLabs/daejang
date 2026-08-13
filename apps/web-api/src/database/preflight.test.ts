@@ -54,8 +54,18 @@ const validTaxReportContract = {
   current_read_view: 'reporting.current_tax_report_read_v1',
   generation_status_read_view:
     'reporting.current_tax_report_generation_status_read_v1',
+  v2_activated_read_view: 'reporting.activated_tax_report_read_v2',
+  v2_current_read_view: 'reporting.current_tax_report_read_v2',
+  v2_generation_status_read_view:
+    'reporting.current_tax_report_generation_status_read_v2',
+  v2_status_function:
+    'reporting.tax_report_generation_status_v2(text,text,integer,text)',
+  v2_subject_resident_function:
+    'reporting.tax_report_subject_resident_v2(text,integer,text)',
   contract_version: '1',
   migration_version: '73',
+  generation_contract_version: '2',
+  generation_migration_version: '76',
   reporting_usage: true,
   reporting_create: false,
   report_select: false,
@@ -68,6 +78,14 @@ const validTaxReportContract = {
   current_read_write: false,
   generation_status_read_select: true,
   generation_status_read_write: false,
+  v2_activated_read_select: true,
+  v2_activated_read_write: false,
+  v2_current_read_select: true,
+  v2_current_read_write: false,
+  v2_generation_status_read_select: true,
+  v2_generation_status_read_write: false,
+  v2_status_execute: true,
+  v2_subject_resident_execute: true,
 }
 
 const validSubjectNameProvisionerContract = {
@@ -157,7 +175,7 @@ describe('web authentication schema preflight', () => {
 })
 
 describe('tax report schema preflight', () => {
-  it('accepts the generation-gated tax report persistence contract at migration 73', async () => {
+  it('accepts the V1 report and V2 generation read contracts through migration 76', async () => {
     await expect(
       assertTaxReportSchema(poolReturning(validTaxReportContract)),
     ).resolves.toBeUndefined()
@@ -169,6 +187,28 @@ describe('tax report schema preflight', () => {
         poolReturning({
           ...validTaxReportContract,
           migration_version: '62',
+        }),
+      ),
+    ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+
+  it('rejects a database without the V2 generation contract', async () => {
+    await expect(
+      assertTaxReportSchema(
+        poolReturning({
+          ...validTaxReportContract,
+          generation_migration_version: '73',
+        }),
+      ),
+    ).rejects.toThrow('tax report persistence migration contract is invalid')
+  })
+
+  it('rejects a runtime role without the subject-scoped V2 resolver grant', async () => {
+    await expect(
+      assertTaxReportSchema(
+        poolReturning({
+          ...validTaxReportContract,
+          v2_subject_resident_execute: false,
         }),
       ),
     ).rejects.toThrow('tax report persistence migration contract is invalid')

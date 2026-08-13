@@ -27,6 +27,7 @@ import {
   combinedJITConfigExpression,
   configureTaxUpbitQuoteRuntime,
   changedTaxSubjectIDs,
+  currentKstTaxYear,
   createRuntimeIndexerConfig,
   createRuntimeSubjectACL,
   createActionRuntimeIdentity,
@@ -49,6 +50,7 @@ import {
   hostTaxProfileRefreshIntervalMs,
   hostTaxProfileRefreshRetryMs,
   hostTaxProfileStabilityPasses,
+  hostTaxRebuildYears,
   hostTaxSimulationYears,
   hostTaxQuoteRuntimeControls,
   eligibleTaxReportGenerationSubjectIDs,
@@ -167,13 +169,13 @@ test('preflights both production RPC chain identities before services start', as
 })
 
 test('pins taxd to the current required database migration', () => {
-  assert.equal(hostTaxDBMigrationVersion, '73')
+  assert.equal(hostTaxDBMigrationVersion, '77')
   assert.match(
     readFileSync(
       new URL('../deploy/workers.runtime.env.example', import.meta.url),
       'utf8',
     ),
-    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=73$/mu,
+    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=77$/mu,
   )
 })
 
@@ -865,7 +867,9 @@ test('keeps the core JIT and Posting pipeline active without tax profiles', () =
   })
   assert.deepEqual(
     hostActiveServiceOrder({ evmPosting: false, taxd: false }),
-    ['pdf-parser', 'jit', 'engine', 'worker', 'posting', 'web-api'],
+    [
+      'pdf-parser', 'jit', 'engine', 'worker', 'posting', 'web-api',
+    ],
   )
   assert.deepEqual(
     hostActiveServiceOrder({ evmPosting: true, taxd: true }),
@@ -982,6 +986,26 @@ test('prefetches quote coverage and rebuilds every simulation year before taxd s
   assert.equal(taxProfileSnapshotStable(null, null), false)
 })
 
+test('rebuilds only tax years that have started in KST while preserving the simulation year contract', () => {
+  const finalSecondOf2026Kst = new Date('2026-12-31T14:59:59.999Z')
+  const firstSecondOf2027Kst = new Date('2026-12-31T15:00:00.000Z')
+
+  assert.equal(currentKstTaxYear(finalSecondOf2026Kst), 2026)
+  assert.deepEqual(
+    hostTaxRebuildYears(finalSecondOf2026Kst),
+    [2025, 2026],
+  )
+  assert.equal(currentKstTaxYear(firstSecondOf2027Kst), 2027)
+  assert.deepEqual(
+    hostTaxRebuildYears(firstSecondOf2027Kst),
+    [2025, 2026, 2027],
+  )
+  assert.throws(
+    () => hostTaxRebuildYears(new Date(Number.NaN)),
+    /requires a valid Date/,
+  )
+})
+
 test('accepts only the exact ready Tax candidate identity', () => {
   const candidateDigest = 'a'.repeat(64)
   const identity = {
@@ -1048,6 +1072,7 @@ test('retains the active and recent owned Tax candidates without following symli
     'profiles.json',
     'quotes.json',
     'runtime.json',
+    'tax-policy-set.v2.json',
     'trust-key.pub',
   ]
   const createCandidate = (digest) => {

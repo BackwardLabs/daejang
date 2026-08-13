@@ -32,9 +32,9 @@ export type ReportAttestationPublication = Readonly<{
 /**
  * Swap boundary between GIWA-28 and the report-producing system.
  *
- * The local demo supplies a fixed mock publication. The future Report Engine
- * adapter will load an owner-scoped, immutable report publication and return
- * the same three fields without changing the attestation lifecycle.
+ * Local test fixtures and the product Tax Report adapter both return the same
+ * owner-scoped immutable publication contract without changing the EAS
+ * attestation lifecycle.
  */
 export interface ReportAttestationPublicationSource {
   getPublication(

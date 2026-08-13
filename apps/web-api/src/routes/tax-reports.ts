@@ -72,9 +72,24 @@ const generationStatusResponseSchema = {
     'generationId',
     'state',
     'taxYear',
+    'finality',
+    'pointerVersion',
     'outcome',
+    'periodStart',
+    'periodEnd',
+    'coverageFrom',
+    'coverageThrough',
+    'calculatedAsOf',
+    'coverageStatus',
+    'coverageAssurance',
+    'taxYearCloseStatus',
+    'sourceCoverageIntervalCount',
+    'sourceCoverageSummaryStatus',
+    'sourceCoverage',
     'createdAt',
     'completedAt',
+    'failedAt',
+    'failureCode',
     'blockedReasonCode',
     'hasCurrentReport',
   ],
@@ -87,14 +102,88 @@ const generationStatusResponseSchema = {
     },
     state: {
       type: 'string',
-      enum: ['NOT_STARTED', 'BUILDING', 'ACTIVE', 'RETIRED', 'SUPERSEDED'],
+      enum: [
+        'NOT_STARTED',
+        'BUILDING',
+        'ACTIVE',
+        'REVIEW_REQUIRED',
+        'FAILED',
+        'SUPERSEDED',
+      ],
     },
     taxYear: { type: 'integer', minimum: 2025, maximum: 2027 },
+    finality: { type: 'string', enum: ['FINAL', 'PROVISIONAL'] },
+    pointerVersion: { type: 'integer', minimum: 0 },
     outcome: {
       anyOf: [
         { type: 'string', enum: ['REPORT', 'NO_TAX_EVENTS'] },
         { type: 'null' },
       ],
+    },
+    periodStart: { type: 'string', format: 'date' },
+    periodEnd: { type: 'string', format: 'date' },
+    coverageFrom: {
+      anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }],
+    },
+    coverageThrough: {
+      anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }],
+    },
+    calculatedAsOf: {
+      anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }],
+    },
+    coverageStatus: {
+      type: 'string',
+      enum: ['UNKNOWN', 'PARTIAL', 'COMPLETE'],
+    },
+    coverageAssurance: {
+      type: 'string',
+      enum: [
+        'UNKNOWN',
+        'USER_DECLARED',
+        'DOCUMENT_METADATA_VERIFIED',
+        'CHAIN_VERIFIED',
+      ],
+    },
+    taxYearCloseStatus: { type: 'string', enum: ['OPEN', 'CLOSED'] },
+    sourceCoverageIntervalCount: { type: 'integer', minimum: 0 },
+    sourceCoverageSummaryStatus: {
+      type: 'string',
+      enum: ['UNKNOWN', 'PARTIAL', 'COMPLETE'],
+    },
+    sourceCoverage: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'sourceKind',
+          'systemName',
+          'declaredFrom',
+          'declaredThrough',
+          'completeness',
+          'assurance',
+        ],
+        properties: {
+          sourceKind: { type: 'string', enum: ['API', 'FILE', 'MANUAL', 'OTHER'] },
+          systemName: { type: 'string' },
+          declaredFrom: {
+            anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }],
+          },
+          declaredThrough: {
+            anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }],
+          },
+          completeness: {
+            type: 'string', enum: ['UNKNOWN', 'PARTIAL', 'COMPLETE'],
+          },
+          assurance: {
+            type: 'string',
+            enum: [
+              'UNKNOWN', 'USER_DECLARED',
+              'DOCUMENT_METADATA_VERIFIED', 'CHAIN_VERIFIED',
+            ],
+          },
+        },
+      },
     },
     createdAt: {
       anyOf: [
@@ -108,6 +197,18 @@ const generationStatusResponseSchema = {
         { type: 'null' },
       ],
     },
+    failedAt: {
+      anyOf: [
+        { type: 'string', format: 'date-time' },
+        { type: 'null' },
+      ],
+    },
+    failureCode: {
+      anyOf: [
+        { type: 'string', pattern: '^[A-Z0-9_]{1,64}$' },
+        { type: 'null' },
+      ],
+    },
     blockedReasonCode: {
       anyOf: [
         {
@@ -116,9 +217,12 @@ const generationStatusResponseSchema = {
             'NOT_STARTED',
             'APPLICATION_PENDING',
             'GENERATION_BUILDING',
-            'GENERATION_RETIRED',
+            'GENERATION_FAILED',
             'GENERATION_NOT_ACTIVE',
             'LEDGER_STALE',
+            'SOURCE_COVERAGE_INVALID',
+            'TAX_RESULT_STALE',
+            'REVIEW_REQUIRED',
             'GENERATION_INCOMPLETE',
             'NO_TAX_EVENTS',
             'REPORT_NOT_CURRENT',
@@ -160,23 +264,76 @@ const publicReport = (report: CurrentTaxReport) => ({
 const publicGenerationStatus = (
   status: TaxReportGenerationStatus | undefined,
   taxYear: 2025 | 2026 | 2027,
-) =>
-  status ?? {
+  finality: TaxReportFinality,
+) => {
+  const value = status ?? {
     generationId: null,
     state: 'NOT_STARTED' as const,
     taxYear,
+    finality,
+    pointerVersion: 0,
     outcome: null,
+    periodStart: `${taxYear}-01-01`,
+    periodEnd: `${taxYear}-12-31`,
+    coverageFrom: null,
+    coverageThrough: null,
+    calculatedAsOf: null,
+    coverageStatus: 'UNKNOWN' as const,
+    coverageAssurance: 'UNKNOWN' as const,
+    taxYearCloseStatus: 'OPEN' as const,
+    sourceCoverageIntervalCount: 0,
+    sourceCoverageSummaryStatus: 'UNKNOWN' as const,
+    sourceCoverageSnapshot: [],
     createdAt: null,
     completedAt: null,
+    failedAt: null,
+    failureCode: null,
     blockedReasonCode: 'NOT_STARTED' as const,
     hasCurrentReport: false,
   }
+  return {
+    generationId: value.generationId,
+    state: value.state,
+    taxYear: value.taxYear,
+    finality: value.finality ?? finality,
+    pointerVersion: value.pointerVersion ?? 0,
+    outcome: value.outcome,
+    periodStart: value.periodStart ?? `${taxYear}-01-01`,
+    periodEnd: value.periodEnd ?? `${taxYear}-12-31`,
+    coverageFrom: value.coverageFrom ?? null,
+    coverageThrough: value.coverageThrough ?? null,
+    calculatedAsOf: value.calculatedAsOf ?? null,
+    coverageStatus: value.coverageStatus ?? 'UNKNOWN',
+    coverageAssurance: value.coverageAssurance ?? 'UNKNOWN',
+    taxYearCloseStatus: value.taxYearCloseStatus ?? 'OPEN',
+    sourceCoverageIntervalCount: value.sourceCoverageIntervalCount ?? 0,
+    sourceCoverageSummaryStatus:
+      value.sourceCoverageSummaryStatus ?? 'UNKNOWN',
+    sourceCoverage: (value.sourceCoverageSnapshot ?? []).map((source) => ({
+      sourceKind: source.sourceKind,
+      systemName: source.systemName,
+      declaredFrom: source.declaredFrom,
+      declaredThrough: source.declaredThrough,
+      completeness: source.completeness,
+      assurance: source.assurance,
+    })),
+    createdAt: value.createdAt,
+    completedAt: value.completedAt,
+    failedAt: value.failedAt ?? null,
+    failureCode: value.failureCode ?? null,
+    blockedReasonCode: value.blockedReasonCode,
+    hasCurrentReport: value.hasCurrentReport,
+  }
+}
 
 export const registerTaxReportRoutes = async (
   app: FastifyInstance,
   options: TaxReportRoutesOptions,
 ) => {
-  app.get<{ Params: { taxYear: string }; Querystring: { finality?: TaxReportFinality; residentId?: string } }>(
+  app.get<{
+    Params: { taxYear: string }
+    Querystring: { finality?: TaxReportFinality; residentId?: string }
+  }>(
     '/api/v1/tax-reports/:taxYear/current',
     {
       schema: {
@@ -201,8 +358,15 @@ export const registerTaxReportRoutes = async (
       }
       const taxYear = Number(request.params.taxYear)
       const finality = request.query.finality ?? 'FINAL'
+      if (request.query.residentId !== undefined) {
+        throw new ApiError(
+          400,
+          'INVALID_REPORT_SCOPE',
+          '거주자 범위는 인증된 사용자 정보에서 서버가 결정합니다.',
+        )
+      }
       try {
-        const report = await options.reader.getCurrent(subjectId, taxYear, finality, request.query.residentId)
+        const report = await options.reader.getCurrent(subjectId, taxYear, finality)
         if (!report) {
           throw resourceNotFound()
         }
@@ -226,7 +390,10 @@ export const registerTaxReportRoutes = async (
   )
   const statusReader = options.statusReader
   if (statusReader) {
-    app.get<{ Params: { taxYear: string } }>(
+    app.get<{
+      Params: { taxYear: string }
+      Querystring: { finality?: TaxReportFinality; residentId?: string }
+    }>(
       '/api/v1/tax-reports/:taxYear/status',
       {
         schema: {
@@ -236,6 +403,18 @@ export const registerTaxReportRoutes = async (
             required: ['taxYear'],
             properties: {
               taxYear: { type: 'string', pattern: '^(2025|2026|2027)$' },
+            },
+          },
+          querystring: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              finality: {
+                type: 'string',
+                enum: ['FINAL', 'PROVISIONAL'],
+                default: 'PROVISIONAL',
+              },
+              residentId: { type: 'string', minLength: 1, maxLength: 256 },
             },
           },
           response: {
@@ -254,13 +433,29 @@ export const registerTaxReportRoutes = async (
           throw unauthorized()
         }
         const taxYear = Number(request.params.taxYear) as 2025 | 2026 | 2027
+        const finality = request.query.finality ?? 'PROVISIONAL'
+        if (request.query.residentId !== undefined) {
+          throw new ApiError(
+            400,
+            'INVALID_REPORT_SCOPE',
+            '거주자 범위는 인증된 사용자 정보에서 서버가 결정합니다.',
+          )
+        }
         try {
           const status = await statusReader.getGenerationStatus(
             subjectId,
             taxYear,
+            finality,
           )
-          return { status: publicGenerationStatus(status, taxYear) }
+          return { status: publicGenerationStatus(status, taxYear, finality) }
         } catch (error) {
+          if (error instanceof AmbiguousCurrentTaxReportError) {
+            throw new ApiError(
+              409,
+              'AMBIGUOUS_TAX_RESIDENCY',
+              '같은 과세연도에 여러 거주자 신고 자료가 있어 자동 선택할 수 없습니다.',
+            )
+          }
           if (error instanceof InconsistentTaxReportGenerationStatusError) {
             throw new ApiError(
               503,

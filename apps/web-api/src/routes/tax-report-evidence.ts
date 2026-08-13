@@ -13,10 +13,24 @@ import {
   InvalidTaxEvidencePackError,
   publicTaxEvidencePackSchema,
 } from '../tax-report/evidence-pack.js'
-import type { TaxEvidencePackReader } from '../tax-report/model-reader.js'
+import {
+  assertTaxEvidencePackV2DecisionRoots,
+  InvalidTaxEvidencePackV2Error,
+  publicTaxEvidencePackV2Schema,
+} from '../tax-report/evidence-pack-v2.js'
+import type {
+  TaxEvidencePackReader,
+  TaxReportModelReader,
+} from '../tax-report/model-reader.js'
+import {
+  decodeAndProjectTaxReportModel,
+  InvalidTaxReportModelError,
+} from '../tax-report/public-model.js'
+import { InvalidTaxReportModelV2Error } from '../tax-report/public-model-v2.js'
 
 type TaxReportEvidenceRoutesOptions = {
   reader: TaxEvidencePackReader
+  reportReader?: TaxReportModelReader
 }
 
 const inconsistentEvidencePack = () =>
@@ -41,7 +55,7 @@ export const registerTaxReportEvidenceRoutes = async (
           properties: {
             reportId: {
               type: 'string',
-              pattern: '^tax-report:[0-9a-f]{64}$',
+              pattern: '^tax-report(?:-v2)?:[0-9a-f]{64}$',
             },
           },
         },
@@ -50,7 +64,14 @@ export const registerTaxReportEvidenceRoutes = async (
             type: 'object',
             additionalProperties: false,
             required: ['evidencePack'],
-            properties: { evidencePack: publicTaxEvidencePackSchema },
+            properties: {
+              evidencePack: {
+                anyOf: [
+                  publicTaxEvidencePackSchema,
+                  publicTaxEvidencePackV2Schema,
+                ],
+              },
+            },
           },
         },
       },
@@ -68,11 +89,27 @@ export const registerTaxReportEvidenceRoutes = async (
           context,
           request.params.reportId,
         )
-        return {
-          evidencePack: decodeAndProjectTaxEvidencePack(
-            artifact,
+        const evidencePack = decodeAndProjectTaxEvidencePack(
+          artifact,
+          request.params.reportId,
+        )
+        if (evidencePack.schemaVersion === 'giwa.tax-evidence-pack.v2') {
+          if (!options.reportReader) throw inconsistentEvidencePack()
+          const reportArtifact = await options.reportReader.getTaxReportModel(
+            context,
             request.params.reportId,
-          ),
+          )
+          const report = decodeAndProjectTaxReportModel(
+            reportArtifact,
+            request.params.reportId,
+          )
+          if (report.schemaVersion !== 'giwa.tax-report-model.v2') {
+            throw inconsistentEvidencePack()
+          }
+          assertTaxEvidencePackV2DecisionRoots(evidencePack, report)
+        }
+        return {
+          evidencePack,
         }
       } catch (error) {
         if (
@@ -92,7 +129,12 @@ export const registerTaxReportEvidenceRoutes = async (
           )
           throw inconsistentEvidencePack()
         }
-        if (error instanceof InvalidTaxEvidencePackError) {
+        if (
+          error instanceof InvalidTaxEvidencePackError ||
+          error instanceof InvalidTaxEvidencePackV2Error ||
+          error instanceof InvalidTaxReportModelError ||
+          error instanceof InvalidTaxReportModelV2Error
+        ) {
           request.log.error(
             { validationError: error.message },
             'tax evidence pack validation failed',

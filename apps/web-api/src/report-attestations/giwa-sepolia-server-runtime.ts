@@ -20,9 +20,8 @@ import {
 import { PostgresReportAttestationOperationStore } from './postgres-operation-store.js'
 import { PostgresReportAttestationStore } from './postgres-store.js'
 import {
-  SYNTHETIC_TESTNET_DERIVATION_RULE_DIGEST,
-  SyntheticTestnetReportAttestationPublicationSource,
-} from './synthetic-testnet-publication-source.js'
+  type ReportAttestationPublicationSource,
+} from './publication-source.js'
 import {
   acquirePostgresAdvisoryLease,
   GIWA_REPORT_WRITER_LEASE_KEY,
@@ -159,7 +158,7 @@ const persistedReviewDecisionSource = (
     }
     return {
       outcome: record.desiredReviewOutcome,
-      reasonCode: 'SYNTHETIC_POLICY_PASS',
+      reasonCode: 'TAX_REPORT_POLICY_PASS',
     }
   },
 })
@@ -169,12 +168,12 @@ export const createGiwaSepoliaReportAttestationServerRuntime =
     pool: Pool
     deployment: ReportAttestationDeploymentConfig
     writer: ReportAttestationSyntheticTestnetConfig
+    publicationSource: ReportAttestationPublicationSource
+    derivationRuleDigest: Hex32
   }) => {
-    const publicationSource =
-      new SyntheticTestnetReportAttestationPublicationSource()
     const store = new PostgresReportAttestationStore(
       input.pool,
-      publicationSource,
+      input.publicationSource,
       input.deployment,
     )
     const operationStore =
@@ -263,7 +262,7 @@ export const createGiwaSepoliaReportAttestationServerRuntime =
             input.deployment,
           ),
           derivationRuleDigest:
-            SYNTHETIC_TESTNET_DERIVATION_RULE_DIGEST,
+            input.derivationRuleDigest,
           verificationFinality: 'safe',
           minimumConfirmations:
             input.writer.minimumConfirmations,
@@ -280,7 +279,7 @@ export const createGiwaSepoliaReportAttestationServerRuntime =
       return Object.freeze({
         runtime,
         store,
-        publicationSource,
+        publicationSource: input.publicationSource,
         identityKey: input.writer.identityHmacKey,
         reviewOutcome: input.writer.reviewOutcome,
         preflight: async () => {

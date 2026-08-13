@@ -18,6 +18,7 @@ import {
   decodeAndProjectTaxReportModel,
   InvalidTaxReportModelError,
 } from '../tax-report/public-model.js'
+import { InvalidTaxReportModelV2Error } from '../tax-report/public-model-v2.js'
 
 type TaxReportArtifactRoutesOptions = {
   reader: TaxReportModelReader
@@ -57,7 +58,7 @@ export const registerTaxReportArtifactRoutes = async (
           properties: {
             reportId: {
               type: 'string',
-              pattern: '^tax-report:[0-9a-f]{64}$',
+              pattern: '^tax-report(?:-v2)?:[0-9a-f]{64}$',
             },
           },
         },
@@ -91,7 +92,10 @@ export const registerTaxReportArtifactRoutes = async (
         ) {
           throw resourceNotFound()
         }
-        if (error instanceof InvalidTaxReportModelError) {
+        if (
+          error instanceof InvalidTaxReportModelError ||
+          error instanceof InvalidTaxReportModelV2Error
+        ) {
           request.log.error(
             { validationError: error.message },
             'tax report PDF source validation failed',

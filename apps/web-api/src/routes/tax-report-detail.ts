@@ -14,6 +14,10 @@ import {
   InvalidTaxReportModelError,
   publicTaxReportDetailSchema,
 } from '../tax-report/public-model.js'
+import {
+  InvalidTaxReportModelV2Error,
+  publicTaxReportV2DetailSchema,
+} from '../tax-report/public-model-v2.js'
 
 type TaxReportDetailRoutesOptions = {
   reader: TaxReportModelReader
@@ -41,7 +45,7 @@ export const registerTaxReportDetailRoutes = async (
           properties: {
             reportId: {
               type: 'string',
-              pattern: '^tax-report:[0-9a-f]{64}$',
+              pattern: '^tax-report(?:-v2)?:[0-9a-f]{64}$',
             },
           },
         },
@@ -50,7 +54,14 @@ export const registerTaxReportDetailRoutes = async (
             type: 'object',
             additionalProperties: false,
             required: ['report'],
-            properties: { report: publicTaxReportDetailSchema },
+            properties: {
+              report: {
+                anyOf: [
+                  publicTaxReportDetailSchema,
+                  publicTaxReportV2DetailSchema,
+                ],
+              },
+            },
           },
         },
       },
@@ -84,7 +95,10 @@ export const registerTaxReportDetailRoutes = async (
         ) {
           throw resourceNotFound()
         }
-        if (error instanceof InvalidTaxReportModelError) {
+        if (
+          error instanceof InvalidTaxReportModelError ||
+          error instanceof InvalidTaxReportModelV2Error
+        ) {
           request.log.error(
             { validationError: error.message },
             'tax report model validation failed',

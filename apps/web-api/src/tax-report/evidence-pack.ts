@@ -3,8 +3,13 @@ import { TextDecoder } from 'node:util'
 
 import {
   TAX_EVIDENCE_PACK_V1_MEDIA_TYPE,
+  TAX_EVIDENCE_PACK_V2_MEDIA_TYPE,
   type TaxEvidencePackArtifact,
 } from './model-reader.js'
+import {
+  decodeAndProjectTaxEvidencePackV2,
+  type PublicTaxEvidencePackV2,
+} from './evidence-pack-v2.js'
 
 const EVIDENCE_SCHEMA_V1 = 'giwa.tax-evidence-pack.v1'
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/
@@ -236,7 +241,10 @@ const canonicalStringify = (value: unknown, path = '$'): string => {
 export const decodeAndProjectTaxEvidencePack = (
   artifact: TaxEvidencePackArtifact,
   expectedReportId: string,
-): PublicTaxEvidencePack => {
+): PublicTaxEvidencePack | PublicTaxEvidencePackV2 => {
+  if (artifact.mediaType === TAX_EVIDENCE_PACK_V2_MEDIA_TYPE) {
+    return decodeAndProjectTaxEvidencePackV2(artifact, expectedReportId)
+  }
   if (!REPORT_ID_PATTERN.test(expectedReportId)) {
     return invalid('$.reportId', 'requested report ID is invalid')
   }

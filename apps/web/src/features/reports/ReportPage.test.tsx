@@ -221,6 +221,42 @@ function jsonResponse(value: unknown, status = 200) {
   })
 }
 
+function generationStatusFixture(
+  taxYear: 2025 | 2026 | 2027,
+  finality: 'FINAL' | 'PROVISIONAL',
+  hasCurrentReport: boolean,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    generationId: hasCurrentReport ? '1'.repeat(64) : null,
+    state: hasCurrentReport ? 'ACTIVE' : 'NOT_STARTED',
+    taxYear,
+    finality,
+    pointerVersion: hasCurrentReport ? 1 : 0,
+    outcome: hasCurrentReport ? 'REPORT' : null,
+    periodStart: `${taxYear}-01-01`,
+    periodEnd: `${taxYear}-12-31`,
+    coverageFrom: hasCurrentReport ? `${taxYear}-01-01` : null,
+    coverageThrough: hasCurrentReport ? `${taxYear}-06-30` : null,
+    calculatedAsOf: hasCurrentReport ? `${taxYear}-07-01T00:00:00Z` : null,
+    coverageStatus: hasCurrentReport ? 'PARTIAL' : 'UNKNOWN',
+    coverageAssurance: hasCurrentReport
+      ? 'DOCUMENT_METADATA_VERIFIED'
+      : 'UNKNOWN',
+    taxYearCloseStatus: 'OPEN',
+    sourceCoverageIntervalCount: hasCurrentReport ? 1 : 0,
+    sourceCoverageSummaryStatus: hasCurrentReport ? 'PARTIAL' : 'UNKNOWN',
+    sourceCoverage: [],
+    createdAt: hasCurrentReport ? `${taxYear}-07-01T00:00:00Z` : null,
+    completedAt: hasCurrentReport ? `${taxYear}-07-01T00:01:00Z` : null,
+    failedAt: null,
+    failureCode: null,
+    blockedReasonCode: hasCurrentReport ? null : 'NOT_STARTED',
+    hasCurrentReport,
+    ...overrides,
+  }
+}
+
 function stubReportRequests(options: {
   detail?: unknown
   detailStatus?: number
@@ -233,6 +269,8 @@ function stubReportRequests(options: {
   provisionalCurrentStatus?: number
   historyStatus?: number
   taxYear?: 2025 | 2026 | 2027
+  finalGenerationStatus?: unknown
+  provisionalGenerationStatus?: unknown
 } = {}) {
   const taxYear = options.taxYear ?? 2027
   const detail = options.detail ?? { ...detailReport, taxYear }
@@ -244,6 +282,32 @@ function stubReportRequests(options: {
     'fetch',
     vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
+      if (url.includes(`/tax-reports/${taxYear}/status`)) {
+        if (url.includes('finality=FINAL')) {
+          return jsonResponse({
+            status:
+              options.finalGenerationStatus ??
+              generationStatusFixture(
+                taxYear,
+                'FINAL',
+                Boolean(options.finalCurrent) ||
+                  Boolean(
+                    options.finalCurrentStatus &&
+                    options.finalCurrentStatus !== 404,
+                  ),
+              ),
+          })
+        }
+        return jsonResponse({
+          status:
+            options.provisionalGenerationStatus ??
+            generationStatusFixture(
+              taxYear,
+              'PROVISIONAL',
+              options.provisionalCurrentStatus !== 404,
+            ),
+        })
+      }
       if (url.includes(`/tax-reports/${taxYear}/current`)) {
         if (url.includes('finality=FINAL')) {
           if (options.finalCurrentStatus) {
@@ -432,6 +496,20 @@ describe('ReportPage', () => {
           '/api/v1/tax-reports/2027/current?finality=FINAL',
         ),
       ),
+    ).toBe(false)
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith(
+          '/api/v1/tax-reports/2027/status?finality=FINAL',
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith(
+          '/api/v1/tax-reports/2027/status?finality=PROVISIONAL',
+        ),
+      ),
     ).toBe(true)
     expect(
       fetchMock.mock.calls.some(([url]) =>
@@ -595,7 +673,7 @@ describe('ReportPage', () => {
       await screen.findByText('revision 2', { selector: 'strong' }),
     ).toHaveTextContent('현재')
     expect(
-      screen.queryByRole('button', { name: /revision 0/u }),
+      screen.queryByRole('option', { name: /revision 0/u }),
     ).not.toBeInTheDocument()
     expect(screen.queryByText('이전 발행본')).not.toBeInTheDocument()
   })
@@ -916,7 +994,7 @@ describe('ReportPage', () => {
       '/api/v1/tax-reports/tax-report-1/artifacts/pdf',
     )
     expect(
-      screen.getByRole('button', { name: /revision 1/u }),
+      screen.getByRole('option', { name: /revision 1/u }),
     ).toBeInTheDocument()
   })
 
@@ -972,7 +1050,7 @@ describe('ReportPage', () => {
     ).toBe(true)
   })
 
-  it('keeps a 2025 history report readable during an older API rollout', async () => {
+  it('does not revive a stale 2025 history report without a readable current pointer', async () => {
     saveAppPreferences({ currency: 'KRW', year: '2025' })
     const legacyDetail = {
       ...detailReport,
@@ -994,12 +1072,292 @@ describe('ReportPage', () => {
 
     render(<ReportWorkspacePage />)
 
+    expect(await screen.findByRole('heading', {
+      name: '아직 생성된 장부가 없습니다',
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes('/tax-reports/2025/history'),
+      ),
+    ).toBe(false)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).endsWith('/api/v1/tax-reports/tax-report-1'),
+      ),
+    ).toBe(false)
+  })
+
+  it.each([
+    {
+      name: 'application pending',
+      title: '세무 장부 신청을 먼저 완료해 주세요',
+      finality: 'PROVISIONAL' as const,
+      overrides: { blockedReasonCode: 'APPLICATION_PENDING' },
+    },
+    {
+      name: 'building',
+      title: '실제 처리 상태만 표시합니다',
+      finality: 'PROVISIONAL' as const,
+      overrides: {
+        state: 'BUILDING', generationId: '2'.repeat(64), pointerVersion: 1,
+        createdAt: '2027-08-01T00:00:00Z', blockedReasonCode: 'GENERATION_BUILDING',
+      },
+    },
+    {
+      name: 'failed',
+      title: '일시적인 조회 오류가 발생했습니다',
+      finality: 'PROVISIONAL' as const,
+      overrides: {
+        state: 'FAILED', generationId: '3'.repeat(64), pointerVersion: 1,
+        createdAt: '2027-08-01T00:00:00Z', failedAt: '2027-08-01T00:01:00Z',
+        failureCode: 'ENGINE_FAILURE', blockedReasonCode: 'GENERATION_FAILED',
+      },
+    },
+    {
+      name: 'review required',
+      title: '최신 장부를 다시 확인해야 합니다',
+      finality: 'PROVISIONAL' as const,
+      overrides: {
+        state: 'REVIEW_REQUIRED', generationId: '4'.repeat(64), pointerVersion: 1,
+        createdAt: '2027-08-01T00:00:00Z', completedAt: '2027-08-01T00:01:00Z',
+        outcome: 'REPORT', blockedReasonCode: 'REVIEW_REQUIRED',
+      },
+    },
+    {
+      name: 'no tax events',
+      title: '계산은 완료되었지만 과세 이벤트가 없습니다',
+      finality: 'FINAL' as const,
+      overrides: {
+        state: 'ACTIVE', generationId: '5'.repeat(64), pointerVersion: 1,
+        createdAt: '2027-08-01T00:00:00Z', completedAt: '2027-08-01T00:01:00Z',
+        outcome: 'NO_TAX_EVENTS', blockedReasonCode: 'NO_TAX_EVENTS',
+        coverageFrom: '2027-01-01', coverageThrough: '2027-12-31',
+        coverageStatus: 'COMPLETE',
+        coverageAssurance: 'DOCUMENT_METADATA_VERIFIED',
+        sourceCoverageSummaryStatus: 'COMPLETE',
+        taxYearCloseStatus: 'CLOSED',
+      },
+    },
+  ])('renders $name as a first-class state without requesting a report', async ({
+    title,
+    overrides,
+    finality,
+  }) => {
+    const status = generationStatusFixture(
+      2027,
+      finality,
+      false,
+      overrides,
+    )
+    stubReportRequests({
+      history: [partialTaxReport],
+      ...(finality === 'FINAL' ? { provisionalCurrentStatus: 404 } : {}),
+      ...(finality === 'FINAL'
+        ? { finalGenerationStatus: status }
+        : { provisionalGenerationStatus: status }),
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes('/tax-reports/2027/current')),
+    ).toBe(false)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes('/tax-reports/2027/history')),
+    ).toBe(false)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).endsWith('/api/v1/tax-reports/tax-report-1')),
+    ).toBe(false)
+  })
+
+  it('hides stale history and detail while the tax application is pending', async () => {
+    stubReportRequests({
+      history: [partialTaxReport],
+      provisionalGenerationStatus: generationStatusFixture(
+        2027,
+        'PROVISIONAL',
+        false,
+        { blockedReasonCode: 'APPLICATION_PENDING' },
+      ),
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(await screen.findByRole('heading', {
+      name: '세무 장부 신청을 먼저 완료해 주세요',
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes('/tax-reports/2027/history'),
+      ),
+    ).toBe(false)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).endsWith('/api/v1/tax-reports/tax-report-1'),
+      ),
+    ).toBe(false)
+  })
+
+  it('shows a newer building lifecycle instead of an older readable estimate', async () => {
+    stubReportRequests({
+      history: [partialTaxReport],
+      finalGenerationStatus: generationStatusFixture(
+        2027,
+        'FINAL',
+        false,
+        {
+          state: 'BUILDING',
+          generationId: '9'.repeat(64),
+          pointerVersion: 2,
+          createdAt: '2027-08-01T00:00:00Z',
+          blockedReasonCode: 'GENERATION_BUILDING',
+        },
+      ),
+      provisionalGenerationStatus: generationStatusFixture(
+        2027,
+        'PROVISIONAL',
+        true,
+        { state: 'REVIEW_REQUIRED', blockedReasonCode: 'REVIEW_REQUIRED' },
+      ),
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(await screen.findByRole('heading', {
+      name: '실제 처리 상태만 표시합니다',
+    })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '리포트 생성 중' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', {
+      name: '실제 처리 상태만 표시합니다',
+    }).closest('.report-generation-state')).toHaveAttribute(
+      'data-standalone',
+      'true',
+    )
+    expect(screen.getByText('자동 새로고침')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes('/tax-reports/2027/current'),
+      ),
+    ).toBe(false)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes('/tax-reports/2027/history'),
+      ),
+    ).toBe(false)
+  })
+
+  it('shows a partial review-required report instead of hiding its estimate', async () => {
+    stubReportRequests({
+      history: [],
+      provisionalGenerationStatus: generationStatusFixture(
+        2027,
+        'PROVISIONAL',
+        true,
+        {
+          state: 'REVIEW_REQUIRED',
+          blockedReasonCode: 'REVIEW_REQUIRED',
+        },
+      ),
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(
+      await screen.findByRole('heading', {
+        name: '검토가 필요한 잠정 장부입니다',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', {
+      name: '검토가 필요한 잠정 장부입니다',
+    }).closest('.report-generation-state')).not.toHaveAttribute(
+      'data-standalone',
+    )
     expect(
       await screen.findByRole('heading', { name: '장부 계산 요약' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('연간 마감 미확인')).toBeInTheDocument()
     expect(
-      screen.getByText('이 발행본만으로 계산 계약 확인 불가'),
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes(
+          '/tax-reports/2027/current?finality=PROVISIONAL',
+        ),
+      ),
+    ).toBe(true)
+  })
+
+  it('does not fetch stale history when review status points to an unreadable current report', async () => {
+    stubReportRequests({
+      history: [partialTaxReport],
+      provisionalCurrentStatus: 404,
+      provisionalGenerationStatus: generationStatusFixture(
+        2027,
+        'PROVISIONAL',
+        true,
+        {
+          state: 'REVIEW_REQUIRED',
+          blockedReasonCode: 'REVIEW_REQUIRED',
+        },
+      ),
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(await screen.findByRole('heading', {
+      name: '최신 장부를 다시 확인해야 합니다',
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).includes('/tax-reports/2027/history'),
+      ),
+    ).toBe(false)
+    expect(
+      vi.mocked(fetch).mock.calls.some(([url]) =>
+        String(url).endsWith('/api/v1/tax-reports/tax-report-1'),
+      ),
+    ).toBe(false)
+  })
+
+  it('does not call partial coverage an authoritative no-tax-events result', async () => {
+    stubReportRequests({
+      history: [],
+      provisionalGenerationStatus: generationStatusFixture(
+        2027,
+        'PROVISIONAL',
+        false,
+        {
+          state: 'REVIEW_REQUIRED',
+          generationId: '6'.repeat(64),
+          pointerVersion: 1,
+          outcome: 'NO_TAX_EVENTS',
+          coverageFrom: '2027-01-01',
+          coverageThrough: '2027-06-30',
+          coverageStatus: 'PARTIAL',
+          coverageAssurance: 'USER_DECLARED',
+          createdAt: '2027-07-01T00:00:00Z',
+          completedAt: '2027-07-01T00:01:00Z',
+          blockedReasonCode: 'REVIEW_REQUIRED',
+        },
+      ),
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(
+      await screen.findByRole('heading', {
+        name: '최신 장부를 다시 확인해야 합니다',
+      }),
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', {
+        name: '계산은 완료되었지만 과세 이벤트가 없습니다',
+      }),
+    ).not.toBeInTheDocument()
   })
 })

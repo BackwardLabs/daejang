@@ -438,9 +438,18 @@ export const registerSyntheticReportAttestationRoutes = async (
           status.submission?.status !== 'CONFIRMED'
         ) {
           await consumeWrite(request, ownerId, 'SUBMIT')
+          const currentPublication =
+            await publicationSource.getPublication(
+              ownerId,
+              SYNTHETIC_TESTNET_REPORT_ID,
+            )
+          if (!currentPublication) {
+            throw new ReportAttestationPreparationError()
+          }
           await service.queueSubmission(
             ownerId,
             SYNTHETIC_TESTNET_REPORT_ID,
+            currentPublication,
           )
         }
         return snapshot(ownerId)

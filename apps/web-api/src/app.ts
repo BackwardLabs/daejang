@@ -242,6 +242,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   }
   if (
     config.runtimeMode === 'production' &&
+    options.taxEvidencePackReader &&
+    !options.taxReportModelReader
+  ) {
+    throw new Error(
+      'A TaxReportModelReader is required to verify V2 evidence packs',
+    )
+  }
+  if (
+    config.runtimeMode === 'production' &&
     config.reportPayments &&
     options.reportPaymentStore?.durable !== true
   ) {
@@ -571,6 +580,9 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     if (options.taxEvidencePackReader) {
       await registerTaxReportEvidenceRoutes(protectedApp, {
         reader: options.taxEvidencePackReader,
+        ...(options.taxReportModelReader
+          ? { reportReader: options.taxReportModelReader }
+          : {}),
       })
     }
     await registerReportPaymentRoutes(protectedApp, {
@@ -639,16 +651,31 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
           : {}),
       })
     }
-    if (
-      reportAttestationService &&
-      options.reportAttestations?.runtime.kind ===
+    if (reportAttestationService && options.reportAttestations) {
+      const isLocalRuntime =
+        options.reportAttestations.runtime.kind ===
         LOCAL_REPORT_ATTESTATION_RUNTIME_KIND
-    ) {
+      const publicationSource =
+        options.reportAttestations.publicationSource ??
+        (isLocalRuntime
+          ? new MockReportAttestationPublicationSource()
+          : undefined)
+      if (!publicationSource) {
+        throw new Error(
+          'A ReportAttestationPublicationSource is required for the GIWA Sepolia runtime',
+        )
+      }
       await registerReportAttestationRoutes(protectedApp, {
         service: reportAttestationService,
-        publicationSource:
-          options.reportAttestations?.publicationSource ??
-          new MockReportAttestationPublicationSource(),
+        publicationSource,
+        devRoutesEnabled:
+          isLocalRuntime && config.runtimeMode !== 'production',
+        automaticReview:
+          options.reportAttestations.runtime.kind ===
+          GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND,
+        ...(reportAttestationWriteRateLimiter
+          ? { writeRateLimiter: reportAttestationWriteRateLimiter }
+          : {}),
       })
     }
   })

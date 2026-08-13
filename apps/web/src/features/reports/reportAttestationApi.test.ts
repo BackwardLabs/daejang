@@ -327,6 +327,72 @@ describe('localReportAttestationApi', () => {
     })
   })
 
+  it('accepts the interrupted-write reconciliation shapes emitted after restart', async () => {
+    const interruptedSubmission = {
+      ...wireStatus('RECONCILIATION_REQUIRED'),
+      failureCode: 'INTERRUPTED_WRITE_REQUIRES_RECONCILIATION',
+      submission: {
+        status: 'RECONCILIATION_REQUIRED',
+        transactionHash: null,
+        attestationUID: null,
+        reasonCode: 'PROCESS_RESTART_REQUIRES_RECONCILIATION',
+      },
+    }
+    const interruptedReview = {
+      ...wireStatus('RECONCILIATION_REQUIRED', {
+        submissionConfirmed: true,
+      }),
+      failureCode: 'INTERRUPTED_WRITE_REQUIRES_RECONCILIATION',
+      review: {
+        status: 'RECONCILIATION_REQUIRED',
+        transactionHash: null,
+        attestationUID: null,
+        reasonCode: 'PROCESS_RESTART_REQUIRES_RECONCILIATION',
+      },
+    }
+    const contradictory = {
+      ...interruptedReview,
+      review: null,
+    }
+    const malformedReason = {
+      ...interruptedSubmission,
+      submission: {
+        ...interruptedSubmission.submission,
+        reasonCode: 'contains private detail',
+      },
+    }
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(interruptedSubmission))
+      .mockResolvedValueOnce(jsonResponse(interruptedReview))
+      .mockResolvedValueOnce(jsonResponse(contradictory))
+      .mockResolvedValueOnce(jsonResponse(malformedReason))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      localReportAttestationApi.prepareFixture(),
+    ).resolves.toMatchObject({
+      lifecycle: 'RECONCILIATION_REQUIRED',
+      failureCode: 'INTERRUPTED_WRITE_REQUIRES_RECONCILIATION',
+      submissionConfirmed: false,
+      reviewConfirmed: false,
+    })
+    await expect(
+      localReportAttestationApi.prepareFixture(),
+    ).resolves.toMatchObject({
+      lifecycle: 'RECONCILIATION_REQUIRED',
+      failureCode: 'INTERRUPTED_WRITE_REQUIRES_RECONCILIATION',
+      submissionConfirmed: true,
+      reviewConfirmed: false,
+    })
+    await expect(
+      localReportAttestationApi.prepareFixture(),
+    ).rejects.toThrow('REPORT_ATTESTATION_RESPONSE_INVALID')
+    await expect(
+      localReportAttestationApi.prepareFixture(),
+    ).rejects.toThrow('REPORT_ATTESTATION_RESPONSE_INVALID')
+  })
+
   it('binds status and verification responses to the requested report', async () => {
     const mismatchedStatus = {
       ...wireStatus('SUBMITTED', { submissionConfirmed: true }),
@@ -413,7 +479,7 @@ describe('pollReportAttestationStatus', () => {
         failed: () => false,
         signal: controller.signal,
         intervalMs: 1,
-        timeoutMs: 50,
+        timeoutMs: 500,
       }),
     ).resolves.toMatchObject({ lifecycle: 'APPROVED' })
 

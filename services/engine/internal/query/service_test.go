@@ -73,7 +73,10 @@ func (f *fakeLotStore) EventLineage(_ context.Context, subjectID, eventID, revis
 
 type fakeTaxReportStore struct {
 	current     taxreportstore.CurrentReportDetail
+	currentV2   map[string]taxreportstore.CurrentReportDetailV2
 	report      taxreportstore.StoredReport
+	history     []taxreportstore.StoredReport
+	historyV2   map[string][]taxreportstore.ActivatedReportDetailV2
 	found       bool
 	reportFound bool
 	err         error
@@ -355,14 +358,30 @@ func (f *fakeTaxReportStore) GetCurrentReportForYear(_ context.Context, subject 
 	return f.current, f.found, f.err
 }
 
+func (f *fakeTaxReportStore) GetCurrentReportV2ForSubject(_ context.Context, subject string, taxYear int, finality string) (taxreportstore.CurrentReportDetailV2, bool, error) {
+	f.lastSubject, f.lastTaxYear = subject, taxYear
+	value, found := f.currentV2[finality]
+	return value, found, f.err
+}
+
 func (f *fakeTaxReportStore) ListReportHistory(_ context.Context, subject string, taxYear int, _ int32) ([]taxreportstore.StoredReport, error) {
 	f.lastSubject, f.lastHistory = subject, taxYear
-	return nil, f.err
+	return f.history, f.err
+}
+
+func (f *fakeTaxReportStore) ListActivatedReportHistoryV2(_ context.Context, subject string, taxYear int, finality string, _ int32) ([]taxreportstore.ActivatedReportDetailV2, error) {
+	f.lastSubject, f.lastHistory = subject, taxYear
+	return f.historyV2[finality], f.err
 }
 
 func (f *fakeTaxReportStore) GetReport(_ context.Context, subject, reportID string) (taxreportstore.StoredReport, bool, error) {
 	f.lastSubject, f.lastReport = subject, reportID
 	return f.report, f.reportFound, f.err
+}
+
+func (f *fakeTaxReportStore) GetActivatedReportV2(_ context.Context, subject, reportID string) (taxreportstore.ActivatedReportDetailV2, bool, error) {
+	f.lastSubject, f.lastReport = subject, reportID
+	return taxreportstore.ActivatedReportDetailV2{StoredReport: f.report}, f.reportFound, f.err
 }
 
 func (f *fakeTaxReportArtifactStore) GetTaxReportArtifact(
@@ -475,14 +494,27 @@ func taxReportModelFixture(t *testing.T) (taxreportstore.StoredReport, []byte) {
 	return report, value
 }
 
+func taxReportModelV2Fixture(t *testing.T) (taxreportstore.StoredReport, []byte) {
+	t.Helper()
+	report, _ := taxReportModelFixture(t)
+	report.ID = "tax-report-v2:" + strings.Repeat("a", 64)
+	value := taxReportModelJSON(t, report, "generation-1")
+	report.ReportArtifactDigest = digestBytes(value)
+	return report, value
+}
+
 func taxReportModelJSON(
 	t *testing.T,
 	report taxreportstore.StoredReport,
 	generationID string,
 ) []byte {
 	t.Helper()
-	value, err := json.Marshal(map[string]any{
-		"schemaVersion":       taxReportModelSchemaV1,
+	contract, valid := taxReportArtifactContractForID(report.ID)
+	if !valid {
+		t.Fatalf("invalid report ID in fixture: %q", report.ID)
+	}
+	identity := map[string]any{
+		"schemaVersion":       contract.reportSchema,
 		"reportId":            report.ID,
 		"inputDigest":         report.InputDigest,
 		"subjectId":           report.SubjectID,
@@ -491,7 +523,6 @@ func taxReportModelJSON(
 		"taxInventoryRunId":   report.TaxInventoryRunID,
 		"taxEstimateId":       report.TaxEstimateID,
 		"lotRunId":            report.LotRunID,
-		"generationId":        generationID,
 		"schemaDigest":        report.SchemaDigest,
 		"denominationAssetId": report.DenominationAssetID,
 		"evidencePackDigest":  report.EvidencePackDigest,
@@ -502,7 +533,13 @@ func taxReportModelJSON(
 			"name": report.Engine.Name, "version": report.Engine.Version, "artifactDigest": report.Engine.ArtifactDigest,
 		},
 		"issuedAt": report.IssuedAt.Format(time.RFC3339Nano),
-	})
+	}
+	if contract.reportSchema == taxReportModelSchemaV2 {
+		identity["sourceLedgerGenerationId"] = generationID
+	} else {
+		identity["generationId"] = generationID
+	}
+	value, err := json.Marshal(identity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,20 +552,29 @@ func digestBytes(value []byte) string {
 }
 
 func taxReportArtifact(report taxreportstore.StoredReport, value []byte) artifactstore.Object {
+	contract, _ := taxReportArtifactContractForID(report.ID)
 	return artifactstore.Object{
 		Ref:          artifactstore.Ref{Algorithm: "sha256", Digest: report.ReportArtifactDigest},
 		Bytes:        value,
-		MediaType:    taxReportModelMediaType,
+		MediaType:    contract.reportMediaType,
 		PrivacyClass: artifactstore.PrivacySubjectPrivate,
 	}
 }
 
 func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, []byte) {
+	return taxEvidencePackFixtureForVersion(t, false)
+}
+
+func taxEvidencePackFixtureForVersion(t *testing.T, v2 bool) (taxreportstore.StoredReport, []byte, []byte) {
 	t.Helper()
+	reportIDPrefix := "tax-report:"
+	if v2 {
+		reportIDPrefix = "tax-report-v2:"
+	}
 	report := taxreportstore.StoredReport{
 		SubjectID: queryTestSubjectID,
 		Report: taxreportstore.Report{
-			ID:                  "tax-report:" + strings.Repeat("b", 64),
+			ID:                  reportIDPrefix + strings.Repeat("b", 64),
 			ResidentID:          "resident-1",
 			TaxYear:             2027,
 			TaxInventoryRunID:   "tax-inventory-run-1",
@@ -546,8 +592,12 @@ func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, 
 			IssuedAt: time.Date(2028, 1, 10, 0, 0, 0, 0, time.UTC),
 		},
 	}
-	value, err := json.Marshal(map[string]any{
-		"schemaVersion":     taxEvidencePackSchemaV1,
+	contract, valid := taxReportArtifactContractForID(report.ID)
+	if !valid {
+		t.Fatalf("invalid report ID in fixture: %q", report.ID)
+	}
+	identity := map[string]any{
+		"schemaVersion":     contract.evidenceSchema,
 		"manifestId":        expectedTaxEvidencePackManifestID(report),
 		"reportId":          report.ID,
 		"subjectId":         report.SubjectID,
@@ -556,7 +606,6 @@ func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, 
 		"taxInventoryRunId": report.TaxInventoryRunID,
 		"taxEstimateId":     report.TaxEstimateID,
 		"lotRunId":          report.LotRunID,
-		"generationId":      "generation-1",
 		"schemaDigest":      report.SchemaDigest,
 		"artifactRoots":     []any{},
 		"evidenceCoordinates": []any{
@@ -569,7 +618,13 @@ func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, 
 			"name": report.Engine.Name, "version": report.Engine.Version, "artifactDigest": report.Engine.ArtifactDigest,
 		},
 		"issuedAt": report.IssuedAt.Format(time.RFC3339Nano),
-	})
+	}
+	if contract.evidenceSchema == taxEvidencePackSchemaV2 {
+		identity["sourceLedgerGenerationId"] = "generation-1"
+	} else {
+		identity["generationId"] = "generation-1"
+	}
+	value, err := json.Marshal(identity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,10 +635,11 @@ func taxEvidencePackFixture(t *testing.T) (taxreportstore.StoredReport, []byte, 
 }
 
 func taxEvidencePackArtifact(report taxreportstore.StoredReport, value []byte) artifactstore.Object {
+	contract, _ := taxReportArtifactContractForID(report.ID)
 	return artifactstore.Object{
 		Ref:          artifactstore.Ref{Algorithm: "sha256", Digest: report.EvidencePackDigest},
 		Bytes:        value,
-		MediaType:    taxEvidencePackMediaType,
+		MediaType:    contract.evidenceMediaType,
 		PrivacyClass: artifactstore.PrivacySubjectPrivate,
 	}
 }
@@ -753,6 +809,127 @@ func TestGetCurrentTaxReportScopesByActorAndPreservesUnknownAmount(t *testing.T)
 	}
 }
 
+func TestGetCurrentTaxReportPrefersActivatedV2FinalOnTimestampTieOverProvisionalAndLegacy(t *testing.T) {
+	issuedAt := time.Date(2028, 1, 10, 0, 0, 0, 0, time.UTC)
+	stored := func(id, finality string) taxreportstore.StoredReport {
+		return taxreportstore.StoredReport{
+			SubjectID: queryTestSubjectID,
+			Report: taxreportstore.Report{
+				ID: id, ResidentID: "resident-1", TaxYear: 2027,
+				Finality: finality, Status: "FINAL", FilingStatus: "READY",
+				IssuedAt: issuedAt,
+			},
+		}
+	}
+	store := &fakeTaxReportStore{
+		found:   true,
+		current: taxreportstore.CurrentReportDetail{StoredReport: stored("legacy-report", "FINAL")},
+		currentV2: map[string]taxreportstore.CurrentReportDetailV2{
+			"FINAL": {
+				StoredReport:   stored("tax-report-v2:"+strings.Repeat("a", 64), "FINAL"),
+				PointerVersion: 7, UpdatedAt: issuedAt,
+			},
+			"PROVISIONAL": {
+				StoredReport:   stored("tax-report-v2:"+strings.Repeat("b", 64), "PROVISIONAL"),
+				PointerVersion: 8, UpdatedAt: issuedAt,
+			},
+		},
+	}
+	service := &Service{TaxReports: store}
+
+	response, err := service.GetCurrentTaxReport(context.Background(), &enginev1.GetCurrentTaxReportRequest{
+		Context: queryTestContext(), TaxYear: 2027,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := response.GetReport().GetReportId(); got != "tax-report-v2:"+strings.Repeat("a", 64) {
+		t.Fatalf("current report=%q, want activated V2 FINAL", got)
+	}
+	if response.GetReport().GetPointerVersion() != 7 {
+		t.Fatalf("pointer version=%d, want 7", response.GetReport().GetPointerVersion())
+	}
+}
+
+func TestGetCurrentTaxReportPrefersNewerActivatedV2ProvisionalOverOlderFinal(t *testing.T) {
+	finalAt := time.Date(2028, 1, 10, 0, 0, 0, 0, time.UTC)
+	provisionalAt := finalAt.Add(time.Hour)
+	stored := func(id, finality string, issuedAt time.Time) taxreportstore.StoredReport {
+		return taxreportstore.StoredReport{
+			SubjectID: queryTestSubjectID,
+			Report: taxreportstore.Report{
+				ID: id, ResidentID: "resident-1", TaxYear: 2027,
+				Finality: finality, Status: "PARTIAL", FilingStatus: "BLOCKED",
+				IssuedAt: issuedAt,
+			},
+		}
+	}
+	provisionalID := "tax-report-v2:" + strings.Repeat("c", 64)
+	store := &fakeTaxReportStore{currentV2: map[string]taxreportstore.CurrentReportDetailV2{
+		"FINAL": {
+			StoredReport:   stored("tax-report-v2:"+strings.Repeat("d", 64), "FINAL", finalAt),
+			PointerVersion: 3, UpdatedAt: finalAt,
+		},
+		"PROVISIONAL": {
+			StoredReport:   stored(provisionalID, "PROVISIONAL", provisionalAt),
+			PointerVersion: 4, UpdatedAt: provisionalAt,
+		},
+	}}
+	service := &Service{TaxReports: store}
+
+	response, err := service.GetCurrentTaxReport(context.Background(), &enginev1.GetCurrentTaxReportRequest{
+		Context: queryTestContext(), TaxYear: 2027,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := response.GetReport().GetReportId(); got != provisionalID {
+		t.Fatalf("current report=%q, want newer V2 provisional %q", got, provisionalID)
+	}
+}
+
+func TestListTaxReportHistoryMergesActivatedV2FinalitiesDeduplicatesAndSorts(t *testing.T) {
+	stored := func(id string, issuedAt time.Time) taxreportstore.StoredReport {
+		return taxreportstore.StoredReport{
+			SubjectID: queryTestSubjectID,
+			Report: taxreportstore.Report{
+				ID: id, ResidentID: "resident-1", TaxYear: 2027,
+				Finality: "PROVISIONAL", Status: "PARTIAL", FilingStatus: "BLOCKED",
+				IssuedAt: issuedAt,
+			},
+		}
+	}
+	oldAt := time.Date(2027, 7, 1, 0, 0, 0, 0, time.UTC)
+	newAt := oldAt.Add(time.Hour)
+	oldID := "tax-report-v2:" + strings.Repeat("a", 64)
+	newID := "tax-report-v2:" + strings.Repeat("b", 64)
+	store := &fakeTaxReportStore{
+		history: []taxreportstore.StoredReport{stored(oldID, oldAt)},
+		historyV2: map[string][]taxreportstore.ActivatedReportDetailV2{
+			"FINAL":       {{StoredReport: stored(newID, newAt)}},
+			"PROVISIONAL": {{StoredReport: stored(oldID, oldAt)}},
+		},
+	}
+	service := &Service{TaxReports: store}
+
+	response, err := service.ListTaxReportHistory(context.Background(), &enginev1.ListTaxReportHistoryRequest{
+		Context: queryTestContext(), TaxYear: 2027, Limit: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := response.GetItems()
+	if len(items) != 2 {
+		t.Fatalf("history length=%d, want 2 unique reports: %#v", len(items), items)
+	}
+	if items[0].GetReportId() != newID || items[1].GetReportId() != oldID {
+		t.Fatalf("history order=%q,%q, want newest V2 then older deduplicated report", items[0].GetReportId(), items[1].GetReportId())
+	}
+	if store.lastSubject != queryTestSubjectID || store.lastHistory != 2027 {
+		t.Fatalf("history query escaped owner/year scope: %#v", store)
+	}
+}
+
 func TestGetCurrentTaxReportDoesNotLeakCrossSubjectOrAmbiguousResidency(t *testing.T) {
 	for name, store := range map[string]*fakeTaxReportStore{
 		"missing":   {found: false},
@@ -861,9 +1038,47 @@ func TestGetTaxReportModelReturnsExactSubjectScopedCanonicalArtifact(t *testing.
 	}
 	if response.GetReportId() != report.ID ||
 		response.GetArtifactDigest() != report.ReportArtifactDigest ||
-		response.GetMediaType() != taxReportModelMediaType ||
+		response.GetMediaType() != taxReportModelMediaTypeV1 ||
 		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
 		t.Fatalf("unexpected exact report model response: %#v", response)
+	}
+}
+
+func TestGetTaxReportModelReturnsV2ArtifactWithMatchingContract(t *testing.T) {
+	report, canonicalJSON := taxReportModelV2Fixture(t)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{
+			object: taxReportArtifact(report, canonicalJSON), found: true,
+		},
+	}
+
+	response, err := service.GetTaxReportModel(context.Background(), &enginev1.GetTaxReportModelRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetReportId() != report.ID || response.GetMediaType() != taxReportModelMediaTypeV2 ||
+		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
+		t.Fatalf("unexpected V2 report model response: %#v", response)
+	}
+}
+
+func TestGetTaxReportModelRejectsV1MediaTypeForV2ReportID(t *testing.T) {
+	report, canonicalJSON := taxReportModelV2Fixture(t)
+	object := taxReportArtifact(report, canonicalJSON)
+	object.MediaType = taxReportModelMediaTypeV1
+	service := &Service{
+		TaxReports:         &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{object: object, found: true},
+	}
+
+	_, err := service.GetTaxReportModel(context.Background(), &enginev1.GetTaxReportModelRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if status.Code(err) != codes.DataLoss {
+		t.Fatalf("status=%s, want DATA_LOSS: %v", status.Code(err), err)
 	}
 }
 
@@ -923,9 +1138,61 @@ func TestGetTaxEvidencePackReturnsExactSubjectScopedCanonicalArtifact(t *testing
 	}
 	if response.GetReportId() != report.ID ||
 		response.GetArtifactDigest() != report.EvidencePackDigest ||
-		response.GetMediaType() != taxEvidencePackMediaType ||
+		response.GetMediaType() != taxEvidencePackMediaTypeV1 ||
 		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
 		t.Fatalf("unexpected exact evidence pack response: %#v", response)
+	}
+}
+
+func TestGetTaxEvidencePackReturnsV2ArtifactWithMatchingContract(t *testing.T) {
+	report, reportModelJSON, canonicalJSON := taxEvidencePackFixtureForVersion(t, true)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{objects: map[string]artifactstore.Object{
+			report.EvidencePackDigest:   taxEvidencePackArtifact(report, canonicalJSON),
+			report.ReportArtifactDigest: taxReportArtifact(report, reportModelJSON),
+		}},
+	}
+
+	response, err := service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetReportId() != report.ID || response.GetMediaType() != taxEvidencePackMediaTypeV2 ||
+		!bytes.Equal(response.GetCanonicalJson(), canonicalJSON) {
+		t.Fatalf("unexpected V2 evidence pack response: %#v", response)
+	}
+}
+
+func TestGetTaxEvidencePackV2RejectsDifferentSourceLedgerGeneration(t *testing.T) {
+	report, _, evidenceJSON := taxEvidencePackFixtureForVersion(t, true)
+	var evidence map[string]any
+	if err := json.Unmarshal(evidenceJSON, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	evidence["sourceLedgerGenerationId"] = "different-ledger-generation"
+	evidenceJSON, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report.EvidencePackDigest = digestBytes(evidenceJSON)
+	reportModelJSON := taxReportModelJSON(t, report, "generation-1")
+	report.ReportArtifactDigest = digestBytes(reportModelJSON)
+	service := &Service{
+		TaxReports: &fakeTaxReportStore{report: report, reportFound: true},
+		TaxReportArtifacts: &fakeTaxReportArtifactStore{objects: map[string]artifactstore.Object{
+			report.EvidencePackDigest:   taxEvidencePackArtifact(report, evidenceJSON),
+			report.ReportArtifactDigest: taxReportArtifact(report, reportModelJSON),
+		}},
+	}
+
+	_, err = service.GetTaxEvidencePack(context.Background(), &enginev1.GetTaxEvidencePackRequest{
+		Context: queryTestContext(), ReportId: report.ID,
+	})
+	if status.Code(err) != codes.DataLoss {
+		t.Fatalf("status=%s, want DATA_LOSS: %v", status.Code(err), err)
 	}
 }
 
@@ -978,6 +1245,8 @@ func TestGetTaxEvidencePackRejectsNonCanonicalReportID(t *testing.T) {
 		"tax-report:ABCDEF",
 		"tax-report:" + strings.Repeat("A", 64),
 		"tax-report:" + strings.Repeat("a", 63),
+		"tax-report-v2:" + strings.Repeat("A", 64),
+		"tax-report-v2:" + strings.Repeat("a", 63),
 	} {
 		_, err := service.GetTaxEvidencePack(
 			context.Background(),
@@ -1039,7 +1308,7 @@ func TestGetTaxEvidencePackFailsClosedOnArtifactMismatch(t *testing.T) {
 			object.Ref.Digest = strings.Repeat("0", 64)
 		},
 		"media type": func(object *artifactstore.Object) {
-			object.MediaType = taxReportModelMediaType
+			object.MediaType = taxReportModelMediaTypeV1
 		},
 		"privacy": func(object *artifactstore.Object) {
 			object.PrivacyClass = artifactstore.PrivacyPublicChain
