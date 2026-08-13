@@ -4,6 +4,17 @@ import { SourceManagementPage } from './SourceManagementPage.tsx'
 import { SourceMethodIntroPage } from './SourceMethodIntroPage.tsx'
 import { SourceTypeSelectionPage } from './SourceTypeSelectionPage.tsx'
 
+vi.mock('./ReownEvmWalletConnectionRoute.tsx', () => ({
+  ReownEvmWalletConnectionRoute: ({
+    launchImmediately,
+  }: {
+    launchImmediately?: boolean
+  }) =>
+    launchImmediately ? (
+      <div aria-label="Reown 지갑 연결" role="dialog" />
+    ) : null,
+}))
+
 afterEach(() => vi.unstubAllGlobals())
 
 describe('source flow pages', () => {
@@ -868,8 +879,8 @@ describe('source flow pages', () => {
       within(methods).queryByRole('link', { name: 'Upbit PDF 선택' }),
     ).not.toBeInTheDocument()
     expect(
-      within(methods).getByRole('link', { name: 'EVM Wallet 선택' }),
-    ).toHaveAttribute('href', '/sources/new/wallet')
+      within(methods).getByRole('button', { name: 'EVM Wallet 선택' }),
+    ).toBeEnabled()
     expect(
       within(methods).getByText('암호화되지 않은 PDF 지원'),
     ).toBeInTheDocument()
@@ -884,16 +895,22 @@ describe('source flow pages', () => {
     expect(screen.queryByText('PDF 업로드')).not.toBeInTheDocument()
   })
 
-  it('routes EVM selection to the explicit wallet selection page', () => {
+  it('opens Reown directly without leaving source selection', async () => {
     window.history.pushState({}, '', '/sources/new')
     render(<SourceTypeSelectionPage />)
 
     expect(
-      screen.getByRole('link', { name: 'EVM Wallet 선택' }),
-    ).toHaveAttribute('href', '/sources/new/wallet')
-    expect(
       screen.queryByRole('dialog', { name: 'Reown 지갑 연결' }),
     ).not.toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'EVM Wallet 선택' }),
+    )
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Reown 지갑 연결' }),
+    ).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/sources/new')
   })
 
   it('explains the Upbit PDF flow without linking to a disabled registration path', () => {
@@ -954,25 +971,4 @@ describe('source flow pages', () => {
     ).toHaveClass('source-primary-action--dark-text')
   })
 
-  it('explains the read-only EVM Wallet connection and links to the connection flow', () => {
-    render(<SourceMethodIntroPage methodId="evm-wallet" />)
-
-    expect(
-      screen.getByRole('heading', { name: 'EVM Wallet 연결' }),
-    ).toBeInTheDocument()
-    const flow = screen.getByRole('complementary', {
-      name: 'EVM Wallet 등록 흐름',
-    })
-    expect(within(flow).getByText('지갑 연결')).toBeInTheDocument()
-    expect(within(flow).getByText('수집 범위 확인')).toBeInTheDocument()
-    expect(within(flow).getByText('연결 완료')).toBeInTheDocument()
-    expect(
-      screen.getByText(/가스비가 없는 오프체인 메시지 서명/),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
-
-    expect(
-      screen.getByRole('link', { name: '지갑 연결 시작' }),
-    ).toHaveAttribute('href', '/sources/new/wallet')
-  })
 })

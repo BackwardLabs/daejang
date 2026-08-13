@@ -1,18 +1,35 @@
+import { lazy, Suspense, useState } from 'react'
 import {
   sourceMethodBullets,
   sourceMethodDefinitions,
   type SourceMethodDefinition,
 } from './sourceDefinitions.ts'
+import { navigateTo } from '../../auth/navigation.ts'
 import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import { useSourceCapabilities } from './useSourceCapabilities.ts'
 
+const loadReownEvmWalletConnectionRoute = () =>
+  import('./ReownEvmWalletConnectionRoute.tsx')
+
+const ReownEvmWalletConnectionRoute = lazy(() =>
+  loadReownEvmWalletConnectionRoute().then((module) => ({
+    default: module.ReownEvmWalletConnectionRoute,
+  })),
+)
+
+function preloadReownEvmWalletConnectionRoute() {
+  void loadReownEvmWalletConnectionRoute().catch(() => undefined)
+}
+
 function SourceMethodCard({
   disabled = false,
   method,
+  onSelect,
 }: {
   disabled?: boolean
   method: SourceMethodDefinition
+  onSelect?: () => void
 }) {
   return (
     <article className={`source-method-card source-method-card--${method.tone}`}>
@@ -42,17 +59,32 @@ function SourceMethodCard({
         <span className="source-primary-action" aria-disabled="true">
           준비 중
         </span>
-      ) : (
+      ) : onSelect ? (
+        <button
+          className="source-primary-action"
+          type="button"
+          onFocus={preloadReownEvmWalletConnectionRoute}
+          onClick={onSelect}
+          onPointerEnter={preloadReownEvmWalletConnectionRoute}
+        >
+          EVM Wallet 선택
+          <span aria-hidden="true">→</span>
+        </button>
+      ) : method.href ? (
         <AppLink className="source-primary-action" href={method.href}>
-          {method.id === 'evm-wallet' ? 'EVM Wallet 선택' : 'Upbit PDF 선택'}
+          Upbit PDF 선택
           <span aria-hidden="true">→</span>
         </AppLink>
-      )}
+      ) : null}
     </article>
   )
 }
 
-function SourceTypeSelectionView() {
+function SourceTypeSelectionView({
+  onEvmWalletSelect,
+}: {
+  onEvmWalletSelect: () => void
+}) {
   const capabilities = useSourceCapabilities()
 
   return (
@@ -74,6 +106,7 @@ function SourceTypeSelectionView() {
         />
         <SourceMethodCard
           method={sourceMethodDefinitions['evm-wallet']}
+          onSelect={onEvmWalletSelect}
         />
       </section>
     </SourceFlowLayout>
@@ -81,5 +114,26 @@ function SourceTypeSelectionView() {
 }
 
 export function SourceTypeSelectionPage() {
-  return <SourceTypeSelectionView />
+  const [walletFlowActive, setWalletFlowActive] = useState(false)
+  const selectionView = (
+    <SourceTypeSelectionView
+      onEvmWalletSelect={() => setWalletFlowActive(true)}
+    />
+  )
+
+  if (!walletFlowActive) {
+    return selectionView
+  }
+
+  return (
+    <Suspense fallback={selectionView}>
+      <ReownEvmWalletConnectionRoute
+        launchImmediately
+        onAlreadyConnected={() => navigateTo('/sources')}
+        onExitRequested={() => setWalletFlowActive(false)}
+        onLaunchFailed={() => setWalletFlowActive(false)}
+        pendingView={selectionView}
+      />
+    </Suspense>
+  )
 }

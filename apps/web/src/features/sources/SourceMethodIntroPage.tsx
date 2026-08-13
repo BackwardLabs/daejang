@@ -1,7 +1,6 @@
 import {
   sourceMethodBullets,
   sourceMethodDefinitions,
-  type SourceMethodId,
 } from './sourceDefinitions.ts'
 import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
@@ -10,21 +9,17 @@ import { useSourceCapabilities } from './useSourceCapabilities.ts'
 export function SourceMethodIntroPage({
   methodId,
 }: {
-  methodId: SourceMethodId
+  methodId: 'upbit-pdf'
 }) {
   const capabilities = useSourceCapabilities()
   const method = sourceMethodDefinitions[methodId]
-  const isUpbitPdf = methodId === 'upbit-pdf'
-  const registrationEnabled =
-    !isUpbitPdf || capabilities.upbitPdf.registrationEnabled
-  const actionLabel =
-    isUpbitPdf ? 'PDF 등록 시작' : '지갑 연결 시작'
+  const registrationEnabled = capabilities.upbitPdf.registrationEnabled
 
   return (
     <SourceFlowLayout
       description={method.intro.subtitle}
       eyebrow={method.intro.eyebrow}
-      title={methodId === 'upbit-pdf' ? 'Upbit PDF 등록' : 'EVM Wallet 연결'}
+      title="Upbit PDF 등록"
     >
       <section
         className={`source-intro-card source-intro-card--${method.tone}`}
@@ -57,16 +52,10 @@ export function SourceMethodIntroPage({
           <div className="source-intro-actions">
             {registrationEnabled ? (
               <AppLink
-                className={`source-primary-action${
-                  isUpbitPdf ? ' source-primary-action--dark-text' : ''
-                }`}
-                href={
-                  isUpbitPdf
-                    ? '/sources/new/upbit/upload'
-                    : '/sources/new/wallet'
-                }
+                className="source-primary-action source-primary-action--dark-text"
+                href="/sources/new/upbit/upload"
               >
-                {actionLabel} <span aria-hidden="true">→</span>
+                PDF 등록 시작 <span aria-hidden="true">→</span>
               </AppLink>
             ) : (
               <span className="source-primary-action" aria-disabled="true">
@@ -95,9 +84,7 @@ export function SourceMethodIntroPage({
           <div>
             <strong>보안 원칙</strong>
             <p>
-              {isUpbitPdf
-                ? '파일 암호는 격리 파서 처리에만 일회성으로 사용하고 로그·DB·파일에 저장하지 않으며, 거래소 계정 자격증명은 요청하지 않습니다.'
-                : 'private key·seed phrase·쓰기·출금 권한을 요청하거나 저장하지 않습니다. 오프체인 서명은 지갑 소유권 확인에만 사용합니다.'}
+              파일 암호는 격리 파서 처리에만 일회성으로 사용하고 로그·DB·파일에 저장하지 않으며, 거래소 계정 자격증명은 요청하지 않습니다.
             </p>
           </div>
         </aside>
