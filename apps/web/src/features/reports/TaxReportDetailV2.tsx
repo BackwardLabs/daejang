@@ -90,6 +90,11 @@ const statusLabel: Record<string, string> = {
   SIMULATION: '정책 시뮬레이션',
 }
 
+const basisReasonLabel: Record<string, string> = {
+  NON_VASP_NO_BOOKS_OR_EVIDENCE: '장부·증빙을 확인할 수 없는 비가상자산사업자 거래',
+  NTS_DESIGNATED_OTHER: '국세청 지정 사유',
+}
+
 function Amount({
   value,
   denomination,
@@ -472,6 +477,9 @@ export function TaxReportDetailV2({
                     {asset.openingBasisProvenance.actualAcquisitionAmount !== null ? <div><dt>기초 실제취득가</dt><dd>{formatAmount({ status: 'KNOWN', hasAmount: true, amount: asset.openingBasisProvenance.actualAcquisitionAmount })}</dd></div> : null}
                     {asset.openingBasisProvenance.marketValueAt2026End !== null ? <div><dt>2026년 말 시가</dt><dd>{formatAmount({ status: 'KNOWN', hasAmount: true, amount: asset.openingBasisProvenance.marketValueAt2026End })}</dd></div> : null}
                     {asset.openingBasisProvenance.sourceRunId !== null ? <div><dt>이전 확정 run</dt><dd>{asset.openingBasisProvenance.sourceRunId}</dd></div> : null}
+                    {asset.basisApplicationReasonCode !== null ? <div><dt>50% 특례 적용 사유</dt><dd>{basisReasonLabel[asset.basisApplicationReasonCode] ?? asset.basisApplicationReasonCode}</dd></div> : null}
+                    {asset.ntsDesignationId !== null ? <div><dt>국세청 지정 ID</dt><dd>{asset.ntsDesignationId}</dd></div> : null}
+                    {asset.ntsDesignationPolicyVersion !== null ? <div><dt>국세청 지정 정책 버전</dt><dd>{asset.ntsDesignationPolicyVersion}</dd></div> : null}
                     {asset.basisEvidenceDigest !== null ? <div><dt>50% 특례 증거 digest</dt><dd><code>{asset.basisEvidenceDigest}</code></dd></div> : null}
                     <div><dt>연간 취득수량(원천 최소단위) · 취득가액</dt><dd>{asset.acquiredQuantity} · {formatAmount(asset.acquisitionCost)}</dd></div>
                     <div><dt>처분수량(원천 최소단위) · 처분가액</dt><dd>{asset.disposedQuantity} · {formatAmount(asset.grossProceeds)}</dd></div>
@@ -520,6 +528,12 @@ export function TaxReportDetailV2({
                     { label: '취득 대가', value: formatAmount(row.consideration) },
                     { label: '취득 부대비용', value: formatAmount(row.acquisitionAncillaryExpense) },
                     { label: '총 취득가액', value: formatAmount(row.acquisitionCost) },
+                    ...(row.incomePolicyMapping === null ? [] : [
+                      { label: '보상 분류', value: row.incomePolicyMapping.eventSubtype },
+                      { label: '적용 처리', value: row.incomePolicyMapping.treatment },
+                      { label: '정책 버전', value: row.incomePolicyMapping.policyVersion },
+                      { label: '정책 증거 digest', value: row.incomePolicyMapping.policyArtifactDigest },
+                    ]),
                   ]} />
               ))}
             </section>

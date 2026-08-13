@@ -6,6 +6,7 @@ import {
   type TaxEvidencePackArtifact,
 } from './model-reader.js'
 import type {
+  PublicTaxReportV2Detail,
   PublicTaxReportV2Policy,
   PublicTaxReportV2SourceCoverage,
 } from './public-model-v2.js'
@@ -23,6 +24,31 @@ const RFC3339 =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/
 const MAX_BYTES = 16 * 1024 * 1024
 const MAX_ROWS = 250_000
+const BASE_ARTIFACT_ROOT_KINDS = [
+  'LOT_RUN', 'TAX_INVENTORY', 'TAX_ESTIMATE', 'REPORT_POLICY', 'REPORT_ENGINE',
+] as const
+const DECISION_ARTIFACT_ROOT_PREFIXES = [
+  'BASIS_ELECTION_EVIDENCE:', 'INCOME_POLICY_MAPPING:',
+] as const
+const INCOME_POLICY_SUBTYPES = new Set([
+  'AIRDROP', 'STAKING_REWARD', 'HARD_FORK', 'MINING_REWARD',
+])
+
+const isDecisionArtifactRootKind = (kind: string) => {
+  const prefix = DECISION_ARTIFACT_ROOT_PREFIXES.find((value) =>
+    kind.startsWith(value))
+  if (prefix === undefined) return false
+  const identity = kind.slice(prefix.length)
+  if (
+    prefix === 'INCOME_POLICY_MAPPING:' &&
+    !INCOME_POLICY_SUBTYPES.has(identity)
+  ) return false
+  return identity.length >= 1 && identity.length <= 256 &&
+    [...identity].every((character) => {
+      const codePoint = character.codePointAt(0) ?? 0
+      return codePoint >= 0x20 && codePoint !== 0x7f
+    })
+}
 
 type JsonRecord = Record<string, unknown>
 
@@ -65,6 +91,63 @@ export class InvalidTaxEvidencePackV2Error extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'InvalidTaxEvidencePackV2Error'
+  }
+}
+
+export const assertTaxEvidencePackV2DecisionRoots = (
+  pack: PublicTaxEvidencePackV2,
+  report: PublicTaxReportV2Detail,
+) => {
+  if (
+    pack.reportId !== report.reportId ||
+    pack.artifactDigest !== report.evidencePackDigest ||
+    pack.taxYear !== report.taxYear ||
+    pack.methodology.taxInventoryRunId !== report.methodology.taxInventoryRunId ||
+    pack.methodology.taxEstimateId !== report.methodology.taxEstimateId ||
+    pack.methodology.lotRunId !== report.methodology.lotRunId ||
+    pack.methodology.sourceLedgerGenerationId !==
+      report.methodology.sourceLedgerGenerationId ||
+    pack.methodology.schemaDigest !== report.methodology.schemaDigest ||
+    pack.issuedAt !== report.issuedAt ||
+    canonicalStringify(pack.methodology.policy) !==
+      canonicalStringify(report.methodology.policy) ||
+    canonicalStringify(pack.methodology.engine) !==
+      canonicalStringify(report.methodology.engine)
+  ) {
+    invalid('$', 'evidence pack methodology does not match the report model')
+  }
+  const expected = new Map<string, string>()
+  for (const summary of report.assetSummaries) {
+    if (
+      summary.basisMode === 'DEEMED_EXPENSE_50' &&
+      summary.basisEvidenceDigest !== null
+    ) {
+      expected.set(
+        `BASIS_ELECTION_EVIDENCE:${summary.taxAssetId}`,
+        summary.basisEvidenceDigest,
+      )
+    }
+  }
+  for (const acquisition of report.acquisitions) {
+    const mapping = acquisition.incomePolicyMapping
+    if (mapping === null) continue
+    const kind = `INCOME_POLICY_MAPPING:${mapping.eventSubtype}`
+    const existing = expected.get(kind)
+    if (existing !== undefined && existing !== mapping.policyArtifactDigest) {
+      invalid('$.acquisitions', 'income policy mapping digests contradict')
+    }
+    expected.set(kind, mapping.policyArtifactDigest)
+  }
+  const actual = new Map(
+    pack.artifactRoots
+      .filter((root) => isDecisionArtifactRootKind(root.kind))
+      .map((root) => [root.kind, root.digest]),
+  )
+  if (
+    actual.size !== expected.size ||
+    [...expected].some(([kind, rootDigest]) => actual.get(kind) !== rootDigest)
+  ) {
+    invalid('$.artifactRoots', 'decision evidence roots do not match the report model')
   }
 }
 
@@ -344,7 +427,8 @@ export const decodeAndProjectTaxEvidencePackV2 = (
   }
   const root = record(parsed, '$', [
     'schemaVersion', 'manifestId', 'reportId', 'subjectId', 'residentId',
-    'taxYear', 'taxInventoryRunId', 'taxEstimateId', 'lotRunId',
+    'taxYear', 'taxInventoryRunId',
+    'taxEstimateId', 'lotRunId',
     'sourceLedgerGenerationId', 'schemaDigest', 'artifactRoots',
     'evidenceCoordinates',
     'sourceCoverage', 'policy', 'engine', 'issuedAt',
@@ -358,16 +442,32 @@ export const decodeAndProjectTaxEvidencePackV2 = (
   if (!Number.isSafeInteger(root.taxYear) || Number(root.taxYear) < 2025) {
     invalid('$.taxYear', 'is unsupported')
   }
+  const artifactRoots = array(root.artifactRoots, '$.artifactRoots', (value, path) => {
+    const row = record(value, path, ['kind', 'digest'])
+    const kind = string(row.kind, `${path}.kind`)
+    if (
+      !(BASE_ARTIFACT_ROOT_KINDS as readonly string[]).includes(kind) &&
+      !isDecisionArtifactRootKind(kind)
+    ) {
+      invalid(`${path}.kind`, 'is not an allowlisted evidence root')
+    }
+    return { kind, digest: digest(row.digest, `${path}.digest`) }
+  })
+  if (new Set(artifactRoots.map((root) => root.kind)).size !== artifactRoots.length) {
+    invalid('$.artifactRoots', 'root kinds must be unique')
+  }
+  for (const kind of BASE_ARTIFACT_ROOT_KINDS) {
+    if (!artifactRoots.some((root) => root.kind === kind)) {
+      invalid('$.artifactRoots', `is missing required ${kind} root`)
+    }
+  }
   return {
     schemaVersion: EVIDENCE_SCHEMA_V2,
     reportId: expectedReportId,
     artifactDigest,
     manifestId,
     taxYear: root.taxYear as number,
-    artifactRoots: array(root.artifactRoots, '$.artifactRoots', (value, path) => {
-      const row = record(value, path, ['kind', 'digest'])
-      return { kind: string(row.kind, `${path}.kind`), digest: digest(row.digest, `${path}.digest`) }
-    }),
+    artifactRoots,
     evidenceCoordinates: array(root.evidenceCoordinates, '$.evidenceCoordinates', coordinate),
     sourceCoverage: array(root.sourceCoverage, '$.sourceCoverage', sourceCoverage),
     methodology: {
@@ -391,8 +491,8 @@ export const publicTaxEvidencePackV2Schema = {
   additionalProperties: false,
   required: [
     'schemaVersion', 'reportId', 'artifactDigest', 'manifestId', 'taxYear',
-    'artifactRoots', 'evidenceCoordinates', 'sourceCoverage', 'methodology',
-    'issuedAt',
+    'artifactRoots', 'evidenceCoordinates',
+    'sourceCoverage', 'methodology', 'issuedAt',
   ],
   properties: {
     schemaVersion: { type: 'string', const: EVIDENCE_SCHEMA_V2 },

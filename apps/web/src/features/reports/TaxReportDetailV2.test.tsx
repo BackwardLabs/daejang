@@ -131,7 +131,9 @@ const report: TaxReportV2DetailModel = {
     incurredExpense: known('1000'), deductibleExpense: known('1000'),
     disposedBasis: known('18000000'), gainLoss: known('4499000'),
     endingQuantity: '75000000', endingCost: known('52500000'),
-    basisMode: 'ACTUAL_TOTAL_AVERAGE', basisEvidenceDigest: null,
+    basisMode: 'ACTUAL_TOTAL_AVERAGE',
+    basisApplicationReasonCode: null, basisEvidenceDigest: null,
+    ntsDesignationId: null, ntsDesignationPolicyVersion: null,
   }],
   disposals: [{
     transactionType: 'DISPOSAL', movementId: 'disposal-1', relatedMovementId: null, eventId: 'event-1',
@@ -171,6 +173,10 @@ const report: TaxReportV2DetailModel = {
     kind: 'OTHER_ACQUISITION', taxAssetId: 'ETH', ledgerAssetId: 'ethereum',
     quantity: '1000', valuationId: 'valuation-2', consideration: known('490000'),
     acquisitionAncillaryExpense: known('10000'), acquisitionCost: known('500000'),
+    incomePolicyMapping: {
+      eventSubtype: 'AIRDROP', treatment: 'OTHER_ACQUISITION_ONLY',
+      policyVersion: 'reward-policy-v1', policyArtifactDigest: '8'.repeat(64),
+    },
     occurredAt: '2027-02-01T00:00:00Z',
     account: { status: 'KNOWN', accountId: 'wallet-1', accountKind: 'EVM_WALLET', displayNameStatus: 'UNKNOWN', displayName: null },
     valuation: { status: 'KNOWN', valuationId: 'valuation-2', kind: 'MARKET_QUOTE', effectiveAt: '2027-02-01T00:00:00Z', quoteId: 'quote-2', snapshotArtifactDigest: '9'.repeat(64), baseAtomicUnits: '1000', quoteAtomicUnits: '500000', rounding: 'FLOOR', providerStatus: 'KNOWN', provider: 'UPBIT', datasetVersionStatus: 'KNOWN', datasetVersion: 'fixture-v1', marketStatus: 'KNOWN', market: 'KRW-ETH' },
@@ -325,6 +331,10 @@ describe('TaxReportDetailV2', () => {
     expect(screen.getByText('취득 대가')).toBeInTheDocument()
     expect(screen.getByText('취득 부대비용')).toBeInTheDocument()
     expect(screen.getByText('총 취득가액')).toBeInTheDocument()
+    expect(screen.getByText('보상 분류')).toBeInTheDocument()
+    expect(screen.getByText('AIRDROP')).toBeInTheDocument()
+    expect(screen.getByText('reward-policy-v1')).toBeInTheDocument()
+    expect(screen.getByText('8'.repeat(64))).toBeInTheDocument()
     expect(screen.getByText(/TRANSFER · BTC/u)).toBeInTheDocument()
     expect(screen.getByText(/SELF_TRANSFER · ETH/u)).toBeInTheDocument()
     expect(screen.getByText('relation relation-1')).toBeInTheDocument()
@@ -450,7 +460,10 @@ describe('TaxReportDetailV2', () => {
         rounding: null,
       },
       basisMode: 'DEEMED_EXPENSE_50',
+      basisApplicationReasonCode: 'NTS_DESIGNATED_OTHER',
       basisEvidenceDigest: evidenceDigest,
+      ntsDesignationId: 'nts-designation-1',
+      ntsDesignationPolicyVersion: '2027-v1',
     }
     deemedReport.disposals[0] = {
       ...deemedReport.disposals[0]!,
@@ -463,6 +476,9 @@ describe('TaxReportDetailV2', () => {
     fireEvent.click(screen.getByRole('tab', { name: '자산별 장부' }))
     expect(screen.getAllByText('해당 없음 · 50% 필요경비 특례').length)
       .toBeGreaterThan(0)
+    expect(screen.getByText('국세청 지정 사유')).toBeInTheDocument()
+    expect(screen.getByText('nts-designation-1')).toBeInTheDocument()
+    expect(screen.getByText('2027-v1')).toBeInTheDocument()
     expect(screen.getByText(evidenceDigest)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '소득·처분' }))

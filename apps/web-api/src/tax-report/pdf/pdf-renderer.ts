@@ -41,6 +41,16 @@ type TableOptions = {
   rows: ReadonlyArray<ReadonlyArray<string>>
 }
 
+export const incomePolicyMappingLines = (mapping: {
+  eventSubtype: string
+  policyVersion: string
+  policyArtifactDigest: string
+} | null): string[] => mapping === null ? [] : [
+  `보상 분류 ${mapping.eventSubtype}`,
+  `정책 ${mapping.policyVersion}`,
+  `정책 근거 ${shortId(mapping.policyArtifactDigest)}`,
+]
+
 const formatDecimal = (value: string) => {
   const [integer = '', fraction] = value.split('.', 2)
   const sign = integer.startsWith('-') ? '-' : ''
@@ -96,9 +106,15 @@ const shortId = (value: string) => value.length <= 28
 
 export const deemedExpenseEvidenceRows = (
   model: Pick<ReportPrintModelV1, 'v2'>,
-): Array<readonly [string, string]> => model.v2?.assetSummaries
+): Array<readonly [string, string, string, string, string]> => model.v2?.assetSummaries
   .filter((row) => row.basisEvidenceDigest !== null)
-  .map((row) => [row.taxAssetId, row.basisEvidenceDigest!]) ?? []
+  .map((row) => [
+    row.taxAssetId,
+    row.basisApplicationReasonCode ?? '사유 미확정',
+    row.ntsDesignationId ?? '해당 없음',
+    row.ntsDesignationPolicyVersion ?? '해당 없음',
+    row.basisEvidenceDigest!,
+  ]) ?? []
 
 export const formatValuationMarket = (
   valuation: { marketStatus: string; market: string | null },
@@ -797,8 +813,11 @@ export async function renderTaxReportPdf(
         title: '50% 필요경비 특례 증거',
         emptyLabel: '50% 필요경비 특례를 적용한 자산이 없습니다.',
         columns: [
-          { header: '자산', width: 112 },
-          { header: '법정 적용 증거 digest', width: 399 },
+          { header: '자산', width: 66 },
+          { header: '법정 적용 사유', width: 130 },
+          { header: '국세청 지정 ID', width: 88 },
+          { header: '지정 정책 버전', width: 88 },
+          { header: '법정 적용 증거 digest', width: 139 },
         ],
         rows: deemedEvidence,
       })
@@ -901,7 +920,12 @@ export async function renderTaxReportPdf(
             `취득수수료 ${formatReportAmount(row.acquisitionAncillaryExpense, model.denominationAssetId)}`,
             `총취득가액 ${formatReportAmount(row.acquisitionCost, model.denominationAssetId)}`,
           ].join('\n'),
-          `${reportRowAccountLabel(row.account)}\n${reportRowSourceLabel(row)}\n${row.review.status}`,
+          [
+            reportRowAccountLabel(row.account),
+            reportRowSourceLabel(row),
+            row.review.status,
+            ...incomePolicyMappingLines(row.incomePolicyMapping),
+          ].join('\n'),
         ]),
       ],
     })

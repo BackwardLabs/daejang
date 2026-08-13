@@ -93,7 +93,10 @@ export type PublicTaxReportV2AssetSummary = {
   endingQuantity: string
   endingCost: PublicTaxReportV2Amount
   basisMode: 'ACTUAL_TOTAL_AVERAGE' | 'DEEMED_EXPENSE_50'
+  basisApplicationReasonCode: string | null
   basisEvidenceDigest: string | null
+  ntsDesignationId: string | null
+  ntsDesignationPolicyVersion: string | null
 }
 
 export type PublicTaxReportV2Account = {
@@ -135,6 +138,13 @@ export type PublicTaxReportV2SourceEvidence = {
 export type PublicTaxReportV2RowReview = {
   status: 'CLEAR' | 'REVIEW_REQUIRED'
   limitations: PublicTaxReportV2Detail['limitations']
+}
+
+export type PublicTaxReportV2IncomePolicyMapping = {
+  eventSubtype: string
+  treatment: 'OTHER_ACQUISITION_ONLY'
+  policyVersion: string
+  policyArtifactDigest: string
 }
 
 type PublicMovementBase = {
@@ -275,6 +285,7 @@ export type PublicTaxReportV2Detail = {
     consideration: PublicTaxReportV2Amount
     acquisitionAncillaryExpense: PublicTaxReportV2Amount
     acquisitionCost: PublicTaxReportV2Amount
+    incomePolicyMapping: PublicTaxReportV2IncomePolicyMapping | null
   }>
   incomeRows: Array<PublicMovementBase & {
     transactionType: PublicIncomeKind
@@ -861,12 +872,49 @@ const assetSummary = (
     'acquisitionCost', 'annualAverage', 'disposedQuantity', 'grossProceeds',
     'incurredExpense', 'deductibleExpense', 'disposedBasis', 'gainLoss',
     'endingQuantity', 'endingCost', 'basisMode',
-  ], ['basisEvidenceDigest'])
+  ], [
+    'basisApplicationReasonCode', 'basisEvidenceDigest',
+    'ntsDesignationId', 'ntsDesignationPolicyVersion',
+  ])
   const { mode, evidence } = basisDecision(
     row.basisMode,
     row.basisEvidenceDigest,
     path,
   )
+  const basisApplicationReasonCode = optionalString(
+    row.basisApplicationReasonCode,
+    `${path}.basisApplicationReasonCode`,
+  )
+  const ntsDesignationId = optionalString(
+    row.ntsDesignationId,
+    `${path}.ntsDesignationId`,
+  )
+  const ntsDesignationPolicyVersion = optionalString(
+    row.ntsDesignationPolicyVersion,
+    `${path}.ntsDesignationPolicyVersion`,
+  )
+  if (mode === 'ACTUAL_TOTAL_AVERAGE') {
+    if (
+      basisApplicationReasonCode !== null ||
+      ntsDesignationId !== null ||
+      ntsDesignationPolicyVersion !== null
+    ) {
+      invalid(path, 'actual-cost mode must not claim deemed-expense authority')
+    }
+  } else if (basisApplicationReasonCode === 'NON_VASP_NO_BOOKS_OR_EVIDENCE') {
+    if (ntsDesignationId !== null || ntsDesignationPolicyVersion !== null) {
+      invalid(path, 'non-VASP deemed expense must not claim an NTS designation')
+    }
+  } else if (basisApplicationReasonCode === 'NTS_DESIGNATED_OTHER') {
+    if (ntsDesignationId === null || ntsDesignationPolicyVersion === null) {
+      invalid(path, 'NTS-designated deemed expense requires designation identity')
+    }
+  } else {
+    invalid(
+      `${path}.basisApplicationReasonCode`,
+      'deemed-expense mode requires a supported statutory reason',
+    )
+  }
   const openingQuantity = numeric(
     row.openingQuantity,
     `${path}.openingQuantity`,
@@ -919,12 +967,17 @@ const assetSummary = (
     invalid(`${path}.openingBasisProvenance`, 'NOT_APPLICABLE must not carry values')
   }
   if (
-    (openingQuantity === '0') !==
-    (openingBasisProvenance.status === 'NOT_APPLICABLE')
+    (mode === 'DEEMED_EXPENSE_50' &&
+      openingBasisProvenance.status !== 'NOT_APPLICABLE') ||
+    (mode === 'ACTUAL_TOTAL_AVERAGE' &&
+      (openingQuantity === '0') !==
+        (openingBasisProvenance.status === 'NOT_APPLICABLE'))
   ) {
     invalid(
       `${path}.openingBasisProvenance`,
-      'must be NOT_APPLICABLE exactly when opening quantity is zero',
+      mode === 'DEEMED_EXPENSE_50'
+        ? 'must be NOT_APPLICABLE when basis is derived from disposal proceeds'
+        : 'must be NOT_APPLICABLE exactly when opening quantity is zero',
     )
   }
   if (openingBasisProvenance.status === 'KNOWN') {
@@ -1009,7 +1062,10 @@ const assetSummary = (
     endingQuantity: numeric(row.endingQuantity, `${path}.endingQuantity`, true),
     endingCost: amount(row.endingCost, `${path}.endingCost`),
     basisMode: mode,
+    basisApplicationReasonCode,
     basisEvidenceDigest: evidence,
+    ntsDesignationId,
+    ntsDesignationPolicyVersion,
   }
 }
 
@@ -1102,13 +1158,38 @@ const movementBase = (row: JsonRecord, path: string): PublicMovementBase => {
   }
 }
 
+const incomePolicyMapping = (
+  value: unknown,
+  path: string,
+): PublicTaxReportV2IncomePolicyMapping => {
+  const row = record(value, path, [
+    'eventSubtype', 'treatment', 'policyVersion', 'policyArtifactDigest',
+  ])
+  const eventSubtype = oneOf(
+    row.eventSubtype,
+    `${path}.eventSubtype`,
+    ['AIRDROP', 'STAKING_REWARD', 'HARD_FORK', 'MINING_REWARD'],
+  )
+  return {
+    eventSubtype,
+    treatment: oneOf(row.treatment, `${path}.treatment`, [
+      'OTHER_ACQUISITION_ONLY',
+    ]),
+    policyVersion: string(row.policyVersion, `${path}.policyVersion`),
+    policyArtifactDigest: digest(
+      row.policyArtifactDigest,
+      `${path}.policyArtifactDigest`,
+    ),
+  }
+}
+
 const acquisition = (value: unknown, path: string) => {
   const row = record(value, path, [
     'transactionType', 'movementId', 'eventId', 'revisionId', 'legId', 'kind',
     'taxAssetId', 'ledgerAssetId', 'quantity', 'consideration',
     'acquisitionAncillaryExpense', 'acquisitionCost', 'occurredAt',
     'account', 'valuation', 'sourceEvidence', 'review',
-  ], ['relatedMovementId', 'valuationId'])
+  ], ['relatedMovementId', 'valuationId', 'incomePolicyMapping'])
   const result = {
     ...movementBase(row, path),
     consideration: amount(row.consideration, `${path}.consideration`),
@@ -1117,6 +1198,9 @@ const acquisition = (value: unknown, path: string) => {
       `${path}.acquisitionAncillaryExpense`,
     ),
     acquisitionCost: amount(row.acquisitionCost, `${path}.acquisitionCost`),
+    incomePolicyMapping: row.incomePolicyMapping === undefined
+      ? null
+      : incomePolicyMapping(row.incomePolicyMapping, `${path}.incomePolicyMapping`),
   }
   const kind = oneOf(result.kind, `${path}.kind`, [
     'ACQUIRE', 'OTHER_ACQUISITION',
@@ -1138,6 +1222,9 @@ const acquisition = (value: unknown, path: string) => {
   }
   if (transactionType !== kind) {
     invalid(`${path}.transactionType`, 'must equal acquisition kind')
+  }
+  if (result.incomePolicyMapping !== null && kind !== 'OTHER_ACQUISITION') {
+    invalid(`${path}.incomePolicyMapping`, 'is only valid for OTHER_ACQUISITION')
   }
   return { ...result, transactionType, kind }
 }
@@ -1325,7 +1412,8 @@ export const decodeAndProjectTaxReportModelV2 = (
     invalid('artifact.canonicalJson', 'must be exact canonical JSON')
   }
   const root = record(parsed, '$', [
-    'schemaVersion', 'reportId', 'inputDigest', 'subjectId', 'residentId',
+    'schemaVersion', 'reportId', 'inputDigest',
+    'subjectId', 'residentId',
     'taxYear', 'status', 'calculationStatus', 'taxOutcome', 'filingAction',
     'filingStatus', 'filingSubmissionStatus', 'inputPeriod', 'dataCoverage', 'calculatedAsOf',
     'taxYearCloseStatus', 'valuationFinality', 'reportFinality',
@@ -1847,7 +1935,9 @@ const publicAssetSummarySchema = {
     'openingBasisProvenance', 'acquiredQuantity',
     'acquisitionCost', 'annualAverage', 'disposedQuantity', 'grossProceeds',
     'incurredExpense', 'deductibleExpense', 'disposedBasis', 'gainLoss',
-    'endingQuantity', 'endingCost', 'basisMode', 'basisEvidenceDigest',
+    'endingQuantity', 'endingCost', 'basisMode',
+    'basisApplicationReasonCode', 'basisEvidenceDigest',
+    'ntsDesignationId', 'ntsDesignationPolicyVersion',
   ],
   properties: {
     taxAssetId: publicStringSchema,
@@ -1886,9 +1976,12 @@ const publicAssetSummarySchema = {
       type: 'string',
       enum: ['ACTUAL_TOTAL_AVERAGE', 'DEEMED_EXPENSE_50'],
     },
+    basisApplicationReasonCode: publicNullableStringSchema,
     basisEvidenceDigest: {
       anyOf: [publicDigestSchema, { type: 'null' }],
     },
+    ntsDesignationId: publicNullableStringSchema,
+    ntsDesignationPolicyVersion: publicNullableStringSchema,
   },
 } as const
 
@@ -1972,6 +2065,20 @@ const publicMovementRequired = [
   'review',
 ] as const
 
+const publicIncomePolicyMappingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'eventSubtype', 'treatment', 'policyVersion', 'policyArtifactDigest',
+  ],
+  properties: {
+    eventSubtype: publicStringSchema,
+    treatment: { type: 'string', const: 'OTHER_ACQUISITION_ONLY' },
+    policyVersion: publicStringSchema,
+    policyArtifactDigest: publicDigestSchema,
+  },
+} as const
+
 const publicCalculationRuleSchema = {
   type: 'object',
   additionalProperties: false,
@@ -2037,7 +2144,8 @@ export const publicTaxReportV2DetailSchema = {
   additionalProperties: false,
   required: [
     'schemaVersion', 'reportId', 'reportModelDigest', 'inputDigest',
-    'evidencePackDigest', 'taxYear', 'status', 'calculationStatus',
+    'evidencePackDigest', 'taxYear', 'status',
+    'calculationStatus',
     'taxOutcome', 'filingAction', 'filingStatus', 'filingSubmissionStatus', 'inputPeriod',
     'dataCoverage', 'calculatedAsOf', 'taxYearCloseStatus',
     'valuationFinality', 'reportFinality', 'denominationAssetId',
@@ -2155,6 +2263,7 @@ export const publicTaxReportV2DetailSchema = {
           'consideration',
           'acquisitionAncillaryExpense',
           'acquisitionCost',
+          'incomePolicyMapping',
         ],
         properties: {
           ...publicMovementProperties,
@@ -2169,6 +2278,9 @@ export const publicTaxReportV2DetailSchema = {
           consideration: publicTaxReportV2AmountSchema,
           acquisitionAncillaryExpense: publicTaxReportV2AmountSchema,
           acquisitionCost: publicTaxReportV2AmountSchema,
+          incomePolicyMapping: {
+            anyOf: [publicIncomePolicyMappingSchema, { type: 'null' }],
+          },
         },
       },
     },

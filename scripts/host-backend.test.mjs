@@ -727,7 +727,9 @@ test('keeps the core JIT and Posting pipeline active without tax profiles', () =
   })
   assert.deepEqual(
     hostActiveServiceOrder({ evmPosting: false, taxd: false }),
-    ['pdf-parser', 'jit', 'engine', 'worker', 'posting', 'web-api'],
+    [
+      'pdf-parser', 'jit', 'engine', 'worker', 'posting', 'web-api',
+    ],
   )
   assert.deepEqual(
     hostActiveServiceOrder({ evmPosting: true, taxd: true }),

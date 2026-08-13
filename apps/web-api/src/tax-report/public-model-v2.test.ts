@@ -168,6 +168,10 @@ const reportFixture = () => ({
     quantity: '1000', valuationId: 'valuation-1', occurredAt: '2027-02-01T00:00:00Z',
     consideration: known('500000'), acquisitionAncillaryExpense: known('1000'),
     acquisitionCost: known('501000'), account, valuation, sourceEvidence,
+    incomePolicyMapping: {
+      eventSubtype: 'AIRDROP', treatment: 'OTHER_ACQUISITION_ONLY',
+      policyVersion: 'reward-policy-v1', policyArtifactDigest: digest('8'),
+    },
     review: clearReview,
   }],
   incomeRows: [],
@@ -276,6 +280,10 @@ describe('ReportModel V2 public projection', () => {
         consideration: { amount: '500000' },
         acquisitionAncillaryExpense: { amount: '1000' },
         acquisitionCost: { amount: '501000' },
+        incomePolicyMapping: {
+          eventSubtype: 'AIRDROP', treatment: 'OTHER_ACQUISITION_ONLY',
+          policyVersion: 'reward-policy-v1', policyArtifactDigest: digest('8'),
+        },
         valuation: {
           provider: 'UPBIT',
           datasetVersion: 'fixture-v1',
@@ -321,6 +329,34 @@ describe('ReportModel V2 public projection', () => {
       artifact(report),
       reportId,
     )).toThrow(InvalidTaxReportModelV2Error)
+  })
+
+  it('rejects an invalid or misplaced reward acquisition policy mapping', () => {
+    const invalidTreatment = reportFixture()
+    invalidTreatment.acquisitions[0]!.incomePolicyMapping.treatment = 'INCOME'
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(invalidTreatment),
+      reportId,
+    )).toThrow(/incomePolicyMapping\.treatment/u)
+
+    const misplaced = reportFixture()
+    misplaced.acquisitions[0] = {
+      ...misplaced.acquisitions[0]!,
+      transactionType: 'ACQUIRE',
+      kind: 'ACQUIRE',
+    }
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(misplaced),
+      reportId,
+    )).toThrow(/incomePolicyMapping/u)
+
+    const unsupportedSubtype = reportFixture()
+    unsupportedSubtype.acquisitions[0]!.incomePolicyMapping.eventSubtype =
+      'UNREVIEWED_REWARD'
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(unsupportedSubtype),
+      reportId,
+    )).toThrow(/incomePolicyMapping\.eventSubtype/u)
   })
 
   it('rejects the DB report generation field at the artifact boundary', () => {
@@ -523,6 +559,7 @@ describe('ReportModel V2 public projection', () => {
         status: 'NOT_APPLICABLE',
       },
       basisMode: 'DEEMED_EXPENSE_50',
+      basisApplicationReasonCode: 'NON_VASP_NO_BOOKS_OR_EVIDENCE',
       basisEvidenceDigest: evidence,
     })
     Object.assign(report.disposals[0]!, {
@@ -542,6 +579,73 @@ describe('ReportModel V2 public projection', () => {
     })
   })
 
+  it('accepts a deemed-expense asset with a positive opening quantity and intentionally unavailable historical basis provenance', () => {
+    const report = reportFixture()
+    const evidence = digest('b')
+    Object.assign(report.assetSummaries[0]!, {
+      openingQuantity: '10',
+      openingBasis: { status: 'UNKNOWN' },
+      openingBasisProvenance: { status: 'NOT_APPLICABLE' },
+      annualAverage: { status: 'NOT_APPLICABLE' },
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisApplicationReasonCode: 'NON_VASP_NO_BOOKS_OR_EVIDENCE',
+      basisEvidenceDigest: evidence,
+    })
+    Object.assign(report.disposals[0]!, {
+      rounding: 'CUMULATIVE_FLOOR_50_PERCENT_PROCEEDS',
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisEvidenceDigest: evidence,
+    })
+
+    const projected = decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )
+    expect(projected.assetSummaries[0]).toMatchObject({
+      openingQuantity: '10',
+      openingBasis: { status: 'UNKNOWN', amount: null },
+      openingBasisProvenance: { status: 'NOT_APPLICABLE' },
+    })
+  })
+
+  it('rejects actual-cost opening balances that claim deemed-expense-only provenance semantics', () => {
+    const report = reportFixture()
+    Object.assign(report.assetSummaries[0]!, {
+      openingQuantity: '10',
+      openingBasis: known('100'),
+      openingBasisProvenance: { status: 'NOT_APPLICABLE' },
+    })
+
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )).toThrow(/must be NOT_APPLICABLE exactly when opening quantity is zero/u)
+  })
+
+  it('rejects contradictory deemed-expense authority coordinates', () => {
+    const actual = reportFixture()
+    Object.assign(actual.assetSummaries[0]!, {
+      basisApplicationReasonCode: 'NON_VASP_NO_BOOKS_OR_EVIDENCE',
+    })
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(actual), reportId,
+    )).toThrow(/actual-cost mode must not claim deemed-expense authority/u)
+
+    const missingDesignation = reportFixture()
+    Object.assign(missingDesignation.assetSummaries[0]!, {
+      annualAverage: { status: 'NOT_APPLICABLE' },
+      basisMode: 'DEEMED_EXPENSE_50',
+      basisApplicationReasonCode: 'NTS_DESIGNATED_OTHER',
+      basisEvidenceDigest: digest('b'),
+      ntsDesignationId: 'nts-designation-1',
+    })
+    delete (missingDesignation.assetSummaries[0]! as Record<string, unknown>)
+      .ntsDesignationPolicyVersion
+    expect(() => decodeAndProjectTaxReportModelV2(
+      artifact(missingDesignation), reportId,
+    )).toThrow(/requires designation identity/u)
+  })
+
   it('rejects a 50% average that carries total-average values', () => {
     const report = reportFixture()
     const evidence = digest('b')
@@ -551,6 +655,7 @@ describe('ReportModel V2 public projection', () => {
         numerator: '1',
       },
       basisMode: 'DEEMED_EXPENSE_50',
+      basisApplicationReasonCode: 'NON_VASP_NO_BOOKS_OR_EVIDENCE',
       basisEvidenceDigest: evidence,
     })
 
@@ -580,6 +685,7 @@ describe('ReportModel V2 public projection', () => {
     Object.assign(report.assetSummaries[0]!, {
       annualAverage: { status: 'NOT_APPLICABLE' },
       basisMode: 'DEEMED_EXPENSE_50',
+      basisApplicationReasonCode: 'NON_VASP_NO_BOOKS_OR_EVIDENCE',
       basisEvidenceDigest: digest('b'),
     })
 

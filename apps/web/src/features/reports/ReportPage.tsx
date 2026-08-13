@@ -158,6 +158,37 @@ const generationPresentation = (
   }
 }
 
+const reportPageHeader = (status: TaxReportGenerationStatusModel | null) => {
+  if (status?.blockedReasonCode === 'APPLICATION_PENDING') return {
+    title: '세무 장부 신청',
+    description: '데이터 소스를 확인하고 세무 장부 생성을 시작할 준비를 합니다.',
+  }
+  if (status?.state === 'BUILDING') return {
+    title: '리포트 생성 중',
+    description: 'Tax Engine의 실제 처리 상태를 확인합니다. 완료되면 결과 화면으로 자동 전환됩니다.',
+  }
+  if (status?.state === 'FAILED') return {
+    title: '리포트 상태를 불러오지 못했습니다',
+    description: '저장된 원본과 장부는 그대로입니다. 잠시 후 다시 확인해 주세요.',
+  }
+  if (
+    status?.state === 'ACTIVE' &&
+    status.outcome === 'NO_TAX_EVENTS' &&
+    status.finality === 'FINAL'
+  ) return {
+    title: '과세 이벤트 없음',
+    description: '전체 과세기간의 검증된 데이터에서 과세 계산 대상이 확인되지 않았습니다.',
+  }
+  if (status?.state === 'REVIEW_REQUIRED' && !canReadCurrent(status)) return {
+    title: '재검토 필요',
+    description: '최신 원장과 계산 결과의 정합성을 확인한 뒤 장부를 다시 생성해야 합니다.',
+  }
+  return {
+    title: '세무 장부',
+    description: 'Tax Engine이 발행한 계산 결과를 장부로 검토하고, 선택한 revision의 PDF를 생성합니다.',
+  }
+}
+
 function ReportGenerationState({
   status,
   onRetry,
@@ -176,8 +207,99 @@ function ReportGenerationState({
     : status.state === 'REVIEW_REQUIRED'
       ? { href: '/ledger', label: '장부 검토' }
       : null
+  const standalone = !hasReadableCurrent
+
+  if (standalone && presentation.tone === 'building') {
+    const steps = [
+      ['현재 상태', '생성 작업이 실행 중입니다', 'BUILDING'],
+      ['안내', '다른 화면으로 이동해도 작업은 계속됩니다', '완료'],
+      ['다음 표시', '리포트가 준비되면 계산 결과와 근거를 표시합니다', '숨김'],
+      ['표시 제한', 'PDF와 블록체인 증명은 준비된 리포트에서만 사용할 수 있습니다', '대기'],
+      ['자동 새로고침', '상태가 바뀌면 이 화면은 최신 결과로 교체합니다', '자동'],
+    ]
+    return (
+      <section
+        className="report-generation-state report-generation-state--building"
+        data-standalone="true"
+        data-tone={presentation.tone}
+      >
+        <header>
+          <span>생성 중 · 잠정</span>
+          <h3>실제 처리 상태만 표시합니다</h3>
+          <p>리포트가 준비되면 세액과 PDF, 블록체인 증명을 보여 드립니다.</p>
+        </header>
+        <div className="report-generation-state__steps">
+          {steps.map(([label, detail, value], index) => (
+            <div data-active={index < 2 ? 'true' : undefined} key={label}>
+              <span><strong>{label}</strong><small>{detail}</small></span>
+              <em>{value}</em>
+            </div>
+          ))}
+        </div>
+        <a href="/sources">데이터 범위 보기 →</a>
+        <small className="report-generation-state__polling" role="status">
+          상태를 자동으로 다시 확인하고 있습니다.
+        </small>
+      </section>
+    )
+  }
+
+  if (standalone && presentation.tone === 'error') {
+    return (
+      <section
+        className="report-generation-state report-generation-state--error"
+        data-standalone="true"
+        data-tone={presentation.tone}
+      >
+        <div className="report-generation-state__error-icon" aria-hidden="true">!</div>
+        <header>
+          <h3>일시적인 조회 오류가 발생했습니다</h3>
+          <p>리포트 상태나 결과를 불러오지 못했습니다.</p>
+        </header>
+        <div className="report-generation-state__error-detail">
+          <strong>오류 범위 · 리포트 조회</strong>
+          <span>현재 상태를 다시 확인한 뒤, 리포트가 활성화된 경우에만 결과를 표시합니다.</span>
+          <small>{status.failureCode ? `오류 번호 · ${status.failureCode}` : '오류 번호 · 문의 시 함께 전달'}</small>
+        </div>
+        <div className="report-generation-state__actions">
+          <button type="button" onClick={onRetry}>상태 다시 확인</button>
+          <a href="/sources">데이터 범위 보기</a>
+        </div>
+        <small>계속 실패하면 오류 번호와 함께 문의해 주세요.</small>
+      </section>
+    )
+  }
+
+  if (standalone && presentation.tone === 'empty' && status.outcome === 'NO_TAX_EVENTS') {
+    return (
+      <section
+        className="report-generation-state report-generation-state--no-events"
+        data-standalone="true"
+        data-tone={presentation.tone}
+      >
+        <div className="report-generation-state__empty-icon" aria-hidden="true">＋</div>
+        <header>
+          <h3>계산은 완료되었지만 과세 이벤트가 없습니다</h3>
+          <p>데이터 범위와 거래 분류를 확인할 수 있습니다.</p>
+        </header>
+        <div className="report-generation-state__actions">
+          <a href="/sources">데이터 범위 보기</a>
+          <a href="/ledger">거래 검토 보기</a>
+        </div>
+        <dl>
+          <div><dt>완료 상태</dt><dd>{status.finality} · 과세 이벤트 없음</dd></div>
+          <div><dt>사용 가능 항목</dt><dd>데이터 범위 · 거래 검토</dd></div>
+        </dl>
+      </section>
+    )
+  }
+
   return (
-    <section className="report-generation-state" data-tone={presentation.tone}>
+    <section
+      className="report-generation-state"
+      data-standalone={standalone ? 'true' : undefined}
+      data-tone={presentation.tone}
+    >
       <div className="report-generation-state__icon" aria-hidden="true" />
       <div>
         <span>{presentation.eyebrow}</span>
@@ -379,6 +501,8 @@ export function ReportWorkspacePage() {
     saveAppYear(nextYear)
   }
 
+  const pageHeader = reportPageHeader(generationStatus)
+
   return (
     <div className="ledger-page report-page product-shell">
       <AppSidebar
@@ -388,9 +512,9 @@ export function ReportWorkspacePage() {
       />
       <main className="report-main">
         <PageHeader
-          description="Tax Engine이 발행한 계산 결과를 장부로 검토하고, 선택한 revision의 PDF를 생성합니다."
+          description={pageHeader.description}
           eyebrow="TAX LEDGER"
-          title="세무 장부"
+          title={pageHeader.title}
           tone="workspace"
         />
 

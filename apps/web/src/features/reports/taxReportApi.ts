@@ -377,7 +377,10 @@ export type TaxReportV2DetailModel = {
     endingQuantity: string
     endingCost: TaxReportV2AmountModel
     basisMode: 'ACTUAL_TOTAL_AVERAGE' | 'DEEMED_EXPENSE_50'
+    basisApplicationReasonCode: string | null
     basisEvidenceDigest: string | null
+    ntsDesignationId: string | null
+    ntsDesignationPolicyVersion: string | null
   }>
   disposals: TaxReportV2DisposalModel[]
   feeAssetDisposals: TaxReportV2DisposalModel[]
@@ -532,6 +535,12 @@ export type TaxReportV2AcquisitionModel = TaxReportV2MovementModel & {
   consideration: TaxReportV2AmountModel
   acquisitionAncillaryExpense: TaxReportV2AmountModel
   acquisitionCost: TaxReportV2AmountModel
+  incomePolicyMapping: {
+    eventSubtype: string
+    treatment: 'OTHER_ACQUISITION_ONLY'
+    policyVersion: string
+    policyArtifactDigest: string
+  } | null
 }
 
 export type TaxReportV2IncomeModel = TaxReportV2MovementModel & {

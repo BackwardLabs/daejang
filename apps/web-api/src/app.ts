@@ -242,6 +242,15 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
   }
   if (
     config.runtimeMode === 'production' &&
+    options.taxEvidencePackReader &&
+    !options.taxReportModelReader
+  ) {
+    throw new Error(
+      'A TaxReportModelReader is required to verify V2 evidence packs',
+    )
+  }
+  if (
+    config.runtimeMode === 'production' &&
     config.reportPayments &&
     options.reportPaymentStore?.durable !== true
   ) {
@@ -571,6 +580,9 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
     if (options.taxEvidencePackReader) {
       await registerTaxReportEvidenceRoutes(protectedApp, {
         reader: options.taxEvidencePackReader,
+        ...(options.taxReportModelReader
+          ? { reportReader: options.taxReportModelReader }
+          : {}),
       })
     }
     await registerReportPaymentRoutes(protectedApp, {

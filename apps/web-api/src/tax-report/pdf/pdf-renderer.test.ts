@@ -7,6 +7,7 @@ import {
   deemedExpenseEvidenceRows,
   formatKstTimestamp,
   formatCostMethod,
+  incomePolicyMappingLines,
   formatReportAmount,
   formatValuationMarket,
   reportCalculationKeyValues,
@@ -132,6 +133,20 @@ const model = (
 })
 
 describe('tax report PDF renderer', () => {
+  it('renders the approved reward acquisition policy evidence', () => {
+    const policyDigest = digest('reward-policy')
+    expect(incomePolicyMappingLines({
+      eventSubtype: 'AIRDROP',
+      policyVersion: 'reward-policy-v1',
+      policyArtifactDigest: policyDigest,
+    })).toEqual([
+      '보상 분류 AIRDROP',
+      '정책 reward-policy-v1',
+      `정책 근거 ${policyDigest.slice(0, 12)}…${policyDigest.slice(-12)}`,
+    ])
+    expect(incomePolicyMappingLines(null)).toEqual([])
+  })
+
   it('renders tax dates at the Korea tax-day boundary', () => {
     expect(formatKstTimestamp('2026-12-31T15:00:00Z')).toBe(
       '2027-01-01 00:00:00 KST',
@@ -232,7 +247,9 @@ describe('tax report PDF renderer', () => {
           incurredExpense: known('1000'), deductibleExpense: known('1000'),
           disposedBasis: known('18000000'), gainLoss: known('4499000'),
           endingQuantity: '75000000', endingCost: known('52500000'),
-          basisMode: 'ACTUAL_TOTAL_AVERAGE', basisEvidenceDigest: null,
+          basisMode: 'ACTUAL_TOTAL_AVERAGE',
+          basisApplicationReasonCode: null, basisEvidenceDigest: null,
+          ntsDesignationId: null, ntsDesignationPolicyVersion: null,
         }],
         disposals: [],
         feeAssetDisposals: [],
@@ -303,12 +320,18 @@ describe('tax report PDF renderer', () => {
             rounding: null,
           },
           basisMode: 'DEEMED_EXPENSE_50' as const,
+          basisApplicationReasonCode: 'NTS_DESIGNATED_OTHER',
+          ntsDesignationId: 'nts-designation-1',
+          ntsDesignationPolicyVersion: '2027-v1',
           basisEvidenceDigest: evidenceDigest,
         })),
       },
     }
     expect(deemedExpenseEvidenceRows(deemedInput)).toEqual([
-      ['BTC', evidenceDigest],
+      [
+        'BTC', 'NTS_DESIGNATED_OTHER', 'nts-designation-1', '2027-v1',
+        evidenceDigest,
+      ],
     ])
     const deemedOutput = await renderTaxReportPdf(deemedInput, {
       fontBytes,

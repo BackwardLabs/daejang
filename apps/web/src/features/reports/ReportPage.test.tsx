@@ -1097,7 +1097,7 @@ describe('ReportPage', () => {
     },
     {
       name: 'building',
-      title: '세무 장부를 생성하고 있습니다',
+      title: '실제 처리 상태만 표시합니다',
       finality: 'PROVISIONAL' as const,
       overrides: {
         state: 'BUILDING', generationId: '2'.repeat(64), pointerVersion: 1,
@@ -1106,7 +1106,7 @@ describe('ReportPage', () => {
     },
     {
       name: 'failed',
-      title: '장부 생성에 실패했습니다',
+      title: '일시적인 조회 오류가 발생했습니다',
       finality: 'PROVISIONAL' as const,
       overrides: {
         state: 'FAILED', generationId: '3'.repeat(64), pointerVersion: 1,
@@ -1126,7 +1126,7 @@ describe('ReportPage', () => {
     },
     {
       name: 'no tax events',
-      title: '2027년 과세 이벤트가 없습니다',
+      title: '계산은 완료되었지만 과세 이벤트가 없습니다',
       finality: 'FINAL' as const,
       overrides: {
         state: 'ACTIVE', generationId: '5'.repeat(64), pointerVersion: 1,
@@ -1230,8 +1230,16 @@ describe('ReportPage', () => {
     render(<ReportWorkspacePage />)
 
     expect(await screen.findByRole('heading', {
-      name: '세무 장부를 생성하고 있습니다',
+      name: '실제 처리 상태만 표시합니다',
     })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '리포트 생성 중' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', {
+      name: '실제 처리 상태만 표시합니다',
+    }).closest('.report-generation-state')).toHaveAttribute(
+      'data-standalone',
+      'true',
+    )
+    expect(screen.getByText('자동 새로고침')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
@@ -1266,6 +1274,11 @@ describe('ReportPage', () => {
         name: '검토가 필요한 잠정 장부입니다',
       }),
     ).toBeInTheDocument()
+    expect(screen.getByRole('heading', {
+      name: '검토가 필요한 잠정 장부입니다',
+    }).closest('.report-generation-state')).not.toHaveAttribute(
+      'data-standalone',
+    )
     expect(
       await screen.findByRole('heading', { name: '장부 계산 요약' }),
     ).toBeInTheDocument()
@@ -1343,7 +1356,7 @@ describe('ReportPage', () => {
     ).toBeInTheDocument()
     expect(
       screen.queryByRole('heading', {
-        name: '2027년 과세 이벤트가 없습니다',
+        name: '계산은 완료되었지만 과세 이벤트가 없습니다',
       }),
     ).not.toBeInTheDocument()
   })

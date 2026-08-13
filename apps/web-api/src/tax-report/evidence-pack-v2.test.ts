@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import { describe, expect, it } from 'vitest'
 
 import {
+  assertTaxEvidencePackV2DecisionRoots,
   decodeAndProjectTaxEvidencePackV2,
   InvalidTaxEvidencePackV2Error,
   publicTaxEvidencePackV2Schema,
@@ -11,6 +12,7 @@ import {
   TAX_EVIDENCE_PACK_V2_MEDIA_TYPE,
   type TaxEvidencePackArtifact,
 } from './model-reader.js'
+import type { PublicTaxReportV2Detail } from './public-model-v2.js'
 
 const reportId = `tax-report-v2:${'a'.repeat(64)}`
 const digest = (character: string) => character.repeat(64)
@@ -35,7 +37,15 @@ const evidenceFixture = () => ({
   lotRunId: 'lot-1',
   sourceLedgerGenerationId: 'ledger-generation-1',
   schemaDigest: digest('1'),
-  artifactRoots: [{ kind: 'TAX_INVENTORY', digest: digest('2') }],
+  artifactRoots: [
+    { kind: 'LOT_RUN', digest: digest('1') },
+    { kind: 'TAX_INVENTORY', digest: digest('2') },
+    { kind: 'TAX_ESTIMATE', digest: digest('3') },
+    { kind: 'REPORT_POLICY', digest: digest('4') },
+    { kind: 'REPORT_ENGINE', digest: digest('5') },
+    { kind: 'BASIS_ELECTION_EVIDENCE:BTC', digest: digest('7') },
+    { kind: 'INCOME_POLICY_MAPPING:AIRDROP', digest: digest('8') },
+  ],
   evidenceCoordinates: [{
     kind: 'POSTING', eventId: 'event-1', revisionId: 'revision-1',
     legId: 'leg-1', movementId: 'movement-1',
@@ -98,6 +108,15 @@ describe('EvidencePack V2 public projection', () => {
 
     expect(projected).toMatchObject({
       reportId,
+      artifactRoots: [
+        { kind: 'LOT_RUN', digest: digest('1') },
+        { kind: 'TAX_INVENTORY', digest: digest('2') },
+        { kind: 'TAX_ESTIMATE', digest: digest('3') },
+        { kind: 'REPORT_POLICY', digest: digest('4') },
+        { kind: 'REPORT_ENGINE', digest: digest('5') },
+        { kind: 'BASIS_ELECTION_EVIDENCE:BTC', digest: digest('7') },
+        { kind: 'INCOME_POLICY_MAPPING:AIRDROP', digest: digest('8') },
+      ],
       sourceCoverage: [{
         sourceArtifactId: 'source-1', systemName: 'UPBIT', status: 'PARTIAL',
       }],
@@ -141,6 +160,88 @@ describe('EvidencePack V2 public projection', () => {
       }),
       reportId,
     )).toThrow(/rounding profile approval and evidence disagree/u)
+  })
+
+  it('rejects missing, duplicate, or unknown artifact roots', () => {
+    const missing = evidenceFixture()
+    missing.artifactRoots = missing.artifactRoots.filter(
+      (root) => root.kind !== 'LOT_RUN',
+    )
+    expect(() => decodeAndProjectTaxEvidencePackV2(
+      artifact(missing), reportId,
+    )).toThrow(/missing required LOT_RUN/u)
+
+    const duplicate = evidenceFixture()
+    duplicate.artifactRoots.push({ kind: 'TAX_INVENTORY', digest: digest('9') })
+    expect(() => decodeAndProjectTaxEvidencePackV2(
+      artifact(duplicate), reportId,
+    )).toThrow(/root kinds must be unique/u)
+
+    const unknown = evidenceFixture()
+    unknown.artifactRoots.push({ kind: 'PRIVATE_ACTOR', digest: digest('9') })
+    expect(() => decodeAndProjectTaxEvidencePackV2(
+      artifact(unknown), reportId,
+    )).toThrow(/not an allowlisted evidence root/u)
+
+    const unsupportedSubtype = evidenceFixture()
+    unsupportedSubtype.artifactRoots.push({
+      kind: 'INCOME_POLICY_MAPPING:UNREVIEWED_REWARD', digest: digest('9'),
+    })
+    expect(() => decodeAndProjectTaxEvidencePackV2(
+      artifact(unsupportedSubtype), reportId,
+    )).toThrow(/not an allowlisted evidence root/u)
+
+    const namespacedAsset = evidenceFixture()
+    namespacedAsset.artifactRoots = namespacedAsset.artifactRoots.map((root) =>
+      root.kind === 'BASIS_ELECTION_EVIDENCE:BTC'
+        ? { ...root, kind: 'BASIS_ELECTION_EVIDENCE:eip155:1:BTC' }
+        : root)
+    expect(() => decodeAndProjectTaxEvidencePackV2(
+      artifact(namespacedAsset), reportId,
+    )).not.toThrow()
+  })
+
+  it('binds decision evidence roots to the exact public report decisions', () => {
+    const projected = decodeAndProjectTaxEvidencePackV2(
+      artifact(evidenceFixture()), reportId,
+    )
+    const report = {
+      reportId,
+      evidencePackDigest: projected.artifactDigest,
+      taxYear: 2027,
+      methodology: {
+        taxInventoryRunId: 'inventory-1', taxEstimateId: 'estimate-1',
+        lotRunId: 'lot-1', sourceLedgerGenerationId: 'ledger-generation-1',
+        schemaDigest: digest('1'), policy: projected.methodology.policy,
+        engine: projected.methodology.engine,
+      },
+      issuedAt: projected.issuedAt,
+      assetSummaries: [{
+        taxAssetId: 'BTC', basisMode: 'DEEMED_EXPENSE_50',
+        basisEvidenceDigest: digest('7'),
+      }],
+      acquisitions: [{
+        incomePolicyMapping: {
+          eventSubtype: 'AIRDROP', policyArtifactDigest: digest('8'),
+        },
+      }],
+    } as unknown as PublicTaxReportV2Detail
+    expect(() => assertTaxEvidencePackV2DecisionRoots(
+      projected, report,
+    )).not.toThrow()
+
+    const mismatchedArtifact = structuredClone(projected)
+    mismatchedArtifact.artifactDigest = digest('6')
+    expect(() => assertTaxEvidencePackV2DecisionRoots(
+      mismatchedArtifact, report,
+    )).toThrow(/evidence pack methodology does not match/u)
+
+    const mismatched = structuredClone(report)
+    mismatched.assetSummaries[0]!.basisEvidenceDigest = digest('9')
+    expect(() => assertTaxEvidencePackV2DecisionRoots(
+      projected, mismatched,
+    )).toThrow(/decision evidence roots do not match/u)
+
   })
 
   it('serializes the exact public evidence allowlist', async () => {
