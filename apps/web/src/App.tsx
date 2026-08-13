@@ -54,6 +54,7 @@ export function App({
   const [onboardingScreen, setOnboardingScreen] = useState<OnboardingScreen>(
     returnedFromSignup ? 'consent' : 'entry',
   )
+  const [onboardingEmail, setOnboardingEmail] = useState('')
   const [onboardingKey, setOnboardingKey] = useState(0)
   const startRoutePending = useRef(false)
   const signupAvailable = authCapabilities ? canSignup(authCapabilities) : false
@@ -161,9 +162,32 @@ export function App({
     if (!signupAvailable) return
     navigateTo('/')
     setPath('/')
+    setOnboardingEmail('')
     setOnboardingScreen('method')
     setOnboardingKey((current) => current + 1)
     setOnboardingVisible(true)
+  }
+
+  const startEmailOnboarding = async (email: string) => {
+    let capabilities = authCapabilities
+    if (!capabilities) {
+      try {
+        capabilities = await getAuthCapabilities()
+        setAuthCapabilities(capabilities)
+      } catch {
+        return false
+      }
+    }
+    if (!canSignup(capabilities) || !capabilities.signup.methods.email) {
+      return false
+    }
+    navigateTo('/')
+    setPath('/')
+    setOnboardingEmail(email)
+    setOnboardingScreen('email')
+    setOnboardingKey((current) => current + 1)
+    setOnboardingVisible(true)
+    return true
   }
 
   const openLogin = () => {
@@ -215,6 +239,7 @@ export function App({
       <LoginPage
         onHome={exitOnboarding}
         onSignup={startOnboarding}
+        onSignupWithEmail={startEmailOnboarding}
         onNavigate={navigatePublic}
         onAuthenticated={continueAfterLogin}
         signupAvailable={signupAvailable}
@@ -240,6 +265,7 @@ export function App({
       (onboardingScreen === 'entry' || (signupAvailable && authCapabilities)) ? (
         <OnboardingFlow
           key={onboardingKey}
+          initialEmail={onboardingEmail}
           initialScreen={onboardingScreen}
           onAuthenticated={continueAfterLogin}
           onExit={exitOnboarding}

@@ -13,6 +13,7 @@ import { Resend } from 'resend'
 import type { EmailAuthConfig } from '../config.js'
 import {
   accountAlreadyExists,
+  emailAccountNotFound,
   emailDeliveryFailed,
   invalidCredentials,
   invalidEmailVerification,
@@ -415,7 +416,10 @@ export class EmailAuthService {
     } catch {
       valid = false
     }
-    if (!credential || !valid) {
+    if (!credential) {
+      throw emailAccountNotFound()
+    }
+    if (!valid) {
       throw invalidCredentials()
     }
     return credential.user

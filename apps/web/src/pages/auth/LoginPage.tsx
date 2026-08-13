@@ -61,6 +61,7 @@ function readAuthError() {
 type LoginPageProps = {
   onHome: () => void
   onSignup: () => void
+  onSignupWithEmail: (email: string) => Promise<boolean>
   onNavigate: (path: PublicPath) => void
   onAuthenticated: (response: EmailLoginResponse) => void
   signupAvailable: boolean
@@ -69,6 +70,7 @@ type LoginPageProps = {
 export function LoginPage({
   onHome,
   onSignup,
+  onSignupWithEmail,
   onNavigate,
   onAuthenticated,
   signupAvailable,
@@ -111,6 +113,12 @@ export function LoginPage({
       })
       onAuthenticated(response)
     } catch (caught) {
+      if (
+        caught instanceof WebApiError &&
+        caught.code === 'EMAIL_ACCOUNT_NOT_FOUND'
+      ) {
+        if (await onSignupWithEmail(email.trim())) return
+      }
       setError(
         caught instanceof WebApiError
           ? caught.message.replace(/\.$/u, '')

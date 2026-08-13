@@ -31,6 +31,7 @@ export type OnboardingScreen =
   | 'complete'
 
 type OnboardingFlowProps = {
+  initialEmail?: string
   initialScreen?: OnboardingScreen
   onAuthenticated: (response: AuthenticatedSessionResponse) => void
   onExit: () => void
@@ -369,12 +370,13 @@ function EntryScreen({
   )
 }
 
-function EmailScreen({ onComplete, onBack, totalSteps }: {
+function EmailScreen({ initialEmail = '', onComplete, onBack, totalSteps }: {
+  initialEmail?: string
   onComplete: () => void
   onBack: () => void
   totalSteps: number
 }) {
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(initialEmail)
   const [code, setCode] = useState('')
   const [verificationToken, setVerificationToken] = useState('')
   const [password, setPassword] = useState('')
@@ -919,6 +921,7 @@ function CompleteScreen({
 }
 
 export function OnboardingFlow({
+  initialEmail = '',
   initialScreen = 'entry',
   onAuthenticated,
   onExit,
@@ -964,6 +967,7 @@ export function OnboardingFlow({
   } else if (screen === 'email') {
     content = (
       <EmailScreen
+        initialEmail={initialEmail}
         onComplete={() => setScreen('consent')}
         onBack={() => setScreen('method')}
         totalSteps={totalSteps}

@@ -107,7 +107,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     fireEvent.click(screen.getByTestId('connect-wallet'))
 
     await act(async () => Promise.resolve())
-    expect(mocks.listSources).not.toHaveBeenCalled()
+    expect(mocks.listSources).toHaveBeenCalledTimes(1)
     expect(onLaunchFailed).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -115,7 +115,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     })
 
     await waitFor(() => {
-      expect(mocks.listSources).toHaveBeenCalledTimes(1)
+      expect(mocks.listSources).toHaveBeenCalledTimes(2)
     })
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
@@ -130,6 +130,9 @@ describe('ReownEvmWalletConnectionRoute', () => {
       />,
     )
     fireEvent.click(screen.getByTestId('connect-wallet'))
+    await waitFor(() => {
+      expect(mocks.open).toHaveBeenCalledTimes(1)
+    })
     await act(async () => {
       mocks.stateCallback?.({ open: false })
     })
@@ -142,7 +145,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
         }),
       )
     })
-    expect(mocks.listSources).not.toHaveBeenCalled()
+    expect(mocks.listSources).toHaveBeenCalledTimes(1)
   })
 
   it('reports an already-active wallet immediately after explicit selection', async () => {
@@ -176,6 +179,33 @@ describe('ReownEvmWalletConnectionRoute', () => {
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
 
+  it('skips the wallet picker when the current wallet is already an active source', async () => {
+    mocks.listSources.mockResolvedValue({
+      items: [
+        {
+          address: mocks.caipAddress.split(':').at(-1),
+          status: 'ACTIVE',
+          type: 'EVM_WALLET',
+        },
+      ],
+    })
+    const onAlreadyConnected = vi.fn()
+
+    render(
+      <ReownEvmWalletConnectionRoute
+        launchImmediately
+        onAlreadyConnected={onAlreadyConnected}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('connect-wallet'))
+
+    await waitFor(() => {
+      expect(onAlreadyConnected).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.open).not.toHaveBeenCalled()
+    expect(mocks.connect).not.toHaveBeenCalled()
+  })
+
   it('keeps the direct wallet happy path after an explicit connect click', async () => {
     mocks.provider = 'metamask'
     const onLaunchFailed = vi.fn()
@@ -190,7 +220,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
 
     await waitFor(() => {
       expect(mocks.connect).toHaveBeenCalledWith('metamask')
-      expect(mocks.listSources).toHaveBeenCalledTimes(1)
+      expect(mocks.listSources).toHaveBeenCalledTimes(2)
     })
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
