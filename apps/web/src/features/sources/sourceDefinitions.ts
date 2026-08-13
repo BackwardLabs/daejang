@@ -10,7 +10,7 @@ export type SourceMethodDefinition = {
   badge: string
   bullets: string[]
   description: string
-  href: `/${string}`
+  href?: `/${string}`
   id: SourceMethodId
   intro: {
     description: string
@@ -88,7 +88,6 @@ export const sourceMethodDefinitions: Record<
     ],
     description:
       '브라우저 지갑을 연결해 공개 온체인 거래를 읽기 전용으로 동기화합니다.',
-    href: '/sources/new/wallet',
     id: 'evm-wallet',
     intro: {
       description:

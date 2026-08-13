@@ -611,7 +611,6 @@ describe('AppRouter', () => {
     ['/sources/new', '데이터 소스 추가'],
     ['/sources/new/upbit', 'Upbit PDF 등록'],
     ['/sources/new/upbit/upload', 'Upbit PDF 등록'],
-    ['/sources/new/wallet', 'EVM Wallet 연결'],
   ])('renders the source flow page at %s', async (path, heading) => {
     window.history.pushState({}, '', path)
 
@@ -622,33 +621,38 @@ describe('AppRouter', () => {
     ).toBeInTheDocument()
   })
 
-  it('opens the EVM wallet flow from source selection', async () => {
+  it('keeps the source selection route when launching an EVM wallet', async () => {
     window.history.pushState({}, '', '/sources/new')
 
     render(<AppRouter />)
 
     fireEvent.click(
-      await screen.findByRole('link', { name: 'EVM Wallet 선택' }),
+      await screen.findByRole('button', { name: 'EVM Wallet 선택' }),
     )
 
-    expect(
-      await screen.findByRole('heading', { name: 'EVM Wallet 연결' }),
-    ).toBeInTheDocument()
-    expect(window.location.pathname).toBe('/sources/new/wallet')
-  })
-
-  it('replaces the legacy wallet connect path with the wallet route', async () => {
-    window.history.pushState({}, '', '/sources/new/wallet/connect')
-
-    render(<AppRouter />)
-
-    expect(
-      await screen.findByRole('heading', { name: 'EVM Wallet 연결' }),
-    ).toBeInTheDocument()
     await waitFor(() => {
-      expect(window.location.pathname).toBe('/sources/new/wallet')
+      expect(window.location.pathname).toBe('/sources/new')
     })
+    expect(
+      await screen.findByRole('heading', { name: '데이터 소스 추가' }),
+    ).toBeInTheDocument()
   })
+
+  it.each(['/sources/new/wallet', '/sources/new/wallet/connect'])(
+    'replaces the removed wallet page %s with source selection',
+    async (path) => {
+      window.history.pushState({}, '', path)
+
+      render(<AppRouter />)
+
+      expect(
+        await screen.findByRole('heading', { name: '데이터 소스 추가' }),
+      ).toBeInTheDocument()
+      await waitFor(() => {
+        expect(window.location.pathname).toBe('/sources/new')
+      })
+    },
+  )
 
   it('renders the settings product page', async () => {
     window.history.pushState({}, '', '/settings')
