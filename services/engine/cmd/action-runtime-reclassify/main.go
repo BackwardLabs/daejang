@@ -59,10 +59,20 @@ func enqueueActionRuntimeReclassification(ctx context.Context, store reclassific
 		if err != nil {
 			return index, fmt.Errorf("enqueue action runtime reclassification for source %s: %w", target.SourceID, err)
 		}
-		if job.State == "FAILED" {
-			params.IdempotencyKey = "action-runtime-retry:" + runtimeID + ":" + job.ID
-			if _, err := store.Enqueue(ctx, params); err != nil {
-				return index, fmt.Errorf("retry failed action runtime reclassification job %s: %w", job.ID, err)
+		seenFailedJobs := map[string]struct{}{}
+		for job.State == "FAILED" {
+			if job.ID == "" {
+				return index, fmt.Errorf("retry failed action runtime reclassification for source %s: failed job has no ID", target.SourceID)
+			}
+			if _, exists := seenFailedJobs[job.ID]; exists {
+				return index, fmt.Errorf("retry failed action runtime reclassification job %s: retry chain contains a cycle", job.ID)
+			}
+			seenFailedJobs[job.ID] = struct{}{}
+			failedJobID := job.ID
+			params.IdempotencyKey = "action-runtime-retry:" + runtimeID + ":" + failedJobID
+			job, err = store.Enqueue(ctx, params)
+			if err != nil {
+				return index, fmt.Errorf("retry failed action runtime reclassification job %s: %w", failedJobID, err)
 			}
 		}
 	}
