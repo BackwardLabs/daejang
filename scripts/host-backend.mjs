@@ -1543,6 +1543,95 @@ export const loadVerifiedActionRuntimeRelease = (
   }
 }
 
+const actionRuntimeReleasePaths = Object.freeze([
+  'releases/action-registry-v1.json',
+  'releases/action-registry-v1.json.sha256',
+  'releases/action-registry-v1.json.receipt.json',
+  'releases/action-registry-v1.signature.json',
+  'releases/action-registry-v1.public-key.pem',
+])
+
+const actionRuntimeScriptPaths = Object.freeze([
+  'scripts/registry.py',
+  'scripts/transaction_adapter.py',
+  'scripts/action_evaluator.py',
+])
+
+export const materializeVerifiedActionRuntime = (
+  repository,
+  release,
+  root,
+  inspect = (command, args, options) => spawnSync(command, args, options),
+  read = readFileSync,
+) => {
+  if (
+    release?.repository !== 'BackwardLabs/DeFi-Label' ||
+    !/^[0-9a-f]{40}$/.test(release?.commit) ||
+    !/^[0-9a-f]{64}$/.test(release?.bundleSha256) ||
+    !isAbsolute(root)
+  ) {
+    throw new Error('A verified Action runtime release and absolute runtime root are required')
+  }
+
+  const bundlePath = join(repository, actionRuntimeReleasePaths[0])
+  const bundleBytes = read(bundlePath)
+  const bundleDigest = sha256(bundleBytes)
+  const bundle = JSON.parse(bundleBytes.toString())
+  if (
+    bundleDigest !== release.bundleSha256 ||
+    bundle.exporterContractRepository !== release.repository ||
+    !/^[0-9a-f]{40}$/.test(bundle.exporterContractCommit) ||
+    resolveActionRuntimeCommit(bundleDigest, bundle.exporterContractCommit) !== release.commit
+  ) {
+    throw new Error('The verified Action runtime release changed before materialization')
+  }
+
+  const staged = `${join(root, release.bundleSha256)}.tmp-${randomUUID()}`
+  const destination = join(root, release.bundleSha256)
+  mkdirSync(join(staged, 'releases'), { recursive: true, mode: 0o700 })
+  mkdirSync(join(staged, 'scripts'), { recursive: true, mode: 0o700 })
+  try {
+    for (const path of actionRuntimeReleasePaths) {
+      const payload = path === actionRuntimeReleasePaths[0]
+        ? bundleBytes
+        : read(join(repository, path))
+      writeFileSync(join(staged, path), payload, { mode: 0o600 })
+    }
+    for (const path of actionRuntimeScriptPaths) {
+      const expectedDigest = bundle.sourceDigests?.[path]
+      if (!/^[0-9a-f]{64}$/.test(expectedDigest)) {
+        throw new Error(`The signed Action runtime does not pin ${path}`)
+      }
+      const result = inspect(
+        'git',
+        ['show', `${bundle.exporterContractCommit}:${path}`],
+        { cwd: repository, encoding: null, maxBuffer: 16 * 1024 * 1024 },
+      )
+      if (result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
+        throw new Error(`Unable to read pinned Action runtime file ${path}`)
+      }
+      if (sha256(result.stdout) !== expectedDigest) {
+        throw new Error(`Pinned Action runtime file ${path} does not match the signed digest`)
+      }
+      writeFileSync(join(staged, path), result.stdout, { mode: 0o600 })
+    }
+
+    if (existsSync(destination)) {
+      for (const path of [...actionRuntimeReleasePaths, ...actionRuntimeScriptPaths]) {
+        if (sha256(readFileSync(join(destination, path))) !== sha256(readFileSync(join(staged, path)))) {
+          throw new Error('The immutable Action runtime cache does not match its signed release')
+        }
+      }
+      return destination
+    }
+    mkdirSync(root, { recursive: true, mode: 0o700 })
+    renameSync(staged, destination)
+    return destination
+  } finally {
+    rmSync(staged, { recursive: true, force: true })
+  }
+}
+
 const decodePublicationTrustKey = (value) => {
   if (!value) throw new Error('DAEJANG_PUBLICATION_POLICY_TRUST_KEY is missing')
   const direct = Buffer.from(value, 'latin1')
@@ -3410,6 +3499,11 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
   // to the same clean revision on every start, including prebuilt restarts.
   assertCleanRuntimeCheckouts()
   const actionRuntimeRelease = loadVerifiedActionRuntimeRelease(deFiLabelRepository)
+  const actionRuntimeDirectory = materializeVerifiedActionRuntime(
+    deFiLabelRepository,
+    actionRuntimeRelease,
+    join(runtimeRoot, 'action-runtime'),
+  )
   if (buildArtifacts) build()
   for (const requiredArtifact of [
     jitBinary,
@@ -3552,7 +3646,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         '--subject-acl',
         subjectACL,
         '--defi-label-dir',
-        deFiLabelRepository,
+        actionRuntimeDirectory,
       ],
       serviceEnvironment(hostJITForwardedEnvironmentNames, ['ENV_RPC_URL_', 'ETHEREUM_', 'OPTIMISM_'], {
         ENV_POSTGRES_DSN: jitURL,
@@ -3772,7 +3866,7 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     // Enqueue only after every downstream service is stable so a deployment
     // restart cannot strand a deterministic runtime job in a failed state.
     const actionRuntimeID = createActionRuntimeIdentity(
-      deFiLabelRepository,
+      actionRuntimeDirectory,
       managedJITBinary,
       join(binaryRoot, 'evm-posting-worker'),
     )
