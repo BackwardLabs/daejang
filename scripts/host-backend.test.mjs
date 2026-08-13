@@ -19,6 +19,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
+  assertProductionRPCConfiguration,
   assertReportAttestationRuntimeInstalled,
   assertCleanGitCheckout,
   assertUpbitCollectorStarted,
@@ -71,6 +72,7 @@ import {
   privateObjectWriteEnvironment,
   planTaxProfileActivation,
   planTaxProfileReconcile,
+  preflightProductionRPCs,
   pruneTaxCandidateDirectories,
   finishSignalShutdown,
   finishSuperviseCommand,
@@ -106,6 +108,63 @@ import {
   validateTaxQuotePrefetchResult,
   validateTaxSubjectRebuildResult,
 } from './host-backend.mjs'
+
+const productionRPCFixture = () => ({
+  ethereumURL: 'https://eth-mainnet.g.alchemy.com/v2/public-team-credential',
+  optimismURL: 'https://opt-mainnet.g.alchemy.com/v2/public-team-credential',
+  sharedCredentialSHA256: createHash('sha256')
+    .update('public-team-credential')
+    .digest('hex'),
+})
+
+test('pins both production RPC chains to one explicitly approved credential', () => {
+  const fixture = productionRPCFixture()
+  assert.doesNotThrow(() => assertProductionRPCConfiguration(fixture))
+  assert.throws(
+    () => assertProductionRPCConfiguration({
+      ...fixture,
+      ethereumURL: 'https://eth-mainnet.g.alchemy.com/v2/personal-credential',
+    }),
+    /do not match the pinned shared credential/u,
+  )
+  assert.throws(
+    () => assertProductionRPCConfiguration({
+      ...fixture,
+      optimismURL: 'https://mainnet.optimism.io',
+    }),
+    /approved opt-mainnet\.g\.alchemy\.com HTTPS endpoint/u,
+  )
+})
+
+test('preflights both production RPC chain identities before services start', async () => {
+  const fixture = productionRPCFixture()
+  const calls = []
+  await preflightProductionRPCs({
+    ...fixture,
+    request: async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ result: calls.length === 1 ? '0x1' : '0xa' }),
+      }
+    },
+  })
+  assert.equal(calls.length, 2)
+  assert.deepEqual(calls.map(({ body }) => body.method), ['eth_chainId', 'eth_chainId'])
+
+  await assert.rejects(
+    preflightProductionRPCs({
+      ...fixture,
+      request: async () => ({
+        ok: false,
+        status: 403,
+        json: async () => ({}),
+      }),
+    }),
+    /Ethereum Mainnet RPC preflight returned HTTP 403/u,
+  )
+})
 
 test('pins taxd to the current required database migration', () => {
   assert.equal(hostTaxDBMigrationVersion, '73')
