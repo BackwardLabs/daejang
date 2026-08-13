@@ -79,12 +79,15 @@ npm run mac-studio:deploy-indexer
 ```text
 ~/Library/Application Support/GIWA/production/source-checkouts.tsv
 ~/Library/Application Support/GIWA/production/deployed-release.tsv
+~/Library/Application Support/GIWA/production/backend-source-checkouts.tsv
+~/Library/Application Support/GIWA/production/backend-deployed-release.tsv
 ~/Library/Application Support/GIWA/production/evm-indexer-deployed.tsv
 ```
 
-`source-checkouts.tsv`는 서버에서 동기화한 소스 조합이고, 나머지 두 파일은 재시작까지
-성공한 실행 버전이다. 소스가 최신이라는 사실만으로 실행 중인 서비스도 최신이라고
-판단하지 않는다. 이 파일들에는 secret이 없다.
+`source-checkouts.tsv`와 `deployed-release.tsv`는 전체 배포 조합을 기록한다.
+`backend-*` 파일은 진행 중인 indexer checkout을 건드리지 않은 백엔드 전용 동기화·배포
+조합이고, `evm-indexer-deployed.tsv`는 indexer 단독 배포 버전이다. 소스가 최신이라는
+사실만으로 실행 중인 서비스도 최신이라고 판단하지 않는다. 이 파일들에는 secret이 없다.
 
 ## 최초 한 번만 관리자가 준비할 것
 

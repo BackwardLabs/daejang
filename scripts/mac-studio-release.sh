@@ -9,6 +9,8 @@ DEPLOY_USER="${GIWA_DEPLOY_USER:-backwardlabs}"
 RUNTIME_ROOT="${GIWA_RUNTIME_ROOT:-$HOME/Library/Application Support/GIWA/production}"
 SOURCE_STATE_FILE="$RUNTIME_ROOT/source-checkouts.tsv"
 DEPLOYED_STATE_FILE="$RUNTIME_ROOT/deployed-release.tsv"
+BACKEND_SOURCE_STATE_FILE="$RUNTIME_ROOT/backend-source-checkouts.tsv"
+BACKEND_DEPLOYED_STATE_FILE="$RUNTIME_ROOT/backend-deployed-release.tsv"
 INDEXER_STATE_FILE="$RUNTIME_ROOT/evm-indexer-deployed.tsv"
 
 repositories=(
@@ -26,12 +28,13 @@ repositories=(
 
 usage() {
   cat <<'EOF'
-usage: scripts/mac-studio-release.sh status|preflight|sync|deploy-indexer|deploy
+usage: scripts/mac-studio-release.sh status|preflight|sync|deploy-indexer|deploy-backend|deploy
 
   status          Show checkout state and the last recorded deployed release.
   preflight       Verify deploy user, repository identity, main branch, clean state and GitHub access.
   sync            Fast-forward every deployment checkout to GitHub main and record exact commits.
   deploy-indexer  Sync, build and restart only the EVM bulk indexer.
+  deploy-backend  Sync and restart only the Daejang backend, leaving an in-progress indexer checkout untouched.
   deploy          Sync, deploy the indexer, restart the Daejang backend and print final status.
 EOF
 }
@@ -40,6 +43,15 @@ for_each_repository() {
   local callback="$1" entry name directory slug
   for entry in "${repositories[@]}"; do
     IFS='|' read -r name directory slug <<<"$entry"
+    "$callback" "$name" "$directory" "$slug"
+  done
+}
+
+for_each_backend_repository() {
+  local callback="$1" entry name directory slug
+  for entry in "${repositories[@]}"; do
+    IFS='|' read -r name directory slug <<<"$entry"
+    [[ "$name" == evm-indexer ]] && continue
     "$callback" "$name" "$directory" "$slug"
   done
 }
@@ -135,6 +147,23 @@ record_deployed_state() {
   record_repository_set "$DEPLOYED_STATE_FILE" deployed_at
 }
 
+record_backend_repository_set() {
+  local target="$1" timestamp_label="$2" temporary="$1.tmp.$$" entry name directory slug
+  mkdir -p "$RUNTIME_ROOT"
+  umask 077
+  {
+    printf '%s\t%s\n' "$timestamp_label" "$(date -u +%FT%TZ)"
+    for entry in "${repositories[@]}"; do
+      IFS='|' read -r name directory slug <<<"$entry"
+      [[ "$name" == evm-indexer ]] && continue
+      printf '%s\t%s\n' "$name" "$(git -C "$directory" rev-parse HEAD)"
+    done
+  } >"$temporary"
+  chmod 600 "$temporary"
+  mv "$temporary" "$target"
+  echo "backend repository state recorded at $target"
+}
+
 record_component_deployment() {
   local name="$1" directory="$2" target="$3" temporary="$3.tmp.$$"
   mkdir -p "$RUNTIME_ROOT"
@@ -150,13 +179,26 @@ record_component_deployment() {
 
 show_recorded_state() {
   local state_file
-  for state_file in "$SOURCE_STATE_FILE" "$DEPLOYED_STATE_FILE" "$INDEXER_STATE_FILE"; do
+  for state_file in "$SOURCE_STATE_FILE" "$DEPLOYED_STATE_FILE" "$BACKEND_SOURCE_STATE_FILE" "$BACKEND_DEPLOYED_STATE_FILE" "$INDEXER_STATE_FILE"; do
     if [[ -r "$state_file" ]]; then
       echo
       echo "record: $state_file"
       sed 's/^/  /' "$state_file"
     fi
   done
+}
+
+preflight_backend() {
+  assert_deploy_user
+  command -v git >/dev/null
+  command -v node >/dev/null
+  command -v npm >/dev/null
+  command -v go >/dev/null
+  command -v docker >/dev/null
+  for_each_backend_repository assert_repository
+  for_each_backend_repository fetch_repository
+  for_each_backend_repository assert_fast_forward
+  echo "backend preflight passed"
 }
 
 preflight() {
@@ -176,6 +218,12 @@ sync_sources() {
   preflight
   for_each_repository merge_repository
   record_source_state
+}
+
+sync_backend_sources() {
+  preflight_backend
+  for_each_backend_repository merge_repository
+  record_backend_repository_set "$BACKEND_SOURCE_STATE_FILE" recorded_at
 }
 
 sync_indexer_source() {
@@ -249,6 +297,14 @@ deploy_indexer() {
   restart_indexer
 }
 
+deploy_backend() {
+  sync_backend_sources
+  npm --prefix "$DAEJANG_ROOT/daejang" ci
+  npm --prefix "$DAEJANG_ROOT/daejang" run backend:restart
+  npm --prefix "$DAEJANG_ROOT/daejang" run backend:status
+  record_backend_repository_set "$BACKEND_DEPLOYED_STATE_FILE" deployed_at
+}
+
 deploy_all() {
   sync_sources
   npm --prefix "$DAEJANG_ROOT/daejang" ci
@@ -263,6 +319,7 @@ case "${1:-}" in
   preflight) preflight ;;
   sync) sync_sources ;;
   deploy-indexer) deploy_indexer ;;
+  deploy-backend) deploy_backend ;;
   deploy) deploy_all ;;
   *) usage >&2; exit 2 ;;
 esac
