@@ -30,10 +30,11 @@ func (s *recordingReclassificationStore) Enqueue(_ context.Context, params sourc
 
 func TestEnqueueActionRuntimeReclassificationPreservesCoverageAndIsRuntimeIdempotent(t *testing.T) {
 	store := &recordingReclassificationStore{targets: []sourcejobstore.ActionRuntimeReclassificationTarget{{
-		SubjectID:     "00000000-0000-4000-8000-000000000001",
-		SourceID:      "00000000-0000-4000-8000-000000000002",
-		CoverageStart: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		CoverageEnd:   time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+		SubjectID:             "00000000-0000-4000-8000-000000000001",
+		SourceID:              "00000000-0000-4000-8000-000000000002",
+		LatestSuccessfulJobID: "00000000-0000-4000-8000-000000000009",
+		CoverageStart:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		CoverageEnd:           time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
 	}}}
 	runtimeID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	count, err := enqueueActionRuntimeReclassification(context.Background(), store, runtimeID)
@@ -43,7 +44,7 @@ func TestEnqueueActionRuntimeReclassificationPreservesCoverageAndIsRuntimeIdempo
 	value := store.params[0]
 	if value.Trigger != "BACKFILL" || value.RequestedCoverageStart != store.targets[0].CoverageStart ||
 		value.RequestedCoverageEnd != store.targets[0].CoverageEnd ||
-		value.IdempotencyKey != "action-runtime:"+runtimeID+":"+store.targets[0].SourceID {
+		value.IdempotencyKey != "action-runtime:"+runtimeID+":"+store.targets[0].SourceID+":"+store.targets[0].LatestSuccessfulJobID {
 		t.Fatalf("reclassification changed the target contract: %#v", value)
 	}
 }
@@ -52,8 +53,9 @@ func TestEnqueueActionRuntimeReclassificationRetriesAnExistingFailedJob(t *testi
 	runtimeID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	store := &recordingReclassificationStore{
 		targets: []sourcejobstore.ActionRuntimeReclassificationTarget{{
-			SubjectID: "00000000-0000-4000-8000-000000000001",
-			SourceID:  "00000000-0000-4000-8000-000000000002",
+			SubjectID:             "00000000-0000-4000-8000-000000000001",
+			SourceID:              "00000000-0000-4000-8000-000000000002",
+			LatestSuccessfulJobID: "00000000-0000-4000-8000-000000000009",
 		}},
 		jobs: []sourcejobstore.SyncJob{{
 			ID: "00000000-0000-4000-8000-000000000003", State: "FAILED",
@@ -73,8 +75,9 @@ func TestEnqueueActionRuntimeReclassificationAdvancesPastFailedRetryChain(t *tes
 	runtimeID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	store := &recordingReclassificationStore{
 		targets: []sourcejobstore.ActionRuntimeReclassificationTarget{{
-			SubjectID: "00000000-0000-4000-8000-000000000001",
-			SourceID:  "00000000-0000-4000-8000-000000000002",
+			SubjectID:             "00000000-0000-4000-8000-000000000001",
+			SourceID:              "00000000-0000-4000-8000-000000000002",
+			LatestSuccessfulJobID: "00000000-0000-4000-8000-000000000009",
 		}},
 		jobs: []sourcejobstore.SyncJob{
 			{ID: "00000000-0000-4000-8000-000000000003", State: "FAILED"},
@@ -87,7 +90,7 @@ func TestEnqueueActionRuntimeReclassificationAdvancesPastFailedRetryChain(t *tes
 		t.Fatalf("unexpected retry-chain result: count=%d params=%#v error=%v", count, store.params, err)
 	}
 	want := []string{
-		"action-runtime:" + runtimeID + ":00000000-0000-4000-8000-000000000002",
+		"action-runtime:" + runtimeID + ":00000000-0000-4000-8000-000000000002:00000000-0000-4000-8000-000000000009",
 		"action-runtime-retry:" + runtimeID + ":00000000-0000-4000-8000-000000000003",
 		"action-runtime-retry:" + runtimeID + ":00000000-0000-4000-8000-000000000004",
 	}
@@ -95,6 +98,17 @@ func TestEnqueueActionRuntimeReclassificationAdvancesPastFailedRetryChain(t *tes
 		if params.IdempotencyKey != want[index] {
 			t.Fatalf("retry chain stopped at the wrong job: got=%q want=%q", params.IdempotencyKey, want[index])
 		}
+	}
+}
+
+func TestEnqueueActionRuntimeReclassificationRequiresSuccessfulSnapshot(t *testing.T) {
+	runtimeID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	store := &recordingReclassificationStore{targets: []sourcejobstore.ActionRuntimeReclassificationTarget{{
+		SubjectID: "00000000-0000-4000-8000-000000000001",
+		SourceID:  "00000000-0000-4000-8000-000000000002",
+	}}}
+	if _, err := enqueueActionRuntimeReclassification(context.Background(), store, runtimeID); err == nil {
+		t.Fatal("reclassification without a successful source snapshot was accepted")
 	}
 }
 

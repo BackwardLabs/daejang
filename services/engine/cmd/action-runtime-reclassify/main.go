@@ -50,10 +50,13 @@ func enqueueActionRuntimeReclassification(ctx context.Context, store reclassific
 		return 0, err
 	}
 	for index, target := range targets {
+		if target.LatestSuccessfulJobID == "" {
+			return index, fmt.Errorf("enqueue action runtime reclassification for source %s: latest successful source snapshot is required", target.SourceID)
+		}
 		params := sourcejobstore.EnqueueParams{
 			SubjectID: target.SubjectID, SourceKind: "EVM_WALLET", SourceID: target.SourceID,
 			RequestedCoverageStart: target.CoverageStart, RequestedCoverageEnd: target.CoverageEnd,
-			Trigger: "BACKFILL", IdempotencyKey: "action-runtime:" + runtimeID + ":" + target.SourceID,
+			Trigger: "BACKFILL", IdempotencyKey: "action-runtime:" + runtimeID + ":" + target.SourceID + ":" + target.LatestSuccessfulJobID,
 		}
 		job, err := store.Enqueue(ctx, params)
 		if err != nil {
