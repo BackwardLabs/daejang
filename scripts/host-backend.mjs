@@ -3560,17 +3560,13 @@ const prepareStableTaxRuntime = async (
   initialSubjectIDs = initialRuntime.subjectIDs,
 ) => {
   let runtime = initialRuntime
-  let subjectIDs = await filterTaxReportGenerationRebuildSubjects(
+  let subjectIDs = await filterTaxReportGenerationEligibleSubjects(
     taxURL,
     initialRuntime,
     initialSubjectIDs,
   )
   if (subjectIDs.length === 0) return runtime
-  const pendingGenerations = new Map()
-  const retrySubjectIDs = () => taxReportGenerationRetrySubjectIDs(
-    pendingGenerations.keys(),
-    subjectIDs,
-  )
+  const retrySubjectIDs = () => [...subjectIDs]
   for (let pass = 1; pass <= hostTaxProfileStabilityPasses; pass++) {
     writeTaxdProfileState({
       status: 'ACTIVATING',
@@ -3580,25 +3576,15 @@ const prepareStableTaxRuntime = async (
       prefetchRequired: true,
       affectedSubjectIDs: retrySubjectIDs(),
     })
-    const begun = await beginTaxReportGenerations(taxURL, runtime, subjectIDs)
-    subjectIDs = [...begun.keys()].sort()
-    if (subjectIDs.length === 0 && pendingGenerations.size === 0) {
-      return runtime
-    }
-    let rebuilt
     try {
-      rebuilt = prefetchTaxQuotes(taxURL, runtime, subjectIDs)
+      // Tax Report V2 owns its per-scope BUILDING -> ACTIVE/REVIEW_REQUIRED
+      // lifecycle inside tax-backfill. Do not wrap it in the legacy v1
+      // all-years/FINAL generation contract.
+      prefetchTaxQuotes(taxURL, runtime, subjectIDs)
     } catch (error) {
       error.taxRuntime = runtime
       error.taxSubjectIDs = retrySubjectIDs()
       throw error
-    }
-    for (const { subjectID, outcomes } of rebuilt.subjectOutcomes) {
-      const generation = begun.get(subjectID)
-      if (!generation) {
-        throw new Error('Tax annual rebuild has no BUILDING generation')
-      }
-      pendingGenerations.set(subjectID, { ...generation, outcomes })
     }
     let refreshedRuntime
     try {
@@ -3609,7 +3595,6 @@ const prepareStableTaxRuntime = async (
       throw error
     }
     if (!taxRuntimeHasProfiles(refreshedRuntime)) {
-      await retireMissingTaxReportGenerations(taxURL, refreshedRuntime)
       const error = new Error(
         'Tax profile snapshot disappeared during quote prefetch',
       )
@@ -3618,37 +3603,7 @@ const prepareStableTaxRuntime = async (
       throw error
     }
     if (taxProfileSnapshotStable(runtime, refreshedRuntime)) {
-      try {
-        await activateTaxReportGenerations(
-          taxURL,
-          refreshedRuntime,
-          pendingGenerations,
-        )
-      } catch (error) {
-        error.taxRuntime = refreshedRuntime
-        error.taxSubjectIDs = retrySubjectIDs()
-        throw error
-      }
       return refreshedRuntime
-    }
-    try {
-      await retireMissingTaxReportGenerations(taxURL, refreshedRuntime)
-    } catch (error) {
-      error.taxRuntime = refreshedRuntime
-      error.taxSubjectIDs = retrySubjectIDs()
-      throw error
-    }
-    for (const [subjectID, pending] of pendingGenerations) {
-      const refreshedEpoch = refreshedRuntime.subjectEpochs.find(
-        ({ subjectId }) => subjectId === subjectID,
-      )?.ledgerEpoch
-      if (
-        pending.candidateDigest !== refreshedRuntime.candidateDigest ||
-        pending.ledgerFingerprint !== refreshedEpoch ||
-        !refreshedRuntime.subjectIDs.includes(subjectID)
-      ) {
-        pendingGenerations.delete(subjectID)
-      }
     }
     subjectIDs = changedTaxSubjectIDs(
       runtime.subjectEpochs,
@@ -3661,7 +3616,7 @@ const prepareStableTaxRuntime = async (
       subjectIDs = refreshedRuntime.subjectIDs
     }
     runtime = refreshedRuntime
-    subjectIDs = await filterTaxReportGenerationRebuildSubjects(
+    subjectIDs = await filterTaxReportGenerationEligibleSubjects(
       taxURL,
       runtime,
       subjectIDs,
@@ -4081,7 +4036,6 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     }
 
     const taxRuntime = await createTaxRuntime(queryURL)
-    await retireMissingTaxReportGenerations(taxURL, taxRuntime)
     let taxdStarted = false
     if (taxRuntimeHasProfiles(taxRuntime)) {
       // Prefetch closes the current backlog before launch. Keep the single
@@ -4493,7 +4447,6 @@ const reconcileTaxRuntime = async () => {
   let runtime
   try {
     runtime = await createTaxRuntime(queryURL)
-    await retireMissingTaxReportGenerations(taxURL, runtime)
   } catch (error) {
     markTaxdDisabled({
       reason: `Tax profile generation failed: ${error.message}`,
