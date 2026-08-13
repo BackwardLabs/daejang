@@ -14,7 +14,7 @@ describe('EthersWalletSignatureVerifier', () => {
     const wallet = Wallet.createRandom(); const message = 'challenge'
     await expect(new EthersWalletSignatureVerifier(new Map()).verify({
       address: wallet.address, message, signature: await wallet.signMessage(message), verificationChainId: 'eip155:1',
-    })).resolves.toBe('VALID')
+    })).resolves.toEqual({ status: 'VALID', accountType: 'EOA' })
   })
   it('accepts an ERC-1271 contract signature', async () => {
     const owner = Wallet.createRandom(); const message = 'challenge'
@@ -24,7 +24,7 @@ describe('EthersWalletSignatureVerifier', () => {
     }
     await expect(verifier(rpc).verify({
       address: Wallet.createRandom().address, message, signature: await owner.signMessage(message), verificationChainId: 'eip155:1',
-    })).resolves.toBe('VALID')
+    })).resolves.toEqual({ status: 'VALID', accountType: 'CONTRACT' })
   })
   it('accepts a raw owner signature only for a threshold-one Safe', async () => {
     const owner = Wallet.createRandom(); const message = 'challenge'
@@ -38,6 +38,6 @@ describe('EthersWalletSignatureVerifier', () => {
     }
     await expect(verifier(rpc).verify({
       address: Wallet.createRandom().address, message, signature: await owner.signMessage(message), verificationChainId: 'eip155:1',
-    })).resolves.toBe('VALID')
+    })).resolves.toEqual({ status: 'VALID', accountType: 'CONTRACT' })
   })
 })

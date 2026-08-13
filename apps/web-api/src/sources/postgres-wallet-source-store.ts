@@ -131,6 +131,7 @@ export class PostgresWalletSourceStore implements WalletSourceStore {
       challengeId: source.id,
       userId: input.userId,
       recoveredAddress: source.address,
+      accountType: source.accountType,
       verificationChainId: source.verificationChainId,
       chainIds: input.chainIds,
       label: source.label,

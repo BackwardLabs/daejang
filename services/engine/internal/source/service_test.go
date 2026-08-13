@@ -68,13 +68,22 @@ func TestRegisterWalletUsesAuthenticatedActor(t *testing.T) {
 	service := Service{Store: store}
 	response, err := service.RegisterWallet(context.Background(), &enginev1.RegisterWalletRequest{
 		Context: validContext(), Address: store.source.Address, VerificationChainId: "eip155:1",
-		ChainIds: []string{"eip155:1"}, VerifiedAt: timestamppb.New(now),
+		ChainIds: []string{"eip155:1"}, VerifiedAt: timestamppb.New(now), AccountType: "CONTRACT",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.registered.SubjectID != validContext().Actor.UserId || response.GetSource().GetId() != store.source.ID {
+	if store.registered.SubjectID != validContext().Actor.UserId || store.registered.AccountType != "CONTRACT" || response.GetSource().GetId() != store.source.ID {
 		t.Fatalf("request context was not mapped to the source operation: params=%#v response=%#v", store.registered, response)
+	}
+}
+
+func TestRegisterWalletRejectsUnsupportedAccountType(t *testing.T) {
+	_, err := (&Service{Store: &recordingStore{}}).RegisterWallet(context.Background(), &enginev1.RegisterWalletRequest{
+		Context: validContext(), AccountType: "SAFE", VerifiedAt: timestamppb.Now(),
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("unsupported account type returned %v", err)
 	}
 }
 

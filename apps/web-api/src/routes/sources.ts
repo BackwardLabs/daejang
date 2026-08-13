@@ -83,7 +83,7 @@ const sourceResponseSchema = {
     id: { type: 'string', format: 'uuid' },
     type: { type: 'string', const: 'EVM_WALLET' },
     address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
-    accountType: { type: 'string', const: 'EOA' },
+    accountType: { type: 'string', enum: ['EOA', 'CONTRACT'] },
     verificationChainId: { type: 'string', pattern: chainIdPattern },
     verifiedAt: { type: 'string', format: 'date-time' },
     label: { type: 'string' },
@@ -334,8 +334,8 @@ export const registerSourceRoutes = async (
         address: challenge.address, message: challenge.message,
         signature: request.body.signature, verificationChainId: challenge.verificationChainId,
       })
-      if (verification === 'UNAVAILABLE') throw walletSignatureVerificationUnavailable()
-      if (verification !== 'VALID') {
+      if (verification.status === 'UNAVAILABLE') throw walletSignatureVerificationUnavailable()
+      if (verification.status !== 'VALID') {
         throw invalidWalletSignature()
       }
 
@@ -343,6 +343,7 @@ export const registerSourceRoutes = async (
         challengeId: challenge.id,
         userId: session.user.id,
         recoveredAddress: challenge.address,
+        accountType: verification.accountType,
         verificationChainId: challenge.verificationChainId,
         chainIds: request.body.chainIds,
         label: request.body.label,

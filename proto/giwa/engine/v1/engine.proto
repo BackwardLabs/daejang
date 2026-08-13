@@ -59,6 +59,7 @@ message RegisterWalletRequest {
   repeated string chain_ids = 4;
   string label = 5;
   google.protobuf.Timestamp verified_at = 6;
+  string account_type = 7;
 }
 
 message ListSourcesRequest {
