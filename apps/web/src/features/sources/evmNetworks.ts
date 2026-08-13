@@ -11,12 +11,7 @@ export const evmWalletNetworks = [
 
 export const evmWalletNetworkMetadata = [
   { chainId: 'eip155:1', collectionEnabled: true, label: 'Ethereum' },
-  {
-    chainId: 'eip155:10',
-    collectionEnabled: false,
-    disabledReason: '백필 진행 중 · 현재 수집 불가',
-    label: 'Optimism',
-  },
+  { chainId: 'eip155:10', collectionEnabled: true, label: 'Optimism' },
 ] as const
 
 export const EVM_WALLET_SUPPORTED_CHAIN_IDS =
@@ -24,7 +19,10 @@ export const EVM_WALLET_SUPPORTED_CHAIN_IDS =
     .filter((network) => network.collectionEnabled)
     .map((network) => network.chainId)
 
-export const EVM_WALLET_DEFAULT_CHAIN_IDS = ['eip155:1'] as const
+export const EVM_WALLET_DEFAULT_CHAIN_IDS = [
+  'eip155:1',
+  'eip155:10',
+] as const
 
 const networkMetadataByChainId = new Map<
   string,

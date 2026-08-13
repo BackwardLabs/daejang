@@ -589,7 +589,7 @@ describe('source flow pages', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('disables Optimism and starts collection for an updated Ethereum period', async () => {
+  it('keeps Optimism available while starting collection for an updated Ethereum period', async () => {
     const source = {
       id: '33333333-3333-4333-8333-333333333333',
       type: 'EVM_WALLET',
@@ -660,7 +660,8 @@ describe('source flow pages', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '수집 네트워크 관리' }))
     expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /Optimism/ })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: /Optimism/ })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Optimism/ })).toBeEnabled()
     fireEvent.change(screen.getByLabelText('수집 시작일'), {
       target: { value: '2025-01-01' },
     })

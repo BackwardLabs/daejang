@@ -139,7 +139,8 @@ describe('EvmWalletConnectionPage', () => {
 
     await screen.findByRole('heading', { name: '연결 및 수집 범위' })
     expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: /Optimism/ })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: /Optimism/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Optimism/ })).toBeEnabled()
     expect(screen.getByLabelText('시작일')).toHaveValue('2025-01-01')
     expect(screen.getByLabelText('종료일')).toHaveValue('2026-08-11')
     expect(
@@ -156,7 +157,7 @@ describe('EvmWalletConnectionPage', () => {
     await screen.findByRole('heading', { name: '지갑 연결이 완료됐어요' })
     expect(completeConnection).toHaveBeenCalledWith(
       expect.objectContaining({
-        chainIds: ['eip155:1'],
+        chainIds: ['eip155:1', 'eip155:10'],
         period: {
           endDate: '2026-08-11',
           mode: 'CUSTOM',

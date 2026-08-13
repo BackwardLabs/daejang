@@ -56,7 +56,7 @@ describe('evmWalletFlowReducer', () => {
     let state = advanceToScopeEditing()
 
     expect(state).toMatchObject({
-      chainIds: ['eip155:1'],
+      chainIds: ['eip155:1', 'eip155:10'],
       error: null,
       intentKey: null,
       period: {
@@ -108,7 +108,7 @@ describe('evmWalletFlowReducer', () => {
 
     expect(state).toEqual({
       addressPreview: '0x1234…5678',
-      chainIds: ['eip155:1'],
+      chainIds: ['eip155:1', 'eip155:10'],
       jobId: 'job-wallet-1',
       normalizedPeriod: result.normalizedPeriod,
       provider: 'rabby',
