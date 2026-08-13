@@ -53,7 +53,7 @@ func (s *recordingJITServer) MaterializeAccountSelection(_ context.Context, requ
 	}}, nil
 }
 
-func TestClientFailsClosedWhenTaxPeriodSelectionExceedsFiveHundredCandidates(t *testing.T) {
+func TestClientFailsClosedWhenOneChainExceedsFiveHundredCandidates(t *testing.T) {
 	server := &recordingJITServer{logicalCandidateCount: 501}
 	connection := newTestConnection(t, server)
 	client, err := New(jitv1.NewCandidateQueryServiceClient(connection), jitv1.NewJitEngineServiceClient(connection), testConfig())
@@ -202,7 +202,9 @@ func TestClientUsesContainingEtherscanCoverageForRequestedSubPeriod(t *testing.T
 }
 
 func TestClientMaterializesEverySelectedNetworkForOneWalletAddress(t *testing.T) {
-	server := &recordingJITServer{}
+	// The per-chain selections remain within their independent 500-candidate
+	// budgets even though the combined two-chain run contains 600 candidates.
+	server := &recordingJITServer{logicalCandidateCount: 300}
 	connection := newTestConnection(t, server)
 	config := testConfig()
 	for _, chainID := range []string{"eip155:10"} {
