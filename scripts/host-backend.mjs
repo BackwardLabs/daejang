@@ -1260,9 +1260,13 @@ export const normalizeMultichainSnapshotIds = (config) => {
         toBlock: coverage.toBlock,
       }))
       .sort((left, right) => left.chainId.localeCompare(right.chainId))
-    const snapshotId = createHash('sha256')
+    const snapshotDigest = createHash('sha256')
       .update(JSON.stringify(manifest))
       .digest('hex')
+    const snapshotId = group.every(({ coverage }) =>
+      coverage.indexSnapshotId.startsWith('etherscan-v2:'))
+      ? `etherscan-v2:multichain:${snapshotDigest}`
+      : snapshotDigest
     for (const { coverage } of group) coverage.indexSnapshotId = snapshotId
   }
   return config
