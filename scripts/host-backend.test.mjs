@@ -378,6 +378,7 @@ test('materializes Action runtime scripts from the signed exporter commit withou
     const exporterContractCommit = '2'.repeat(40)
     const scripts = new Map([
       ['scripts/registry.py', Buffer.from('pinned-registry')],
+      ['scripts/role_classifier.py', Buffer.from('pinned-role-classifier')],
       ['scripts/transaction_adapter.py', Buffer.from('pinned-adapter')],
       ['scripts/action_evaluator.py', Buffer.from('pinned-evaluator')],
     ])
@@ -388,7 +389,7 @@ test('materializes Action runtime scripts from the signed exporter commit withou
       exporterContractRepository: 'BackwardLabs/DeFi-Label',
       exporterContractCommit,
       sourceDigests: Object.fromEntries(
-        [...scripts].map(([path, payload]) => [
+        [...scripts].filter(([path]) => path !== 'scripts/role_classifier.py').map(([path, payload]) => [
           path,
           createHash('sha256').update(payload).digest('hex'),
         ]),
@@ -416,14 +417,25 @@ test('materializes Action runtime scripts from the signed exporter commit withou
       runtimeRoot,
       (command, args) => {
         calls.push([command, args])
+        if (args[0] === 'ls-tree') {
+          return {
+            status: 0,
+            stdout: Buffer.from([...scripts].map(([path, payload]) =>
+              `100644 blob ${'3'.repeat(40)} ${payload.length}\t${path}\0`,
+            ).join('')),
+          }
+        }
         return { status: 0, stdout: scripts.get(args[1].split(':', 2)[1]) }
       },
     )
 
-    assert.equal(destination, join(runtimeRoot, bundleSha256))
+    assert.equal(destination, join(runtimeRoot, `v2-${bundleSha256}`))
     assert.deepEqual(
       calls.map(([, args]) => args),
-      [...scripts.keys()].map((path) => ['show', `${exporterContractCommit}:${path}`]),
+      [
+        ['ls-tree', '-r', '-l', '-z', exporterContractCommit, '--', 'scripts'],
+        ...[...scripts.keys()].map((path) => ['show', `${exporterContractCommit}:${path}`]),
+      ],
     )
     for (const [path, payload] of scripts) {
       assert.deepEqual(readFileSync(join(destination, path)), payload)
