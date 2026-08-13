@@ -376,12 +376,14 @@ test('materializes Action runtime scripts from the signed exporter commit withou
     const repository = join(parent, 'repository')
     const runtimeRoot = join(parent, 'runtime')
     const exporterContractCommit = '2'.repeat(40)
-    const scripts = new Map([
+    const pinnedFiles = new Map([
       ['scripts/registry.py', Buffer.from('pinned-registry')],
       ['scripts/role_classifier.py', Buffer.from('pinned-role-classifier')],
       ['scripts/transaction_adapter.py', Buffer.from('pinned-adapter')],
       ['scripts/action_evaluator.py', Buffer.from('pinned-evaluator')],
+      ['registry/promotions/v1/promotions.json', Buffer.from('{"promotions":[]}')],
     ])
+    const scripts = new Map([...pinnedFiles].filter(([path]) => path.startsWith('scripts/')))
     const bundle = Buffer.from(JSON.stringify({
       schemaVersion: 'defi-label.action-registry.v1',
       registrySourceRepository: 'BackwardLabs/DeFi-Label',
@@ -389,7 +391,7 @@ test('materializes Action runtime scripts from the signed exporter commit withou
       exporterContractRepository: 'BackwardLabs/DeFi-Label',
       exporterContractCommit,
       sourceDigests: Object.fromEntries(
-        [...scripts].filter(([path]) => path !== 'scripts/role_classifier.py').map(([path, payload]) => [
+        [...pinnedFiles].filter(([path]) => path !== 'scripts/role_classifier.py').map(([path, payload]) => [
           path,
           createHash('sha256').update(payload).digest('hex'),
         ]),
@@ -425,19 +427,20 @@ test('materializes Action runtime scripts from the signed exporter commit withou
             ).join('')),
           }
         }
-        return { status: 0, stdout: scripts.get(args[1].split(':', 2)[1]) }
+        return { status: 0, stdout: pinnedFiles.get(args[1].split(':', 2)[1]) }
       },
     )
 
-    assert.equal(destination, join(runtimeRoot, `v2-${bundleSha256}`))
+    assert.equal(destination, join(runtimeRoot, `v3-${bundleSha256}`))
     assert.deepEqual(
       calls.map(([, args]) => args),
       [
         ['ls-tree', '-r', '-l', '-z', exporterContractCommit, '--', 'scripts'],
         ...[...scripts.keys()].map((path) => ['show', `${exporterContractCommit}:${path}`]),
+        ['show', `${exporterContractCommit}:registry/promotions/v1/promotions.json`],
       ],
     )
-    for (const [path, payload] of scripts) {
+    for (const [path, payload] of pinnedFiles) {
       assert.deepEqual(readFileSync(join(destination, path)), payload)
     }
     assert.equal(readdirSync(runtimeRoot).some((name) => name.includes('.tmp-')), false)
