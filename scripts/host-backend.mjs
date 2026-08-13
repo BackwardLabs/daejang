@@ -1268,6 +1268,41 @@ export const normalizeMultichainSnapshotIds = (config) => {
   return config
 }
 
+export const validateJITBridgeCoverage = (
+  config,
+  requiredChainIds = ['eip155:1', 'eip155:10'],
+) => {
+  const chains = Array.isArray(config?.chains) ? config.chains : []
+  const required = [...new Set(requiredChainIds)]
+  const coveragePeriods = []
+
+  for (const chainId of required) {
+    const matchingChains = chains.filter((chain) => chain?.chainId === chainId)
+    if (matchingChains.length !== 1) {
+      throw new Error(
+        `JIT bridge config must contain exactly one ${chainId} chain; found ${matchingChains.length}`,
+      )
+    }
+    const coverage = matchingChains[0].coverage
+    if (!Array.isArray(coverage) || coverage.length === 0) {
+      throw new Error(
+        `JIT bridge config must contain coverage for ${chainId}`,
+      )
+    }
+    coveragePeriods.push(new Set(coverage.map((entry) =>
+      `${entry?.coverageStart}\u0000${entry?.coverageEnd}`)))
+  }
+
+  const sharedCoveragePeriod = coveragePeriods[0] && [...coveragePeriods[0]]
+    .find((period) => coveragePeriods.every((periods) => periods.has(period)))
+  if (!sharedCoveragePeriod) {
+    throw new Error(
+      `JIT bridge config must contain a shared coverage period for ${required.join(', ')}`,
+    )
+  }
+  return config
+}
+
 // One Etherscan-backed JIT selection can legitimately take several minutes:
 // the bridge request covers all account endpoints and candidate verification.
 // Keep the bridge deadline aligned with the worker's 15 minute await window.
@@ -1280,7 +1315,9 @@ const createRuntimeBridgeConfig = (source) => {
   const output = join(configRoot, 'jit-bridge.runtime.json')
   const config = normalizeJITBridgeTimeouts(
     normalizeMultichainSnapshotIds(
-      JSON.parse(readFileSync(source, 'utf8')),
+      validateJITBridgeCoverage(
+        JSON.parse(readFileSync(source, 'utf8')),
+      ),
     ),
   )
   config.endpoint = `unix://${join(socketRoot, 'jit.sock')}`
