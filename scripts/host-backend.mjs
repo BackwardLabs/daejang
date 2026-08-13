@@ -2874,6 +2874,7 @@ export const currentTaxReportGenerationRowsQuery = `
   JOIN reporting.tax_report_generation AS generation
     ON generation.subject_id = current.subject_id
    AND generation.generation_id = current.generation_id
+  WHERE current.subject_id ~ '${canonicalWebSubjectIDPattern}'
   ORDER BY current.subject_id
 `
 
@@ -3125,7 +3126,10 @@ const readTaxSubjectEpochs = async (queryURL) => {
 
 const readTaxReportGenerationPointers = async (client) => {
   const result = await client.query(currentTaxReportGenerationRowsQuery)
-  return normalizeTaxReportGenerationPointers(result.rows)
+  return normalizeTaxReportGenerationPointers(
+    result.rows.filter(({ subject_id: subjectID }) =>
+      isCanonicalWebSubjectID(subjectID)),
+  )
 }
 
 const readTaxReportGenerationEligibility = async (client) => {
