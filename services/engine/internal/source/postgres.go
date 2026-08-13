@@ -29,6 +29,7 @@ func (s PostgresStore) ListDocuments(ctx context.Context, subjectID string) ([]D
 func (s PostgresStore) RegisterWallet(ctx context.Context, params RegisterWalletParams) (WalletSource, error) {
 	value, err := s.Store.RegisterWallet(ctx, sourcestore.RegisterWalletParams{
 		SubjectID: params.SubjectID, Address: params.Address,
+		AccountType:         params.AccountType,
 		VerificationChainID: params.VerificationChainID, ChainIDs: params.ChainIDs,
 		Label: params.Label, VerifiedAt: params.VerifiedAt,
 	})

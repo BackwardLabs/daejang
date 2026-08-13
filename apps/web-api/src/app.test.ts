@@ -593,6 +593,56 @@ describe('web api authentication boundary', () => {
     })
   })
 
+  it('preserves a verified contract wallet through registration and listing', async () => {
+    await context.app.close()
+    context = await buildApp({
+      config,
+      logger: false,
+      now: () => now,
+      walletSignatureVerifier: {
+        verify: async () => ({ status: 'VALID', accountType: 'CONTRACT' }),
+      },
+    })
+    const { token } = await createSession()
+    const address = Wallet.createRandom().address
+    const headers = {
+      cookie: `${config.sessionCookieName}=${token}`,
+      origin: config.publicOrigin,
+    }
+    const challengeResponse = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets/challenges',
+      headers,
+      payload: { address, chainId: 'eip155:1' },
+    })
+    const challenge = challengeResponse.json<{ challengeId: string }>()
+
+    const registration = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/sources/wallets',
+      headers,
+      payload: {
+        challengeId: challenge.challengeId,
+        signature: 'verified-by-contract-verifier',
+        chainIds: ['eip155:1', 'eip155:10'],
+      },
+    })
+    expect(registration.statusCode).toBe(201)
+    expect(registration.json()).toMatchObject({
+      address: address.toLowerCase(),
+      accountType: 'CONTRACT',
+    })
+
+    const listed = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/sources',
+      headers: { cookie: `${config.sessionCookieName}=${token}` },
+    })
+    expect(listed.json()).toMatchObject({
+      items: [{ address: address.toLowerCase(), accountType: 'CONTRACT' }],
+    })
+  })
+
   it('rejects unsupported wallet collection networks', async () => {
     const { token } = await createSession()
     const wallet = Wallet.createRandom()

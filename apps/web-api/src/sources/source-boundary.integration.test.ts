@@ -53,6 +53,7 @@ describeWithBoundary('Web-to-Engine source persistence boundary', () => {
       challengeId,
       userId,
       recoveredAddress: address,
+      accountType: 'CONTRACT',
       verificationChainId: 'eip155:1',
       chainIds: ['eip155:1', 'eip155:8453'],
       label: 'Boundary integration wallet',
@@ -61,7 +62,7 @@ describeWithBoundary('Web-to-Engine source persistence boundary', () => {
       sessionId,
       idempotencyKey: challengeId,
     })
-    expect(registered).toMatchObject({ address, status: 'ACTIVE' })
+    expect(registered).toMatchObject({ address, accountType: 'CONTRACT', status: 'ACTIVE' })
     expect((await store.getChallenge(userId, challengeId))?.consumedAt).toEqual(now)
 
     const listed = await store.listWallets({

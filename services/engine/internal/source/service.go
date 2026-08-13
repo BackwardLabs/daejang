@@ -52,6 +52,7 @@ type DocumentSource struct {
 type RegisterWalletParams struct {
 	SubjectID           string
 	Address             string
+	AccountType         string
 	VerificationChainID string
 	ChainIDs            []string
 	Label               string
@@ -88,8 +89,12 @@ func (s *Service) RegisterWallet(ctx context.Context, request *enginev1.Register
 	if err != nil {
 		return nil, err
 	}
+	if request.GetAccountType() != "EOA" && request.GetAccountType() != "CONTRACT" {
+		return nil, status.Error(codes.InvalidArgument, "account_type must be EOA or CONTRACT")
+	}
 	result, err := s.Store.RegisterWallet(ctx, RegisterWalletParams{
 		SubjectID: subjectID, Address: request.GetAddress(),
+		AccountType:         request.GetAccountType(),
 		VerificationChainID: request.GetVerificationChainId(), ChainIDs: request.GetChainIds(),
 		Label: request.GetLabel(), VerifiedAt: verifiedAt,
 	})

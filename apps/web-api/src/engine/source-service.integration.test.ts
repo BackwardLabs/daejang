@@ -27,6 +27,7 @@ describeWithEngine('SourceService integration', () => {
       challengeId: '00000000-0000-4000-8000-000000000501',
       userId,
       recoveredAddress: address,
+      accountType: 'CONTRACT',
       verificationChainId: 'eip155:1',
       chainIds: ['eip155:1', 'eip155:8453'],
       label: 'Engine integration wallet',
@@ -37,6 +38,7 @@ describeWithEngine('SourceService integration', () => {
     })
     expect(registered).toMatchObject({
       address,
+      accountType: 'CONTRACT',
       status: 'ACTIVE',
       chainScopes: [
         { chainId: 'eip155:1', status: 'ACTIVE' },

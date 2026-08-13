@@ -142,6 +142,7 @@ type RegisterWalletRequest struct {
 	ChainIds            []string               `protobuf:"bytes,4,rep,name=chain_ids,json=chainIds,proto3" json:"chain_ids,omitempty"`
 	Label               string                 `protobuf:"bytes,5,opt,name=label,proto3" json:"label,omitempty"`
 	VerifiedAt          *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=verified_at,json=verifiedAt,proto3" json:"verified_at,omitempty"`
+	AccountType         string                 `protobuf:"bytes,7,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -216,6 +217,13 @@ func (x *RegisterWalletRequest) GetVerifiedAt() *timestamppb.Timestamp {
 		return x.VerifiedAt
 	}
 	return nil
+}
+
+func (x *RegisterWalletRequest) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
 }
 
 type ListSourcesRequest struct {
@@ -4689,7 +4697,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x122\n" +
-	"\x05actor\x18\x03 \x01(\v2\x1c.giwa.engine.v1.ActorContextR\x05actor\"\x8f\x02\n" +
+	"\x05actor\x18\x03 \x01(\v2\x1c.giwa.engine.v1.ActorContextR\x05actor\"\xb2\x02\n" +
 	"\x15RegisterWalletRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x122\n" +
@@ -4697,7 +4705,8 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\tchain_ids\x18\x04 \x03(\tR\bchainIds\x12\x14\n" +
 	"\x05label\x18\x05 \x01(\tR\x05label\x12;\n" +
 	"\vverified_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"verifiedAt\"N\n" +
+	"verifiedAt\x12!\n" +
+	"\faccount_type\x18\a \x01(\tR\vaccountType\"N\n" +
 	"\x12ListSourcesRequest\x128\n" +
 	"\acontext\x18\x01 \x01(\v2\x1e.giwa.engine.v1.RequestContextR\acontext\"N\n" +
 	"\x16RegisterWalletResponse\x124\n" +

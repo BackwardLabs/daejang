@@ -1,5 +1,6 @@
 export type WalletSourceStatus = 'ACTIVE' | 'DISCONNECTED'
 export type WalletChainScopeStatus = 'ACTIVE' | 'DISABLED'
+export type WalletAccountType = 'EOA' | 'CONTRACT'
 
 export type WalletChainScope = {
   chainId: string
@@ -9,7 +10,7 @@ export type WalletChainScope = {
 export type WalletSource = {
   id: string
   address: string
-  accountType: 'EOA'
+  accountType: WalletAccountType
   verificationChainId: string
   verifiedAt: Date
   label: string | undefined
@@ -42,6 +43,7 @@ export type CompleteWalletRegistration = {
   challengeId: string
   userId: string
   recoveredAddress: string
+  accountType: WalletAccountType
   verificationChainId: string
   chainIds: string[]
   label: string | undefined
@@ -131,7 +133,7 @@ export class MemoryWalletSourceStore
       id: existing?.id ?? crypto.randomUUID(),
       userId: input.userId,
       address: input.recoveredAddress,
-      accountType: 'EOA',
+      accountType: input.accountType,
       verificationChainId: input.verificationChainId,
       verifiedAt: input.now,
       label: input.label ?? existing?.label,

@@ -64,7 +64,7 @@ type ProtoTimestamp = { seconds: string | number; nanos?: number }
 type ProtoWalletSource = {
   id: string
   address: string
-  accountType: 'EOA'
+  accountType: 'EOA' | 'CONTRACT'
   verificationChainId: string
   verifiedAt: ProtoTimestamp
   label?: string
@@ -490,6 +490,7 @@ export class EngineMtlsClient
     const response = (await this.#unary('registerWallet', {
       context: requestContext(input),
       address: input.recoveredAddress,
+      accountType: input.accountType,
       verificationChainId: input.verificationChainId,
       chainIds: input.chainIds,
       label: input.label ?? '',
