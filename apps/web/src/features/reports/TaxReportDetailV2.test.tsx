@@ -268,7 +268,17 @@ describe('TaxReportDetailV2', () => {
   it('shows a compact partial-year summary and all engine-owned detail tabs', async () => {
     render(<TaxReportDetailV2 report={report} pointerVersion={3} isCurrent />)
 
+    expect(screen.getByRole('heading', {
+      name: '2027 가상자산 세금 리포트',
+    })).toBeInTheDocument()
     expect(screen.getByText(/현재 확보된 데이터 범위로 계산한/u)).toBeInTheDocument()
+    expect(screen.getByRole('table', {
+      name: '자산별 손익 요약',
+    })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '자산별 손익' })).toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: /계산식·법적 근거 보기/u,
+    })).toBeInTheDocument()
     expect(screen.getByText('528,000 KRW')).toBeInTheDocument()
     expect(screen.getByText('2027. 07. 01. 09:00:00 KST')).toBeInTheDocument()
     expect(screen.getByText('연간 자료·마감 확인 후 가능합니다.')).toBeInTheDocument()
@@ -424,6 +434,7 @@ describe('TaxReportDetailV2', () => {
     render(<TaxReportDetailV2 report={krwReport} />)
 
     expect(screen.getByText('528,000 KRW')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: '계산·법적 근거' }))
     expect(screen.getByText('2,500,000 KRW / 2,500,000 KRW')).toBeInTheDocument()
     expect(screen.queryByText('52,800,000,000,000 KRW')).not.toBeInTheDocument()
   })

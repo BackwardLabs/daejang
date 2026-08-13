@@ -502,6 +502,36 @@ export function ReportWorkspacePage() {
   }
 
   const pageHeader = reportPageHeader(generationStatus)
+  const showsV2Detail =
+    detailStatus === 'ready' &&
+    reportDetail?.schemaVersion === 'giwa.tax-report-model.v2'
+  const v2RevisionControl = revisions.length > 0 ? (
+    <section
+      className="tax-report-v2__revision-control"
+      aria-labelledby="tax-report-v2-revision-title"
+    >
+      <h3 className="sr-only" id="tax-report-v2-revision-title">
+        장부 revision
+      </h3>
+      <label>
+        <span className="sr-only">발행본 전환</span>
+        <select
+          aria-label="장부 revision 선택"
+          value={selectedReportId}
+          onChange={(event) => setSelectedReportId(event.target.value)}
+        >
+          {revisions.map((report) => {
+            const isCurrent = report.reportId === currentReport?.reportId
+            return (
+              <option key={report.reportId} value={report.reportId}>
+                {revisionLabel(report, isCurrent)}{isCurrent ? ' · 현재' : ''}
+              </option>
+            )
+          })}
+        </select>
+      </label>
+    </section>
+  ) : null
 
   return (
     <div className="ledger-page report-page product-shell">
@@ -511,12 +541,14 @@ export function ReportWorkspacePage() {
         onYearChange={handleYearChange}
       />
       <main className="report-main">
-        <PageHeader
-          description={pageHeader.description}
-          eyebrow="TAX LEDGER"
-          title={pageHeader.title}
-          tone="workspace"
-        />
+        {!showsV2Detail ? (
+          <PageHeader
+            description={pageHeader.description}
+            eyebrow="TAX LEDGER"
+            title={pageHeader.title}
+            tone="workspace"
+          />
+        ) : null}
 
         <section
           className="tax-report-section"
@@ -559,7 +591,7 @@ export function ReportWorkspacePage() {
             />
           ) : null}
 
-          {currentReport && generationStatus && canReadCurrent(generationStatus) &&
+          {!showsV2Detail && currentReport && generationStatus && canReadCurrent(generationStatus) &&
           generationStatus.coverageStatus !== 'COMPLETE' ? (
             <aside className="report-coverage-notice" role="note">
               <strong>전체 연도 중 현재 확보된 데이터까지만 반영했습니다.</strong>
@@ -571,7 +603,7 @@ export function ReportWorkspacePage() {
             </aside>
           ) : null}
 
-          {revisions.length > 0 ? (
+          {revisions.length > 0 && !showsV2Detail ? (
             <section className="tax-report-revisions" aria-labelledby="tax-report-revisions-title">
               <h3 id="tax-report-revisions-title">장부 revision</h3>
               <div>
@@ -637,6 +669,7 @@ export function ReportWorkspacePage() {
                 }
                 isCurrent={selectedReportId === currentReport?.reportId}
                 filingStatus={selectedReport?.filingStatus}
+                revisionControl={v2RevisionControl}
                 generationState={
                   selectedReportId === currentReport?.reportId &&
                   (generationStatus?.state === 'ACTIVE' ||

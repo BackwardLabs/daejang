@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { requestRaw } from '../../api/client.ts'
 import type {
@@ -235,12 +235,14 @@ export function TaxReportDetailV2({
   isCurrent = false,
   generationState,
   filingStatus,
+  revisionControl,
 }: {
   report: TaxReportV2DetailModel
   pointerVersion?: TaxReportModel['pointerVersion']
   isCurrent?: boolean
   generationState?: 'ACTIVE' | 'REVIEW_REQUIRED'
   filingStatus?: TaxReportModel['filingStatus']
+  revisionControl?: ReactNode
 }) {
   const [activeTab, setActiveTab] = useState<V2Tab>('summary')
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
@@ -262,10 +264,14 @@ export function TaxReportDetailV2({
     'DOCUMENT_METADATA_VERIFIED',
     'CHAIN_VERIFIED',
   ].includes(report.dataCoverage.assurance)
+  const effectiveFilingStatus = filingStatus ?? report.filingStatus
+  const disposalCount =
+    report.counts.disposals + report.counts.feeAssetDisposals
+  const reviewItems = report.limitations.slice(0, 3)
   const attestationEligible =
     isCurrent &&
     generationState === 'ACTIVE' &&
-    filingStatus === 'READY' &&
+    effectiveFilingStatus === 'READY' &&
     report.reportFinality === 'FINAL' &&
     report.status === 'FINAL' &&
     report.calculationStatus === 'COMPLETE' &&
@@ -323,14 +329,13 @@ export function TaxReportDetailV2({
     <article className="tax-report-v2" aria-labelledby="tax-report-v2-title">
       <header className="tax-report-v2__header">
         <div>
-          <span className="tax-report-v2__eyebrow">TAX ENGINE RESULT</span>
-          <h2 id="tax-report-v2-title">{report.taxYear}년 가상자산 세무 장부</h2>
+          <h1 id="tax-report-v2-title">
+            {report.taxYear} 가상자산 세금 리포트
+          </h1>
           <p>
-            {pointerVersion === undefined
-              ? '발행본'
-              : `revision ${String(pointerVersion)}`}
-            {isCurrent ? ' · 현재 장부' : ' · 이전 발행본'} ·{' '}
-            {dateLabel(report.issuedAt)} 발행
+            {report.reportFinality === 'FINAL'
+              ? '검증된 연간 데이터와 발행본에 고정된 정책으로 계산한 결과입니다'
+              : '지금까지 등록된 데이터와 발행본에 고정된 정책으로 계산한 예상값입니다'}
           </p>
         </div>
         <div className="tax-report-v2__pdf-actions">
@@ -339,37 +344,44 @@ export function TaxReportDetailV2({
         </div>
       </header>
 
-      <div className="tax-report-v2__meta" aria-label="장부 상태">
-        <span>{statusLabel[policy.applicationMode] ?? policy.applicationMode}</span>
-        <span>{statusLabel[report.reportFinality] ?? report.reportFinality}</span>
-        <span>{statusLabel[report.calculationStatus] ?? report.calculationStatus}</span>
-        <span>{statusLabel[report.taxOutcome] ?? report.taxOutcome}</span>
-        <span>{report.taxYearCloseStatus === 'CLOSED' ? '연간 마감' : '연중 추정'}</span>
-      </div>
-
-      <ReportAttestationControl
-        reportId={report.reportId}
-        reportModelDigest={report.reportModelDigest}
-        pointerVersion={pointerVersion ?? 1}
-        eligible={attestationEligible}
-      />
+      <section className="tax-report-v2__status" aria-label="리포트 상태">
+        <span className="tax-report-v2__status-context">
+          귀속연도 {report.taxYear}
+        </span>
+        <i aria-hidden="true" />
+        <span className="tax-report-v2__status-time">
+          최근 계산 <time dateTime={report.calculatedAsOf}>{dateTimeLabel(report.calculatedAsOf)}</time>
+        </span>
+        <div className="tax-report-v2__meta">
+          <span data-tone={report.reportFinality === 'FINAL' ? 'success' : 'warning'}>
+            {statusLabel[report.reportFinality] ?? report.reportFinality}
+          </span>
+          <span data-tone={effectiveFilingStatus === 'READY' ? 'success' : 'danger'}>
+            {effectiveFilingStatus === 'READY' ? '발행 가능' : '확인 필요'}
+          </span>
+          <span data-tone="neutral">
+            {statusLabel[policy.applicationMode] ?? policy.applicationMode}
+          </span>
+        </div>
+        <div className="tax-report-v2__status-spacer" />
+        {revisionControl}
+      </section>
 
       {partialCoverage ? (
         <aside className="tax-report-v2__coverage" role="note">
           <div>
-            <strong>현재 확보된 데이터 범위로 계산한 연중 추정 장부입니다.</strong>
+            <strong>현재 확보된 데이터 범위로 계산한 예상 리포트</strong>
             <p>
               과세기간 {dateLabel(report.inputPeriod.from)} ~{' '}
               {dateLabel(report.inputPeriod.through)} 중{' '}
-              표시 경계는 <b>{dateLabel(report.dataCoverage.from)} ~ {dateLabel(report.dataCoverage.through)}</b>
-              입니다. 실제 반영 여부는 아래 포함·누락 구간으로 판단하며, 자료를 추가하면 Tax Engine이 전체 연도를 다시 계산합니다.
+              <b>{dateLabel(report.dataCoverage.from)} ~ {dateLabel(report.dataCoverage.through)}</b>
+              까지 확인했습니다. 누락 구간:{' '}
+              {report.dataCoverage.uncoveredIntervals.map(intervalLabel).join(', ') || '없음'}
             </p>
-            <dl className="tax-report-v2__coverage-intervals">
-              <div><dt>포함 구간</dt><dd>{report.dataCoverage.coveredIntervals.map(intervalLabel).join(', ') || '확인된 구간 없음'}</dd></div>
-              <div><dt>누락 구간</dt><dd>{report.dataCoverage.uncoveredIntervals.map(intervalLabel).join(', ') || '없음'}</dd></div>
-            </dl>
           </div>
-          <span>{report.dataCoverage.status}</span>
+          <button type="button" onClick={() => setActiveTab('basis')}>
+            데이터 범위 보기 →
+          </button>
         </aside>
       ) : null}
 
@@ -394,8 +406,8 @@ export function TaxReportDetailV2({
       </nav>
 
       {activeTab === 'summary' ? (
-        <section className="tax-report-v2__panel" role="tabpanel" id="tax-report-v2-panel-summary" aria-labelledby="tax-report-v2-tab-summary">
-          <header>
+        <section className="tax-report-v2__panel tax-report-v2__overview" role="tabpanel" id="tax-report-v2-panel-summary" aria-labelledby="tax-report-v2-tab-summary">
+          <header className="sr-only">
             <div>
               <span>ANNUAL TAX SUMMARY</span>
               <h3>세금 계산 결과</h3>
@@ -403,54 +415,103 @@ export function TaxReportDetailV2({
             <p>표시값은 Tax Engine의 정본이며 브라우저에서 다시 계산하지 않습니다.</p>
           </header>
           <div className="tax-report-v2__kpis">
-            <article className="is-primary">
+            <article>
+              <span>총 처분가액</span>
+              <Amount value={report.summary.grossProceeds} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
+              <small>확인된 처분 {disposalCount}건</small>
+            </article>
+            <article>
+              <span>처분 취득가액</span>
+              <Amount value={report.summary.disposedBasis} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
+              <small>연간 총평균 원가 배분</small>
+            </article>
+            <article>
+              <span>연간 손익</span>
+              <Amount value={report.summary.disposalGainLoss} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
+              <small>수수료·필요경비 반영</small>
+            </article>
+            <article>
               <span>예상 총세액</span>
               <Amount value={report.summary.totalTax} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
               <small>{statusLabel[report.taxOutcome] ?? report.taxOutcome}</small>
             </article>
-            <article>
-              <span>연간 처분손익</span>
-              <Amount value={report.summary.disposalGainLoss} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
-            </article>
-            <article>
-              <span>대여 순소득</span>
-              <Amount value={report.summary.netLendingIncome} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
-            </article>
-            <article>
-              <span>과세소득</span>
-              <Amount value={report.summary.taxableIncome} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} />
-            </article>
           </div>
-          <div className="tax-report-v2__summary-grid">
-            <section>
-              <h4>연간 처분 금액</h4>
-              <dl>
-                <div><dt>총 처분가액</dt><dd><Amount value={report.summary.grossProceeds} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
-                <div><dt>총 취득가액 · 처분 취득원가</dt><dd><Amount value={report.summary.disposedBasis} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
-                <div><dt>총 필요경비</dt><dd><Amount value={report.summary.deductibleExpense} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
-                <div><dt>원천 실제 발생비용</dt><dd><Amount value={report.summary.incurredExpense} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
-              </dl>
+          <div className="tax-report-v2__overview-grid">
+            <section className="tax-report-v2__asset-summary">
+              <header>
+                <h4>자산별 손익</h4>
+                <button type="button" onClick={() => setActiveTab('assets')}>
+                  행을 눌러 계산 근거 확인
+                </button>
+              </header>
+              <div className="tax-report-v2__asset-table-wrap">
+                <table aria-label="자산별 손익 요약">
+                  <thead>
+                    <tr>
+                      <th scope="col">자산</th>
+                      <th scope="col">처분가액</th>
+                      <th scope="col">취득가액·비용</th>
+                      <th scope="col">손익</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.assetSummaries.length === 0 ? (
+                      <tr><td colSpan={4}>표시할 자산이 없습니다.</td></tr>
+                    ) : report.assetSummaries.slice(0, 4).map((asset) => (
+                      <tr key={asset.taxAssetId}>
+                        <th scope="row">
+                          <button type="button" onClick={() => setActiveTab('assets')}>
+                            {asset.taxAssetId}
+                          </button>
+                        </th>
+                        <td>{formatAmount(asset.grossProceeds)}</td>
+                        <td>
+                          {formatAmount(asset.disposedBasis)}
+                          <small>필요경비 {formatAmount(asset.deductibleExpense)}</small>
+                        </td>
+                        <td>{formatAmount(asset.gainLoss)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
-            <section>
-              <h4>세액 구성</h4>
-              <dl>
-                <div><dt>과세표준</dt><dd><Amount value={report.summary.taxableBase} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
-                <div><dt>국세</dt><dd><Amount value={report.summary.nationalTax} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
-                <div><dt>지방세</dt><dd><Amount value={report.summary.localTax} denomination={report.denominationAssetId} denominationAtomicDecimals={report.denominationAtomicDecimals} /></dd></div>
-                <div><dt>기본공제 / 실제 적용</dt><dd>{formatAmount({ status: 'KNOWN', hasAmount: true, amount: report.summary.calculationRule.basicDeductionAmount })} / {report.summary.calculationRule.deductionUsedAmount === null ? '미확정' : formatAmount({ status: 'KNOWN', hasAmount: true, amount: report.summary.calculationRule.deductionUsedAmount })}</dd></div>
-              </dl>
-            </section>
-            <section>
-              <h4>현재 장부 판단</h4>
-              <dl>
-                <div><dt>신고 조치</dt><dd>{report.filingAction}</dd></div>
-                <div><dt>신고 준비 상태</dt><dd>{report.filingStatus === 'READY' ? '신고 가능' : '신고 불가 · 확인 필요'}</dd></div>
-                <div><dt>신고 제출</dt><dd>{report.filingSubmissionStatus}</dd></div>
-                <div><dt>가격 확정성</dt><dd>{statusLabel[report.valuationFinality] ?? report.valuationFinality}</dd></div>
-                <div><dt>마지막 계산</dt><dd>{dateTimeLabel(report.calculatedAsOf)}</dd></div>
-              </dl>
+            <section className="tax-report-v2__review-card" data-empty={reviewItems.length === 0 ? 'true' : undefined}>
+              <span>계산 전 확인</span>
+              <h4>
+                {reviewItems.length > 0
+                  ? `${report.limitations.length}건을 검토하면 예상 세액이 더 정확해져요`
+                  : '추가로 확인할 계산 항목이 없습니다'}
+              </h4>
+              <p>
+                검토하지 않은 항목은 Tax Engine이 발행한 제한 사유와 함께 리포트에 계속 표시됩니다.
+              </p>
+              <div>
+                {reviewItems.length === 0 ? (
+                  <p>현재 발행본에 연결된 검토 제한이 없습니다.</p>
+                ) : reviewItems.map((item, index) => (
+                  <button
+                    type="button"
+                    key={`${item.code}-${item.movementId ?? index}`}
+                    onClick={() => setActiveTab('events')}
+                  >
+                    <span>{item.reason}</span>
+                    <small>{item.code}</small>
+                  </button>
+                ))}
+              </div>
+              <button className="tax-report-v2__review-link" type="button" onClick={() => setActiveTab('events')}>
+                {reviewItems.length > 0 ? `${report.limitations.length}건 검토하기` : '소득·처분 내역 보기'} →
+              </button>
             </section>
           </div>
+          <button className="tax-report-v2__calculation-link" type="button" onClick={() => setActiveTab('basis')}>
+            <span>
+              <strong>계산 기준 · 거주자별 연간 총평균법</strong>
+              <small>기초 재고와 연간 전체 취득을 자산별로 합산하며, 연중 결과는 예상값으로 표시합니다</small>
+            </span>
+            <b>계산식·법적 근거 보기 →</b>
+          </button>
         </section>
       ) : null}
 
@@ -627,6 +688,7 @@ export function TaxReportDetailV2({
               <dl>
                 <div><dt>원가 묶음</dt><dd>거주자 × 과세연도 × 세무자산</dd></div>
                 <div><dt>원가 방식</dt><dd>연간 총평균법</dd></div>
+                <div><dt>기본공제 / 실제 적용</dt><dd>{formatAmount({ status: 'KNOWN', hasAmount: true, amount: report.summary.calculationRule.basicDeductionAmount })} / {report.summary.calculationRule.deductionUsedAmount === null ? '미확정' : formatAmount({ status: 'KNOWN', hasAmount: true, amount: report.summary.calculationRule.deductionUsedAmount })}</dd></div>
                 <div><dt>국세율</dt><dd>{report.summary.calculationRule.nationalRate.numerator} / {report.summary.calculationRule.nationalRate.denominator}</dd></div>
                 <div><dt>지방세율</dt><dd>{report.summary.calculationRule.localRate.numerator} / {report.summary.calculationRule.localRate.denominator}</dd></div>
                 <div><dt>세액 반올림</dt><dd>{report.summary.calculationRule.taxRounding}</dd></div>
@@ -692,6 +754,12 @@ export function TaxReportDetailV2({
           ) : null}
         </section>
       ) : null}
+      <ReportAttestationControl
+        reportId={report.reportId}
+        reportModelDigest={report.reportModelDigest}
+        pointerVersion={pointerVersion ?? 1}
+        eligible={attestationEligible}
+      />
       {pdfPreviewOpen ? (
         <div className="tax-report-v2__pdf-dialog" role="dialog" aria-modal="true" aria-labelledby="tax-report-v2-pdf-title">
           <div>
