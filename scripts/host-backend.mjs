@@ -1557,6 +1557,46 @@ const actionRuntimeScriptPaths = Object.freeze([
   'scripts/action_evaluator.py',
 ])
 
+const actionRuntimeCacheVersion = 'v2'
+const actionRuntimeMaximumFileBytes = 16 * 1024 * 1024
+const actionRuntimeMaximumTreeBytes = 64 * 1024 * 1024
+
+const parseActionRuntimeTree = (payload) => {
+  if (!Buffer.isBuffer(payload)) {
+    throw new Error('Unable to list pinned Action runtime files')
+  }
+  const entries = payload
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean)
+    .map((entry) => {
+      const match = /^(100644|100755) blob [0-9a-f]{40,64} +([0-9]+)\t(.+)$/.exec(entry)
+      if (!match) {
+        throw new Error('The pinned Action runtime tree contains an unsupported entry')
+      }
+      const [, mode, rawSize, path] = match
+      const parts = path.split('/')
+      if (
+        parts[0] !== 'scripts' ||
+        parts.length < 2 ||
+        parts.some((part) => !part || part === '.' || part === '..') ||
+        path.includes('\\')
+      ) {
+        throw new Error('The pinned Action runtime tree contains an unsafe path')
+      }
+      const size = Number(rawSize)
+      if (!Number.isSafeInteger(size) || size < 0 || size > actionRuntimeMaximumFileBytes) {
+        throw new Error(`Pinned Action runtime file ${path} exceeds the materialization limit`)
+      }
+      return { mode, path, size }
+    })
+  const totalBytes = entries.reduce((sum, entry) => sum + entry.size, 0)
+  if (entries.length === 0 || totalBytes > actionRuntimeMaximumTreeBytes) {
+    throw new Error('The pinned Action runtime tree exceeds the materialization limit')
+  }
+  return entries
+}
+
 export const materializeVerifiedActionRuntime = (
   repository,
   release,
@@ -1586,8 +1626,8 @@ export const materializeVerifiedActionRuntime = (
     throw new Error('The verified Action runtime release changed before materialization')
   }
 
-  const staged = `${join(root, release.bundleSha256)}.tmp-${randomUUID()}`
-  const destination = join(root, release.bundleSha256)
+  const destination = join(root, `${actionRuntimeCacheVersion}-${release.bundleSha256}`)
+  const staged = `${destination}.tmp-${randomUUID()}`
   mkdirSync(join(staged, 'releases'), { recursive: true, mode: 0o700 })
   mkdirSync(join(staged, 'scripts'), { recursive: true, mode: 0o700 })
   try {
@@ -1597,11 +1637,25 @@ export const materializeVerifiedActionRuntime = (
         : read(join(repository, path))
       writeFileSync(join(staged, path), payload, { mode: 0o600 })
     }
+
+    const treeResult = inspect(
+      'git',
+      ['ls-tree', '-r', '-l', '-z', bundle.exporterContractCommit, '--', 'scripts'],
+      { cwd: repository, encoding: null, maxBuffer: 4 * 1024 * 1024 },
+    )
+    if (treeResult.status !== 0) {
+      throw new Error('Unable to list pinned Action runtime files')
+    }
+    const treeEntries = parseActionRuntimeTree(treeResult.stdout)
+    const treePaths = new Set(treeEntries.map(({ path }) => path))
     for (const path of actionRuntimeScriptPaths) {
       const expectedDigest = bundle.sourceDigests?.[path]
-      if (!/^[0-9a-f]{64}$/.test(expectedDigest)) {
+      if (!/^[0-9a-f]{64}$/.test(expectedDigest) || !treePaths.has(path)) {
         throw new Error(`The signed Action runtime does not pin ${path}`)
       }
+    }
+
+    for (const { mode, path } of treeEntries) {
       const result = inspect(
         'git',
         ['show', `${bundle.exporterContractCommit}:${path}`],
@@ -1610,14 +1664,17 @@ export const materializeVerifiedActionRuntime = (
       if (result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
         throw new Error(`Unable to read pinned Action runtime file ${path}`)
       }
-      if (sha256(result.stdout) !== expectedDigest) {
+      const expectedDigest = bundle.sourceDigests?.[path]
+      if (expectedDigest && sha256(result.stdout) !== expectedDigest) {
         throw new Error(`Pinned Action runtime file ${path} does not match the signed digest`)
       }
-      writeFileSync(join(staged, path), result.stdout, { mode: 0o600 })
+      const target = join(staged, path)
+      mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
+      writeFileSync(target, result.stdout, { mode: mode === '100755' ? 0o700 : 0o600 })
     }
 
     if (existsSync(destination)) {
-      for (const path of [...actionRuntimeReleasePaths, ...actionRuntimeScriptPaths]) {
+      for (const path of [...actionRuntimeReleasePaths, ...treeEntries.map(({ path }) => path)]) {
         if (sha256(readFileSync(join(destination, path))) !== sha256(readFileSync(join(staged, path)))) {
           throw new Error('The immutable Action runtime cache does not match its signed release')
         }
