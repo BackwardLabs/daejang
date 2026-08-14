@@ -505,6 +505,14 @@ const interval = (value: unknown, path: string): PublicTaxReportV2Interval => {
   return { from, through }
 }
 
+const coverageIntervals = (value: unknown, path: string) => {
+  // Tax Engine revisions published before the empty-slice fix encoded an
+  // empty coverage interval list as null. Treat only that legacy empty value
+  // as []; every non-null value still passes the strict bounded-array parser.
+  if (value === null) return []
+  return array(value, path, interval)
+}
+
 const producer = (value: unknown, path: string) => {
   const row = record(value, path, ['name', 'version', 'artifactDigest'])
   return {
@@ -1363,8 +1371,8 @@ const sourceCoverage = (value: unknown, path: string): PublicTaxReportV2SourceCo
     status: oneOf(row.status, `${path}.status`, ['UNKNOWN', 'PARTIAL', 'COMPLETE']),
     evidenceDigest: digest(row.evidenceDigest, `${path}.evidenceDigest`),
     fragmentIds: stringArray(row.fragmentIds, `${path}.fragmentIds`),
-    coveredIntervals: array(row.coveredIntervals, `${path}.coveredIntervals`, interval),
-    uncoveredIntervals: array(row.uncoveredIntervals, `${path}.uncoveredIntervals`, interval),
+    coveredIntervals: coverageIntervals(row.coveredIntervals, `${path}.coveredIntervals`),
+    uncoveredIntervals: coverageIntervals(row.uncoveredIntervals, `${path}.uncoveredIntervals`),
   }
 }
 

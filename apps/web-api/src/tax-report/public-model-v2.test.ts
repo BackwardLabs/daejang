@@ -315,6 +315,19 @@ describe('ReportModel V2 public projection', () => {
     expect(projected).not.toHaveProperty('residentId')
   })
 
+  it('reads legacy V2 reports whose empty source coverage intervals were encoded as null', () => {
+    const report = reportFixture()
+    report.sourceCoverage[0]!.coveredIntervals = null as never
+    report.sourceCoverage[0]!.uncoveredIntervals = null as never
+
+    const projected = decodeAndProjectTaxReportModelV2(artifact(report), reportId)
+
+    expect(projected.sourceCoverage[0]).toMatchObject({
+      coveredIntervals: [],
+      uncoveredIntervals: [],
+    })
+  })
+
   it('fails closed on unknown fields instead of forwarding them to the browser', () => {
     expect(() => decodeAndProjectTaxReportModelV2(
       artifact({ ...reportFixture(), subjectDisplayName: 'private-name' }),
