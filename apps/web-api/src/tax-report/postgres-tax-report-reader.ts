@@ -603,7 +603,7 @@ export class PostgresTaxReportReader
           report.local_tax_amount::text,
           report.total_tax_status,
           report.total_tax_amount::text
-        FROM reporting.current_tax_report_read_v2 AS report
+        FROM reporting.current_tax_report_summary_read_v1 AS report
         WHERE report.subject_id = $1
           AND report.tax_year = $2
           AND report.finality = $3
