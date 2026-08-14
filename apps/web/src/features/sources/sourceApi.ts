@@ -9,7 +9,7 @@ export type WalletSourceApiModel = {
   id: string
   type: 'EVM_WALLET'
   address: string
-  accountType: 'EOA'
+  accountType: 'EOA' | 'CONTRACT'
   verificationChainId: string
   verifiedAt: string
   label?: string
