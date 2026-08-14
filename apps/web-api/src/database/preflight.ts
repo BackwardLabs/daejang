@@ -444,7 +444,7 @@ export const assertTaxReportSchema = async (pool: Pool) => {
     row.v2_subject_resident_function !==
       'reporting.tax_report_subject_resident_v2(text,integer,text)' ||
     row.contract_version !== '1' ||
-    row.migration_version !== '73' ||
+    row.migration_version !== '88' ||
     row.generation_contract_version !== '2' ||
     row.generation_migration_version !== '76' ||
     !row.reporting_usage ||
