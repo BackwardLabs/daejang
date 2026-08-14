@@ -63,7 +63,7 @@ const validTaxReportContract = {
   v2_subject_resident_function:
     'reporting.tax_report_subject_resident_v2(text,integer,text)',
   contract_version: '1',
-  migration_version: '73',
+  migration_version: '88',
   generation_contract_version: '2',
   generation_migration_version: '76',
   reporting_usage: true,
