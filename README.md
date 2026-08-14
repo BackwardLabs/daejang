@@ -29,6 +29,23 @@ npm run dev
 
 개발 서버는 기본적으로 `http://localhost:5173`에서 실행됩니다.
 
+### 로컬 dev E2E
+
+기능을 수정한 뒤에는 현재 체크아웃으로 Web API, Engine, PDF parser 후보 이미지를
+만들고 실제 서비스 경계를 연결해 확인할 수 있습니다. Registry의 최신 6개 기준
+이미지도 먼저 pull해 사용한 digest를 보여 주며, DB는 실행마다 새로 만들고 종료 시
+삭제합니다.
+
+```bash
+make test DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db
+```
+
+이 테스트는 Web API 요청에서 시작해 Engine gRPC, networkless PDF parser,
+PostgreSQL source 저장까지 확인합니다. 운영 `.env`나 secret은 이미지에 넣지 않고
+테스트 실행 중 생성되는 권한 `0600` 임시 환경 파일로만 전달합니다.
+전체 구조와 저장소별 확인 범위는 [로컬 dev E2E 실행 방법](docs/local-dev-e2e.md)에
+정리되어 있습니다.
+
 Web API는 별도 터미널에서 실행합니다.
 
 ```bash

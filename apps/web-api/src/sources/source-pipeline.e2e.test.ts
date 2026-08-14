@@ -14,6 +14,7 @@ import { PostgresFileUploadStore } from '../uploads/postgres-file-upload-store.j
 import { PostgresWalletSourceStore } from './postgres-wallet-source-store.js'
 
 const enabled = process.env.RUN_SOURCE_PIPELINE_E2E_TESTS === '1'
+const dockerHostEnabled = process.env.ALLOW_DOCKER_HOST_E2E === '1'
 
 const disposableDatabaseUrl = (name: string) => {
   const value = process.env[name]
@@ -21,12 +22,14 @@ const disposableDatabaseUrl = (name: string) => {
   if (!value) throw new Error(`${name} is required for source pipeline E2E tests`)
   const url = new URL(value)
   const databaseName = decodeURIComponent(url.pathname.slice(1)).toLowerCase()
+  const allowedHosts = new Set(['127.0.0.1', 'localhost', '[::1]'])
+  if (dockerHostEnabled) allowedHosts.add('host.docker.internal')
   if (
     !['postgres:', 'postgresql:'].includes(url.protocol) ||
-    !new Set(['127.0.0.1', 'localhost', '[::1]']).has(url.hostname) ||
+    !allowedHosts.has(url.hostname) ||
     !databaseName.includes('test')
   ) {
-    throw new Error(`${name} must target a loopback-only disposable test database`)
+    throw new Error(`${name} must target an explicitly allowed disposable test database`)
   }
   return value
 }

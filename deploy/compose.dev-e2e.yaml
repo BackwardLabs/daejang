@@ -1,0 +1,90 @@
+name: daejang-dev-e2e
+
+services:
+  socket-init:
+    image: ${DAEJANG_PDF_PARSER_CANDIDATE_IMAGE}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 65532:65532 /run/daejang/pdf-parser /run/daejang/engine"]
+    network_mode: none
+    volumes:
+      - pdf_parser_socket:/run/daejang/pdf-parser
+      - engine_socket:/run/daejang/engine
+
+  pdf-parser:
+    image: ${DAEJANG_PDF_PARSER_CANDIDATE_IMAGE}
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 8
+    volumes:
+      - pdf_parser_socket:/run/daejang/pdf-parser
+    depends_on:
+      socket-init: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        - CMD
+        - /opt/daejang-pdf-parser/bin/python
+        - -I
+        - -c
+        - "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect('/run/daejang/pdf-parser/parser.sock'); s.sendall(b'DJPING01'); s.shutdown(socket.SHUT_WR); r=s.makefile('rb'); assert r.read(8)==b'DJPONG01' and r.read(1)==b''"
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  engine:
+    image: ${DAEJANG_ENGINE_CANDIDATE_IMAGE}
+    environment:
+      ENGINE_LISTEN: unix:///run/daejang/engine/engine.sock
+      DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
+      DAEJANG_SOURCE_ARTIFACT_DATABASE_URL: ${SOURCE_ARTIFACT_DATABASE_URL}
+      DAEJANG_SOURCE_ARTIFACT_ROOT: /var/lib/daejang/source-artifacts/objects
+      DAEJANG_SOURCE_ARTIFACT_TEMP: /var/lib/daejang/source-artifacts/tmp
+      DAEJANG_QUERY_DATABASE_URL: ${QUERY_DATABASE_URL}
+      DAEJANG_REPORT_DATABASE_URL: ${REPORT_DATABASE_URL}
+      ENGINE_PDF_PARSER_SOCKET_PATH: /run/daejang/pdf-parser/parser.sock
+      ENGINE_PDF_PARSER_TIMEOUT: 20s
+      ENGINE_PDF_IMPORT_LEASE_DURATION: 2m
+      PRIVATE_OBJECT_ENCRYPTION_KEY: CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: dev-e2e-only
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - pdf_parser_socket:/run/daejang/pdf-parser:ro
+      - engine_socket:/run/daejang/engine
+    depends_on:
+      pdf-parser: { condition: service_healthy }
+
+  web-api-tests:
+    image: ${DAEJANG_WEB_API_TEST_IMAGE}
+    working_dir: /app
+    command:
+      - npm
+      - run
+      - test
+      - --workspace
+      - '@daejang/web-api'
+      - --
+      - src/sources/source-pipeline.e2e.test.ts
+    environment:
+      RUN_SOURCE_PIPELINE_E2E_TESTS: "1"
+      ALLOW_DOCKER_HOST_E2E: "1"
+      TEST_DATABASE_URL: ${OWNER_DATABASE_URL}
+      TEST_WEB_DATABASE_URL: ${WEB_DATABASE_URL}
+      TEST_ENGINE_GRPC_TARGET: unix:/run/daejang/engine/engine.sock
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - engine_socket:/run/daejang/engine:ro
+    depends_on:
+      engine: { condition: service_started }
+
+volumes:
+  pdf_parser_socket: {}
+  engine_socket: {}
