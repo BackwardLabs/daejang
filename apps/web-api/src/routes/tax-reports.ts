@@ -458,7 +458,7 @@ export const registerTaxReportRoutes = async (
           }
           if (error instanceof InconsistentTaxReportGenerationStatusError) {
             throw new ApiError(
-              503,
+              500,
               'TAX_REPORT_STATUS_INCONSISTENT',
               '신고 자료 생성 상태의 일관성 검증에 실패했습니다.',
             )

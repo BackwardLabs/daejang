@@ -271,6 +271,8 @@ function stubReportRequests(options: {
   taxYear?: 2025 | 2026 | 2027
   finalGenerationStatus?: unknown
   provisionalGenerationStatus?: unknown
+  finalGenerationStatusCode?: number
+  provisionalGenerationStatusCode?: number
 } = {}) {
   const taxYear = options.taxYear ?? 2027
   const detail = options.detail ?? { ...detailReport, taxYear }
@@ -284,6 +286,12 @@ function stubReportRequests(options: {
       const url = String(input)
       if (url.includes(`/tax-reports/${taxYear}/status`)) {
         if (url.includes('finality=FINAL')) {
+          if (options.finalGenerationStatusCode) {
+            return jsonResponse(
+              { error: { code: 'TAX_REPORT_STATUS_INCONSISTENT' } },
+              options.finalGenerationStatusCode,
+            )
+          }
           return jsonResponse({
             status:
               options.finalGenerationStatus ??
@@ -297,6 +305,12 @@ function stubReportRequests(options: {
                   ),
               ),
           })
+        }
+        if (options.provisionalGenerationStatusCode) {
+          return jsonResponse(
+            { error: { code: 'TAX_REPORT_STATUS_INCONSISTENT' } },
+            options.provisionalGenerationStatusCode,
+          )
         }
         return jsonResponse({
           status:
@@ -953,6 +967,24 @@ describe('ReportPage', () => {
   it('does not present an upstream report failure as an empty ledger', async () => {
     stubReportRequests({
       finalCurrentStatus: 503,
+      provisionalCurrentStatus: 404,
+      history: [],
+    })
+
+    render(<ReportWorkspacePage />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '장부를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    )
+    expect(
+      screen.queryByText('아직 생성된 장부가 없습니다'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('does not present a partial status failure as an empty ledger', async () => {
+    stubReportRequests({
+      finalGenerationStatus: generationStatusFixture(2027, 'FINAL', false),
+      provisionalGenerationStatusCode: 503,
       provisionalCurrentStatus: 404,
       history: [],
     })

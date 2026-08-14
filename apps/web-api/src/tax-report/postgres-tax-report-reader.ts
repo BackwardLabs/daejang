@@ -285,9 +285,6 @@ const validDate = (value: unknown): value is Date =>
   value instanceof Date && !Number.isNaN(value.getTime())
 
 const dateOnly = (value: unknown) => {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10)
-  }
   if (
     typeof value === 'string' &&
     /^\d{4}-\d{2}-\d{2}$/.test(value) &&
@@ -482,10 +479,10 @@ export class PostgresTaxReportReader
           tax_year,
           finality,
           outcome,
-          period_start,
-          period_end,
-          coverage_from,
-          coverage_through,
+          period_start::text AS period_start,
+          period_end::text AS period_end,
+          coverage_from::text AS coverage_from,
+          coverage_through::text AS coverage_through,
           calculated_as_of,
           coverage_status,
           coverage_assurance,
