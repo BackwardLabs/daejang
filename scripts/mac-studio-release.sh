@@ -297,11 +297,20 @@ deploy_indexer() {
   restart_indexer
 }
 
+restart_backend_with_migrations() {
+  local application="$DAEJANG_ROOT/daejang"
+  local database="$DAEJANG_ROOT/daejang-db"
+
+  npm --prefix "$application" run backend:stop
+  (cd "$database" && make database-up)
+  npm --prefix "$application" run backend:start
+  npm --prefix "$application" run backend:status
+}
+
 deploy_backend() {
   sync_backend_sources
   npm --prefix "$DAEJANG_ROOT/daejang" ci
-  npm --prefix "$DAEJANG_ROOT/daejang" run backend:restart
-  npm --prefix "$DAEJANG_ROOT/daejang" run backend:status
+  restart_backend_with_migrations
   record_backend_repository_set "$BACKEND_DEPLOYED_STATE_FILE" deployed_at
 }
 
@@ -309,8 +318,7 @@ deploy_all() {
   sync_sources
   npm --prefix "$DAEJANG_ROOT/daejang" ci
   restart_indexer
-  npm --prefix "$DAEJANG_ROOT/daejang" run backend:restart
-  npm --prefix "$DAEJANG_ROOT/daejang" run backend:status
+  restart_backend_with_migrations
   record_deployed_state
 }
 
