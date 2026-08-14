@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiClientError } from '../../api/client.ts'
+import { loadLedger } from '../../api/productApi.ts'
 import { AppSidebar } from '../../components/AppSidebar.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import {
@@ -18,6 +19,10 @@ import {
 } from './taxReportApi.ts'
 import { TaxReportDetail } from './TaxReportDetail.tsx'
 import { TaxReportDetailV2 } from './TaxReportDetailV2.tsx'
+import {
+  buildReportAssetPresentations,
+  type ReportAssetPresentations,
+} from './reportAssetPresentation.ts'
 import './report.css'
 
 const newestFirst = (left: TaxReportModel, right: TaxReportModel) => {
@@ -341,6 +346,8 @@ export function ReportWorkspacePage() {
     useState<AnyTaxReportDetailModel | null>(null)
   const [detailStatus, setDetailStatus] =
     useState<'error' | 'idle' | 'loading' | 'not-found' | 'ready'>('idle')
+  const [assetPresentations, setAssetPresentations] =
+    useState<ReportAssetPresentations>({})
   const [statusRequestVersion, setStatusRequestVersion] = useState(0)
   const buildingPollCount = useRef(0)
 
@@ -351,6 +358,7 @@ export function ReportWorkspacePage() {
     setRevisions([])
     setSelectedReportId(undefined)
     setReportDetail(null)
+    setAssetPresentations({})
     setGenerationStatus(null)
     setDetailStatus('idle')
 
@@ -467,12 +475,28 @@ export function ReportWorkspacePage() {
 
     const controller = new AbortController()
     setReportDetail(null)
+    setAssetPresentations({})
     setDetailStatus('loading')
     void loadTaxReportDetail(selectedReportId, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return
-        setReportDetail(result.report)
+        const detail = result.report
+        setReportDetail(detail)
         setDetailStatus('ready')
+        if (detail.schemaVersion === 'giwa.tax-report-model.v2') {
+          void loadLedger(year, { limit: 200, signal: controller.signal })
+            .then((ledger) => {
+              if (!controller.signal.aborted) {
+                setAssetPresentations(buildReportAssetPresentations(
+                  detail,
+                  ledger.items,
+                ))
+              }
+            })
+            .catch(() => {
+              if (!controller.signal.aborted) setAssetPresentations({})
+            })
+        }
       })
       .catch((error: unknown) => {
         if (
@@ -489,7 +513,7 @@ export function ReportWorkspacePage() {
       })
 
     return () => controller.abort()
-  }, [selectedReportId])
+  }, [selectedReportId, year])
 
   const selectedReport = revisions.find(
     (report) => report.reportId === selectedReportId,
@@ -581,7 +605,7 @@ export function ReportWorkspacePage() {
             ) : null
           ) : null}
 
-          {taxStatus === 'ready' && generationStatus &&
+          {!showsV2Detail && taxStatus === 'ready' && generationStatus &&
           (generationStatus.state === 'REVIEW_REQUIRED' ||
             !canReadCurrent(generationStatus)) && revisions.length > 0 ? (
             <ReportGenerationState
@@ -662,6 +686,7 @@ export function ReportWorkspacePage() {
               <TaxReportDetailV2
                 key={reportDetail.reportId}
                 report={reportDetail}
+                assetPresentations={assetPresentations}
                 pointerVersion={
                   selectedReport && String(selectedReport.pointerVersion) !== '0'
                     ? selectedReport.pointerVersion

@@ -271,7 +271,7 @@ describe('TaxReportDetailV2', () => {
     expect(screen.getByRole('heading', {
       name: '2027 가상자산 세금 리포트',
     })).toBeInTheDocument()
-    expect(screen.getByText(/현재 확보된 데이터 범위로 계산한/u)).toBeInTheDocument()
+    expect(screen.getByText('현재 계산에 반영된 데이터 범위')).toBeInTheDocument()
     expect(screen.getByRole('table', {
       name: '자산별 손익 요약',
     })).toBeInTheDocument()
@@ -288,9 +288,14 @@ describe('TaxReportDetailV2', () => {
       `/api/v1/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`,
     )
     const coverageNote = screen.getByRole('note')
-    expect(coverageNote).toHaveTextContent('누락 구간')
-    expect(coverageNote).toHaveTextContent('2027. 07. 01.')
-    expect(coverageNote).toHaveTextContent('2027. 12. 31.')
+    expect(coverageNote).toHaveTextContent('2027. 01. 01.')
+    expect(coverageNote).toHaveTextContent('2027. 06. 30.')
+    expect(coverageNote).not.toHaveTextContent('누락 구간')
+    expect(screen.getByRole('heading', {
+      name: '직접 검토할 거래가 없습니다',
+    })).toBeInTheDocument()
+    expect(screen.getByText(/남은 제한 1건/u)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /1건 검토하기/u })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'PDF 미리보기' }))
     expect(screen.getByRole('dialog', { name: 'PDF 미리보기' })).toBeInTheDocument()
@@ -359,6 +364,66 @@ describe('TaxReportDetailV2', () => {
     )
     expect(screen.getByText('7월 이후 자료가 없습니다.')).toBeInTheDocument()
     expect(screen.getAllByText(/누락:/u).length).toBeGreaterThan(0)
+  })
+
+  it('shortens canonical EVM asset coordinates without discarding the full identity', () => {
+    const canonicalAssetId =
+      'asset:eip155:10:0x4200000000000000000000000000000000000006'
+
+    render(<TaxReportDetailV2 report={{
+      ...report,
+      assetSummaries: [{
+        ...report.assetSummaries[0]!,
+        taxAssetId: canonicalAssetId,
+      }],
+    }} />)
+
+    const assetLabel = screen.getByText('Optimism · 0x420000…000006')
+    expect(assetLabel).toHaveAttribute('title', canonicalAssetId)
+  })
+
+  it('uses bound ledger metadata while retaining the canonical coordinate', () => {
+    const canonicalAssetId =
+      'asset:eip155:10:0x4200000000000000000000000000000000000006'
+
+    render(<TaxReportDetailV2
+      report={{
+        ...report,
+        assetSummaries: [{
+          ...report.assetSummaries[0]!,
+          taxAssetId: canonicalAssetId,
+        }],
+      }}
+      assetPresentations={{
+        [canonicalAssetId]: {
+          symbol: 'WETH',
+          decimals: 18,
+          metadata: '소수점 18자리',
+        },
+      }}
+    />)
+
+    const assetLabel = screen.getByText('WETH')
+    expect(assetLabel).toHaveAttribute(
+      'title',
+      'Optimism · 0x420000…000006 · 소수점 18자리',
+    )
+    expect(screen.queryByText(canonicalAssetId)).not.toBeInTheDocument()
+  })
+
+  it('renders a confirmed zero but does not turn an unknown tax amount into zero', () => {
+    const amountReport = structuredClone(report)
+    amountReport.summary.grossProceeds = known('0')
+    amountReport.summary.disposedBasis = {
+      status: 'UNKNOWN',
+      amount: null,
+      hasAmount: false,
+    }
+
+    render(<TaxReportDetailV2 report={amountReport} />)
+
+    expect(screen.getAllByText('0 KRW').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('미확정').length).toBeGreaterThan(0)
   })
 
   it('revokes each PDF blob when the report changes and when it unmounts', async () => {

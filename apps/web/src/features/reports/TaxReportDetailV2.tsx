@@ -12,6 +12,7 @@ import type {
 } from './taxReportApi.ts'
 import { ReportAttestationControl } from './ReportAttestationControl.tsx'
 import { formatLedgerQuantity } from '../ledger/ledgerPresentation.ts'
+import type { ReportAssetPresentations } from './reportAssetPresentation.ts'
 
 type V2Tab = 'summary' | 'assets' | 'events' | 'basis'
 
@@ -70,6 +71,24 @@ const dateTimeLabel = (value: string) =>
 
 const intervalLabel = ({ from, through }: { from: string; through: string }) =>
   `${dateTimeLabel(from)} ~ ${dateTimeLabel(through)}`
+
+const chainLabels: Record<string, string> = {
+  '1': 'Ethereum',
+  '10': 'Optimism',
+}
+
+const compactCoordinate = (value: string) =>
+  value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value
+
+const taxAssetLabel = (taxAssetId: string) => {
+  const match = /^asset:eip155:(\d+):(.+)$/.exec(taxAssetId)
+  if (!match?.[1] || !match[2]) return taxAssetId
+  const [, chainId, assetReference] = match
+  const chain = chainLabels[chainId] ?? `EVM ${chainId}`
+  return assetReference === 'native'
+    ? `${chain} · 네이티브 자산`
+    : `${chain} · ${compactCoordinate(assetReference)}`
+}
 
 const statusLabel: Record<string, string> = {
   FINAL: '확정',
@@ -231,6 +250,7 @@ function EventRow({
 
 export function TaxReportDetailV2({
   report,
+  assetPresentations = {},
   pointerVersion,
   isCurrent = false,
   generationState,
@@ -238,6 +258,7 @@ export function TaxReportDetailV2({
   revisionControl,
 }: {
   report: TaxReportV2DetailModel
+  assetPresentations?: ReportAssetPresentations
   pointerVersion?: TaxReportModel['pointerVersion']
   isCurrent?: boolean
   generationState?: 'ACTIVE' | 'REVIEW_REQUIRED'
@@ -260,6 +281,14 @@ export function TaxReportDetailV2({
     report.denominationAssetId,
     report.denominationAtomicDecimals,
   )
+  const displayAsset = (taxAssetId: string) =>
+    assetPresentations[taxAssetId]?.symbol ?? taxAssetLabel(taxAssetId)
+  const describeAsset = (taxAssetId: string) => {
+    const presentation = assetPresentations[taxAssetId]
+    return presentation
+      ? `${taxAssetLabel(taxAssetId)} · ${presentation.metadata}`
+      : taxAssetId
+  }
   const verifiedCoverage = [
     'DOCUMENT_METADATA_VERIFIED',
     'CHAIN_VERIFIED',
@@ -267,7 +296,10 @@ export function TaxReportDetailV2({
   const effectiveFilingStatus = filingStatus ?? report.filingStatus
   const disposalCount =
     report.counts.disposals + report.counts.feeAssetDisposals
-  const reviewItems = report.limitations.slice(0, 3)
+  const reviewableLimitations = report.limitations.filter(
+    (item) => item.reviewId !== null && item.reviewRevisionId !== null,
+  )
+  const reviewItems = reviewableLimitations.slice(0, 3)
   const attestationEligible =
     isCurrent &&
     generationState === 'ACTIVE' &&
@@ -370,13 +402,10 @@ export function TaxReportDetailV2({
       {partialCoverage ? (
         <aside className="tax-report-v2__coverage" role="note">
           <div>
-            <strong>현재 확보된 데이터 범위로 계산한 예상 리포트</strong>
+            <strong>현재 계산에 반영된 데이터 범위</strong>
             <p>
-              과세기간 {dateLabel(report.inputPeriod.from)} ~{' '}
-              {dateLabel(report.inputPeriod.through)} 중{' '}
               <b>{dateLabel(report.dataCoverage.from)} ~ {dateLabel(report.dataCoverage.through)}</b>
-              까지 확인했습니다. 누락 구간:{' '}
-              {report.dataCoverage.uncoveredIntervals.map(intervalLabel).join(', ') || '없음'}
+              까지 계산했습니다. 과세기간 전체가 확정되기 전에는 금액을 잠정값으로 표시합니다.
             </p>
           </div>
           <button type="button" onClick={() => setActiveTab('basis')}>
@@ -461,7 +490,12 @@ export function TaxReportDetailV2({
                       <tr key={asset.taxAssetId}>
                         <th scope="row">
                           <button type="button" onClick={() => setActiveTab('assets')}>
-                            {asset.taxAssetId}
+                            <span
+                              className="tax-report-v2__asset-label"
+                              title={describeAsset(asset.taxAssetId)}
+                            >
+                              {displayAsset(asset.taxAssetId)}
+                            </span>
                           </button>
                         </th>
                         <td>{formatAmount(asset.grossProceeds)}</td>
@@ -480,15 +514,17 @@ export function TaxReportDetailV2({
               <span>계산 전 확인</span>
               <h4>
                 {reviewItems.length > 0
-                  ? `${report.limitations.length}건을 검토하면 예상 세액이 더 정확해져요`
-                  : '추가로 확인할 계산 항목이 없습니다'}
+                  ? `${reviewableLimitations.length}건의 거래를 확인해 주세요`
+                  : '직접 검토할 거래가 없습니다'}
               </h4>
               <p>
-                검토하지 않은 항목은 Tax Engine이 발행한 제한 사유와 함께 리포트에 계속 표시됩니다.
+                {reviewItems.length > 0
+                  ? '거래별 확인 결과는 다음 계산 revision에 반영됩니다.'
+                  : `남은 제한 ${report.limitations.length}건은 데이터 범위·취득원가·정책 상태이며 거래 검토 건수와 다릅니다.`}
               </p>
               <div>
                 {reviewItems.length === 0 ? (
-                  <p>현재 발행본에 연결된 검토 제한이 없습니다.</p>
+                  <p>장부 작업에서 추가로 처리할 항목은 없습니다.</p>
                 ) : reviewItems.map((item, index) => (
                   <button
                     type="button"
@@ -501,7 +537,7 @@ export function TaxReportDetailV2({
                 ))}
               </div>
               <button className="tax-report-v2__review-link" type="button" onClick={() => setActiveTab('events')}>
-                {reviewItems.length > 0 ? `${report.limitations.length}건 검토하기` : '소득·처분 내역 보기'} →
+                {reviewItems.length > 0 ? `${reviewableLimitations.length}건 검토하기` : '제한 사유 확인하기'} →
               </button>
             </section>
           </div>
@@ -525,7 +561,13 @@ export function TaxReportDetailV2({
             <div className="tax-report-v2__asset-list">
               {report.assetSummaries.map((asset) => (
                 <article key={asset.taxAssetId}>
-                  <header><h4>{asset.taxAssetId}</h4><span>{statusLabel[asset.basisMode] ?? asset.basisMode}</span></header>
+                  <header>
+                    <div>
+                      <h4 title={describeAsset(asset.taxAssetId)}>{displayAsset(asset.taxAssetId)}</h4>
+                      <small>{taxAssetLabel(asset.taxAssetId)}</small>
+                    </div>
+                    <span>{statusLabel[asset.basisMode] ?? asset.basisMode}</span>
+                  </header>
                   <div className="tax-report-v2__average">
                     <div><span>총평균 분자 · 연간 취득가액(원천 정수)</span><strong>{asset.annualAverage.status === 'NOT_APPLICABLE' ? '해당 없음 · 50% 필요경비 특례' : asset.annualAverage.numerator ? decimalLabel(asset.annualAverage.numerator) : '미확정'}</strong></div>
                     <div><span>총평균 분모 · 연간 취득수량(원천 정수)</span><strong>{asset.annualAverage.status === 'NOT_APPLICABLE' ? '해당 없음 · 50% 필요경비 특례' : asset.annualAverage.denominator ? decimalLabel(asset.annualAverage.denominator) : '미확정'}</strong></div>
@@ -568,7 +610,7 @@ export function TaxReportDetailV2({
               {report.incomeRows.length === 0 ? <p>해당 내역이 없습니다.</p> : report.incomeRows.map((row) => (
                 <EventRow key={row.movementId}
                   reportId={report.reportId}
-                  label={`${row.transactionType} · ${row.taxAssetId}`}
+                  label={`${row.transactionType} · ${displayAsset(row.taxAssetId)}`}
                   amount={formatAmount(row.income)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
@@ -580,7 +622,7 @@ export function TaxReportDetailV2({
               {report.acquisitions.length === 0 ? <p>해당 내역이 없습니다.</p> : report.acquisitions.map((row) => (
                 <EventRow key={row.movementId}
                   reportId={report.reportId}
-                  label={`${row.transactionType} · ${row.taxAssetId}`}
+                  label={`${row.transactionType} · ${displayAsset(row.taxAssetId)}`}
                   amount={formatAmount(row.acquisitionCost)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
@@ -603,7 +645,7 @@ export function TaxReportDetailV2({
               {report.disposals.length === 0 ? <p>해당 내역이 없습니다.</p> : report.disposals.map((row) => (
                 <EventRow key={row.movementId}
                   reportId={report.reportId}
-                  label={`${row.transactionType} · ${row.taxAssetId} · ${statusLabel[row.basisMode] ?? row.basisMode}`}
+                  label={`${row.transactionType} · ${displayAsset(row.taxAssetId)} · ${statusLabel[row.basisMode] ?? row.basisMode}`}
                   amount={formatAmount(row.gainLoss)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
@@ -625,7 +667,7 @@ export function TaxReportDetailV2({
               {report.feeAssetDisposals.length === 0 ? <p>해당 내역이 없습니다.</p> : report.feeAssetDisposals.map((row) => (
                 <EventRow key={row.movementId}
                   reportId={report.reportId}
-                  label={`${row.taxAssetId} · ${row.transactionType}`}
+                  label={`${displayAsset(row.taxAssetId)} · ${row.transactionType}`}
                   amount={formatAmount(row.gainLoss)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   account={row.account} valuation={row.valuation}
@@ -644,7 +686,7 @@ export function TaxReportDetailV2({
               <h4>원가 이어받기 이체 <span>{report.transfers.length}</span></h4>
               {report.transfers.length === 0 ? <p>해당 내역이 없습니다.</p> : report.transfers.map((row) => (
                 <EventRow key={row.movementId} reportId={report.reportId}
-                  label={`${row.transactionType} · ${row.taxAssetId}`}
+                  label={`${row.transactionType} · ${displayAsset(row.taxAssetId)}`}
                   amount={formatAmount(row.basis)}
                   quantity={row.quantity} occurredAt={row.occurredAt}
                   from={row.from} to={row.to}
@@ -656,7 +698,7 @@ export function TaxReportDetailV2({
               <h4>비과세 자기이체 <span>{report.nonTaxableTransfers.length}</span></h4>
               {report.nonTaxableTransfers.length === 0 ? <p>해당 내역이 없습니다.</p> : report.nonTaxableTransfers.map((row) => (
                 <EventRow key={row.movementId} reportId={report.reportId}
-                  label={`${row.transactionType} · ${row.taxAssetId}`}
+                  label={`${row.transactionType} · ${displayAsset(row.taxAssetId)}`}
                   amount="비과세" quantity={row.quantity} occurredAt={row.occurredAt}
                   from={row.from} to={row.to}
                   sourceEvidence={row.sourceEvidence} review={row.review} />
@@ -666,7 +708,7 @@ export function TaxReportDetailV2({
               <h4>처분 제외 교환 <span>{report.excludedConversions.length}</span></h4>
               {report.excludedConversions.length === 0 ? <p>해당 내역이 없습니다.</p> : report.excludedConversions.map((row) => (
                 <div className="tax-report-v2__excluded" key={row.relationId}>
-                  <strong>{row.taxAssetId}</strong>
+                  <strong title={describeAsset(row.taxAssetId)}>{displayAsset(row.taxAssetId)}</strong>
                   <span>원천 최소단위 {row.fromQuantity} → {row.toQuantity}</span>
                   <small>relation {row.relationId}</small>
                 </div>
