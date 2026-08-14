@@ -237,6 +237,10 @@ describe('PostgresTaxReportReader', () => {
     expect(sql).toContain(
       'reporting.tax_report_generation_status_v2',
     )
+    expect(sql).toContain('period_start::text AS period_start')
+    expect(sql).toContain('period_end::text AS period_end')
+    expect(sql).toContain('coverage_from::text AS coverage_from')
+    expect(sql).toContain('coverage_through::text AS coverage_through')
     expect(sql).not.toMatch(
       /(?:FROM|JOIN)\s+reporting\.(?:tax_report_generation|current_tax_report_generation|tax_report)\s/,
     )

@@ -371,12 +371,12 @@ export function ReportWorkspacePage() {
             status: TaxReportGenerationStatusModel
           }> => result.status === 'fulfilled')
           .map((result) => result.value.status)
-        if (statuses.length === 0) {
-          const rejectedStatus = statusResults.find(
-            (result): result is PromiseRejectedResult =>
-              result.status === 'rejected',
-          )
-          throw rejectedStatus?.reason ?? new Error('tax report status unavailable')
+        const rejectedStatus = statusResults.find(
+          (result): result is PromiseRejectedResult =>
+            result.status === 'rejected',
+        )
+        if (rejectedStatus) {
+          throw rejectedStatus.reason ?? new Error('tax report status unavailable')
         }
 
         const blockingStatus = [...statuses]

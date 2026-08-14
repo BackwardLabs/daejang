@@ -298,7 +298,7 @@ describe('current tax report route', () => {
       headers: { cookie: `${config.sessionCookieName}=${token}` },
     })
 
-    expect(response.statusCode).toBe(503)
+    expect(response.statusCode).toBe(500)
     expect(response.json()).toMatchObject({
       error: { code: 'TAX_REPORT_STATUS_INCONSISTENT' },
     })
