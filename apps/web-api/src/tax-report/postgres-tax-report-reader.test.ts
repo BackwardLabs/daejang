@@ -181,7 +181,7 @@ describe('PostgresTaxReportReader', () => {
 
     expect(query).toHaveBeenCalledTimes(1)
     const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]]
-    expect(sql).toContain('reporting.current_tax_report_read_v2')
+    expect(sql).toContain('reporting.current_tax_report_summary_read_v1')
     expect(sql).not.toMatch(/FROM\s+reporting\.current_tax_report\s/)
     expect(sql).not.toContain('reporting.activated_tax_report_read_v1')
     expect(sql).not.toMatch(/JOIN\s+reporting\.tax_report\s/)
