@@ -1,10 +1,9 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import {
   sourceMethodBullets,
   sourceMethodDefinitions,
   type SourceMethodDefinition,
 } from './sourceDefinitions.ts'
-import { navigateTo } from '../../auth/navigation.ts'
 import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import { useSourceCapabilities } from './useSourceCapabilities.ts'
@@ -115,25 +114,67 @@ function SourceTypeSelectionView({
 
 export function SourceTypeSelectionPage() {
   const [walletFlowActive, setWalletFlowActive] = useState(false)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const selectionView = (
     <SourceTypeSelectionView
       onEvmWalletSelect={() => setWalletFlowActive(true)}
     />
   )
 
-  if (!walletFlowActive) {
-    return selectionView
-  }
+  useEffect(() => {
+    if (!walletFlowActive) return
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    closeButtonRef.current?.focus()
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setWalletFlowActive(false)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [walletFlowActive])
 
   return (
-    <Suspense fallback={selectionView}>
-      <ReownEvmWalletConnectionRoute
-        launchImmediately
-        onAlreadyConnected={() => navigateTo('/sources')}
-        onExitRequested={() => setWalletFlowActive(false)}
-        onLaunchFailed={() => setWalletFlowActive(false)}
-        pendingView={selectionView}
-      />
-    </Suspense>
+    <>
+      {selectionView}
+      {walletFlowActive ? (
+        <div className="wallet-connect-overlay">
+          <section
+            aria-label="지갑 연결"
+            aria-modal="true"
+            className="wallet-connect-dialog"
+            role="dialog"
+          >
+            <button
+              ref={closeButtonRef}
+              aria-label="지갑 연결 닫기"
+              className="wallet-connect-dialog__close"
+              type="button"
+              onClick={() => setWalletFlowActive(false)}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+            <Suspense
+              fallback={
+                <div className="wallet-connect-dialog__loading" role="status">
+                  <span aria-hidden="true" />
+                  지갑 연결 화면을 준비하고 있어요
+                </div>
+              }
+            >
+              <ReownEvmWalletConnectionRoute
+                presentation="dialog"
+                onExitRequested={() => setWalletFlowActive(false)}
+              />
+            </Suspense>
+          </section>
+        </div>
+      ) : null}
+    </>
   )
 }

@@ -277,4 +277,179 @@ describe('ReownEvmWalletConnectionRoute', () => {
     })
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
+
+  it('uses the announced Rabby provider and prompts for another account', async () => {
+    const secondAddress = '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd'
+    mocks.provider = 'rabby'
+    mocks.providerAccounts = [mocks.caipAddress.split(':').at(-1)!]
+    mocks.listSources.mockResolvedValue({
+      items: [
+        {
+          address: mocks.caipAddress.split(':').at(-1),
+          status: 'ACTIVE',
+          type: 'EVM_WALLET',
+        },
+      ],
+    })
+    mocks.providerRequest.mockImplementation(
+      async ({ method }: { method: string }) => {
+        if (method === 'wallet_requestPermissions') {
+          mocks.providerAccounts = [secondAddress]
+          return [{ parentCapability: 'eth_accounts' }]
+        }
+        if (method === 'eth_accounts') return mocks.providerAccounts
+        if (method === 'eth_chainId') return '0x1'
+        throw new Error(`Unexpected provider method: ${method}`)
+      },
+    )
+    const announceRabby = () => {
+      window.dispatchEvent(
+        new CustomEvent('eip6963:announceProvider', {
+          detail: {
+            info: { rdns: 'io.rabby' },
+            provider: { request: mocks.providerRequest },
+          },
+        }),
+      )
+    }
+    window.addEventListener('eip6963:requestProvider', announceRabby)
+    const onLaunchFailed = vi.fn()
+
+    try {
+      render(
+        <ReownEvmWalletConnectionRoute
+          launchImmediately
+          onLaunchFailed={onLaunchFailed}
+        />,
+      )
+      fireEvent.click(screen.getByTestId('connect-wallet'))
+
+      await waitFor(() => {
+        expect(mocks.providerRequest).toHaveBeenCalledWith({
+          method: 'wallet_requestPermissions',
+          params: [{ eth_accounts: {} }],
+        })
+        expect(mocks.listSources).toHaveBeenCalledTimes(2)
+      })
+      expect(mocks.connect).not.toHaveBeenCalled()
+      expect(mocks.open).not.toHaveBeenCalled()
+      expect(onLaunchFailed).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('eip6963:requestProvider', announceRabby)
+    }
+  })
+
+  it('returns immediately when Rabby keeps the already linked account', async () => {
+    const currentAddress = mocks.caipAddress.split(':').at(-1)!
+    mocks.provider = 'rabby'
+    mocks.providerAccounts = [currentAddress]
+    mocks.listSources.mockResolvedValue({
+      items: [
+        {
+          address: currentAddress,
+          status: 'ACTIVE',
+          type: 'EVM_WALLET',
+        },
+      ],
+    })
+    mocks.providerRequest.mockImplementation(
+      async ({ method }: { method: string }) => {
+        if (method === 'wallet_requestPermissions') {
+          return [{ parentCapability: 'eth_accounts' }]
+        }
+        if (method === 'eth_accounts') return mocks.providerAccounts
+        if (method === 'eth_chainId') return '0x1'
+        throw new Error(`Unexpected provider method: ${method}`)
+      },
+    )
+    const announceRabby = () => {
+      window.dispatchEvent(
+        new CustomEvent('eip6963:announceProvider', {
+          detail: {
+            info: { rdns: 'io.rabby' },
+            provider: { request: mocks.providerRequest },
+          },
+        }),
+      )
+    }
+    window.addEventListener('eip6963:requestProvider', announceRabby)
+    const onAlreadyConnected = vi.fn()
+
+    try {
+      render(
+        <ReownEvmWalletConnectionRoute
+          launchImmediately
+          onAlreadyConnected={onAlreadyConnected}
+        />,
+      )
+      fireEvent.click(screen.getByTestId('connect-wallet'))
+
+      await waitFor(() => {
+        expect(onAlreadyConnected).toHaveBeenCalledTimes(1)
+      })
+      expect(mocks.open).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('eip6963:requestProvider', announceRabby)
+    }
+  })
+
+  it('falls back to the authorised Rabby account when account selection is unsupported', async () => {
+    const currentAddress = mocks.caipAddress.split(':').at(-1)!
+    mocks.provider = 'rabby'
+    mocks.providerAccounts = [currentAddress]
+    mocks.listSources.mockResolvedValue({
+      items: [
+        {
+          address: currentAddress,
+          status: 'ACTIVE',
+          type: 'EVM_WALLET',
+        },
+      ],
+    })
+    mocks.providerRequest.mockImplementation(
+      async ({ method }: { method: string }) => {
+        if (method === 'wallet_requestPermissions') {
+          throw { code: -32601, message: 'Method not found' }
+        }
+        if (method === 'eth_requestAccounts') return mocks.providerAccounts
+        if (method === 'eth_accounts') return mocks.providerAccounts
+        if (method === 'eth_chainId') return '0x1'
+        throw new Error(`Unexpected provider method: ${method}`)
+      },
+    )
+    const announceRabby = () => {
+      window.dispatchEvent(
+        new CustomEvent('eip6963:announceProvider', {
+          detail: {
+            info: { rdns: 'io.rabby' },
+            provider: { request: mocks.providerRequest },
+          },
+        }),
+      )
+    }
+    window.addEventListener('eip6963:requestProvider', announceRabby)
+    const onAlreadyConnected = vi.fn()
+    const onLaunchFailed = vi.fn()
+
+    try {
+      render(
+        <ReownEvmWalletConnectionRoute
+          launchImmediately
+          onAlreadyConnected={onAlreadyConnected}
+          onLaunchFailed={onLaunchFailed}
+        />,
+      )
+      fireEvent.click(screen.getByTestId('connect-wallet'))
+
+      await waitFor(() => {
+        expect(onAlreadyConnected).toHaveBeenCalledTimes(1)
+      })
+      expect(mocks.providerRequest).toHaveBeenCalledWith({
+        method: 'eth_requestAccounts',
+      })
+      expect(onLaunchFailed).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('eip6963:requestProvider', announceRabby)
+    }
+  })
 })

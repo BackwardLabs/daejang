@@ -7,8 +7,14 @@ import {
   type RefObject,
 } from 'react'
 import pdfStepComplete from '../../assets/sources/pdf-step-complete.svg'
+import coinbaseLogo from '../../assets/sources/wallet/coinbase.svg'
+import metamaskLogo from '../../assets/sources/wallet/metamask.svg'
+import noMark from '../../assets/sources/wallet/no-mark.svg'
+import otherWalletsIcon from '../../assets/sources/wallet/other-wallets.svg'
+import rabbyLogo from '../../assets/sources/wallet/rabby.svg'
 import stepActive from '../../assets/sources/wallet/step-active.svg'
 import stepInactive from '../../assets/sources/wallet/step-inactive.svg'
+import walletConnectLogo from '../../assets/sources/wallet/walletconnect.svg'
 import { AppLink } from '../../components/AppLink.tsx'
 import { SourceFlowLayout } from './SourceFlowLayout.tsx'
 import {
@@ -45,6 +51,48 @@ import './evm-wallet-flow.css'
 
 const walletSteps = ['지갑 연결', '수집 범위 확인', '연결 완료'] as const
 
+const walletProviders: ReadonlyArray<{
+  description: string
+  icon: string
+  id: EvmWalletProviderId
+  name: string
+}> = [
+  {
+    description: '브라우저에서 연결할 계정을 선택해요',
+    icon: rabbyLogo,
+    id: 'rabby',
+    name: 'Rabby Wallet',
+  },
+  {
+    description: 'MetaMask 계정으로 연결해요',
+    icon: metamaskLogo,
+    id: 'metamask',
+    name: 'MetaMask',
+  },
+  {
+    description: '모바일 지갑이나 QR로 연결해요',
+    icon: walletConnectLogo,
+    id: 'walletconnect',
+    name: 'WalletConnect',
+  },
+  {
+    description: 'Coinbase Wallet 계정으로 연결해요',
+    icon: coinbaseLogo,
+    id: 'coinbase',
+    name: 'Coinbase Wallet',
+  },
+  {
+    description: 'Reown에서 지원하는 지갑을 찾아요',
+    icon: otherWalletsIcon,
+    id: 'other',
+    name: '다른 지갑',
+  },
+]
+
+const providerMeta = Object.fromEntries(
+  walletProviders.map((provider) => [provider.id, provider]),
+) as Record<EvmWalletProviderId, (typeof walletProviders)[number]>
+
 const connectionErrorCopy: Record<
   EvmWalletConnectionError['code'],
   { body: string; title: string }
@@ -58,8 +106,8 @@ const connectionErrorCopy: Record<
     title: '지갑 연결이 취소되었어요',
   },
   SOURCE_ALREADY_CONNECTED: {
-    body: '연결된 데이터 소스에서 현재 수집 상태와 네트워크 설정을 확인할 수 있습니다.',
-    title: '이미 연결된 지갑입니다',
+    body: '지갑 앱에서 다른 계정을 선택한 뒤 다시 연결해 주세요. 현재 계정은 연결된 데이터 소스에서 확인할 수 있습니다.',
+    title: '이 계정은 이미 연결되어 있어요',
   },
   PROVIDER_UNAVAILABLE: {
     body: '선택한 지갑을 이 브라우저에서 찾을 수 없습니다. 지갑을 설치하거나 다른 연결 방식을 선택해 주세요.',
@@ -212,6 +260,109 @@ function FlowAlert({ error }: { error: EvmWalletFlowError }) {
   return <FlowAlertBox body={copy.body} title={copy.title} />
 }
 
+function SafetyAside() {
+  return (
+    <aside className="wallet-flow-aside" aria-label="EVM Wallet 연결 안내">
+      <section className="wallet-flow-aside__card">
+        <h2>수집하지 않는 정보</h2>
+        <ul className="wallet-safety-list">
+          {['private key', 'seed phrase', '쓰기 권한', '출금 권한'].map(
+            (label) => (
+              <li key={label}>
+                <img src={noMark} alt="" />
+                <span>{label}</span>
+              </li>
+            ),
+          )}
+        </ul>
+        <div className="wallet-read-only-note" role="note">
+          <strong>READ ONLY</strong>
+          <span>공개 체인 데이터 조회만 허용</span>
+        </div>
+      </section>
+    </aside>
+  )
+}
+
+function WalletSelectionStep({
+  error,
+  isConnecting,
+  onCancel,
+  onConnect,
+  onProviderChange,
+  selectedProvider,
+}: {
+  error: EvmWalletConnectionError | null
+  isConnecting: boolean
+  onCancel: () => void
+  onConnect: () => void
+  onProviderChange: (provider: EvmWalletProviderId) => void
+  selectedProvider: EvmWalletProviderId | null
+}) {
+  return (
+    <div className="wallet-flow-grid">
+      <section className="wallet-flow-card" aria-labelledby="wallet-select-title">
+        <header className="wallet-flow-card__heading">
+          <h2 id="wallet-select-title" tabIndex={-1}>
+            지갑 선택
+          </h2>
+          <p>
+            사용할 지갑을 고른 뒤 지갑 앱에서 연결할 계정을 선택해 주세요.
+          </p>
+        </header>
+
+        {error ? <FlowAlert error={error} /> : null}
+
+        <fieldset className="wallet-provider-fieldset">
+          <legend className="sr-only">연결할 지갑</legend>
+          {walletProviders.map((provider) => (
+            <label className="wallet-provider-option" key={provider.id}>
+              <input
+                type="radio"
+                name="evm-wallet-provider"
+                value={provider.id}
+                checked={selectedProvider === provider.id}
+                disabled={isConnecting}
+                onChange={() => onProviderChange(provider.id)}
+              />
+              <img src={provider.icon} alt="" />
+              <span className="wallet-provider-option__copy">
+                <strong>{provider.name}</strong>
+                <span>{provider.description}</span>
+              </span>
+              <span className="wallet-provider-option__check" aria-hidden="true">
+                ✓
+              </span>
+            </label>
+          ))}
+        </fieldset>
+
+        <div className="wallet-flow-actions">
+          <button
+            type="button"
+            className="wallet-flow-secondary-action"
+            disabled={isConnecting}
+            onClick={onCancel}
+          >
+            <span aria-hidden="true">←</span> 취소
+          </button>
+          <button
+            type="button"
+            className="source-primary-action"
+            disabled={!selectedProvider || isConnecting}
+            onClick={onConnect}
+          >
+            {isConnecting ? '계정 선택 중…' : '계정 선택'}
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
+
+      <SafetyAside />
+    </div>
+  )
+}
+
 function SignatureAside() {
   return (
     <aside className="wallet-flow-aside" aria-label="지갑 서명 안내">
@@ -237,11 +388,14 @@ function SignatureAside() {
 }
 
 function ConnectedWalletCard({ wallet }: { wallet: ConnectedWallet }) {
+  const provider = providerMeta[wallet.provider]
+
   return (
     <div className="wallet-connected-card">
       <div className="wallet-connected-card__summary">
+        <img src={provider.icon} alt="" />
         <div>
-          <strong>Reown 지갑 연결됨</strong>
+          <strong>{provider.name} 연결됨</strong>
           <span>
             {maskEvmAddress(wallet.address)} · {wallet.network}
           </span>
@@ -884,6 +1038,7 @@ export function EvmWalletConnectionPage({
   connectWallet,
   onExitRequested,
   onInitialConnectionResult,
+  presentation = 'page',
   requestSignature,
   watchSyncJob,
 }: {
@@ -892,6 +1047,7 @@ export function EvmWalletConnectionPage({
   connectWallet: ConnectWallet
   onExitRequested?: () => void
   onInitialConnectionResult?: (result: ConnectWalletResult) => void
+  presentation?: 'dialog' | 'page'
   requestSignature: RequestOwnershipSignature
   watchSyncJob?: WatchWalletSyncJob
 }) {
@@ -1159,6 +1315,14 @@ export function EvmWalletConnectionPage({
     dispatch({ type: 'BACK_REQUESTED' })
   }
 
+  function handleExit() {
+    if (onExitRequested) {
+      onExitRequested()
+      return
+    }
+    window.history.back()
+  }
+
   useEffect(() => {
     if (!autoConnectProvider || autoConnectStartedRef.current) {
       return
@@ -1168,15 +1332,60 @@ export function EvmWalletConnectionPage({
     void handleConnect()
   }, [autoConnectProvider])
 
-  return (
-    <SourceFlowLayout
-      description={pageCopy.description}
-      eyebrow="DATA SOURCES · EVM"
-      title={pageCopy.title}
-    >
-      <WalletFlowStepper currentStep={currentStep} />
+  const flowContent = (
+    <>
+      {presentation === 'page' ? (
+        <WalletFlowStepper currentStep={currentStep} />
+      ) : (
+        <header className="wallet-connect-dialog__header">
+          <span className="wallet-connect-dialog__eyebrow">
+            읽기 전용 연결 · {currentStep} / 3
+          </span>
+          <h1>{pageCopy.title}</h1>
+          <p>{pageCopy.description}</p>
+          <div className="wallet-connect-dialog__progress" aria-hidden="true">
+            {walletSteps.map((step, index) => (
+              <span
+                className={index + 1 <= currentStep ? 'is-active' : undefined}
+                key={step}
+              />
+            ))}
+          </div>
+        </header>
+      )}
 
-      <div ref={stepContentRef}>
+      <div
+        className={
+          presentation === 'dialog'
+            ? 'wallet-connect-dialog__content'
+            : undefined
+        }
+        ref={stepContentRef}
+      >
+        {state.view === 'select' ? (
+          <WalletSelectionStep
+            error={state.error}
+            isConnecting={false}
+            onCancel={handleExit}
+            selectedProvider={state.provider}
+            onConnect={handleConnect}
+            onProviderChange={(provider) =>
+              dispatch({ provider, type: 'PROVIDER_SELECTED' })
+            }
+          />
+        ) : null}
+
+        {state.view === 'connect' ? (
+          <WalletSelectionStep
+            error={null}
+            isConnecting
+            onCancel={handleExit}
+            selectedProvider={state.provider}
+            onConnect={() => undefined}
+            onProviderChange={() => undefined}
+          />
+        ) : null}
+
         {state.view === 'ownership' ? (
           <OwnershipStep
             error={
@@ -1237,7 +1446,20 @@ export function EvmWalletConnectionPage({
           />
         ) : null}
       </div>
+    </>
+  )
 
+  if (presentation === 'dialog') {
+    return flowContent
+  }
+
+  return (
+    <SourceFlowLayout
+      description={pageCopy.description}
+      eyebrow="DATA SOURCES · EVM"
+      title={pageCopy.title}
+    >
+      {flowContent}
     </SourceFlowLayout>
   )
 }
