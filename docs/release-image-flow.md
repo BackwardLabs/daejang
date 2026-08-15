@@ -26,7 +26,7 @@
     linux/arm64 image build
            │
            ▼  build가 성공한 저장소만
-      Registry :latest 갱신
+ Registry :sha-<commit> 발행 · :latest 갱신
            │
            ▼
       OCI digest 기록·검증
@@ -38,7 +38,8 @@
 PR의 후보 image와 merge 뒤 Registry image는 목적이 다르다.
 
 - **PR 전 후보 image**: 현재 branch를 로컬에서 검증하기 위한 임시 image다. Registry에 push하지 않는다.
-- **Registry `latest` image**: merge된 `main` commit을 Mac Studio publisher가 다시 build한 팀 기준 image다.
+- **Registry `latest` image**: merge된 `main` commit을 Mac Studio publisher가 다시 build한 개발 의존 기준 image다.
+- **Registry `sha-<commit>` image**: Release가 같은 bytes를 다시 찾을 수 있도록 보존하는 불변 후보 tag다.
 - **배포 대상**: mutable한 `latest` 문자열이 아니라 publisher가 기록한 OCI digest다.
 - **merge**: image 발행을 시작시키지만 Production 배포 완료를 의미하지 않는다.
 
@@ -200,10 +201,11 @@ main SHA가 마지막 성공 기록과 다르면 publisher가 다음 작업을 �
 1. GitHub API에서 해당 commit의 source archive를 임시 directory로 받는다.
 2. 공용 checkout이 아니라 이 격리 source에서 native `linux/arm64` image를 build한다.
 3. 한 저장소에 속한 image를 모두 먼저 build한다.
-4. build가 성공하면 Registry의 해당 `latest` tag를 push한다.
-5. source commit을 `org.opencontainers.image.revision` label에 기록한다.
-6. push 결과의 OCI digest와 source commit을 publisher state에 기록한다.
-7. 실패하면 성공 commit을 갱신하지 않고 다음 2분 주기에 재시도한다.
+4. build가 성공하면 Registry의 `sha-<commit>` tag를 먼저 push한다.
+5. 같은 digest로 해당 `latest` tag를 갱신한다.
+6. source commit을 `org.opencontainers.image.revision` label에 기록한다.
+7. push 결과의 OCI digest와 source commit을 publisher state에 기록한다.
+8. 실패하면 성공 commit을 갱신하지 않고 다음 2분 주기에 재시도한다.
 
 | main이 바뀐 저장소 | 자동 발행 image |
 | --- | --- |
@@ -250,9 +252,11 @@ PR이나 Release 기록에는 다음을 구분해서 적는다.
 
 ## 정리와 보존
 
-- Registry에는 각 image의 현재 `latest`를 유지한다.
+- Registry에는 각 image의 현재 `latest`와 Release 후보용 `sha-<commit>`을 유지한다.
 - 교체된 이전 digest는 cleanup queue에 들어간다.
-- 매일 04:15 cleaner가 현재 `latest`가 아닌 digest를 삭제하고 garbage collection을 실행한다.
+- 매일 04:15 cleaner가 `releases/current`와 `releases/previous`가 참조하지 않는 이전
+  digest를 삭제하고 garbage collection을 실행한다.
+- 현재·이전 Production manifest가 참조하는 digest는 `latest`가 아니어도 삭제하지 않는다.
 - 이전 source는 Git commit으로 남으므로 필요하면 해당 commit에서 image를 다시 build할 수 있다.
 - rollback과 배포 기록은 tag가 아니라 검증한 digest를 사용한다.
 
