@@ -7,10 +7,13 @@ import {
 } from 'react'
 import {
   useAppKit,
-  type Provider,
 } from '@reown/appkit/react'
 import { useAppKitWallet } from '@reown/appkit-wallet-button/react'
-import { BrowserProvider, verifyMessage } from 'ethers'
+import {
+  BrowserProvider,
+  verifyMessage,
+  type Eip1193Provider,
+} from 'ethers'
 import { EvmWalletConnectionPage } from './EvmWalletConnectionPage.tsx'
 import {
   type CompleteWalletConnection,
@@ -80,6 +83,64 @@ function parseEvmConnection(caipAddress: string | undefined) {
 
 function readCurrentEvmConnection() {
   return parseEvmConnection(reownAppKit?.getCaipAddress('eip155'))
+}
+
+type BrowserWalletProvider = Eip1193Provider & {
+  isRabby?: boolean
+  providers?: BrowserWalletProvider[]
+}
+
+function getBrowserWalletProvider() {
+  const injected = (
+    window as typeof window & { ethereum?: BrowserWalletProvider }
+  ).ethereum
+  if (!injected) return null
+
+  return injected.providers?.find((provider) => provider.isRabby) ?? injected
+}
+
+function normalizeInjectedChainId(value: unknown) {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return toEvmCaipChainId(value)
+  }
+  if (typeof value !== 'string' || !value.trim()) return null
+
+  try {
+    const numericChainId = value.startsWith('0x')
+      ? BigInt(value)
+      : BigInt(value.trim())
+    return numericChainId > 0n
+      ? toEvmCaipChainId(numericChainId.toString())
+      : null
+  } catch {
+    return null
+  }
+}
+
+async function connectBrowserWallet(signal: AbortSignal) {
+  const provider = getBrowserWalletProvider()
+  if (!provider) return null
+
+  const accounts = await provider.request({ method: 'eth_requestAccounts' })
+  if (signal.aborted) {
+    throw new DOMException('Wallet connection aborted.', 'AbortError')
+  }
+  const chainId = normalizeInjectedChainId(
+    await provider.request({ method: 'eth_chainId' }),
+  )
+  const address = Array.isArray(accounts) ? accounts[0] : undefined
+  if (
+    typeof address !== 'string' ||
+    !/^0x[0-9a-fA-F]{40}$/.test(address) ||
+    !chainId
+  ) {
+    throw new Error('Injected wallet returned an invalid account.')
+  }
+
+  return {
+    connection: { address, chainId },
+    provider,
+  }
 }
 
 function waitForExplicitEvmConnection(
@@ -273,6 +334,7 @@ function ConfiguredReownRoute({
   )
   const pendingSignatures = useRef(new Map<string, string>())
   const pendingSourceIds = useRef(new Map<string, string>())
+  const connectedProvider = useRef<Eip1193Provider | null>(null)
   const duplicateWalletAttempt = useRef(false)
 
   const connectWallet = useCallback<ConnectWallet>(
@@ -312,6 +374,8 @@ function ConfiguredReownRoute({
 
         const currentConnection = readCurrentEvmConnection()
         if (currentConnection) {
+          connectedProvider.current =
+            reownAppKit?.getProvider<Eip1193Provider>('eip155') ?? null
           return finishConnection(currentConnection)
         }
 
@@ -320,6 +384,8 @@ function ConfiguredReownRoute({
 
         if (directWalletName) {
           await walletButton.connect(directWalletName)
+          connectedProvider.current =
+            reownAppKit?.getProvider<Eip1193Provider>('eip155') ?? null
           const directConnection = readCurrentEvmConnection()
           if (!directConnection) {
             return {
@@ -329,9 +395,17 @@ function ConfiguredReownRoute({
           }
           connection = directConnection
         } else {
-          connection = await waitForExplicitEvmConnection(signal, () =>
-            open({ namespace: 'eip155', view: 'Connect' }),
-          )
+          const browserWallet = await connectBrowserWallet(signal)
+          if (browserWallet) {
+            connectedProvider.current = browserWallet.provider
+            connection = browserWallet.connection
+          } else {
+            connection = await waitForExplicitEvmConnection(signal, () =>
+              open({ namespace: 'eip155', view: 'Connect' }),
+            )
+            connectedProvider.current =
+              reownAppKit?.getProvider<Eip1193Provider>('eip155') ?? null
+          }
         }
 
         return finishConnection(connection)
@@ -356,7 +430,8 @@ function ConfiguredReownRoute({
   const requestSignature = useCallback<RequestOwnershipSignature>(
     async ({ signal, wallet }) => {
       try {
-        const walletProvider = reownAppKit?.getProvider<Provider>('eip155')
+        const walletProvider = connectedProvider.current ??
+          reownAppKit?.getProvider<Eip1193Provider>('eip155')
         if (!walletProvider) {
           return {
             error: { code: 'SIGNATURE_FAILED' },

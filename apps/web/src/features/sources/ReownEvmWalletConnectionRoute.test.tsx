@@ -88,6 +88,7 @@ function selectCurrentWallet() {
 
 describe('ReownEvmWalletConnectionRoute', () => {
   beforeEach(() => {
+    Reflect.deleteProperty(window, 'ethereum')
     mocks.caipAddress =
       'eip155:1:0x1234567890abcdef1234567890abcdef12345678'
     mocks.accountCallback = undefined
@@ -115,6 +116,38 @@ describe('ReownEvmWalletConnectionRoute', () => {
     fireEvent.click(screen.getByTestId('connect-wallet'))
 
     await waitFor(() => {
+      expect(mocks.listSources).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.open).not.toHaveBeenCalled()
+    expect(onLaunchFailed).not.toHaveBeenCalled()
+  })
+
+  it('uses the injected Rabby provider without relying on Reown cache', async () => {
+    mocks.caipAddress = undefined
+    const request = vi.fn(async ({ method }: { method: string }) => {
+      if (method === 'eth_requestAccounts') {
+        return ['0xb8b95c8ce9aa3352b9f17505642d667a165bbe9f']
+      }
+      if (method === 'eth_chainId') return '0x1'
+      throw new Error(`Unexpected method: ${method}`)
+    })
+    Object.defineProperty(window, 'ethereum', {
+      configurable: true,
+      value: { isRabby: true, request },
+    })
+    const onLaunchFailed = vi.fn()
+
+    render(
+      <ReownEvmWalletConnectionRoute
+        launchImmediately
+        onLaunchFailed={onLaunchFailed}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('connect-wallet'))
+
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith({ method: 'eth_requestAccounts' })
+      expect(request).toHaveBeenCalledWith({ method: 'eth_chainId' })
       expect(mocks.listSources).toHaveBeenCalledTimes(1)
     })
     expect(mocks.open).not.toHaveBeenCalled()
