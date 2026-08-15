@@ -32,9 +32,8 @@ npm run dev
 ### 로컬 dev E2E
 
 기능을 수정한 뒤에는 현재 체크아웃으로 Web API, Engine, PDF parser 후보 이미지를
-만들고 실제 서비스 경계를 연결해 확인할 수 있습니다. Registry의 최신 6개 기준
-이미지도 먼저 pull해 사용한 digest를 보여 주며, DB는 실행마다 새로 만들고 종료 시
-삭제합니다.
+만들고 실제 서비스 경계를 연결해 확인할 수 있습니다. Registry의 최신 기준
+이미지 digest도 먼저 기록하며, DB는 실행마다 새로 만들고 종료 시 삭제합니다.
 
 ```bash
 make test DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db
@@ -45,6 +44,19 @@ PostgreSQL source 저장까지 확인합니다. 운영 `.env`나 secret은 이�
 테스트 실행 중 생성되는 권한 `0600` 임시 환경 파일로만 전달합니다.
 전체 구조와 저장소별 확인 범위는 [로컬 dev E2E 실행 방법](docs/local-dev-e2e.md)에
 정리되어 있습니다.
+
+여러 저장소를 함께 고친 경우에는 Posting candidate를 먼저 만들고, 그 이미지를
+JIT와 Tax 시나리오가 이어서 사용하도록 전체 경계를 한 명령으로 확인할 수 있습니다.
+
+```bash
+make test-system \
+  DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db \
+  SCHEMA_DIR=/Users/Shared/Projects/01_Daejang/schema
+```
+
+`test-system`은 하나의 거대한 Compose를 계속 켜 두지 않습니다. Web·Source,
+Posting, JIT→Posting, Posting→Tax 시나리오를 각각 격리된 Compose network와 DB에서
+순서대로 실행해, 앞 시나리오의 데이터가 다음 결과를 우연히 통과시키지 않게 합니다.
 
 Web API는 별도 터미널에서 실행합니다.
 

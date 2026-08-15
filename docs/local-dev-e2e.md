@@ -31,13 +31,13 @@ flowchart LR
 make test DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db
 ```
 
-Tax Engine만 Posting Service의 현재 checkout도 필요하다. 두 저장소가 형제
-디렉터리가 아니면 경로를 함께 지정한다.
+JIT Engine은 schema checkout도 사용한다. 형제 디렉터리가 아니면 경로를 함께
+지정한다.
 
 ```bash
 make test \
   DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db \
-  DAEJANG_POSTING_SERVICE_DIR=/path/to/daejang-posting-service
+  SCHEMA_DIR=/Users/Shared/Projects/01_Daejang/schema
 ```
 
 최초 한 번은 Registry와 GitHub CLI 로그인이 필요하다.
@@ -51,21 +51,46 @@ Docker Desktop이 읽을 DB checkout은 `/Users/Shared` 아래처럼 Docker file
 허용된 경로에 두는 편이 안전하다. Registry 주소가 달라진 경우에만
 `REGISTRY=새주소 make test`로 덮어쓴다.
 
+여러 저장소의 변경을 함께 검증하려면 `daejang`에서 전체 시나리오를 실행한다.
+
+```bash
+make test-system \
+  DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db \
+  SCHEMA_DIR=/Users/Shared/Projects/01_Daejang/schema
+```
+
+이 명령은 Posting candidate를 먼저 만든 뒤 그 동일한 image를 JIT→Posting과
+Posting→Tax 시나리오에 넘긴다. 각 시나리오는 별도 Compose network와 일회용 DB를
+사용한다. 모든 컨테이너를 하나의 network에 장시간 올려 두면 어느 시나리오가 만든
+데이터 때문에 통과했는지 불분명해지므로, 제품 흐름은 연결하되 상태는 격리한다.
+
+```mermaid
+flowchart TD
+    A["make test-system"] --> B["Web API → Engine → PDF parser → Source DB"]
+    B --> C["Posting candidate\nSOURCE → canonical ledger"]
+    C --> D["JIT candidate → 같은 Posting candidate\nEVM → SubjectEvidence → ledger"]
+    D --> E["같은 Posting candidate → Tax candidate\nCEX ledger → valuation·lot·report"]
+    B -. "각 단계 종료 시" .-> X["Compose network·DB·volume 삭제"]
+    C -.-> X
+    D -.-> X
+    E -.-> X
+```
+
 ## 저장소별 실제 경계
 
 | 실행 위치 | 현재 코드로 만드는 것 | 끝까지 확인하는 흐름 |
 | --- | --- | --- |
 | `daejang` | Web API, Engine, PDF parser | Web API 요청 → Engine Unix socket → networkless parser → source DB |
-| `daejang-jit-engine` | `jitd` runtime과 test image | 실제 entrypoint → JIT DB 계약 → Go race 통합 테스트 |
+| `daejang-jit-engine` | `jitd` runtime과 test image | fixture RPC → 실제 `jitd` gRPC → SubjectEvidence → 최신 Posting → canonical ledger → Go race |
 | `daejang-posting-service` | Posting test image | SOURCE/JIT evidence → Event·Posting·delivery, Go race + Python adapter |
-| `daejang-tax-engine` | Tax와 Posting test image | Posting의 CEX 장부 → `LedgerRevisionPublished` → valuation → lot → tax report |
+| `daejang-tax-engine` | Tax runtime과 test image | 최신 Posting의 CEX 장부 → `LedgerRevisionPublished` → valuation → lot → tax report |
 
 Tax 연결은 다음 순서를 한 DB 안에서 지킨다. 전체 Tax 회귀 테스트는 연결 fixture에
 다른 delivery가 섞이지 않도록 이 시나리오 뒤에 실행한다.
 
 ```mermaid
 sequenceDiagram
-    participant P as Posting candidate
+    participant P as Posting dependency image
     participant DB as Disposable PostgreSQL
     participant T as Tax candidate (tax role)
     P->>DB: CEX Event·Posting 저장
