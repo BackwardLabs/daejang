@@ -84,8 +84,9 @@ flowchart TD
 make dev-e2e-up
 ```
 
-이 명령은 현재 checkout으로 Web UI, Web API, Engine, PDF parser image를 만들고
-일회용 PostgreSQL에 연결한 다음 백그라운드에서 계속 실행한다. Mac Studio에서는
+이 명령은 현재 checkout으로 Web UI, Web API, Engine, PDF parser image를 만들고,
+Registry의 최신 Posting·Tax image를 같은 일회용 PostgreSQL과 artifact volume에 연결한
+다음 백그라운드에서 계속 실행한다. Mac Studio에서는
 [http://localhost:15173](http://localhost:15173)으로 접속한다.
 
 ```text
@@ -115,7 +116,8 @@ make dev-e2e-test
 ```
 
 이 명령은 image를 다시 만들거나 Registry image를 다시 pull하지 않는다. migration을
-다시 적용하거나 환경을 내리지도 않고, 테스트 container 하나만 실행 후 제거한다.
+다시 적용하거나 환경을 내리지도 않고, 고정 거래의 Posting → Tax → Report 결과와
+Web API source pipeline을 다시 검증하는 container만 실행 후 제거한다.
 따라서 화면을 열어 둔 상태에서 코드를 확인하고 여러 번 테스트할 수 있다. 현재 코드를
 다시 image에 반영해야 할 때만 기존 환경을 내리고 `make dev-e2e-up`을 다시 실행한다.
 
@@ -133,6 +135,18 @@ make dev-e2e-logs
 ```bash
 make dev-e2e-down
 ```
+
+같은 Mac Studio에서 이미 다른 환경이 실행 중이거나 기존 환경을 유지한 채 두 번째
+환경을 확인하려면 포트와 상태 디렉터리를 함께 분리한다.
+
+```bash
+DAEJANG_DEV_E2E_WEB_PORT=16011 \
+DAEJANG_DEV_E2E_STATE_DIR=/tmp/daejang-dev-e2e-$USER \
+make dev-e2e-up
+```
+
+`dev-e2e-status`, `dev-e2e-test`, `dev-e2e-logs`, `dev-e2e-down`에도 같은 두 변수를
+전달해야 같은 환경을 가리킨다.
 
 개인 노트북에서 볼 때는 Mac Studio의 외부 포트를 열지 않고 SSH tunnel을 사용한다.
 아래 명령은 개인 노트북에서 실행한다.
@@ -160,15 +174,31 @@ flowchart LR
     W --> A["Web API candidate"]
     A --> E["Engine candidate"]
     E --> P["PDF parser candidate"]
-    A --> D["일회용 PostgreSQL"]
-    E --> D
+    E --> S["Source evidence"]
+    S --> O["최신 Posting image"]
+    O --> D["Ledger·Review"]
+    D --> T["최신 Tax image"]
+    T --> R["Valuation·Lot·Tax·Report"]
+    A --> DB["일회용 PostgreSQL"]
+    E --> DB
+    O --> DB
+    T --> DB
+    R --> A
 ```
+
+환경을 올릴 때 테스트 계정에는 2025년 Upbit BTC 매수 한 건이 고정 fixture로 들어간다.
+이 거래는 단순 화면 샘플이 아니라 Source publication부터 Posting, Ledger publication,
+Tax Engine, ReportModel까지 실제 runtime이 처리한다. 브라우저에서 조회 기간을 2025년으로
+선택하면 장부와 보고서 결과를 확인할 수 있다. 이후 화면에서 추가한 PDF도 같은 artifact
+volume과 Posting worker를 사용한다. 다만 고정 Tax profile에 없는 계정·자산은 Tax가
+추측하지 않고 명시적으로 실패하므로, 임의 PDF의 세금 결과까지 검증하려면 그 재현 입력에
+맞는 profile·asset mapping fixture를 별도로 추가해야 한다.
 
 ## 저장소별 실제 경계
 
 | 실행 위치 | 현재 코드로 만드는 것 | 끝까지 확인하는 흐름 |
 | --- | --- | --- |
-| `daejang` | Web API, Engine, PDF parser | Web API 요청 → Engine Unix socket → networkless parser → source DB |
+| `daejang` | Web UI, Web API, Engine, PDF parser | PDF/source fixture → 최신 Posting → Ledger·Review → 최신 Tax → Report → 인증 Web API·UI |
 | `daejang-jit-engine` | `jitd` runtime과 test image | fixture RPC → 실제 `jitd` gRPC → SubjectEvidence → 최신 Posting → canonical ledger → Go race |
 | `daejang-posting-service` | Posting test image | SOURCE/JIT evidence → Event·Posting·delivery, Go race + Python adapter |
 | `daejang-tax-engine` | Tax runtime과 test image | 최신 Posting의 CEX 장부 → `LedgerRevisionPublished` → valuation → lot → tax report |

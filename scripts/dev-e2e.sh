@@ -8,7 +8,7 @@ registry=${REGISTRY:-backwardlabss-mac-studio.tail344fa1.ts.net}
 web_port=${DAEJANG_DEV_E2E_WEB_PORT:-15173}
 e2e_subject_id=00000000-0000-4000-8000-00000000e2e1
 compose_file="$repo_root/deploy/compose.dev-e2e.yaml"
-state_dir="$repo_root/.runtime/dev-e2e"
+state_dir=${DAEJANG_DEV_E2E_STATE_DIR:-"$repo_root/.runtime/dev-e2e"}
 state_file="$state_dir/state.env"
 
 safe_segment() {
@@ -25,6 +25,9 @@ web_candidate_image="daejang-web-api:dev-e2e-$user_segment"
 web_ui_candidate_image="daejang-web-ui:dev-e2e-$user_segment"
 engine_candidate_image="daejang-engine:dev-e2e-$user_segment"
 parser_candidate_image="daejang-pdf-parser:dev-e2e-$user_segment"
+posting_image=${DAEJANG_POSTING_IMAGE:-"$registry/daejang/posting-service:latest"}
+tax_engine_image=${DAEJANG_TAX_ENGINE_IMAGE:-"$registry/daejang/tax-engine:latest"}
+tax_dev_e2e_image=${DAEJANG_TAX_DEV_E2E_IMAGE:-"$registry/daejang/tax-engine-dev-e2e:latest"}
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || {
@@ -128,14 +131,15 @@ fi
 
 if [[ "$action" == logs ]]; then
     require_state
-    app_compose_from_state logs --follow --tail=200 web-ui web-api engine pdf-parser
+    app_compose_from_state logs --follow --tail=200 web-ui web-api engine pdf-parser posting-worker tax-engine
     exit 0
 fi
 
 if [[ "$action" == run-tests ]]; then
     require_state
+    app_compose_from_state run --rm --no-deps pipeline-verify
     app_compose_from_state run --rm --no-deps web-api-tests
-    printf '%s\n' 'dev E2E 테스트가 통과했습니다. 실행 환경과 일회용 DB는 그대로 유지합니다.'
+    printf '%s\n' 'PDF → Posting → Ledger → Tax → Report와 Web API 테스트가 통과했습니다. 실행 환경과 일회용 DB는 그대로 유지합니다.'
     exit 0
 fi
 
@@ -143,7 +147,8 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
     for required_variable in \
         DAEJANG_E2E_OWNER_DATABASE_URL DAEJANG_E2E_WEB_DATABASE_URL \
         DAEJANG_E2E_SOURCE_DATABASE_URL DAEJANG_E2E_QUERY_DATABASE_URL \
-        DAEJANG_E2E_REPORT_DATABASE_URL
+        DAEJANG_E2E_REPORT_DATABASE_URL DAEJANG_E2E_EVENT_DATABASE_URL \
+        DAEJANG_E2E_TAX_DATABASE_URL
     do
         [[ -n "${!required_variable:-}" ]] || {
             printf '%s is required.\n' "$required_variable" >&2
@@ -182,19 +187,36 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
         printf 'DAEJANG_WEB_UI_CANDIDATE_IMAGE=%s\n' "$web_ui_candidate_image"
         printf 'DAEJANG_ENGINE_CANDIDATE_IMAGE=%s\n' "$engine_candidate_image"
         printf 'DAEJANG_PDF_PARSER_CANDIDATE_IMAGE=%s\n' "$parser_candidate_image"
+        printf 'DAEJANG_POSTING_IMAGE=%s\n' "$posting_image"
+        printf 'DAEJANG_TAX_ENGINE_IMAGE=%s\n' "$tax_engine_image"
+        printf 'DAEJANG_TAX_DEV_E2E_IMAGE=%s\n' "$tax_dev_e2e_image"
         printf 'DAEJANG_DEV_E2E_WEB_PORT=%s\n' "$web_port"
         printf 'DAEJANG_E2E_SUBJECT_ID=%s\n' "$e2e_subject_id"
+        printf 'ACTIVATION_SHA256=%064d\n' 0
+        printf 'PUBLICATION_TRUST_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
         printf 'OWNER_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_OWNER_DATABASE_URL")"
         printf 'WEB_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_WEB_DATABASE_URL")"
         printf 'SOURCE_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_SOURCE_DATABASE_URL")"
         printf 'SOURCE_ARTIFACT_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_SOURCE_DATABASE_URL")"
         printf 'QUERY_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_QUERY_DATABASE_URL")"
         printf 'REPORT_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_REPORT_DATABASE_URL")"
+        printf 'EVENT_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_EVENT_DATABASE_URL")"
+        printf 'TAX_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_TAX_DATABASE_URL")"
     } > "$env_file"
+
+    current_compose=(
+        "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root"
+        --file "$compose_file" --project-name "$project_name"
+    )
 
     cleanup_compose() {
         exit_status=$?
         trap - EXIT
+        if (( exit_status != 0 )); then
+            "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
+                --file "$compose_file" --project-name "$project_name" \
+                logs --no-color --tail=200 posting-worker tax-engine engine web-api || true
+        fi
         "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
             --file "$compose_file" --project-name "$project_name" \
             down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -207,16 +229,27 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
     }
     trap cleanup_compose EXIT
 
+    printf '%s\n' '고정 2025 거래와 Posting/Tax runtime 설정을 준비합니다.'
+    "${current_compose[@]}" run --rm --no-deps pipeline-permissions
+    fixture_state=$("${current_compose[@]}" run --rm --no-deps pipeline-fixture)
+    activation_sha=$(printf '%s\n' "$fixture_state" | python3 -c 'import json,sys; print(json.load(sys.stdin)["activationSha256"])')
+    publication_trust_key=$(printf '%s\n' "$fixture_state" | python3 -c 'import json,sys; print(json.load(sys.stdin)["publicationTrustKey"])')
+    {
+        printf 'ACTIVATION_SHA256=%s\n' "$activation_sha"
+        printf 'PUBLICATION_TRUST_KEY=%s\n' "$publication_trust_key"
+    } >> "$env_file"
+
+    app_services=(web-api posting-worker tax-engine)
+    if [[ "$action" == --run-persistent ]]; then
+        app_services=(web-ui posting-worker tax-engine)
+    fi
+    "${current_compose[@]}" up --detach --wait "${app_services[@]}"
+    "${current_compose[@]}" run --rm --no-deps pipeline-verify
+
     if [[ "$action" == --run-container-tests ]]; then
-        "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
-            --file "$compose_file" --project-name "$project_name" \
-            up --abort-on-container-exit --exit-code-from web-api-tests web-api-tests
+        "${current_compose[@]}" run --rm --no-deps web-api-tests
         exit 0
     fi
-
-    "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
-        --file "$compose_file" --project-name "$project_name" \
-        up --detach --wait web-ui
 
     {
         printf 'APP_PROJECT_NAME=%s\n' "$project_name"
@@ -230,6 +263,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
 
     printf '\nWeb UI를 계속 실행합니다: http://localhost:%s\n' "$web_port"
     printf '%s\n' '테스트 계정: test@example.test / test1234!'
+    printf '%s\n' '2025년 고정 거래의 Posting, Tax, Report 결과가 준비되었습니다.'
     printf '%s\n' '종료할 때만 make dev-e2e-down을 실행하세요.'
     exit 0
 fi
@@ -261,12 +295,25 @@ trap cleanup_build EXIT
 umask 077
 gh auth token > "$token_file"
 
-printf '%s\n' 'Registry의 최신 기준 이미지 6개를 확인합니다.'
-for image in web-api engine pdf-parser jit-engine posting-service tax-engine; do
-    full_image="$registry/daejang/$image:latest"
-    docker pull "$full_image"
+dependency_images=(
+    "$registry/daejang/web-api:latest"
+    "$registry/daejang/engine:latest"
+    "$registry/daejang/pdf-parser:latest"
+    "$registry/daejang/jit-engine:latest"
+    "$posting_image"
+    "$tax_engine_image"
+    "$tax_dev_e2e_image"
+)
+printf 'Registry 또는 지정된 최신 기준 이미지 %d개를 확인합니다.\n' "${#dependency_images[@]}"
+for full_image in "${dependency_images[@]}"; do
+    if [[ "$full_image" == "$registry/"* ]]; then
+        docker pull "$full_image"
+    else
+        docker image inspect "$full_image" >/dev/null
+    fi
     digest=$(docker image inspect --format '{{join .RepoDigests " "}}' "$full_image")
-    printf '  %-16s %s\n' "$image" "$digest"
+    [[ -n "$digest" ]] || digest=$(docker image inspect --format '{{.Id}}' "$full_image")
+    printf '  %-64s %s\n' "$full_image" "$digest"
 done
 
 if docker buildx version >/dev/null 2>&1; then
@@ -310,7 +357,7 @@ if ! docker compose version >/dev/null 2>&1; then
     export DOCKER_CONFIG="$plugin_config"
 fi
 
-printf '%s\n' '현재 후보 Web API, Engine, PDF parser를 일회용 DB에 연결합니다.'
+printf '%s\n' '현재 후보 Web/API와 최신 Posting/Tax를 같은 일회용 DB에 연결합니다.'
 db_args=(
     --seed-web-test-account
     --role-env DAEJANG_E2E_OWNER_DATABASE_URL=owner
@@ -318,6 +365,8 @@ db_args=(
     --role-env DAEJANG_E2E_SOURCE_DATABASE_URL=source
     --role-env DAEJANG_E2E_QUERY_DATABASE_URL=query
     --role-env DAEJANG_E2E_REPORT_DATABASE_URL=event
+    --role-env DAEJANG_E2E_EVENT_DATABASE_URL=event
+    --role-env DAEJANG_E2E_TAX_DATABASE_URL=tax
 )
 if [[ "$action" == up ]]; then
     db_args=(--keep "${db_args[@]}")

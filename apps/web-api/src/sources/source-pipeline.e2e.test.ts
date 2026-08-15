@@ -14,6 +14,7 @@ import { PostgresRateLimitStore } from '../auth/rate-limit.js'
 import type { AppConfig } from '../config.js'
 import { EngineMtlsClient } from '../engine/mtls-client.js'
 import { PostgresFileUploadStore } from '../uploads/postgres-file-upload-store.js'
+import { PostgresTaxReportReader } from '../tax-report/postgres-tax-report-reader.js'
 import { PostgresWalletSourceStore } from './postgres-wallet-source-store.js'
 
 const enabled = process.env.RUN_SOURCE_PIPELINE_E2E_TESTS === '1'
@@ -123,6 +124,9 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
         encryptionKey: objectEncryptionKey,
         encryptionKeyId: 'source-pipeline-e2e',
       }),
+      taxReportReader: new PostgresTaxReportReader(webPool),
+      taxReportModelReader: engine,
+      taxEvidencePackReader: engine,
       engineDataClient: engine,
     })
     const login = await context.app.inject({
@@ -403,4 +407,36 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
       outputFragmentId: result.job.outputFragmentId,
     })
   }, 120_000)
+
+  it('serves the fixed 2025 Posting and Tax result through the authenticated Web API', async () => {
+    const response = await inject({
+      method: 'GET',
+      url: '/api/v1/tax-reports/2025/current?finality=PROVISIONAL',
+    })
+    expect(response.statusCode, response.body).toBe(200)
+    const current = response.json<{ report: { reportId: string } }>()
+    expect(current).toMatchObject({
+      report: {
+        taxYear: 2025,
+        finality: 'PROVISIONAL',
+      },
+    })
+
+    const detail = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${encodeURIComponent(current.report.reportId)}`,
+    })
+    expect(detail.statusCode, detail.body).toBe(200)
+    expect(detail.json()).toMatchObject({
+      report: {
+        reportId: current.report.reportId,
+        taxYear: 2025,
+        summary: {
+          calculationRule: {
+            basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
+          },
+        },
+      },
+    })
+  })
 })
