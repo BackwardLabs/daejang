@@ -150,6 +150,7 @@ async function readProviderEvmConnection() {
 function waitForExplicitEvmConnection(
   signal: AbortSignal,
   openWalletPicker: () => Promise<unknown>,
+  requireDifferentConnection = false,
 ) {
   return new Promise<{ address: string; chainId: string }>((resolve, reject) => {
     const initialConnection = readCurrentEvmConnection()
@@ -179,7 +180,12 @@ function waitForExplicitEvmConnection(
       allowInitialConnection = false,
     ) {
       if (settled || !connection) return false
-      if (!allowInitialConnection && isInitialConnection(connection)) return false
+      if (
+        isInitialConnection(connection) &&
+        (requireDifferentConnection || !allowInitialConnection)
+      ) {
+        return false
+      }
 
       settled = true
       finish()
@@ -350,7 +356,7 @@ function ConfiguredReownRoute({
   onLaunchFailed,
   pendingView,
 }: ReownRouteProps) {
-  const { open } = useAppKit()
+  const { close, open } = useAppKit()
   const walletButton = useAppKitWallet({ namespace: 'eip155' })
   const [initialConnectionComplete, setInitialConnectionComplete] = useState(
     !launchImmediately,
@@ -364,16 +370,10 @@ function ConfiguredReownRoute({
       try {
         duplicateWalletAttempt.current = false
         const currentConnection = readCurrentEvmConnection()
-        if (
+        const requiresDifferentConnection = Boolean(
           currentConnection &&
-          await isActiveWalletSource(currentConnection.address, signal)
-        ) {
-          duplicateWalletAttempt.current = true
-          return {
-            error: { code: 'SOURCE_ALREADY_CONNECTED' },
-            ok: false,
-          }
-        }
+          await isActiveWalletSource(currentConnection.address, signal),
+        )
 
         const directWalletName = getDirectWalletName(provider)
         let connection: { address: string; chainId: string }
@@ -389,9 +389,12 @@ function ConfiguredReownRoute({
           }
           connection = directConnection
         } else {
-          connection = await waitForExplicitEvmConnection(signal, () =>
-            open({ namespace: 'eip155', view: 'Connect' }),
+          connection = await waitForExplicitEvmConnection(
+            signal,
+            () => open({ namespace: 'eip155', view: 'Connect' }),
+            requiresDifferentConnection,
           )
+          await close()
         }
 
         if (await isActiveWalletSource(connection.address, signal)) {
@@ -434,7 +437,7 @@ function ConfiguredReownRoute({
         }
       }
     },
-    [open, walletButton],
+    [close, open, walletButton],
   )
 
   const requestSignature = useCallback<RequestOwnershipSignature>(
