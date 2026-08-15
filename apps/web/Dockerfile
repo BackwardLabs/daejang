@@ -1,6 +1,8 @@
 FROM node:22.13-bookworm-slim AS preview
 
+ARG VITE_REOWN_PROJECT_ID
 ENV NODE_ENV=development
+ENV VITE_REOWN_PROJECT_ID=${VITE_REOWN_PROJECT_ID}
 WORKDIR /app
 
 COPY package.json package-lock.json ./

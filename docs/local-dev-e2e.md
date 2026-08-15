@@ -148,6 +148,18 @@ make dev-e2e-up
 `dev-e2e-status`, `dev-e2e-test`, `dev-e2e-logs`, `dev-e2e-down`에도 같은 두 변수를
 전달해야 같은 환경을 가리킨다.
 
+EVM Wallet 연결에는 dev Web image를 만들 때 Reown Project ID가 필요하다. 기본값은
+Reown 공식 예제의 localhost 전용 공개 ID이며, 팀 Project ID를 사용하려면 환경을
+올릴 때 다음처럼 덮어쓴다.
+
+```bash
+DAEJANG_DEV_E2E_REOWN_PROJECT_ID=<32자리-project-id> make dev-e2e-up
+```
+
+Reown은 `localhost`와 `127.0.0.1` origin을 항상 허용하므로 SSH tunnel의 로컬 포트는
+Dashboard allowlist에 추가하지 않아도 된다. Tailscale hostname이나 별도 개발 도메인으로
+브라우저가 직접 접속할 때는 그 origin을 Reown Project Domains에 추가한다.
+
 개인 노트북에서 볼 때는 Mac Studio의 외부 포트를 열지 않고 SSH tunnel을 사용한다.
 아래 명령은 개인 노트북에서 실행한다.
 
