@@ -36,7 +36,7 @@ npm run dev
 이미지 digest도 먼저 기록하며, DB는 실행마다 새로 만들고 종료 시 삭제합니다.
 
 ```bash
-make test DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db
+make test
 ```
 
 이 테스트는 Web API 요청에서 시작해 Engine gRPC, networkless PDF parser,
@@ -49,10 +49,12 @@ PostgreSQL source 저장까지 확인합니다. 운영 `.env`나 secret은 이�
 JIT와 Tax 시나리오가 이어서 사용하도록 전체 경계를 한 명령으로 확인할 수 있습니다.
 
 ```bash
-make test-system \
-  DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db \
-  SCHEMA_DIR=/Users/Shared/Projects/01_Daejang/schema
+make test-system
 ```
+
+DB와 schema의 기본 경로는 각각
+`/Users/shared/Projects/01_Daejang/daejang-db`와
+`/Users/shared/Projects/01_Daejang/schema`로 설정되어 있습니다.
 
 `test-system`은 하나의 거대한 Compose를 계속 켜 두지 않습니다. Web·Source,
 Posting, JIT→Posting, Posting→Tax 시나리오를 각각 격리된 Compose network와 DB에서

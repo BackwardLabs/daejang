@@ -28,17 +28,16 @@ flowchart LR
 각 저장소에서는 같은 명령을 사용한다.
 
 ```bash
-make test DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db
+make test
 ```
 
-JIT Engine은 schema checkout도 사용한다. 형제 디렉터리가 아니면 경로를 함께
-지정한다.
+DB와 schema는 Mac Studio의 공용 개발 경로를 기본으로 사용한다.
 
 ```bash
-make test \
-  DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db \
-  SCHEMA_DIR=/Users/Shared/Projects/01_Daejang/schema
+DAEJANG_DB_DIR=/다른/daejang-db SCHEMA_DIR=/다른/schema make test
 ```
+
+변경 중인 DB나 schema checkout을 함께 검증할 때만 위처럼 경로를 덮어쓴다.
 
 최초 한 번은 Registry와 GitHub CLI 로그인이 필요하다.
 
@@ -54,9 +53,7 @@ Docker Desktop이 읽을 DB checkout은 `/Users/Shared` 아래처럼 Docker file
 여러 저장소의 변경을 함께 검증하려면 `daejang`에서 전체 시나리오를 실행한다.
 
 ```bash
-make test-system \
-  DAEJANG_DB_DIR=/Users/Shared/Projects/01_Daejang/daejang-db \
-  SCHEMA_DIR=/Users/Shared/Projects/01_Daejang/schema
+make test-system
 ```
 
 이 명령은 Posting candidate를 먼저 만든 뒤 그 동일한 image를 JIT→Posting과

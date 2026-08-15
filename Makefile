@@ -1,8 +1,8 @@
-DAEJANG_DB_DIR ?= ../daejang-db
+DAEJANG_DB_DIR ?= /Users/shared/Projects/01_Daejang/daejang-db
 DAEJANG_JIT_ENGINE_DIR ?= ../daejang-jit-engine
 DAEJANG_POSTING_SERVICE_DIR ?= ../daejang-posting-service
 DAEJANG_TAX_ENGINE_DIR ?= ../daejang-tax-engine
-SCHEMA_DIR ?= ../schema
+SCHEMA_DIR ?= /Users/shared/Projects/01_Daejang/schema
 REGISTRY ?= backwardlabss-mac-studio.tail344fa1.ts.net
 
 .PHONY: test test-system
