@@ -6,7 +6,6 @@ import {
 import type {
   CompleteWalletConnection,
   ConnectedWallet,
-  ConnectWallet,
   RequestOwnershipSignature,
   WatchWalletSyncJob,
 } from './evmWalletFlow.ts'
@@ -28,6 +27,7 @@ type WalletPageProps = Parameters<typeof EvmWalletConnectionPage>[0]
 const withTestFixtures = (
   overrides: Partial<WalletPageProps> = {},
 ): WalletPageProps => ({
+  autoConnectProvider: 'other',
   completeConnection: completeWalletConnectionTestFixture,
   connectWallet: connectWalletTestFixture,
   requestSignature: requestOwnershipSignatureTestFixture,
@@ -55,8 +55,6 @@ async function moveToOwnership(
   props: Partial<WalletPageProps> = {},
 ) {
   render(<EvmWalletConnectionPage {...withTestFixtures(props)} />)
-  fireEvent.click(screen.getByRole('radio', { name: 'MetaMask' }))
-  fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
 
   await screen.findByRole('heading', { name: '지갑 소유권 확인' })
 }
@@ -78,10 +76,11 @@ afterEach(() => {
 })
 
 describe('EvmWalletConnectionPage', () => {
-  it('shows every supported EVM network before connecting a wallet', () => {
-    render(<EvmWalletConnectionPage {...withTestFixtures()} />)
+  it('shows every supported EVM network when confirming collection scope', async () => {
+    await moveToScope()
 
-    expect(screen.getByText('Ethereum, Optimism')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Ethereum' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Optimism/ })).toBeChecked()
     expect(screen.queryByText('GIWA Sepolia')).not.toBeInTheDocument()
   })
 
@@ -115,16 +114,6 @@ describe('EvmWalletConnectionPage', () => {
         {...withTestFixtures({ completeConnection })}
       />,
     )
-
-    expect(
-      screen.getByRole('heading', { name: 'EVM Wallet 연결' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '지갑 연결' }),
-    ).toBeDisabled()
-
-    fireEvent.click(screen.getByRole('radio', { name: 'MetaMask' }))
-    fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
 
     await screen.findByRole('heading', { name: '지갑 소유권 확인' })
     expect(screen.getByText('0x1234…5678 · Ethereum')).toBeInTheDocument()
@@ -177,31 +166,6 @@ describe('EvmWalletConnectionPage', () => {
     expect(serializeStorage(window.sessionStorage)).not.toContain(
       connectedWallet.address,
     )
-  })
-
-  it('shows a stable provider error and keeps the selected provider retryable', async () => {
-    const connectWallet = vi.fn<ConnectWallet>()
-    connectWallet.mockResolvedValue({
-      error: {
-        code: 'PROVIDER_UNAVAILABLE',
-        requestId: 'wallet-request-01',
-      },
-      ok: false,
-    })
-
-    render(
-      <EvmWalletConnectionPage
-        {...withTestFixtures({ connectWallet })}
-      />,
-    )
-    fireEvent.click(screen.getByRole('radio', { name: 'Rabby Wallet' }))
-    fireEvent.click(screen.getByRole('button', { name: '지갑 연결' }))
-
-    expect(
-      await screen.findByText('선택한 지갑을 사용할 수 없어요'),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: 'Rabby Wallet' })).toBeChecked()
-    expect(screen.queryByText('wallet-request-01')).not.toBeInTheDocument()
   })
 
   it('supports a rejected signature and succeeds when the user retries', async () => {

@@ -104,7 +104,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     })
   })
 
-  it('accepts the persisted Reown account after an explicit connect action', async () => {
+  it('opens Reown even when an old account remains in its cache', async () => {
     const onLaunchFailed = vi.fn()
 
     render(
@@ -116,45 +116,19 @@ describe('ReownEvmWalletConnectionRoute', () => {
     fireEvent.click(screen.getByTestId('connect-wallet'))
 
     await waitFor(() => {
-      expect(mocks.listSources).toHaveBeenCalledTimes(1)
+      expect(mocks.open).toHaveBeenCalledTimes(1)
     })
-    expect(mocks.open).not.toHaveBeenCalled()
-    expect(onLaunchFailed).not.toHaveBeenCalled()
-  })
-
-  it('uses the injected Rabby provider without relying on Reown cache', async () => {
-    mocks.caipAddress = undefined
-    const request = vi.fn(async ({ method }: { method: string }) => {
-      if (method === 'eth_requestAccounts') {
-        return ['0xb8b95c8ce9aa3352b9f17505642d667a165bbe9f']
-      }
-      if (method === 'eth_chainId') return '0x1'
-      throw new Error(`Unexpected method: ${method}`)
+    await act(async () => {
+      selectCurrentWallet()
     })
-    Object.defineProperty(window, 'ethereum', {
-      configurable: true,
-      value: { isRabby: true, request },
-    })
-    const onLaunchFailed = vi.fn()
-
-    render(
-      <ReownEvmWalletConnectionRoute
-        launchImmediately
-        onLaunchFailed={onLaunchFailed}
-      />,
-    )
-    fireEvent.click(screen.getByTestId('connect-wallet'))
 
     await waitFor(() => {
-      expect(request).toHaveBeenCalledWith({ method: 'eth_requestAccounts' })
-      expect(request).toHaveBeenCalledWith({ method: 'eth_chainId' })
       expect(mocks.listSources).toHaveBeenCalledTimes(1)
     })
-    expect(mocks.open).not.toHaveBeenCalled()
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
 
-  it('keeps the connection page open when the picker is cancelled', async () => {
+  it('returns to source selection when the Reown picker is cancelled', async () => {
     mocks.caipAddress = undefined
     const onLaunchFailed = vi.fn()
 
@@ -173,8 +147,10 @@ describe('ReownEvmWalletConnectionRoute', () => {
     })
 
     await waitFor(() => {
-      expect(onLaunchFailed).not.toHaveBeenCalled()
-    })
+      expect(onLaunchFailed).toHaveBeenCalledWith(
+        expect.objectContaining({ ok: false }),
+      )
+    }, { timeout: 2_000 })
     expect(mocks.listSources).not.toHaveBeenCalled()
   })
 
@@ -244,54 +220,4 @@ describe('ReownEvmWalletConnectionRoute', () => {
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
 
-  it('skips the wallet picker when the current wallet is already an active source', async () => {
-    mocks.listSources.mockResolvedValue({
-      items: [
-        {
-          address: mocks.caipAddress!.split(':').at(-1),
-          status: 'ACTIVE',
-          type: 'EVM_WALLET',
-        },
-      ],
-    })
-    const onAlreadyConnected = vi.fn()
-
-    render(
-      <ReownEvmWalletConnectionRoute
-        launchImmediately
-        onAlreadyConnected={onAlreadyConnected}
-      />,
-    )
-    fireEvent.click(screen.getByTestId('connect-wallet'))
-
-    await waitFor(() => {
-      expect(onAlreadyConnected).toHaveBeenCalledTimes(1)
-    })
-    expect(mocks.open).not.toHaveBeenCalled()
-    expect(mocks.connect).not.toHaveBeenCalled()
-  })
-
-  it('keeps the direct wallet happy path after an explicit connect click', async () => {
-    const connectedAddress = mocks.caipAddress
-    mocks.caipAddress = undefined
-    mocks.connect.mockImplementation(async () => {
-      mocks.caipAddress = connectedAddress
-    })
-    mocks.provider = 'metamask'
-    const onLaunchFailed = vi.fn()
-
-    render(
-      <ReownEvmWalletConnectionRoute
-        launchImmediately
-        onLaunchFailed={onLaunchFailed}
-      />,
-    )
-    fireEvent.click(screen.getByTestId('connect-wallet'))
-
-    await waitFor(() => {
-      expect(mocks.connect).toHaveBeenCalledWith('metamask')
-      expect(mocks.listSources).toHaveBeenCalledTimes(1)
-    })
-    expect(onLaunchFailed).not.toHaveBeenCalled()
-  })
 })

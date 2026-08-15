@@ -124,68 +124,6 @@
   word-break: keep-all;
 }
 
-.wallet-provider-fieldset {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.wallet-provider-option {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 75px;
-  padding: 15px 20px;
-  border: 1px solid #e7eaee;
-  border-radius: 12px;
-  background: #fff;
-  cursor: pointer;
-  transition:
-    border-color 150ms ease,
-    box-shadow 150ms ease,
-    background 150ms ease;
-}
-
-.wallet-provider-option:hover {
-  border-color: #c9c5bd;
-  background: #fdfcfb;
-}
-
-.wallet-provider-option:has(input:focus-visible) {
-  outline: 3px solid rgb(240 100 43 / 22%);
-  outline-offset: 2px;
-}
-
-.wallet-provider-option:has(input:checked) {
-  border-color: var(--source-evm);
-  background: #fffaf7;
-  box-shadow: 0 0 0 1px var(--source-evm);
-}
-
-.wallet-provider-option input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  opacity: 0;
-}
-
-.wallet-provider-option strong {
-  color: #171717;
-  font-size: 16px;
-  line-height: 24px;
-}
-
-.wallet-provider-option img {
-  display: block;
-  width: 40px;
-  height: 40px;
-  object-fit: contain;
-}
-
 .wallet-flow-actions {
   display: flex;
   flex-wrap: wrap;
@@ -446,17 +384,10 @@
 
 .wallet-connected-card__summary {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 14px;
   align-items: center;
   padding: 18px;
-}
-
-.wallet-connected-card__summary > img {
-  display: block;
-  width: 44px;
-  height: 44px;
-  object-fit: contain;
 }
 
 .wallet-connected-card__summary strong,
@@ -1022,31 +953,12 @@
     padding: 18px;
   }
 
-  .wallet-provider-option {
-    min-height: 64px;
-    padding: 12px 14px;
-  }
-
-  .wallet-provider-option strong {
-    font-size: 13px;
-  }
-
-  .wallet-provider-option img {
-    width: 34px;
-    height: 34px;
-  }
-
   .wallet-flow-actions > * {
     width: 100%;
   }
 
   .wallet-connected-card__summary {
-    grid-template-columns: 42px minmax(0, 1fr);
-  }
-
-  .wallet-connected-card__summary > img {
-    width: 40px;
-    height: 40px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .wallet-connected-card__badge {
@@ -1076,10 +988,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wallet-provider-option {
-    transition: none;
-  }
-
   .wallet-signature-status__spinner {
     animation-duration: 1800ms;
   }
