@@ -8,6 +8,9 @@ import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { buildApp } from '../app.js'
+import { PostgresAccountAuthStore } from '../auth/account-auth-store.js'
+import { PostgresSessionStore } from '../auth/postgres-session-store.js'
+import { PostgresRateLimitStore } from '../auth/rate-limit.js'
 import type { AppConfig } from '../config.js'
 import { EngineMtlsClient } from '../engine/mtls-client.js'
 import { PostgresFileUploadStore } from '../uploads/postgres-file-upload-store.js'
@@ -43,6 +46,15 @@ if (enabled && !engineTarget) {
 
 const describeWithPipeline = enabled ? describe : describe.skip
 const fixturePassword = 'synthetic-pdf-password-do-not-persist'
+const testAccount = {
+  id: '00000000-0000-4000-8000-00000000e2e1',
+  email: 'test@example.test',
+  password: 'test1234!',
+} as const
+const e2eSubjectId = process.env.DAEJANG_E2E_SUBJECT_ID
+if (enabled && e2eSubjectId !== testAccount.id) {
+  throw new Error(`DAEJANG_E2E_SUBJECT_ID must be ${testAccount.id}`)
+}
 
 const config = (databaseUrl: string): AppConfig => ({
   runtimeMode: 'test',
@@ -87,27 +99,25 @@ const config = (databaseUrl: string): AppConfig => ({
 })
 
 describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
-  const userId = randomUUID()
+  const userId = testAccount.id
   const ownerPool = new Pool({ connectionString: ownerDatabaseUrl })
   const webPool = new Pool({ connectionString: webDatabaseUrl })
   const objectEncryptionKey = Buffer.alloc(32, 7)
   let objectRoot: string
   let engine: EngineMtlsClient
   let context: Awaited<ReturnType<typeof buildApp>>
-  let token: string
+  let sessionCookie: string
 
   beforeAll(async () => {
     objectRoot = await mkdtemp(join(tmpdir(), 'daejang-source-pipeline-e2e-'))
-    await ownerPool.query(
-      `INSERT INTO web_private.users(id,display_name,status)
-       VALUES($1::uuid,'Source pipeline E2E','active')`,
-      [userId],
-    )
     engine = EngineMtlsClient.connectInsecureLoopback(engineTarget!, true)
     await engine.waitForReady(10_000)
     context = await buildApp({
       config: config(webDatabaseUrl!),
       logger: false,
+      accountAuthStore: new PostgresAccountAuthStore(webPool),
+      sessionStore: new PostgresSessionStore(webPool),
+      rateLimitStore: new PostgresRateLimitStore(webPool),
       walletSourceStore: new PostgresWalletSourceStore(webPool, engine),
       uploadStore: new PostgresFileUploadStore(webPool, objectRoot, {
         encryptionKey: objectEncryptionKey,
@@ -115,9 +125,22 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
       }),
       engineDataClient: engine,
     })
-    ;({ token } = await context.sessionService.create({
-      user: { id: userId, displayName: 'Source pipeline E2E' },
-    }))
+    const login = await context.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email/login',
+      headers: { origin: config(webDatabaseUrl!).publicOrigin },
+      payload: { email: testAccount.email, password: testAccount.password },
+    })
+    expect(login.statusCode, login.body).toBe(200)
+    expect(login.json()).toMatchObject({
+      status: 'authenticated',
+      user: { id: userId, displayName: 'Daejang E2E' },
+    })
+    const setCookie = Array.isArray(login.headers['set-cookie'])
+      ? login.headers['set-cookie'][0]
+      : login.headers['set-cookie']
+    sessionCookie = setCookie?.split(';', 1)[0] ?? ''
+    expect(sessionCookie).toMatch(/^daejang_session=\S+$/)
   }, 30_000)
 
   afterAll(async () => {
@@ -138,7 +161,7 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     method: input.method,
     url: input.url,
     headers: {
-      cookie: `daejang_session=${token}`,
+      cookie: sessionCookie,
       ...(input.method === 'GET' ? {} : { origin: config(webDatabaseUrl!).publicOrigin }),
       ...(input.contentType ? { 'content-type': input.contentType } : {}),
       ...(Buffer.isBuffer(input.payload)

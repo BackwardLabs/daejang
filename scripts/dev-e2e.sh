@@ -9,6 +9,7 @@ web_test_image=daejang-web-api:dev-e2e-test
 web_candidate_image=daejang-web-api:dev-e2e
 engine_candidate_image=daejang-engine:dev-e2e
 parser_candidate_image=daejang-pdf-parser:dev-e2e
+e2e_subject_id=00000000-0000-4000-8000-00000000e2e1
 compose_file="$repo_root/deploy/compose.dev-e2e.yaml"
 
 require_command() {
@@ -42,6 +43,7 @@ if [[ "${1:-}" == "--run-container-tests" ]]; then
         printf 'DAEJANG_WEB_API_TEST_IMAGE=%s\n' "$web_test_image"
         printf 'DAEJANG_ENGINE_CANDIDATE_IMAGE=%s\n' "$engine_candidate_image"
         printf 'DAEJANG_PDF_PARSER_CANDIDATE_IMAGE=%s\n' "$parser_candidate_image"
+        printf 'DAEJANG_E2E_SUBJECT_ID=%s\n' "$e2e_subject_id"
         printf 'OWNER_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_OWNER_DATABASE_URL")"
         printf 'WEB_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_WEB_DATABASE_URL")"
         printf 'SOURCE_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_SOURCE_DATABASE_URL")"
@@ -132,6 +134,7 @@ fi
 printf '%s\n' '현재 후보 Web API, Engine, PDF parser를 일회용 DB에 연결합니다.'
 DAEJANG_LOCAL_TEST_NAME=daejang-dev-e2e \
 "$db_dir/scripts/with-disposable-postgres.sh" \
+    --seed-web-test-account \
     --role-env DAEJANG_E2E_OWNER_DATABASE_URL=owner \
     --role-env DAEJANG_E2E_WEB_DATABASE_URL=web \
     --role-env DAEJANG_E2E_SOURCE_DATABASE_URL=source \
