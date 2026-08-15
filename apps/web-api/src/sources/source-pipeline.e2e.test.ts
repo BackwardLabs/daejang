@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../app.js'
 import { PostgresAccountAuthStore } from '../auth/account-auth-store.js'
 import { PostgresSessionStore } from '../auth/postgres-session-store.js'
+import { provisionEmailAccount } from '../auth/provision-email-account.js'
 import { PostgresRateLimitStore } from '../auth/rate-limit.js'
 import type { AppConfig } from '../config.js'
 import { EngineMtlsClient } from '../engine/mtls-client.js'
@@ -46,15 +47,30 @@ if (enabled && !engineTarget) {
 }
 
 const describeWithPipeline = enabled ? describe : describe.skip
+const configuredTaxYear = (() => {
+  if (!enabled) return 2025 as const
+  const raw = process.env.DAEJANG_TAX_DEV_E2E_TAX_YEAR
+  if (!raw || !/^(2025|2026|2027)$/.test(raw)) {
+    throw new Error('DAEJANG_TAX_DEV_E2E_TAX_YEAR must be one of 2025, 2026, or 2027')
+  }
+  return Number(raw) as 2025 | 2026 | 2027
+})()
 const fixturePassword = 'synthetic-pdf-password-do-not-persist'
-const testAccount = {
+const productAccount = {
   id: '00000000-0000-4000-8000-00000000e2e1',
   email: 'test@example.test',
   password: 'test1234!',
+  displayName: 'Daejang E2E',
+} as const
+const sourcePipelineAccount = {
+  id: '00000000-0000-4000-8000-00000000e2f1',
+  email: 'source-pipeline@example.test',
+  password: 'SourcePipelineTest1234!',
+  displayName: 'Daejang Source Pipeline E2E',
 } as const
 const e2eSubjectId = process.env.DAEJANG_E2E_SUBJECT_ID
-if (enabled && e2eSubjectId !== testAccount.id) {
-  throw new Error(`DAEJANG_E2E_SUBJECT_ID must be ${testAccount.id}`)
+if (enabled && e2eSubjectId !== productAccount.id) {
+  throw new Error(`DAEJANG_E2E_SUBJECT_ID must be ${productAccount.id}`)
 }
 
 const config = (databaseUrl: string): AppConfig => ({
@@ -100,19 +116,33 @@ const config = (databaseUrl: string): AppConfig => ({
 })
 
 describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
-  const userId = testAccount.id
+  const userId = sourcePipelineAccount.id
   const ownerPool = new Pool({ connectionString: ownerDatabaseUrl })
   const webPool = new Pool({ connectionString: webDatabaseUrl })
   const objectEncryptionKey = Buffer.alloc(32, 7)
   let objectRoot: string
   let engine: EngineMtlsClient
   let context: Awaited<ReturnType<typeof buildApp>>
-  let sessionCookie: string
+  let sourceSessionCookie: string
+  let productSessionCookie: string
 
   beforeAll(async () => {
     objectRoot = await mkdtemp(join(tmpdir(), 'daejang-source-pipeline-e2e-'))
     engine = EngineMtlsClient.connectInsecureLoopback(engineTarget!, true)
     await engine.waitForReady(10_000)
+    const accountStore = new PostgresAccountAuthStore(ownerPool)
+    const existingSourceAccount = await accountStore.findEmailCredential(
+      sourcePipelineAccount.email,
+    )
+    if (existingSourceAccount) {
+      expect(existingSourceAccount.user).toMatchObject({
+        id: sourcePipelineAccount.id,
+        displayName: sourcePipelineAccount.displayName,
+        status: 'active',
+      })
+    } else {
+      await provisionEmailAccount(ownerPool, sourcePipelineAccount)
+    }
     context = await buildApp({
       config: config(webDatabaseUrl!),
       logger: false,
@@ -129,22 +159,27 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
       taxEvidencePackReader: engine,
       engineDataClient: engine,
     })
-    const login = await context.app.inject({
-      method: 'POST',
-      url: '/api/v1/auth/email/login',
-      headers: { origin: config(webDatabaseUrl!).publicOrigin },
-      payload: { email: testAccount.email, password: testAccount.password },
-    })
-    expect(login.statusCode, login.body).toBe(200)
-    expect(login.json()).toMatchObject({
-      status: 'authenticated',
-      user: { id: userId, displayName: 'Daejang E2E' },
-    })
-    const setCookie = Array.isArray(login.headers['set-cookie'])
-      ? login.headers['set-cookie'][0]
-      : login.headers['set-cookie']
-    sessionCookie = setCookie?.split(';', 1)[0] ?? ''
-    expect(sessionCookie).toMatch(/^daejang_session=\S+$/)
+    const login = async (account: typeof productAccount | typeof sourcePipelineAccount) => {
+      const response = await context.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/email/login',
+        headers: { origin: config(webDatabaseUrl!).publicOrigin },
+        payload: { email: account.email, password: account.password },
+      })
+      expect(response.statusCode, response.body).toBe(200)
+      expect(response.json()).toMatchObject({
+        status: 'authenticated',
+        user: { id: account.id, displayName: account.displayName },
+      })
+      const setCookie = Array.isArray(response.headers['set-cookie'])
+        ? response.headers['set-cookie'][0]
+        : response.headers['set-cookie']
+      const cookie = setCookie?.split(';', 1)[0] ?? ''
+      expect(cookie).toMatch(/^daejang_session=\S+$/)
+      return cookie
+    }
+    sourceSessionCookie = await login(sourcePipelineAccount)
+    productSessionCookie = await login(productAccount)
   }, 30_000)
 
   afterAll(async () => {
@@ -161,7 +196,7 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     url: string
     payload?: Buffer | Record<string, unknown>
     contentType?: string
-  }) => context.app.inject({
+  }, sessionCookie = sourceSessionCookie) => context.app.inject({
     method: input.method,
     url: input.url,
     headers: {
@@ -408,16 +443,16 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     })
   }, 120_000)
 
-  it('serves the fixed 2025 Posting and Tax result through the authenticated Web API', async () => {
+  it(`serves the selected ${configuredTaxYear} Posting and Tax result through the authenticated Web API`, async () => {
     const response = await inject({
       method: 'GET',
-      url: '/api/v1/tax-reports/2025/current?finality=PROVISIONAL',
-    })
+      url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
+    }, productSessionCookie)
     expect(response.statusCode, response.body).toBe(200)
     const current = response.json<{ report: { reportId: string } }>()
     expect(current).toMatchObject({
       report: {
-        taxYear: 2025,
+        taxYear: configuredTaxYear,
         finality: 'PROVISIONAL',
       },
     })
@@ -425,12 +460,12 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     const detail = await inject({
       method: 'GET',
       url: `/api/v1/tax-reports/${encodeURIComponent(current.report.reportId)}`,
-    })
+    }, productSessionCookie)
     expect(detail.statusCode, detail.body).toBe(200)
     expect(detail.json()).toMatchObject({
       report: {
         reportId: current.report.reportId,
-        taxYear: 2025,
+        taxYear: configuredTaxYear,
         summary: {
           calculationRule: {
             basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',

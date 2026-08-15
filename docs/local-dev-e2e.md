@@ -31,6 +31,62 @@ flowchart LR
 make test
 ```
 
+Tax/Report fixture의 기본 연도는 `2025`다. 현재 제품이 지원하는 전체 연도
+`2025`, `2026`, `2027` 중 하나를 같은 경로로 선택할 수 있다.
+
+```bash
+DAEJANG_TAX_DEV_E2E_TAX_YEAR=2026 make test
+```
+
+실제 ledger publication 시각보다 미래인 fixture Event는 Tax Engine의 인과성 fence를
+우회하지 않는다. 따라서 아직 시작하지 않은 연도는 runner가 실행 전에 거부하며, 해당
+연도가 시작되고 고정 fixture 시각이 지난 뒤 같은 명령으로 자동 실행 가능해진다.
+
+### 사용자 Review 선택부터 GIWA testnet까지
+
+Review가 필요한 고정 거래에 사용자가 `OWN_ACCOUNT`를 선택한 뒤, Tax Engine 적용과
+ReviewRoom proof-vector 및 실제 GIWA Sepolia 트랜잭션까지 확인할 때는 별도의 opt-in
+시나리오를 실행한다.
+
+```bash
+DAEJANG_DB_DIR=../daejang-db-review-e2e \
+DAEJANG_REVIEWROOM_DIR=../daejang-reviewroom \
+DAEJANG_TAX_ENGINE_IMAGE=daejang-tax-engine:dev-e2e-runtime \
+DAEJANG_TAX_DEV_E2E_IMAGE=daejang-tax-engine:dev-e2e-fixture \
+DAEJANG_TAX_DEV_E2E_TAX_YEAR=2026 \
+make test-review-giwa
+```
+
+실행 전에 다음 값은 현재 shell 환경에 주입해야 한다. runner는 저장소의 환경 파일을
+읽지 않으며 secret 값을 출력하지 않는다.
+
+| 변수 | 용도 |
+| --- | --- |
+| `REVIEWROOM_INTERNAL_API_URL` | host에서 접근 가능한 ReviewRoom API origin |
+| `REVIEWROOM_APPLICATION_RECEIPT_TOKEN` | Tax Engine의 application receipt 전송 |
+| `REVIEWROOM_RESOLUTION_INGEST_TOKEN` | 중앙 DB resolution을 ReviewRoom으로 전달 |
+| `REVIEWROOM_PROOF_VECTOR_TOKEN` | status 및 proof-vector 검증 |
+| `REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP` | 로컬 HTTP API일 때만 `true` |
+| `DAEJANG_TAX_DEV_E2E_TAX_YEAR` | 검증할 제품 연도 (`2025`, `2026`, `2027`; 기본 `2025`) |
+
+ReviewRoom API와 anchor worker는 같은 ReviewRoom DB를 사용하며 GIWA Sepolia chain ID
+`91342`에 연결된 상태여야 한다. ReviewRoom checkout의 dependency도 미리 설치되어 있어야
+한다. runner는 해당 checkout을 수정하지 않고 delivery worker만 실행한다. API가
+loopback 주소라면 container에서 접근할 때 `host.docker.internal`로 자동 변환한다. host와
+container에서 서로 다른 API origin이 필요할 때만 `REVIEWROOM_DELIVERY_API_URL`로 host
+origin을 별도 지정한다.
+
+각 실행은 기본적으로 새로운 ID-safe fixture suffix를 생성하므로 persistent ReviewRoom
+DB에 이전 proof가 있어도 새 resolution event와 새 트랜잭션을 만든다. 재현 가능한 ID가
+필요하면 `DAEJANG_E2E_SUFFIX`를 소문자 영숫자와 하이픈으로 직접 지정할 수 있다. Tax
+fixture는 실제 durable ID namespace에 선택 연도를 추가하므로 같은 사용자 suffix를 서로
+다른 연도에 재사용해도 충돌하지 않는다. 같은 연도와 suffix를 다시 사용하면 ReviewRoom의
+idempotent replay가 정상 동작해 새 트랜잭션은 생기지 않는다.
+
+성공하면 공개 가능한 tax year, chain ID, proof ID, transaction hash만
+`GIWA_REVIEW_E2E_RESULT` 한 줄로 출력한다. resolution event나 내부 digest, fingerprint,
+token은 출력하지 않는다.
+
 DB와 schema는 Mac Studio의 공용 개발 경로를 기본으로 사용한다.
 
 ```bash
@@ -45,6 +101,11 @@ DAEJANG_DB_DIR=/다른/daejang-db SCHEMA_DIR=/다른/schema make test
 docker login backwardlabss-mac-studio.tail344fa1.ts.net
 gh auth status
 ```
+
+Registry 자격증명이 없는 격리 환경에서는 Posting과 Tax runtime/fixture image를 로컬에서
+먼저 만든 뒤 `DAEJANG_E2E_SKIP_BASELINE_PULL=1`로 실행할 수 있다. 이 플래그는 Daejang의
+Web/API·Engine·PDF parser 후보 빌드와 제품 E2E를 그대로 수행하며, compose에서 사용하지
+않는 Registry 기준 image pull만 생략한다.
 
 DB 초기화·검증 SQL은 host 경로를 container에 bind mount하지 않고 표준입력으로
 PostgreSQL에 전달한다. 따라서 개인 worktree가 `/Users/<사용자>/code` 아래에 있어도
@@ -198,10 +259,11 @@ flowchart LR
     R --> A
 ```
 
-환경을 올릴 때 테스트 계정에는 2025년 Upbit BTC 매수 한 건이 고정 fixture로 들어간다.
+환경을 올릴 때 테스트 계정에는 선택한 연도의 Upbit BTC 매수 한 건이 고정 fixture로 들어간다.
 이 거래는 단순 화면 샘플이 아니라 Source publication부터 Posting, Ledger publication,
-Tax Engine, ReportModel까지 실제 runtime이 처리한다. 브라우저에서 조회 기간을 2025년으로
-선택하면 장부와 보고서 결과를 확인할 수 있다. 이후 화면에서 추가한 PDF도 같은 artifact
+Tax Engine, ReportModel까지 실제 runtime이 처리한다. 기본값은 `2025`이며
+`DAEJANG_TAX_DEV_E2E_TAX_YEAR`로 `2025`, `2026`, `2027`을 선택한다. 브라우저에서도 같은
+연도를 선택하면 장부와 보고서 결과를 확인할 수 있다. 이후 화면에서 추가한 PDF도 같은 artifact
 volume과 Posting worker를 사용한다. 다만 고정 Tax profile에 없는 계정·자산은 Tax가
 추측하지 않고 명시적으로 실패하므로, 임의 PDF의 세금 결과까지 검증하려면 그 재현 입력에
 맞는 profile·asset mapping fixture를 별도로 추가해야 한다.

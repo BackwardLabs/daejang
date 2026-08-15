@@ -87,8 +87,8 @@ services:
       DAEJANG_TAX_DEV_E2E_STATE_DIR: /e2e
       DAEJANG_TAX_DEV_E2E_ARTIFACT_ROOT: /var/lib/daejang/artifacts
       DAEJANG_TAX_DEV_E2E_ARTIFACT_TEMP: /var/lib/daejang/artifacts.tmp
-      DAEJANG_TAX_DEV_E2E_SUFFIX: web-account-2025
-      DAEJANG_TAX_DEV_E2E_TAX_YEAR: "2025"
+      DAEJANG_TAX_DEV_E2E_SUFFIX: ${DAEJANG_E2E_SUFFIX}
+      DAEJANG_TAX_DEV_E2E_TAX_YEAR: ${DAEJANG_TAX_DEV_E2E_TAX_YEAR:-2025}
       DAEJANG_E2E_SUBJECT_ID: ${DAEJANG_E2E_SUBJECT_ID}
     extra_hosts:
       - host.docker.internal:host-gateway
@@ -141,13 +141,17 @@ services:
       DAEJANG_TAXD_SCHEMA_COMMIT: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
       DAEJANG_TAXD_JIT_COMMIT: cccccccccccccccccccccccccccccccccccccccc
       DAEJANG_TAXD_DB_COMMIT: dddddddddddddddddddddddddddddddddddddddd
-      DAEJANG_TAXD_DB_MIGRATION_VERSION: "77"
+      DAEJANG_TAXD_DB_MIGRATION_VERSION: ${DAEJANG_TAXD_DB_MIGRATION_VERSION}
       DAEJANG_TAXD_TAX_COMMIT: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
       DAEJANG_TAXD_CATALOG_SHA256: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
       DAEJANG_TAXD_HEALTH_ADDRESS: 0.0.0.0:8080
       DAEJANG_TAXD_POLL_INTERVAL: 100ms
       DAEJANG_TAXD_LEASE_DURATION: 30s
       DAEJANG_TAXD_RETRY_DELAY: 100ms
+      REVIEWROOM_INTERNAL_API_URL: ${REVIEWROOM_INTERNAL_API_URL}
+      REVIEWROOM_APPLICATION_RECEIPT_TOKEN: ${REVIEWROOM_APPLICATION_RECEIPT_TOKEN}
+      REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT: ${REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT}
+      REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP: ${REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP}
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
@@ -183,13 +187,18 @@ services:
       - '@daejang/web-api'
       - --
       - src/sources/source-pipeline.e2e.test.ts
+      - src/reviews/review-resolution.e2e.test.ts
     environment:
       RUN_SOURCE_PIPELINE_E2E_TESTS: "1"
+      RUN_REVIEW_RESOLUTION_E2E_TESTS: ${RUN_REVIEW_RESOLUTION_E2E_TESTS}
       ALLOW_DOCKER_HOST_E2E: "1"
       DAEJANG_E2E_SUBJECT_ID: ${DAEJANG_E2E_SUBJECT_ID}
+      DAEJANG_TAX_DEV_E2E_TAX_YEAR: ${DAEJANG_TAX_DEV_E2E_TAX_YEAR:-2025}
       TEST_DATABASE_URL: ${OWNER_DATABASE_URL}
       TEST_WEB_DATABASE_URL: ${WEB_DATABASE_URL}
       TEST_ENGINE_GRPC_TARGET: unix:/run/daejang/engine/engine.sock
+      REVIEWROOM_INTERNAL_API_URL: ${REVIEWROOM_INTERNAL_API_URL}
+      REVIEWROOM_PROOF_VECTOR_TOKEN: ${REVIEWROOM_PROOF_VECTOR_TOKEN}
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
