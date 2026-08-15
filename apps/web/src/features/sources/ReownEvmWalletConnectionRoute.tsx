@@ -280,16 +280,40 @@ function ConfiguredReownRoute({
     async ({ provider, signal }) => {
       try {
         duplicateWalletAttempt.current = false
-        const currentConnection = readCurrentEvmConnection()
-        if (
-          currentConnection &&
-          await isActiveWalletSource(currentConnection.address, signal)
-        ) {
-          duplicateWalletAttempt.current = true
-          return {
-            error: { code: 'SOURCE_ALREADY_CONNECTED' },
-            ok: false,
+        const finishConnection = async (connection: {
+          address: string
+          chainId: string
+        }): Promise<ConnectWalletResult> => {
+          if (await isActiveWalletSource(connection.address, signal)) {
+            duplicateWalletAttempt.current = true
+            return {
+              error: { code: 'SOURCE_ALREADY_CONNECTED' },
+              ok: false,
+            }
           }
+
+          const network = getEvmWalletNetwork(connection.chainId)
+          if (!network) {
+            return {
+              error: { code: 'CONNECTION_FAILED' },
+              ok: false,
+            }
+          }
+
+          return {
+            ok: true,
+            wallet: {
+              address: connection.address,
+              chainId: connection.chainId,
+              network: network.label,
+              provider,
+            },
+          }
+        }
+
+        const currentConnection = readCurrentEvmConnection()
+        if (currentConnection) {
+          return finishConnection(currentConnection)
         }
 
         const directWalletName = getDirectWalletName(provider)
@@ -311,31 +335,7 @@ function ConfiguredReownRoute({
           )
         }
 
-        if (await isActiveWalletSource(connection.address, signal)) {
-          duplicateWalletAttempt.current = true
-          return {
-            error: { code: 'SOURCE_ALREADY_CONNECTED' },
-            ok: false,
-          }
-        }
-
-        const network = getEvmWalletNetwork(connection.chainId)
-        if (!network) {
-          return {
-            error: { code: 'CONNECTION_FAILED' },
-            ok: false,
-          }
-        }
-
-        return {
-          ok: true,
-          wallet: {
-            address: connection.address,
-            chainId: connection.chainId,
-            network: network.label,
-            provider,
-          },
-        }
+        return finishConnection(connection)
       } catch (error) {
         if (signal.aborted) {
           throw error

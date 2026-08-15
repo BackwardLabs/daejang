@@ -103,7 +103,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     })
   })
 
-  it('does not accept a persisted CAIP address before this attempt selects a wallet', async () => {
+  it('accepts the persisted Reown account after an explicit connect action', async () => {
     const onLaunchFailed = vi.fn()
 
     render(
@@ -114,21 +114,15 @@ describe('ReownEvmWalletConnectionRoute', () => {
     )
     fireEvent.click(screen.getByTestId('connect-wallet'))
 
-    await act(async () => Promise.resolve())
-    expect(mocks.listSources).toHaveBeenCalledTimes(1)
-    expect(onLaunchFailed).not.toHaveBeenCalled()
-
-    await act(async () => {
-      selectCurrentWallet()
-    })
-
     await waitFor(() => {
-      expect(mocks.listSources).toHaveBeenCalledTimes(2)
+      expect(mocks.listSources).toHaveBeenCalledTimes(1)
     })
+    expect(mocks.open).not.toHaveBeenCalled()
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
 
   it('treats closing the picker without a new selection as cancellation', async () => {
+    mocks.caipAddress = undefined
     const onLaunchFailed = vi.fn()
 
     render(
@@ -153,7 +147,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
         }),
       )
     })
-    expect(mocks.listSources).toHaveBeenCalledTimes(1)
+    expect(mocks.listSources).not.toHaveBeenCalled()
   })
 
   it('waits for the selected wallet address to settle after the modal closes', async () => {
@@ -250,6 +244,11 @@ describe('ReownEvmWalletConnectionRoute', () => {
   })
 
   it('keeps the direct wallet happy path after an explicit connect click', async () => {
+    const connectedAddress = mocks.caipAddress
+    mocks.caipAddress = undefined
+    mocks.connect.mockImplementation(async () => {
+      mocks.caipAddress = connectedAddress
+    })
     mocks.provider = 'metamask'
     const onLaunchFailed = vi.fn()
 
@@ -263,7 +262,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
 
     await waitFor(() => {
       expect(mocks.connect).toHaveBeenCalledWith('metamask')
-      expect(mocks.listSources).toHaveBeenCalledTimes(2)
+      expect(mocks.listSources).toHaveBeenCalledTimes(1)
     })
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
