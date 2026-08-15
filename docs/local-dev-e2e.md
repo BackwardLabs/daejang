@@ -134,6 +134,10 @@ ssh -N -T \
 터널이 열린 동안 개인 노트북 브라우저에서
 [http://localhost:15173](http://localhost:15173)에 접속한다. Compose port는 Mac
 Studio의 `127.0.0.1`에만 bind되므로 Tailscale이나 공유기에서 별도 포트를 열지 않는다.
+인앱 브라우저처럼 임의의 `localhost` port로 중계되는 경우, Web API는
+`NODE_ENV=development`일 때만 같은 protocol과 hostname의 port 차이를 허용한다.
+예를 들어 `http://localhost:60101`은 허용하지만 `http://127.0.0.1:60101`이나
+외부 hostname은 허용하지 않는다. test와 production 환경은 port까지 정확히 일치해야 한다.
 
 ```mermaid
 flowchart LR
