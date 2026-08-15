@@ -154,7 +154,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     expect(mocks.listSources).not.toHaveBeenCalled()
   })
 
-  it('waits for the selected wallet address to settle after the modal closes', async () => {
+  it('uses allAccounts when Reown discards its caipAddress cache', async () => {
     mocks.caipAddress = undefined
     const onLaunchFailed = vi.fn()
 
@@ -177,9 +177,17 @@ describe('ReownEvmWalletConnectionRoute', () => {
 
     await act(async () => {
       mocks.accountCallback?.({
-        caipAddress:
-          'eip155:1:0x1234567890abcdef1234567890abcdef12345678',
-        isConnected: true,
+        allAccounts: [
+          {
+            address: '0x1234567890abcdef1234567890abcdef12345678',
+            caipAddress:
+              'eip155:1:0x1234567890abcdef1234567890abcdef12345678',
+            chainId: 1,
+            namespace: 'eip155',
+          },
+        ],
+        caipAddress: undefined,
+        isConnected: false,
       })
     })
 

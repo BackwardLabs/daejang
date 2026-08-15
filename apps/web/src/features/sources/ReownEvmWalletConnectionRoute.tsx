@@ -73,8 +73,49 @@ function parseEvmConnection(caipAddress: string | undefined) {
   }
 }
 
+type ReownAccountSnapshot = {
+  address?: string
+  allAccounts?: Array<{
+    address?: string
+    caipAddress?: string
+    chainId?: string | number
+    namespace?: string
+  }>
+  caipAddress?: string
+}
+
+function parseReownAccountConnection(account: ReownAccountSnapshot | undefined) {
+  const directConnection = parseEvmConnection(account?.caipAddress)
+  if (directConnection) return directConnection
+
+  const evmAccount = account?.allAccounts?.find(
+    (candidate) => candidate.namespace === 'eip155',
+  )
+  const listedConnection = parseEvmConnection(evmAccount?.caipAddress)
+  if (listedConnection) return listedConnection
+
+  if (evmAccount?.address && evmAccount.chainId !== undefined) {
+    return {
+      address: evmAccount.address,
+      chainId: toEvmCaipChainId(evmAccount.chainId),
+    }
+  }
+
+  const address = evmAccount?.address ?? account?.address
+  const activeChainId = reownAppKit?.getCaipNetwork?.('eip155')?.id
+  if (!address || activeChainId === undefined) return null
+
+  return {
+    address,
+    chainId: toEvmCaipChainId(activeChainId),
+  }
+}
+
 function readCurrentEvmConnection() {
-  return parseEvmConnection(reownAppKit?.getCaipAddress('eip155'))
+  return (
+    parseEvmConnection(reownAppKit?.getCaipAddress('eip155')) ??
+    parseReownAccountConnection(reownAppKit?.getAccount?.('eip155'))
+  )
 }
 
 function waitForExplicitEvmConnection(
@@ -120,9 +161,11 @@ function waitForExplicitEvmConnection(
     })
 
     unsubscribeAccount = reownAppKit?.subscribeAccount((account) => {
-      if (!modalOpened || !account.isConnected) return
+      if (!modalOpened) return
+      const connection = parseReownAccountConnection(account)
+      if (!account.isConnected && !connection) return
       connectionExpected = true
-      if (resolveConnection(parseEvmConnection(account.caipAddress))) return
+      if (resolveConnection(connection)) return
       resolveCurrentConnection()
     }, 'eip155')
 
