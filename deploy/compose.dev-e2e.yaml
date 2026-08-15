@@ -1,0 +1,243 @@
+name: daejang-dev-e2e
+
+services:
+  socket-init:
+    image: ${DAEJANG_PDF_PARSER_CANDIDATE_IMAGE}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 65532:65532 /run/daejang/pdf-parser /run/daejang/engine"]
+    network_mode: none
+    volumes:
+      - pdf_parser_socket:/run/daejang/pdf-parser
+      - engine_socket:/run/daejang/engine
+
+  pdf-parser:
+    image: ${DAEJANG_PDF_PARSER_CANDIDATE_IMAGE}
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 8
+    volumes:
+      - pdf_parser_socket:/run/daejang/pdf-parser
+    depends_on:
+      socket-init: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        - CMD
+        - /opt/daejang-pdf-parser/bin/python
+        - -I
+        - -c
+        - "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect('/run/daejang/pdf-parser/parser.sock'); s.sendall(b'DJPING01'); s.shutdown(socket.SHUT_WR); r=s.makefile('rb'); assert r.read(8)==b'DJPONG01' and r.read(1)==b''"
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  engine:
+    image: ${DAEJANG_ENGINE_CANDIDATE_IMAGE}
+    environment:
+      ENGINE_LISTEN: unix:///run/daejang/engine/engine.sock
+      DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
+      DAEJANG_SOURCE_ARTIFACT_DATABASE_URL: ${SOURCE_ARTIFACT_DATABASE_URL}
+      DAEJANG_SOURCE_ARTIFACT_ROOT: /var/lib/daejang/artifacts
+      DAEJANG_SOURCE_ARTIFACT_TEMP: /var/lib/daejang/artifacts.tmp
+      DAEJANG_QUERY_DATABASE_URL: ${QUERY_DATABASE_URL}
+      DAEJANG_REPORT_DATABASE_URL: ${REPORT_DATABASE_URL}
+      DAEJANG_REVIEW_DATABASE_URL: ${EVENT_DATABASE_URL}
+      DAEJANG_REVIEW_ARTIFACT_DATABASE_URL: ${SOURCE_ARTIFACT_DATABASE_URL}
+      DAEJANG_REVIEW_ARTIFACT_ROOT: /var/lib/daejang/artifacts
+      DAEJANG_REVIEW_ARTIFACT_TEMP: /var/lib/daejang/artifacts.tmp
+      DAEJANG_TAX_ARTIFACT_DATABASE_URL: ${TAX_DATABASE_URL}
+      DAEJANG_TAX_ARTIFACT_ROOT: /var/lib/daejang/artifacts
+      DAEJANG_TAX_ARTIFACT_TEMP: /var/lib/daejang/artifacts.tmp
+      ENGINE_PDF_PARSER_SOCKET_PATH: /run/daejang/pdf-parser/parser.sock
+      ENGINE_PDF_PARSER_TIMEOUT: 20s
+      ENGINE_PDF_IMPORT_LEASE_DURATION: 2m
+      PRIVATE_OBJECT_ENCRYPTION_KEY: CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: dev-e2e-only
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - pdf_parser_socket:/run/daejang/pdf-parser:ro
+      - engine_socket:/run/daejang/engine
+      - pipeline_artifacts:/var/lib/daejang
+    depends_on:
+      pdf-parser: { condition: service_healthy }
+
+  pipeline-permissions:
+    image: alpine:3.23
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["chown -R 65532:65532 /e2e /var/lib/daejang"]
+    network_mode: none
+    volumes:
+      - pipeline_state:/e2e
+      - pipeline_artifacts:/var/lib/daejang
+
+  pipeline-fixture:
+    image: ${DAEJANG_TAX_DEV_E2E_IMAGE}
+    environment:
+      DAEJANG_TAX_DEV_E2E_MODE: prepare
+      DAEJANG_TAX_DEV_E2E_DATABASE_URL: ${OWNER_DATABASE_URL}
+      DAEJANG_TAX_DEV_E2E_STATE_DIR: /e2e
+      DAEJANG_TAX_DEV_E2E_ARTIFACT_ROOT: /var/lib/daejang/artifacts
+      DAEJANG_TAX_DEV_E2E_ARTIFACT_TEMP: /var/lib/daejang/artifacts.tmp
+      DAEJANG_TAX_DEV_E2E_SUFFIX: web-account-2025
+      DAEJANG_TAX_DEV_E2E_TAX_YEAR: "2025"
+      DAEJANG_E2E_SUBJECT_ID: ${DAEJANG_E2E_SUBJECT_ID}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - pipeline_state:/e2e
+      - pipeline_artifacts:/var/lib/daejang
+
+  posting-worker:
+    image: ${DAEJANG_POSTING_IMAGE}
+    command:
+      - --artifact-root
+      - /var/lib/daejang/artifacts
+      - --artifact-temp
+      - /var/lib/daejang/artifacts.tmp
+      - --service-root
+      - /app
+      - --claim-policy
+      - /e2e/source-publication-claim-policy.json
+      - --poll-interval
+      - 250ms
+    environment:
+      DAEJANG_POSTING_DATABASE_URL: ${EVENT_DATABASE_URL}
+      DAEJANG_POSTING_ARTIFACT_DATABASE_URL: ${SOURCE_ARTIFACT_DATABASE_URL}
+      DAEJANG_PUBLICATION_POLICY_TRUST_KEY: ${PUBLICATION_TRUST_KEY}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - pipeline_state:/e2e:ro
+      - pipeline_artifacts:/var/lib/daejang
+
+  tax-engine:
+    image: ${DAEJANG_TAX_ENGINE_IMAGE}
+    environment:
+      DAEJANG_DATABASE_URL: ${TAX_DATABASE_URL}
+      DAEJANG_ARTIFACT_ROOT: /var/lib/daejang/artifacts
+      DAEJANG_ARTIFACT_TEMP: /var/lib/daejang/artifacts.tmp
+      DAEJANG_TAXD_INPUT_MODE: LEDGER_PUBLICATION
+      DAEJANG_TAXD_POLICY_FILE: /e2e/interpretation-policy.json
+      DAEJANG_TAXD_OWNERSHIP_FILE: /e2e/ownership.json
+      DAEJANG_TAXD_ACTIVATION_SET_FILE: /e2e/activation-set.json
+      DAEJANG_TAXD_ACTIVATION_SET_SHA256: ${ACTIVATION_SHA256}
+      DAEJANG_TAXD_DOWNSTREAM_PROFILE_FILE: /e2e/downstream-profiles.json
+      DAEJANG_TAXD_TAX_POLICY_FILE: /e2e/tax-policy.json
+      DAEJANG_TAXD_QUOTE_SNAPSHOT_FILE: /e2e/quotes.json
+      # taxd의 공통 설정이 요구하는 32-byte 키다. LEDGER_PUBLICATION dev E2E에서는
+      # legacy evidence claim controller를 사용하지 않으므로 테스트 전용 고정값을 쓴다.
+      DAEJANG_TAXD_PUBLICATION_POLICY_TRUST_KEY: "dev-e2e-tax-publication-key-0000"
+      DAEJANG_TAXD_CANDIDATE_DIGEST: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      DAEJANG_TAXD_PRODUCER_VERSION: dev-e2e
+      DAEJANG_TAXD_SCHEMA_COMMIT: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      DAEJANG_TAXD_JIT_COMMIT: cccccccccccccccccccccccccccccccccccccccc
+      DAEJANG_TAXD_DB_COMMIT: dddddddddddddddddddddddddddddddddddddddd
+      DAEJANG_TAXD_DB_MIGRATION_VERSION: "77"
+      DAEJANG_TAXD_TAX_COMMIT: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+      DAEJANG_TAXD_CATALOG_SHA256: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+      DAEJANG_TAXD_HEALTH_ADDRESS: 0.0.0.0:8080
+      DAEJANG_TAXD_POLL_INTERVAL: 100ms
+      DAEJANG_TAXD_LEASE_DURATION: 30s
+      DAEJANG_TAXD_RETRY_DELAY: 100ms
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - pipeline_state:/e2e:ro
+      - pipeline_artifacts:/var/lib/daejang
+    healthcheck:
+      test: ["CMD", "/taxd", "healthcheck"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  pipeline-verify:
+    image: ${DAEJANG_TAX_DEV_E2E_IMAGE}
+    environment:
+      DAEJANG_TAX_DEV_E2E_MODE: verify
+      DAEJANG_TAX_DEV_E2E_DATABASE_URL: ${TAX_DATABASE_URL}
+      DAEJANG_TAX_DEV_E2E_STATE_DIR: /e2e
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - pipeline_state:/e2e:ro
+    depends_on:
+      tax-engine: { condition: service_healthy }
+
+  web-api-tests:
+    image: ${DAEJANG_WEB_API_TEST_IMAGE}
+    working_dir: /app
+    command:
+      - npm
+      - run
+      - test
+      - --workspace
+      - '@daejang/web-api'
+      - --
+      - src/sources/source-pipeline.e2e.test.ts
+    environment:
+      RUN_SOURCE_PIPELINE_E2E_TESTS: "1"
+      ALLOW_DOCKER_HOST_E2E: "1"
+      DAEJANG_E2E_SUBJECT_ID: ${DAEJANG_E2E_SUBJECT_ID}
+      TEST_DATABASE_URL: ${OWNER_DATABASE_URL}
+      TEST_WEB_DATABASE_URL: ${WEB_DATABASE_URL}
+      TEST_ENGINE_GRPC_TARGET: unix:/run/daejang/engine/engine.sock
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - engine_socket:/run/daejang/engine:ro
+    depends_on:
+      engine: { condition: service_started }
+
+  web-api:
+    image: ${DAEJANG_WEB_API_CANDIDATE_IMAGE}
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3000
+      PUBLIC_ORIGIN: http://localhost:${DAEJANG_DEV_E2E_WEB_PORT}
+      DATABASE_URL: ${WEB_DATABASE_URL}
+      RATE_LIMIT_HMAC_SECRET: dev-e2e-rate-limit-secret-only
+      SIGNUP_ENABLED: "true"
+      EMAIL_AUTH_ENABLED: "true"
+      EMAIL_VERIFICATION_DEV_CODE: "000000"
+      REPORTS_UI_MODE: product
+      UPBIT_PDF_IMPORT_ENABLED: "true"
+      ENGINE_GRPC_INSECURE_TARGET: unix:/run/daejang/engine/engine.sock
+      PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+      PRIVATE_OBJECT_ENCRYPTION_KEY: CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: dev-e2e-only
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    volumes:
+      - engine_socket:/run/daejang/engine:ro
+      - private_objects:/var/lib/daejang/private
+    depends_on:
+      engine: { condition: service_started }
+
+  web-ui:
+    image: ${DAEJANG_WEB_UI_CANDIDATE_IMAGE}
+    environment:
+      VITE_API_PROXY_TARGET: http://web-api:3000
+    ports:
+      - 127.0.0.1:${DAEJANG_DEV_E2E_WEB_PORT}:5173
+    depends_on:
+      web-api: { condition: service_healthy }
+
+volumes:
+  pdf_parser_socket: {}
+  engine_socket: {}
+  private_objects: {}
+  pipeline_artifacts: {}
+  pipeline_state: {}

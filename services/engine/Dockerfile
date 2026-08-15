@@ -34,7 +34,7 @@ RUN groupadd --gid 65532 nonroot \
  && useradd --uid 65532 --gid 65532 --no-create-home --shell /usr/sbin/nologin nonroot \
  && install -d -o 65532 -g 65532 -m 0700 /run/daejang/pdf-parser
 COPY --from=parser-deps /opt/daejang-pdf-parser /opt/daejang-pdf-parser
-COPY services/engine/python/pdf_parser_server.py /opt/daejang-engine/python/pdf_parser_server.py
+COPY --chown=65532:65532 --chmod=0555 services/engine/python/pdf_parser_server.py /opt/daejang-engine/python/pdf_parser_server.py
 USER nonroot:nonroot
 ENTRYPOINT ["/opt/daejang-pdf-parser/bin/python", "-I", "-B", "/opt/daejang-engine/python/pdf_parser_server.py"]
 CMD ["--socket", "/run/daejang/pdf-parser/parser.sock", "--request-timeout-seconds", "25"]

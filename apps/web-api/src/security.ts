@@ -13,13 +13,37 @@ const securityHeaders = {
   'x-frame-options': 'DENY',
 } as const
 
+export const isAllowedRequestOrigin = (
+  requestOrigin: string | undefined,
+  config: AppConfig,
+) => {
+  if (requestOrigin === config.publicOrigin) {
+    return true
+  }
+  if (config.runtimeMode !== 'development' || requestOrigin === undefined) {
+    return false
+  }
+
+  try {
+    const requestUrl = new URL(requestOrigin)
+    const publicUrl = new URL(config.publicOrigin)
+    return (
+      requestUrl.origin === requestOrigin &&
+      requestUrl.protocol === publicUrl.protocol &&
+      requestUrl.hostname === publicUrl.hostname
+    )
+  } catch {
+    return false
+  }
+}
+
 export const registerSecurityPolicy = async (app: FastifyInstance, config: AppConfig) => {
   app.addHook('onRequest', async (request) => {
     if (!request.url.startsWith('/api/') || !unsafeMethods.has(request.method)) {
       return
     }
 
-    if (request.headers.origin !== config.publicOrigin) {
+    if (!isAllowedRequestOrigin(request.headers.origin, config)) {
       throw invalidOrigin()
     }
 

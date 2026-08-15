@@ -22,6 +22,7 @@ describe('web api configuration', () => {
         'SIGNUP_SESSION_TTL_SECONDS',
         'SIGNUP_ENABLED',
         'EMAIL_AUTH_ENABLED',
+        'EMAIL_VERIFICATION_DEV_CODE',
         'RESEND_API_KEY',
         'EMAIL_FROM',
         'EMAIL_VERIFICATION_HMAC_SECRET',
@@ -534,6 +535,42 @@ describe('web api configuration', () => {
         methods: { email: true, oauthProviders: [] },
       },
     })
+  })
+
+  it('allows a fixed email verification code only in development', () => {
+    const development = loadConfig({
+      NODE_ENV: 'development',
+      SIGNUP_ENABLED: 'true',
+      EMAIL_AUTH_ENABLED: 'true',
+      EMAIL_VERIFICATION_DEV_CODE: '000000',
+    })
+    expect(development.emailAuth).toMatchObject({
+      enabled: true,
+      developmentVerificationCode: '000000',
+      resendApiKey: undefined,
+      from: undefined,
+    })
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        EMAIL_AUTH_ENABLED: 'true',
+        EMAIL_VERIFICATION_DEV_CODE: '000000',
+      }),
+    ).toThrow('allowed only in development')
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        EMAIL_AUTH_ENABLED: 'true',
+        EMAIL_VERIFICATION_DEV_CODE: '000000',
+      }),
+    ).toThrow('allowed only in development')
+    expect(() =>
+      loadConfig({
+        EMAIL_AUTH_ENABLED: 'true',
+        EMAIL_VERIFICATION_DEV_CODE: '12345',
+      }),
+    ).toThrow('exactly six digits')
   })
 
   it('allows explicit production signup without an external identity provider', () => {

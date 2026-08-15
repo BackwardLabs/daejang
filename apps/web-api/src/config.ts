@@ -104,6 +104,7 @@ export type EmailAuthConfig = {
   enabled: boolean
   resendApiKey: string | undefined
   from: string | undefined
+  developmentVerificationCode?: string
   verificationHmacSecret: string
   verificationTtlSeconds: number
   verificationTokenTtlSeconds: number
@@ -683,9 +684,26 @@ const loadOAuthConfig = (
 
 const loadEmailAuthConfig = (
   environment: NodeJS.ProcessEnv,
-  production: boolean,
+  runtimeMode: AppConfig['runtimeMode'],
 ): EmailAuthConfig => {
+  const production = runtimeMode === 'production'
   const enabled = parseBoolean(environment.EMAIL_AUTH_ENABLED, false, 'EMAIL_AUTH_ENABLED')
+  const developmentVerificationCode = environment.EMAIL_VERIFICATION_DEV_CODE
+  if (
+    developmentVerificationCode !== undefined &&
+    runtimeMode !== 'development'
+  ) {
+    throw new Error('EMAIL_VERIFICATION_DEV_CODE is allowed only in development')
+  }
+  if (
+    developmentVerificationCode !== undefined &&
+    !/^[0-9]{6}$/u.test(developmentVerificationCode)
+  ) {
+    throw new Error('EMAIL_VERIFICATION_DEV_CODE must contain exactly six digits')
+  }
+  if (developmentVerificationCode !== undefined && !enabled) {
+    throw new Error('EMAIL_VERIFICATION_DEV_CODE requires EMAIL_AUTH_ENABLED=true')
+  }
   const verificationHmacSecret =
     environment.EMAIL_VERIFICATION_HMAC_SECRET ??
     'development-only-email-verification-secret'
@@ -698,10 +716,10 @@ const loadEmailAuthConfig = (
       'EMAIL_VERIFICATION_HMAC_SECRET must contain at least 32 bytes in production',
     )
   }
-  if (enabled && !environment.RESEND_API_KEY) {
+  if (enabled && developmentVerificationCode === undefined && !environment.RESEND_API_KEY) {
     throw new Error('RESEND_API_KEY is required when email authentication is enabled')
   }
-  if (enabled && !environment.EMAIL_FROM) {
+  if (enabled && developmentVerificationCode === undefined && !environment.EMAIL_FROM) {
     throw new Error('EMAIL_FROM is required when email authentication is enabled')
   }
 
@@ -709,6 +727,7 @@ const loadEmailAuthConfig = (
     enabled,
     resendApiKey: environment.RESEND_API_KEY,
     from: environment.EMAIL_FROM,
+    ...(developmentVerificationCode ? { developmentVerificationCode } : {}),
     verificationHmacSecret,
     verificationTtlSeconds: parsePositiveInteger(
       environment.EMAIL_VERIFICATION_TTL_SECONDS,
@@ -845,7 +864,10 @@ export const loadConfig = (environment: NodeJS.ProcessEnv = process.env): AppCon
     )
   }
   const oauth = loadOAuthConfig(environment, production)
-  const emailAuth = loadEmailAuthConfig(environment, production)
+  const emailAuth = loadEmailAuthConfig(
+    environment,
+    runtimeMode as AppConfig['runtimeMode'],
+  )
   const reportPayments = loadReportPaymentConfig(environment, production)
   const reportAttestationDeployment =
     loadReportAttestationDeploymentConfig(environment, production)

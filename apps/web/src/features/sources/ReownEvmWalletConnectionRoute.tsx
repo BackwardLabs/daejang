@@ -66,8 +66,7 @@ function isUserRejection(error: unknown) {
   )
 }
 
-function readCurrentEvmConnection() {
-  const caipAddress = reownAppKit?.getCaipAddress('eip155')
+function parseEvmConnection(caipAddress: string | undefined) {
   if (!caipAddress) return null
 
   const [, chainId, address] = caipAddress.split(':')
@@ -79,72 +78,191 @@ function readCurrentEvmConnection() {
   }
 }
 
+type ReownAccountSnapshot = {
+  address?: string
+  allAccounts?: Array<{
+    address?: string
+    caipAddress?: string
+    chainId?: string | number
+    namespace?: string
+  }>
+  caipAddress?: string
+  isConnected?: boolean
+}
+
+function parseReownAccountConnection(account: ReownAccountSnapshot | undefined) {
+  if (!account?.isConnected) return null
+
+  const directConnection = parseEvmConnection(account.caipAddress)
+  if (directConnection) return directConnection
+
+  const evmAccount = account.allAccounts?.find(
+    (candidate) => candidate.namespace === 'eip155',
+  )
+  const listedConnection = parseEvmConnection(evmAccount?.caipAddress)
+  if (listedConnection) return listedConnection
+
+  if (evmAccount?.address && evmAccount.chainId !== undefined) {
+    return {
+      address: evmAccount.address,
+      chainId: toEvmCaipChainId(evmAccount.chainId),
+    }
+  }
+
+  const address = evmAccount?.address ?? account.address
+  const activeChainId = reownAppKit?.getCaipNetwork?.('eip155')?.id
+  if (!address || activeChainId === undefined) return null
+
+  return {
+    address,
+    chainId: toEvmCaipChainId(activeChainId),
+  }
+}
+
+function readCurrentEvmConnection() {
+  return (
+    parseEvmConnection(reownAppKit?.getCaipAddress('eip155')) ??
+    parseReownAccountConnection(reownAppKit?.getAccount?.('eip155'))
+  )
+}
+
+async function readProviderEvmConnection() {
+  const provider = reownAppKit?.getProvider<Provider>('eip155')
+  if (!provider) return null
+
+  const accounts = await provider.request({ method: 'eth_accounts' })
+  const chainId = await provider.request({ method: 'eth_chainId' })
+  const address = Array.isArray(accounts) ? accounts[0] : undefined
+  if (typeof address !== 'string' || address.length === 0) return null
+  if (typeof chainId !== 'string' && typeof chainId !== 'number') return null
+
+  const normalizedChainId =
+    typeof chainId === 'string' && /^0x[0-9a-f]+$/iu.test(chainId)
+      ? Number.parseInt(chainId.slice(2), 16)
+      : chainId
+
+  return {
+    address,
+    chainId: toEvmCaipChainId(normalizedChainId),
+  }
+}
+
 function waitForExplicitEvmConnection(
   signal: AbortSignal,
   openWalletPicker: () => Promise<unknown>,
+  requireDifferentConnection = false,
 ) {
   return new Promise<{ address: string; chainId: string }>((resolve, reject) => {
+    const initialConnection = readCurrentEvmConnection()
     const startedAt = Date.now()
     let intervalId = 0
-    let modalOpened = false
-    let unsubscribeEvents: (() => void) | undefined
+    let modalClosedAt: number | null = null
+    let modalWasOpen = false
+    let readingConnection = false
+    let settled = false
+    let unsubscribeAccount: (() => void) | undefined
     let unsubscribeState: (() => void) | undefined
-    let walletSelected = false
 
-    unsubscribeEvents = reownAppKit?.subscribeEvents((state) => {
-      if (state.data.event === 'SELECT_WALLET') {
-        walletSelected = true
-        return
+    function isInitialConnection(connection: {
+      address: string
+      chainId: string
+    }) {
+      return Boolean(
+        initialConnection &&
+        initialConnection.address.toLowerCase() ===
+          connection.address.toLowerCase() &&
+        initialConnection.chainId === connection.chainId,
+      )
+    }
+
+    function resolveConnection(
+      connection: { address: string; chainId: string } | null,
+      allowInitialConnection = false,
+    ) {
+      if (settled || !connection) return false
+      if (
+        isInitialConnection(connection) &&
+        (requireDifferentConnection || !allowInitialConnection)
+      ) {
+        return false
       }
 
-      if (!modalOpened || state.data.event !== 'CONNECT_SUCCESS') return
+      settled = true
+      finish()
+      resolve(connection)
+      return true
+    }
 
-      const connection = readCurrentEvmConnection()
-      if (connection) {
-        finish()
-        resolve(connection)
+    async function readConnection() {
+      if (settled || readingConnection) return
+      readingConnection = true
+      try {
+        if (resolveConnection(readCurrentEvmConnection())) return
+        resolveConnection(await readProviderEvmConnection(), true)
+      } catch {
+        // Reown may expose the provider one tick before it is ready to answer.
+      } finally {
+        readingConnection = false
       }
-    })
+    }
+
+    unsubscribeAccount = reownAppKit?.subscribeAccount((account) => {
+      resolveConnection(parseReownAccountConnection(account), true)
+    }, 'eip155')
 
     unsubscribeState = reownAppKit?.subscribeState((state) => {
       if (state.open) {
-        modalOpened = true
+        modalWasOpen = true
+        modalClosedAt = null
         return
       }
 
-      if (!modalOpened) return
-
-      if (walletSelected) {
-        const connection = readCurrentEvmConnection()
-        if (connection) {
-          finish()
-          resolve(connection)
-          return
-        }
-      }
-
-      finish()
-      reject({ code: 4001 })
+      if (!modalWasOpen) return
+      modalClosedAt = Date.now()
+      void readConnection()
     })
 
     function finish() {
       window.clearInterval(intervalId)
-      unsubscribeEvents?.()
+      unsubscribeAccount?.()
       unsubscribeState?.()
       signal.removeEventListener('abort', handleAbort)
     }
 
     function handleAbort() {
+      if (settled) return
+      settled = true
       finish()
       reject(new DOMException('Wallet connection aborted.', 'AbortError'))
     }
 
     intervalId = window.setInterval(() => {
+      const modalOpen = reownAppKit?.isOpen() ?? false
+      if (modalOpen) {
+        modalWasOpen = true
+        modalClosedAt = null
+      } else if (modalWasOpen && modalClosedAt === null) {
+        modalClosedAt = Date.now()
+      }
+
+      void readConnection()
+
+      if (
+        modalClosedAt !== null &&
+        Date.now() - modalClosedAt >= 750
+      ) {
+        settled = true
+        finish()
+        reject({ code: 4001 })
+        return
+      }
+
       if (Date.now() - startedAt >= 120_000) {
+        settled = true
         finish()
         reject(new Error('Wallet connection timed out.'))
       }
-    }, 250)
+    }, 100)
 
     signal.addEventListener('abort', handleAbort, { once: true })
     if (signal.aborted) {
@@ -152,10 +270,15 @@ function waitForExplicitEvmConnection(
       return
     }
 
-    void openWalletPicker().catch((error: unknown) => {
-      finish()
-      reject(error)
-    })
+    modalWasOpen = true
+    void openWalletPicker()
+      .then(() => readConnection())
+      .catch((error: unknown) => {
+        if (settled) return
+        settled = true
+        finish()
+        reject(error)
+      })
   })
 }
 
@@ -233,7 +356,7 @@ function ConfiguredReownRoute({
   onLaunchFailed,
   pendingView,
 }: ReownRouteProps) {
-  const { open } = useAppKit()
+  const { close, open } = useAppKit()
   const walletButton = useAppKitWallet({ namespace: 'eip155' })
   const [initialConnectionComplete, setInitialConnectionComplete] = useState(
     !launchImmediately,
@@ -247,16 +370,10 @@ function ConfiguredReownRoute({
       try {
         duplicateWalletAttempt.current = false
         const currentConnection = readCurrentEvmConnection()
-        if (
+        const requiresDifferentConnection = Boolean(
           currentConnection &&
-          await isActiveWalletSource(currentConnection.address, signal)
-        ) {
-          duplicateWalletAttempt.current = true
-          return {
-            error: { code: 'SOURCE_ALREADY_CONNECTED' },
-            ok: false,
-          }
-        }
+          await isActiveWalletSource(currentConnection.address, signal),
+        )
 
         const directWalletName = getDirectWalletName(provider)
         let connection: { address: string; chainId: string }
@@ -272,9 +389,12 @@ function ConfiguredReownRoute({
           }
           connection = directConnection
         } else {
-          connection = await waitForExplicitEvmConnection(signal, () =>
-            open({ namespace: 'eip155', view: 'Connect' }),
+          connection = await waitForExplicitEvmConnection(
+            signal,
+            () => open({ namespace: 'eip155', view: 'Connect' }),
+            requiresDifferentConnection,
           )
+          await close()
         }
 
         if (await isActiveWalletSource(connection.address, signal)) {
@@ -317,7 +437,7 @@ function ConfiguredReownRoute({
         }
       }
     },
-    [open, walletButton],
+    [close, open, walletButton],
   )
 
   const requestSignature = useCallback<RequestOwnershipSignature>(

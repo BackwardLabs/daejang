@@ -57,7 +57,9 @@
 ## 공통 컨테이너·release 경계
 
 - 공용 checkout이 아닌 자신의 clone에서만 변경·빌드·개발 실행을 합니다.
-- 서비스·worker·migration 영향이 있으면 PR 전 격리 Docker/DB 검증을 실행하거나, 실행할 수 없는 이유와 위험을 PR에 기록합니다.
+- 변경한 저장소의 PR 전 기본 검증은 해당 기능 worktree의 `make test`입니다. 서비스·worker·migration 영향이 있는데 실행할 수 없으면 이유와 위험을 PR에 기록합니다.
+- 지속형 Web UI 환경은 Daejang의 `make dev-e2e-up`이 소유합니다. Posting·Tax 후보를 연결할 때는 [공통 release image 흐름](docs/release-image-flow.md)의 image override 절차를 사용하고, 다른 저장소에 Compose를 복사하지 않습니다.
+- branch 후보 image는 로컬 검증에만 사용하고 Registry의 `latest`로 직접 push하지 않습니다.
 - 운영 DB·secret·Supervisor/launchd runtime은 검증에 사용하지 않으며, main 병합 뒤 검증한 image digest만 배포 후보로 취급합니다.
 
 ## GitHub 및 Linear
@@ -65,6 +67,10 @@
 - 브랜치와 PR 규칙은 [CONTRIBUTING.md](CONTRIBUTING.md)를 따릅니다.
 - Linear 이슈의 **Copy git branch name**으로 브랜치를 만들고 이슈 ID를 유지합니다.
 - 한 PR에는 하나의 논리적 변경만 담고, 관련 이슈와 다른 저장소의 의존 PR을 연결합니다.
+- PR 제목과 본문은 한국어로 작성하고 별도 요청이 없으면 Draft로 만듭니다.
+- PR 본문에는 재현한 상황, 실행한 명령과 결과, 로컬 후보 image ID, Registry 의존 image digest, 생략한 테스트, 관련 PR과 병합 순서를 기록합니다.
+- merge 뒤 image는 Mac Studio publisher가 main commit에서 자동 build·push합니다. 에이전트는 branch 후보를 Registry에 직접 push하거나 image 발행을 Production 배포 완료로 표현하지 않습니다.
+- 명시적인 요청 없이 PR을 merge하지 않습니다.
 - 커밋 메시지는 Conventional Commits 형식의 영어 명령문으로 작성합니다.
 
 ## 보안

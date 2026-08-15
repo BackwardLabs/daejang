@@ -104,6 +104,18 @@ export class DisabledVerificationEmailSender
   }
 }
 
+export class DevelopmentVerificationEmailSender
+  implements VerificationEmailSender
+{
+  constructor(private readonly expectedCode: string) {}
+
+  async sendVerificationCode(input: { code: string }) {
+    if (input.code !== this.expectedCode) {
+      throw emailDeliveryFailed()
+    }
+  }
+}
+
 const containsUnsafeEmailCharacter = (value: string) =>
   [...value].some((character) => {
     const codePoint = character.codePointAt(0) ?? 0
@@ -264,7 +276,9 @@ export class EmailAuthService {
       throw accountAlreadyExists()
     }
     const challengeId = randomUUID()
-    const code = randomInt(0, 1_000_000).toString().padStart(6, '0')
+    const code =
+      this.config.developmentVerificationCode ??
+      randomInt(0, 1_000_000).toString().padStart(6, '0')
     const expiresAt = new Date(
       now.getTime() + this.config.verificationTtlSeconds * 1_000,
     )

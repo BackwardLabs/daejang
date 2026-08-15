@@ -37,6 +37,28 @@ class FailOnceSender implements VerificationEmailSender {
 }
 
 describe('EmailAuthService', () => {
+  it('uses the configured fixed verification code for development signup', async () => {
+    const sender = new FailOnceSender()
+    const service = new EmailAuthService(
+      new MemoryAccountAuthStore(),
+      {
+        async sendVerificationCode(input) {
+          sender.codes.push(input.code)
+        },
+      },
+      { ...config, developmentVerificationCode: '000000' },
+      () => new Date('2027-07-20T00:00:00.000Z'),
+      undefined,
+      immediateResponseTiming,
+    )
+
+    await service.sendSignupCode('new-user@example.com')
+    expect(sender.codes).toEqual(['000000'])
+    await expect(
+      service.verifySignupCode('new-user@example.com', '000000'),
+    ).resolves.toMatchObject({ verificationToken: expect.any(String) })
+  })
+
   it('reports an existing account without creating or sending a signup code', async () => {
     class ExistingAccountStore extends MemoryAccountAuthStore {
       challengeCreationAttempted = false
