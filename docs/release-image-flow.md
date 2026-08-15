@@ -14,7 +14,10 @@
   └─ PR 직전 해당 저장소 make test
            │
            ▼
-      Draft PR · CI · 리뷰
+      Draft PR · 로컬 검증 · 리뷰
+           │
+           ▼  Ready for review에서 최종 CI 1회
+      GitHub 최종 검사
            │
            ▼
          main 병합
@@ -172,6 +175,16 @@ PR은 기본적으로 Draft로 만들고 제목과 본문을 한국어로 작성
 - UI 변경은 확인한 URL·시나리오와 필요한 화면을 함께 남긴다.
 - 동일 목적의 PR을 새로 만들지 않고 기존 최신 PR에 유효한 변경을 통합한다.
 - CI와 리뷰가 끝나도 명시적인 요청 없이 에이전트가 merge하지 않는다.
+
+### GitHub Actions 비용 경계
+
+- Draft PR에서는 GitHub-hosted runner를 실행하지 않는다. 개발 중 반복 검증은 해당 worktree의 `make test` 또는 `make check`로 수행한다.
+- 최종 로컬 검증과 PR 설명 정리가 끝나면 PR을 `Ready for review`로 바꾼다. 자동 CI가 있는 저장소는 이 시점에 최종 검사를 한 번 실행한다.
+- `Ready for review` 상태에서 새 commit을 push하면 최종 CI가 다시 실행된다. 따라서 준비 전까지 Draft를 유지한다.
+- Markdown과 `docs/`만 바뀐 PR은 자동 CI를 실행하지 않는다.
+- 자동 GitHub CI는 현재 `daejang`과 `daejang-db`에만 둔다. DB의 PostgreSQL race test도 Draft에서는 실행하지 않고 최종 PR 검사에서만 실행한다.
+- `daejang-jit-engine`, `daejang-posting-service`, `daejang-tax-engine`과 schema 저장소는 자동 GitHub Actions를 사용하지 않는다. 각 저장소의 로컬 검증 결과와 생략 사유를 PR 본문에 기록한다.
+- main image 발행은 GitHub Actions가 아니라 Mac Studio publisher가 담당한다.
 
 ## main 병합 후: Mac Studio 자동 publisher
 

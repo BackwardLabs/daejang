@@ -68,6 +68,7 @@
 - Linear 이슈의 **Copy git branch name**으로 브랜치를 만들고 이슈 ID를 유지합니다.
 - 한 PR에는 하나의 논리적 변경만 담고, 관련 이슈와 다른 저장소의 의존 PR을 연결합니다.
 - PR 제목과 본문은 한국어로 작성하고 별도 요청이 없으면 Draft로 만듭니다.
+- Draft에서는 로컬 검증을 반복하고, 최종 검증과 PR 설명이 준비된 뒤에만 `Ready for review`로 전환해 GitHub 최종 CI를 실행합니다. 세부 저장소별 CI 경계는 `docs/release-image-flow.md`를 따릅니다.
 - PR 본문에는 재현한 상황, 실행한 명령과 결과, 로컬 후보 image ID, Registry 의존 image digest, 생략한 테스트, 관련 PR과 병합 순서를 기록합니다.
 - merge 뒤 image는 Mac Studio publisher가 main commit에서 자동 build·push합니다. 에이전트는 branch 후보를 Registry에 직접 push하거나 image 발행을 Production 배포 완료로 표현하지 않습니다.
 - 명시적인 요청 없이 PR을 merge하지 않습니다.
