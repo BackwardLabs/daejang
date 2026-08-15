@@ -14,6 +14,7 @@ RUN npm ci --workspace @daejang/web --include-workspace-root
 COPY apps/web apps/web
 COPY scripts/check-web-bundle-cycles.mjs scripts/check-web-bundle-cycles.mjs
 COPY scripts/check-web-report-surface.mjs scripts/check-web-report-surface.mjs
+ENV NODE_ENV=production
 RUN npm run build --workspace @daejang/web
 
 EXPOSE 5173

@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -5,6 +6,7 @@ import {
 } from './EvmWalletConnectionPage.tsx'
 import type {
   CompleteWalletConnection,
+  ConnectWallet,
   ConnectedWallet,
   RequestOwnershipSignature,
   WatchWalletSyncJob,
@@ -105,6 +107,38 @@ describe('EvmWalletConnectionPage', () => {
     expect(onInitialConnectionResult).toHaveBeenCalledWith(
       expect.objectContaining({ ok: true }),
     )
+  })
+
+  it('restarts an aborted automatic connection under StrictMode', async () => {
+    let attempt = 0
+    const connectWallet = vi.fn<ConnectWallet>(async (request) => {
+      attempt += 1
+      if (attempt === 1) {
+        return new Promise((_, reject) => {
+          request.signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          )
+        })
+      }
+
+      return connectWalletTestFixture(request)
+    })
+
+    render(
+      <StrictMode>
+        <EvmWalletConnectionPage
+          {...withTestFixtures({ connectWallet })}
+          autoConnectProvider="other"
+        />
+      </StrictMode>,
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: '지갑 소유권 확인' }),
+    ).toBeInTheDocument()
+    expect(connectWallet).toHaveBeenCalledTimes(2)
   })
 
   it('completes the Figma wallet connection, signature, scope, and backfill flow', async () => {

@@ -944,6 +944,7 @@ export function EvmWalletConnectionPage({
 
   useEffect(
     () => () => {
+      autoConnectStartedRef.current = false
       activeRequestRef.current += 1
       abortControllerRef.current?.abort()
       requestPendingRef.current = false

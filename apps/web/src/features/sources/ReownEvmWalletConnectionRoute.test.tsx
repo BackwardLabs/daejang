@@ -2,11 +2,15 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  accountCallback: undefined as ((state: any) => void) | undefined,
   caipAddress: 'eip155:1:0x1234567890abcdef1234567890abcdef12345678',
   connect: vi.fn(),
   eventCallback: undefined as ((state: any) => void) | undefined,
   listSources: vi.fn(),
+  modalOpen: false,
   open: vi.fn(),
+  providerAccounts: [] as string[],
+  providerRequest: vi.fn(),
   provider: 'other',
   stateCallback: undefined as ((state: any) => void) | undefined,
 }))
@@ -23,7 +27,13 @@ vi.mock('./reownAppKit.ts', () => ({
   isReownAppKitConfigured: true,
   reownAppKit: {
     getCaipAddress: () => mocks.caipAddress,
-    getProvider: vi.fn(),
+    getAccount: () => ({ isConnected: false }),
+    getProvider: () => ({ request: mocks.providerRequest }),
+    isOpen: () => mocks.modalOpen,
+    subscribeAccount: (callback: (state: any) => void) => {
+      mocks.accountCallback = callback
+      return vi.fn()
+    },
     subscribeEvents: (callback: (state: any) => void) => {
       mocks.eventCallback = callback
       return vi.fn()
@@ -71,16 +81,19 @@ vi.mock('./EvmWalletConnectionPage.tsx', () => ({
 import { ReownEvmWalletConnectionRoute } from './ReownEvmWalletConnectionRoute.tsx'
 
 function openModal() {
+  mocks.modalOpen = true
   mocks.stateCallback?.({ open: true })
 }
 
 function selectCurrentWallet() {
-  mocks.eventCallback?.({ data: { event: 'SELECT_WALLET' } })
+  mocks.providerAccounts = [mocks.caipAddress.split(':').at(-1)!]
+  mocks.modalOpen = false
   mocks.stateCallback?.({ open: false })
 }
 
 describe('ReownEvmWalletConnectionRoute', () => {
   beforeEach(() => {
+    mocks.accountCallback = undefined
     mocks.caipAddress =
       'eip155:1:0x1234567890abcdef1234567890abcdef12345678'
     mocks.eventCallback = undefined
@@ -89,10 +102,20 @@ describe('ReownEvmWalletConnectionRoute', () => {
     mocks.connect.mockReset()
     mocks.listSources.mockReset()
     mocks.listSources.mockResolvedValue({ items: [] })
+    mocks.modalOpen = false
     mocks.open.mockReset()
     mocks.open.mockImplementation(async () => {
       openModal()
     })
+    mocks.providerAccounts = []
+    mocks.providerRequest.mockReset()
+    mocks.providerRequest.mockImplementation(
+      async ({ method }: { method: string }) => {
+        if (method === 'eth_accounts') return mocks.providerAccounts
+        if (method === 'eth_chainId') return '0x1'
+        throw new Error(`Unexpected provider method: ${method}`)
+      },
+    )
   })
 
   it('does not accept a persisted CAIP address before this attempt selects a wallet', async () => {
@@ -134,6 +157,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
       expect(mocks.open).toHaveBeenCalledTimes(1)
     })
     await act(async () => {
+      mocks.modalOpen = false
       mocks.stateCallback?.({ open: false })
     })
 
@@ -144,7 +168,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
           ok: false,
         }),
       )
-    })
+    }, { timeout: 2_000 })
     expect(mocks.listSources).toHaveBeenCalledTimes(1)
   })
 
