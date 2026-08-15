@@ -64,6 +64,9 @@ export type PublicTaxReportV2SourceCoverage = {
 
 export type PublicTaxReportV2AssetSummary = {
   taxAssetId: string
+  // Missing only for historical artifacts sealed before per-asset scale was
+  // projected. Consumers must not infer a unit from a ticker or asset ID.
+  assetAtomicDecimals: number | null
   openingQuantity: string
   openingBasis: PublicTaxReportV2Amount
   openingBasisProvenance: {
@@ -157,6 +160,7 @@ type PublicMovementBase = {
   kind: string
   taxAssetId: string
   ledgerAssetId: string
+  assetAtomicDecimals: number | null
   quantity: string
   valuationId: string | null
   occurredAt: string
@@ -261,6 +265,7 @@ export type PublicTaxReportV2Detail = {
     taxAddressId: string
     taxAssetId: string
     ledgerAssetId: string
+    assetAtomicDecimals: number | null
     quantity: string
     grossProceeds: PublicTaxReportV2Amount
     ancillaryExpense: PublicTaxReportV2Amount
@@ -303,6 +308,7 @@ export type PublicTaxReportV2Detail = {
     fromAddressId: string
     toAddressId: string
     taxAssetId: string
+    assetAtomicDecimals: number | null
     quantity: string
     basis: PublicTaxReportV2Amount
     fromCostMethod: string
@@ -321,6 +327,7 @@ export type PublicTaxReportV2Detail = {
     fromLegId: string
     toLegId: string
     taxAssetId: string
+    assetAtomicDecimals: number | null
     quantity: string
     occurredAt: string
     from: PublicTaxReportV2Account
@@ -665,6 +672,15 @@ const average = (value: unknown, path: string) => {
 const basisMode = (value: unknown, path: string) =>
   oneOf(value, path, ['ACTUAL_TOTAL_AVERAGE', 'DEEMED_EXPENSE_50'])
 
+const assetAtomicDecimals = (value: unknown, path: string) => {
+  if (value === undefined) return null
+  const decimals = integer(value, path)
+  if (decimals < 0 || decimals > 255) {
+    invalid(path, 'must be between 0 and 255')
+  }
+  return decimals
+}
+
 const basisDecision = (
   modeValue: unknown,
   evidenceValue: unknown,
@@ -882,7 +898,7 @@ const assetSummary = (
     'endingQuantity', 'endingCost', 'basisMode',
   ], [
     'basisApplicationReasonCode', 'basisEvidenceDigest',
-    'ntsDesignationId', 'ntsDesignationPolicyVersion',
+    'ntsDesignationId', 'ntsDesignationPolicyVersion', 'assetAtomicDecimals',
   ])
   const { mode, evidence } = basisDecision(
     row.basisMode,
@@ -1055,6 +1071,10 @@ const assetSummary = (
   }
   return {
     taxAssetId: string(row.taxAssetId, `${path}.taxAssetId`),
+    assetAtomicDecimals: assetAtomicDecimals(
+      row.assetAtomicDecimals,
+      `${path}.assetAtomicDecimals`,
+    ),
     openingQuantity,
     openingBasis,
     openingBasisProvenance,
@@ -1084,7 +1104,10 @@ const disposal = (value: unknown, path: string) => {
     'ancillaryExpense', 'basis', 'gainLoss', 'costMethod',
     'incurredExpense', 'basisMode', 'occurredAt', 'account', 'valuation',
     'sourceEvidence', 'review',
-  ], ['valuationId', 'rounding', 'relatedMovementId', 'basisEvidenceDigest'])
+  ], [
+    'valuationId', 'rounding', 'relatedMovementId', 'basisEvidenceDigest',
+    'assetAtomicDecimals',
+  ])
   const { mode, evidence } = basisDecision(
     row.basisMode,
     row.basisEvidenceDigest,
@@ -1117,6 +1140,10 @@ const disposal = (value: unknown, path: string) => {
     taxAddressId: string(row.taxAddressId, `${path}.taxAddressId`),
     taxAssetId: string(row.taxAssetId, `${path}.taxAssetId`),
     ledgerAssetId: string(row.ledgerAssetId, `${path}.ledgerAssetId`),
+    assetAtomicDecimals: assetAtomicDecimals(
+      row.assetAtomicDecimals,
+      `${path}.assetAtomicDecimals`,
+    ),
     quantity: numeric(row.quantity, `${path}.quantity`, true),
     grossProceeds: amount(row.grossProceeds, `${path}.grossProceeds`),
     ancillaryExpense: amount(row.ancillaryExpense, `${path}.ancillaryExpense`),
@@ -1152,6 +1179,10 @@ const movementBase = (row: JsonRecord, path: string): PublicMovementBase => {
     kind: string(row.kind, `${path}.kind`),
     taxAssetId: string(row.taxAssetId, `${path}.taxAssetId`),
     ledgerAssetId: string(row.ledgerAssetId, `${path}.ledgerAssetId`),
+    assetAtomicDecimals: assetAtomicDecimals(
+      row.assetAtomicDecimals,
+      `${path}.assetAtomicDecimals`,
+    ),
     quantity: numeric(row.quantity, `${path}.quantity`, true),
     valuationId: parsedValuation.valuationId,
     occurredAt: timestamp(row.occurredAt, `${path}.occurredAt`),
@@ -1197,7 +1228,10 @@ const acquisition = (value: unknown, path: string) => {
     'taxAssetId', 'ledgerAssetId', 'quantity', 'consideration',
     'acquisitionAncillaryExpense', 'acquisitionCost', 'occurredAt',
     'account', 'valuation', 'sourceEvidence', 'review',
-  ], ['relatedMovementId', 'valuationId', 'incomePolicyMapping'])
+  ], [
+    'relatedMovementId', 'valuationId', 'incomePolicyMapping',
+    'assetAtomicDecimals',
+  ])
   const result = {
     ...movementBase(row, path),
     consideration: amount(row.consideration, `${path}.consideration`),
@@ -1242,7 +1276,7 @@ const income = (value: unknown, path: string) => {
     'transactionType', 'movementId', 'eventId', 'revisionId', 'legId', 'kind',
     'taxAssetId', 'ledgerAssetId', 'quantity', 'income', 'ancillaryExpense',
     'occurredAt', 'account', 'valuation', 'sourceEvidence', 'review',
-  ], ['relatedMovementId', 'valuationId'])
+  ], ['relatedMovementId', 'valuationId', 'assetAtomicDecimals'])
   const result = {
     ...movementBase(row, path),
     income: amount(row.income, `${path}.income`),
@@ -1268,7 +1302,7 @@ const transfer = (value: unknown, path: string) => {
     'fromAddressId', 'toAddressId', 'taxAssetId', 'quantity', 'basis',
     'fromCostMethod', 'toCostMethod', 'occurredAt', 'from', 'to',
     'sourceEvidence', 'review',
-  ])
+  ], ['assetAtomicDecimals'])
   return {
     transactionType: oneOf(row.transactionType, `${path}.transactionType`, ['TRANSFER']),
     movementId: string(row.movementId, `${path}.movementId`),
@@ -1279,6 +1313,10 @@ const transfer = (value: unknown, path: string) => {
     fromAddressId: string(row.fromAddressId, `${path}.fromAddressId`),
     toAddressId: string(row.toAddressId, `${path}.toAddressId`),
     taxAssetId: string(row.taxAssetId, `${path}.taxAssetId`),
+    assetAtomicDecimals: assetAtomicDecimals(
+      row.assetAtomicDecimals,
+      `${path}.assetAtomicDecimals`,
+    ),
     quantity: numeric(row.quantity, `${path}.quantity`, true),
     basis: amount(row.basis, `${path}.basis`),
     fromCostMethod: string(row.fromCostMethod, `${path}.fromCostMethod`),
@@ -1314,7 +1352,7 @@ const nonTaxableTransfer = (value: unknown, path: string) => {
     'transactionType', 'movementId', 'eventId', 'revisionId', 'fromLegId',
     'toLegId', 'taxAssetId', 'quantity', 'occurredAt', 'from', 'to',
     'sourceEvidence', 'review',
-  ])
+  ], ['assetAtomicDecimals'])
   return {
     transactionType: oneOf(
       row.transactionType,
@@ -1327,6 +1365,10 @@ const nonTaxableTransfer = (value: unknown, path: string) => {
     fromLegId: string(row.fromLegId, `${path}.fromLegId`),
     toLegId: string(row.toLegId, `${path}.toLegId`),
     taxAssetId: string(row.taxAssetId, `${path}.taxAssetId`),
+    assetAtomicDecimals: assetAtomicDecimals(
+      row.assetAtomicDecimals,
+      `${path}.assetAtomicDecimals`,
+    ),
     quantity: numeric(row.quantity, `${path}.quantity`, true),
     occurredAt: timestamp(row.occurredAt, `${path}.occurredAt`),
     from: account(row.from, `${path}.from`),
@@ -1939,7 +1981,7 @@ const publicAssetSummarySchema = {
   type: 'object',
   additionalProperties: false,
   required: [
-    'taxAssetId', 'openingQuantity', 'openingBasis',
+    'taxAssetId', 'assetAtomicDecimals', 'openingQuantity', 'openingBasis',
     'openingBasisProvenance', 'acquiredQuantity',
     'acquisitionCost', 'annualAverage', 'disposedQuantity', 'grossProceeds',
     'incurredExpense', 'deductibleExpense', 'disposedBasis', 'gainLoss',
@@ -1949,6 +1991,12 @@ const publicAssetSummarySchema = {
   ],
   properties: {
     taxAssetId: publicStringSchema,
+    assetAtomicDecimals: {
+      anyOf: [
+        { type: 'integer', minimum: 0, maximum: 255 },
+        { type: 'null' },
+      ],
+    },
     openingQuantity: publicStringSchema,
     openingBasis: publicTaxReportV2AmountSchema,
     openingBasisProvenance: {
@@ -1998,7 +2046,7 @@ const publicDisposalSchema = {
   additionalProperties: false,
   required: [
     'transactionType', 'movementId', 'relatedMovementId', 'eventId', 'revisionId', 'legId',
-    'taxAddressId', 'taxAssetId', 'ledgerAssetId', 'quantity',
+    'taxAddressId', 'taxAssetId', 'ledgerAssetId', 'assetAtomicDecimals', 'quantity',
     'grossProceeds', 'ancillaryExpense', 'incurredExpense', 'basis',
     'gainLoss', 'valuationId', 'costMethod', 'rounding', 'basisMode',
     'basisEvidenceDigest', 'occurredAt', 'account', 'valuation',
@@ -2017,6 +2065,9 @@ const publicDisposalSchema = {
     taxAddressId: publicStringSchema,
     taxAssetId: publicStringSchema,
     ledgerAssetId: publicStringSchema,
+    assetAtomicDecimals: {
+      anyOf: [{ type: 'integer', minimum: 0, maximum: 255 }, { type: 'null' }],
+    },
     quantity: publicStringSchema,
     grossProceeds: publicTaxReportV2AmountSchema,
     ancillaryExpense: publicTaxReportV2AmountSchema,
@@ -2057,6 +2108,9 @@ const publicMovementProperties = {
   kind: publicStringSchema,
   taxAssetId: publicStringSchema,
   ledgerAssetId: publicStringSchema,
+  assetAtomicDecimals: {
+    anyOf: [{ type: 'integer', minimum: 0, maximum: 255 }, { type: 'null' }],
+  },
   quantity: publicStringSchema,
   valuationId: publicNullableStringSchema,
   occurredAt: publicStringSchema,
@@ -2068,7 +2122,7 @@ const publicMovementProperties = {
 
 const publicMovementRequired = [
   'transactionType', 'movementId', 'relatedMovementId', 'eventId',
-  'revisionId', 'legId', 'kind', 'taxAssetId', 'ledgerAssetId', 'quantity',
+  'revisionId', 'legId', 'kind', 'taxAssetId', 'ledgerAssetId', 'assetAtomicDecimals', 'quantity',
   'valuationId', 'occurredAt', 'account', 'valuation', 'sourceEvidence',
   'review',
 ] as const
@@ -2321,7 +2375,7 @@ export const publicTaxReportV2DetailSchema = {
         required: [
           'transactionType', 'movementId', 'eventId', 'revisionId',
           'fromLegId', 'toLegId',
-          'fromAddressId', 'toAddressId', 'taxAssetId', 'quantity', 'basis',
+          'fromAddressId', 'toAddressId', 'taxAssetId', 'assetAtomicDecimals', 'quantity', 'basis',
           'fromCostMethod', 'toCostMethod', 'occurredAt', 'from', 'to',
           'sourceEvidence', 'review',
         ],
@@ -2335,6 +2389,9 @@ export const publicTaxReportV2DetailSchema = {
           fromAddressId: publicStringSchema,
           toAddressId: publicStringSchema,
           taxAssetId: publicStringSchema,
+          assetAtomicDecimals: {
+            anyOf: [{ type: 'integer', minimum: 0, maximum: 255 }, { type: 'null' }],
+          },
           quantity: publicStringSchema,
           basis: publicTaxReportV2AmountSchema,
           fromCostMethod: publicStringSchema,
@@ -2357,7 +2414,7 @@ export const publicTaxReportV2DetailSchema = {
         additionalProperties: false,
         required: [
           'transactionType', 'movementId', 'eventId', 'revisionId',
-          'fromLegId', 'toLegId', 'taxAssetId', 'quantity', 'occurredAt',
+          'fromLegId', 'toLegId', 'taxAssetId', 'assetAtomicDecimals', 'quantity', 'occurredAt',
           'from', 'to', 'sourceEvidence', 'review',
         ],
         properties: {
@@ -2368,6 +2425,9 @@ export const publicTaxReportV2DetailSchema = {
           fromLegId: publicStringSchema,
           toLegId: publicStringSchema,
           taxAssetId: publicStringSchema,
+          assetAtomicDecimals: {
+            anyOf: [{ type: 'integer', minimum: 0, maximum: 255 }, { type: 'null' }],
+          },
           quantity: publicStringSchema,
           occurredAt: publicStringSchema,
           from: publicAccountSchema,

@@ -46,9 +46,8 @@ export const incomePolicyMappingLines = (mapping: {
   policyVersion: string
   policyArtifactDigest: string
 } | null): string[] => mapping === null ? [] : [
-  `보상 분류 ${mapping.eventSubtype}`,
-  `정책 ${mapping.policyVersion}`,
-  `정책 근거 ${shortId(mapping.policyArtifactDigest)}`,
+  '보상 자산 취득 기준 적용',
+  '원본 정책 근거 자료에 연결됨',
 ]
 
 const formatDecimal = (value: string) => {
@@ -63,11 +62,13 @@ const reportDenominations: Record<
   string,
   { symbol: string; decimals: number }
 > = {
+  KRW: { symbol: 'KRW', decimals: 0 },
   'asset-krw-upbit': { symbol: 'KRW', decimals: 8 },
 }
 
 const formatAtomicAmount = (value: string, decimals: number) => {
   if (!/^-?\d+$/.test(value)) return formatDecimal(value)
+  if (decimals === 0) return formatDecimal(value)
   const negative = value.startsWith('-')
   const digits = negative ? value.slice(1) : value
   const padded = digits.padStart(decimals + 1, '0')
@@ -78,6 +79,22 @@ const formatAtomicAmount = (value: string, decimals: number) => {
   )
 }
 
+const presentTaxAsset = (assetId: string) => {
+  const symbol = assetId
+    .replace(/^tax-asset-/i, '')
+    .replace(/^asset-/i, '')
+    .replace(/-upbit$/i, '')
+  return /^[a-z0-9]{2,20}$/i.test(symbol) ? symbol.toUpperCase() : '기록된 자산'
+}
+
+const formatAssetQuantity = (
+  quantity: string,
+  taxAssetId: string,
+  assetAtomicDecimals: number | null | undefined,
+) => assetAtomicDecimals === null || assetAtomicDecimals === undefined
+  ? '수량 단위 확인 필요'
+  : `${formatAtomicAmount(quantity, assetAtomicDecimals)} ${presentTaxAsset(taxAssetId)}`
+
 const formatReportAmountWithScale = (
   amount: ReportPrintAmountV1,
   denominationAssetId: string,
@@ -87,12 +104,13 @@ const formatReportAmountWithScale = (
   const presentation = reportDenominations[denominationAssetId]
   const decimals = denominationAtomicDecimals ?? presentation?.decimals
   if (decimals !== undefined) {
+    const symbol = presentation?.symbol ?? (denominationAssetId === 'KRW' ? 'KRW' : '금액 단위 확인 필요')
     return `${formatAtomicAmount(
       amount.amount,
       decimals,
-    )} ${presentation?.symbol ?? denominationAssetId}`
+    )} ${symbol}`
   }
-  return `${formatDecimal(amount.amount)} ${denominationAssetId}`
+  return '금액 단위 확인 필요'
 }
 
 export const formatReportAmount = (
@@ -100,27 +118,26 @@ export const formatReportAmount = (
   denominationAssetId: string,
 ) => formatReportAmountWithScale(amount, denominationAssetId)
 
-const shortId = (value: string) => value.length <= 28
-  ? value
-  : `${value.slice(0, 12)}…${value.slice(-12)}`
-
 export const deemedExpenseEvidenceRows = (
   model: Pick<ReportPrintModelV1, 'v2'>,
-): Array<readonly [string, string, string, string, string]> => model.v2?.assetSummaries
+): Array<readonly [string, string, string]> => model.v2?.assetSummaries
   .filter((row) => row.basisEvidenceDigest !== null)
   .map((row) => [
-    row.taxAssetId,
-    row.basisApplicationReasonCode ?? '사유 미확정',
-    row.ntsDesignationId ?? '해당 없음',
-    row.ntsDesignationPolicyVersion ?? '해당 없음',
-    row.basisEvidenceDigest!,
+    presentTaxAsset(row.taxAssetId),
+    presentBasisApplicationReason(row.basisApplicationReasonCode),
+    '원본 근거 자료에 연결됨',
   ]) ?? []
+
+const presentBasisApplicationReason = (value: string | null) => ({
+  NON_VASP_NO_BOOKS_OR_EVIDENCE: '장부·증빙이 충분하지 않은 비거래소 보유분',
+  NTS_DESIGNATED_OTHER: '국세청 지정 요건에 따른 적용',
+}[value ?? ''] ?? '법정 적용 사유 확인 필요')
 
 export const formatValuationMarket = (
   valuation: { marketStatus: string; market: string | null },
 ) => valuation.marketStatus === 'NOT_APPLICABLE'
   ? '직접 평가 · 시장 코드 해당 없음'
-  : valuation.market ?? 'market 미확정'
+  : valuation.market ?? '시장 정보 확인 필요'
 
 export const formatKstTimestamp = (value: string) => {
   const timestamp = Date.parse(value)
@@ -129,43 +146,106 @@ export const formatKstTimestamp = (value: string) => {
   return `${kst.slice(0, 10)} ${kst.slice(11, 19)} KST`
 }
 
-const reportRowSourceLabel = (
-  row: {
-    sourceEvidence: ReadonlyArray<{
+const reportRowSourceLabel = <T extends object>(
+  row: T & Partial<{
+    sourceEvidence?: ReadonlyArray<{
       sourceKinds: ReadonlyArray<string>
       sourceArtifactBindingStatus: 'BOUND' | 'UNBOUND'
     }>
-  },
+  }>,
 ) => {
-  const kinds = [...new Set(row.sourceEvidence.flatMap(
+  const sourceEvidence = row.sourceEvidence ?? []
+  const kinds = [...new Set(sourceEvidence.flatMap(
     (evidence) => evidence.sourceKinds,
-  ))]
-  const binding = row.sourceEvidence.length > 0 && row.sourceEvidence.every(
+  ))].map((kind) => ({
+    API: '연결된 거래 기록',
+    FILE: '업로드한 원본 자료',
+    MANUAL: '직접 입력 자료',
+    CHAIN: '블록체인 기록',
+    OTHER: '기타 자료',
+  })[kind] ?? '출처 확인 필요')
+  const binding = sourceEvidence.length > 0 && sourceEvidence.every(
     (evidence) => evidence.sourceArtifactBindingStatus === 'BOUND',
   )
-    ? 'BOUND'
-    : 'UNBOUND'
-  return `${kinds.join(', ') || '출처 미확인'} · ${binding}`
+    ? '원본 자료 연결됨'
+    : '원본 자료 연결 확인 필요'
+  return `${kinds.join(', ') || '출처 확인 필요'} · ${binding}`
+}
+
+const limitationLabels: Record<string, readonly [string, string]> = {
+  FILING_ROUNDING_PROFILE_UNAPPROVED: ['신고용 반올림 기준 확인 필요', '현재 세액은 신고 전 추정치입니다.'],
+  OPENING_INVENTORY_MISSING: ['이전 보유내역 확인 필요', '처분 시점 이전의 보유 기록이 충분하지 않습니다.'],
+  SOURCE_COVERAGE_UNVERIFIED: ['자료 범위 확인 필요', '일부 원본 자료의 확인 범위가 확정되지 않았습니다.'],
+  TRANSFER_ENDPOINT_REVIEW_REQUIRED: ['이체 상대 정보 확인 필요', '이체 상대방과 거래 성격을 확인해 주세요.'],
+  UNKNOWN_ACQUISITION_BASIS: ['취득가액 확인 필요', '취득 당시 금액 근거가 충분하지 않습니다.'],
+  UNKNOWN_DISPOSAL_BASIS: ['처분가액 확인 필요', '처분 당시 금액 근거가 충분하지 않습니다.'],
+  UNRESOLVED_EVENT: ['거래 분류 확인 필요', '이 거래의 세무 분류를 확인해 주세요.'],
+  UNRESOLVED_TAX_CHARACTERIZATION: ['과세 분류 확인 필요', '과세 여부를 확정할 정보가 부족합니다.'],
+  UNRESOLVED_TRANSFER_TAX_TREATMENT: ['이체 처리 확인 필요', '자산 이동의 세무 처리를 확인해 주세요.'],
+  VALUATION_DISPLAY_PROVENANCE_INCOMPLETE: ['가격 근거 확인 필요', '가격 산정에 사용한 자료를 모두 확인하지 못했습니다.'],
+}
+
+const presentLimitation = (code: string): readonly [string, string] =>
+  limitationLabels[code] ?? ['계산 근거 확인 필요', '계산에 필요한 일부 정보를 확인해 주세요.']
+
+const presentTransactionType = (value: string) => ({
+  ACQUIRE: '자산 취득',
+  OTHER_ACQUISITION: '기타 취득',
+  DISPOSAL: '자산 처분',
+  FEE_ASSET_DISPOSAL: '수수료로 사용한 자산 처분',
+  LENDING_INCOME_CASH: '대여 수익(원화)',
+  LENDING_INCOME_ASSET: '대여 수익(자산)',
+  TRANSFER: '취득원가 이월 이체',
+  SELF_TRANSFER: '본인 계정 간 이동',
+}[value] ?? '거래 분류 확인 필요')
+
+const presentBasisMode = (value: string) => ({
+  ACTUAL_TOTAL_AVERAGE: '실제 원가 기준',
+  DEEMED_EXPENSE_50: '50% 필요경비 특례',
+}[value] ?? '원가 기준 확인 필요')
+
+const presentReviewStatus = (value: string) => value === 'CLEAR'
+  ? '추가 확인 없음'
+  : '사용자 확인 필요'
+
+const presentCoverage = (status: string, assurance?: string) => {
+  const completeness = status === 'COMPLETE'
+    ? '확인된 전체 기간'
+    : status === 'PARTIAL'
+      ? '일부 기간 확인'
+      : '범위 확인 필요'
+  const verification = assurance === 'DOCUMENT_METADATA_VERIFIED'
+    ? '원본 자료 확인됨'
+    : assurance === 'CHAIN_VERIFIED'
+      ? '체인 기록 확인됨'
+      : assurance === 'USER_DECLARED'
+        ? '사용자 제공 범위'
+        : '확인 수준 미확정'
+  return `${completeness} · ${verification}`
 }
 
 const reportRowAccountLabel = (
   account: NonNullable<ReportPrintModelV1['v2']>['disposals'][number]['account'],
-) => [
-  account.accountKind,
-  account.displayName,
-  account.accountId === null ? null : shortId(account.accountId),
-].filter((value): value is string => value !== null).join(' · ') || '계정 미확인'
+) => {
+  const kind = {
+    CEX: '거래소 계정',
+    EVM_WALLET: '개인 지갑',
+    WALLET: '개인 지갑',
+  }[account.accountKind ?? ''] ?? '계정 정보 확인 필요'
+  return [kind, account.displayName].filter((value): value is string => value !== null)
+    .join(' · ') || '계정 정보 확인 필요'
+}
 
 export const formatCostMethod = (value: string) => {
   switch (value) {
     case 'ANNUAL_TOTAL_AVERAGE':
-      return '연간 총평균법 (ANNUAL_TOTAL_AVERAGE)'
+      return '연간 총평균법'
     case 'MOVING_AVERAGE':
-      return '이동평균법 (MOVING_AVERAGE)'
+      return '이동평균법'
     case 'FIFO':
-      return '선입선출법 (FIFO)'
+      return '선입선출법'
     default:
-      return value
+      return '원가 계산 방식 확인 필요'
   }
 }
 
@@ -176,40 +256,40 @@ const formatPoolScope = (value: string) => {
     case 'ADDRESS':
       return '주소별'
     default:
-      return value
+      return '계산 대상 확인 필요'
   }
 }
 
 const formatCalculationContract = (value: string) => {
   switch (value) {
     case 'ANNUAL_TOTAL_AVERAGE':
-      return '원가 방식: 연간 총평균법 (ANNUAL_TOTAL_AVERAGE)'
+      return '원가 방식: 연간 총평균법'
     case 'LEGACY':
-      return '원가 방식: 기존 주소별 방식 (LEGACY)'
+      return '원가 방식: 기존 주소별 방식'
     case 'UNSUPPORTED':
-      return '원가 방식 확인 불가 (UNSUPPORTED)'
+      return '원가 방식 확인 필요'
     default:
-      return value
+      return '원가 방식 확인 필요'
   }
 }
 
 const formatRate = (value: ReportPrintCalculationRateV1) =>
   value.denominator === '100'
-    ? `${value.numerator}% (${value.numerator}/${value.denominator})`
+    ? `${value.numerator}%`
     : `${value.numerator}/${value.denominator}`
 
 const formatRounding = (value: string) => {
   switch (value) {
     case 'FLOOR':
-      return '절사 (FLOOR)'
+      return '원 단위 미만 절사'
     case 'FLOOR_EXCEPT_EXHAUSTED_LAYER':
-      return '소진 원가층 제외 절사 (FLOOR_EXCEPT_EXHAUSTED_LAYER)'
+      return '소진 원가층을 제외하고 절사'
     case 'CUMULATIVE_FLOOR_ANNUAL_POOL':
-      return '연간 총평균 누적 배분 절사 (CUMULATIVE_FLOOR_ANNUAL_POOL)'
+      return '연간 총평균 기준 누적 배분 후 절사'
     case 'MIXED':
-      return '복수 반올림 규칙 (MIXED)'
+      return '여러 반올림 기준 적용'
     default:
-      return value
+      return '반올림 기준 확인 필요'
   }
 }
 
@@ -253,7 +333,7 @@ export const reportDocumentPresentation = (model: ReportPrintModelV1) => {
       kind: '신고 준비 자료',
       title: `${model.taxYear}년 가상자산 신고 준비 자료`,
       description:
-        'Tax Engine에서 확정 계산과 차단 항목 없음을 판정한 자료입니다. 원화 단위와 세액 적합성은 별도 검토가 필요하며, 실제 신고 제출 또는 세무서 접수 완료를 뜻하지 않습니다.',
+        '확정된 계산 결과와 제한사항을 함께 정리한 자료입니다. 실제 신고 제출 또는 세무서 접수 완료를 뜻하지 않습니다.',
     } as const
   }
   if (model.taxYear < 2027) {
@@ -282,24 +362,24 @@ export const reportDocumentPresentation = (model: ReportPrintModelV1) => {
 
 const finalityLabel = (value: ReportPrintModelV1['finality']) =>
   value === 'FINAL'
-    ? 'FINAL · 평가 입력 확정'
-    : 'PROVISIONAL · 평가 입력 잠정'
+    ? '가격 자료 확정'
+    : '가격 자료 잠정'
 
 const taxYearCloseLabel = (
   value: ReportPrintModelV1['taxYearCloseStatus'],
 ) => value === 'CLOSED'
-  ? 'CLOSED · 연간 입력 마감 확인'
-  : 'UNVERIFIED · 연간 입력 마감 미확인'
+  ? '연간 입력 마감 확인'
+  : '연간 입력 마감 미확인'
 
 const reportStatusLabel = (value: ReportPrintModelV1['status']) =>
   value === 'FINAL'
-    ? 'FINAL · 계산 항목 확정'
-    : 'PARTIAL · 일부 계산 항목 미확정'
+    ? '계산 항목 확정'
+    : '일부 계산 항목 미확정'
 
 const filingStatusLabel = (value: ReportPrintModelV1['filingStatus']) =>
   value === 'READY'
-    ? 'READY · 엔진상 차단 항목 없음'
-    : 'BLOCKED · 엔진상 차단 항목 있음'
+    ? '신고 준비 완료'
+    : '신고 전 확인 필요'
 
 export const reportStatusKeyValues = (
   model: ReportPrintModelV1,
@@ -316,10 +396,10 @@ export const reportStatusKeyValues = (
   ]
   if (model.v2) {
     values.splice(4, 0,
-      ['Tax Engine 계산 상태', model.v2.calculationStatus],
-      ['세금 결과', model.v2.taxOutcome],
-      ['신고 조치', model.v2.filingAction],
-      ['신고 제출 상태', model.v2.filingSubmissionStatus],
+      ['계산 상태', model.v2.calculationStatus === 'COMPLETE' ? '계산 완료' : '계산 보류'],
+      ['세금 결과', model.v2.taxOutcome.includes('ZERO') ? '세액 없음 또는 추정 세액 없음' : model.v2.taxOutcome.includes('DUE') ? '예상 세액 있음' : '계산 근거 확인 필요'],
+      ['신고 조치', model.v2.filingAction === 'FILING_NOT_APPLICABLE' ? '신고 대상 아님' : model.v2.filingAction === 'BLOCKED' ? '신고용 계산 보류' : '자료 검토 필요'],
+      ['신고 제출 상태', model.v2.filingSubmissionStatus === 'NOT_APPLICABLE' ? '시뮬레이션 장부' : '제출 여부는 이 장부에서 확인하지 않음'],
     )
   }
   return values
@@ -414,7 +494,7 @@ export async function renderTaxReportPdf(
     info: {
       Title: documentTitle,
       Author: 'Daejang',
-      Subject: `Tax calculation reference ${model.reportId}`,
+      Subject: '가상자산 세금 계산 자료',
       Creator: 'Daejang',
       Producer: `daejang-tax-report-pdf/${rendererVersion}`,
       CreationDate: issuedAt,
@@ -461,16 +541,9 @@ export async function renderTaxReportPdf(
         26,
         { width: contentWidth * 0.62, lineBreak: false },
       )
-      doc.text(
-        shortId(model.reportId),
-        page.marginX + contentWidth * 0.62,
-        26,
-        {
-          align: 'right',
-          width: contentWidth * 0.38,
-          lineBreak: false,
-        },
-      )
+      doc.text('가상자산 세금 장부', page.marginX + contentWidth * 0.62, 26, {
+        align: 'right', width: contentWidth * 0.38, lineBreak: false,
+      })
     }
     doc.moveTo(page.marginX, 42)
       .lineTo(page.width - page.marginX, 42)
@@ -625,14 +698,12 @@ export async function renderTaxReportPdf(
 
   drawKeyValues([
     ['과세연도', String(model.taxYear)],
-    ['Report ID', model.reportId],
-    ['Report model digest', model.reportModelDigest],
     ['생성 시각', formatKstTimestamp(model.issuedAt)],
   ])
 
   sectionTitle(
     '자료 상태',
-    '아래 값은 Tax Engine의 계산 상태입니다. 법적·제품 최종 승인이나 신고 완료를 뜻하지 않습니다.',
+    '아래 상태는 현재 장부에 반영된 계산과 원본 자료의 확인 수준입니다. 실제 신고 제출 완료를 뜻하지 않습니다.',
   )
   drawKeyValues(reportStatusKeyValues(model))
 
@@ -661,8 +732,7 @@ export async function renderTaxReportPdf(
     drawKeyValues([
       ['과세기간', `${formatKstTimestamp(model.v2.inputPeriod.from)} ~ ${formatKstTimestamp(model.v2.inputPeriod.through)}`],
       ['표시 경계', `${formatKstTimestamp(model.v2.dataCoverage.from)} ~ ${formatKstTimestamp(model.v2.dataCoverage.through)}`],
-      ['포함 상태', model.v2.dataCoverage.status],
-      ['확인 수준', model.v2.dataCoverage.assurance],
+      ['포함 상태', presentCoverage(model.v2.dataCoverage.status, model.v2.dataCoverage.assurance)],
       ['계산 기준 시각', formatKstTimestamp(model.v2.calculatedAsOf)],
       [
         '누락 구간',
@@ -683,7 +753,7 @@ export async function renderTaxReportPdf(
         { header: '누락 구간', width: 195 },
       ],
       rows: model.v2.sourceCoverage.map((source) => [
-        `${source.systemName ?? source.sourceKind} · ${source.status}\n${source.sourceKind} · ${source.assurance}\n${shortId(source.sourceArtifactId)}`,
+        `${source.systemName ?? '자료 출처'}\n${presentCoverage(source.status, source.assurance)}`,
         source.coveredIntervals.length === 0
           ? '확인된 구간 없음'
           : source.coveredIntervals.map((row) =>
@@ -715,27 +785,16 @@ export async function renderTaxReportPdf(
     title: '검토·보완할 항목',
     emptyLabel: '확인된 제한사항이 없습니다.',
     columns: [
-      { header: '코드', width: 112 },
+      { header: '확인할 내용', width: 112 },
       { header: '설명', width: 236 },
       { header: '영향 대상', width: 163 },
     ],
     rows: model.limitations.map((row) => {
-      const targets = [
-        row.taxAssetId === undefined ? undefined : `자산 ${row.taxAssetId}`,
-        row.taxAddressId === undefined
-          ? undefined
-          : `주소 ${shortId(row.taxAddressId)}`,
-        row.movementId === undefined
-          ? undefined
-          : `Movement ${shortId(row.movementId)}`,
-        row.reviewId === undefined
-          ? undefined
-          : `Review ${shortId(row.reviewId)}`,
-        row.reviewRevisionId === undefined
-          ? undefined
-          : `Review revision ${shortId(row.reviewRevisionId)}`,
-      ].filter((value): value is string => value !== undefined)
-      return [row.code, row.reason, targets.join('\n') || '전체 계산']
+      const targets = row.taxAssetId === undefined
+        ? '전체 계산'
+        : `${presentTaxAsset(row.taxAssetId)} 자산`
+      const [title, description] = presentLimitation(row.code)
+      return [title, description, targets]
     }),
   })
 
@@ -748,15 +807,15 @@ export async function renderTaxReportPdf(
       { header: '취득원가', width: 88, align: 'right' },
       { header: '필요경비', width: 78, align: 'right' },
       { header: '손익', width: 82, align: 'right' },
-      { header: '최소 단위 수량', width: 83, align: 'right' },
+      { header: '수량', width: 83, align: 'right' },
     ],
     rows: model.assetSummaries.map((row) => [
-      `${row.taxAssetId}\n${row.disposalCount}건`,
+      `${presentTaxAsset(row.taxAssetId)}\n${row.disposalCount}건`,
       formatReportAmount(row.grossProceeds, model.denominationAssetId),
       formatReportAmount(row.acquisitionCost, model.denominationAssetId),
       formatReportAmount(row.ancillaryExpense, model.denominationAssetId),
       formatReportAmount(row.gainLoss, model.denominationAssetId),
-      formatDecimal(row.quantity),
+      formatAssetQuantity(row.quantity, row.taxAssetId, row.assetAtomicDecimals),
     ]),
   })
 
@@ -771,12 +830,12 @@ export async function renderTaxReportPdf(
         { header: '원본 결합 / 검토', width: 155 },
       ],
       rows: model.v2.disposals.map((row) => [
-        `${formatKstTimestamp(row.occurredAt)}\n${row.transactionType}`,
+        `${formatKstTimestamp(row.occurredAt)}\n${presentTransactionType(row.transactionType)}`,
         reportRowAccountLabel(row.account),
         row.valuation.status === 'UNKNOWN'
           ? '평가 미확정'
-          : `${row.valuation.kind ?? '종류 미확인'}\n${row.valuation.effectiveAt ? formatKstTimestamp(row.valuation.effectiveAt) : '시점 미확인'}\n${row.valuation.provider ?? 'provider 미확정'} · ${row.valuation.datasetVersion ?? 'dataset 미확정'} · ${formatValuationMarket(row.valuation)}\n${row.valuation.quoteId ?? shortId(row.valuation.valuationId ?? '')}`,
-        `${reportRowSourceLabel(row)}\n${row.review.status}${row.basisEvidenceDigest === null ? '' : `\n50% 근거 ${shortId(row.basisEvidenceDigest)}`}`,
+          : `${row.valuation.kind ?? '평가 방식 확인 필요'}\n${row.valuation.effectiveAt ? formatKstTimestamp(row.valuation.effectiveAt) : '시점 미확인'}\n${row.valuation.provider ?? '가격 제공처 확인 필요'} · ${row.valuation.datasetVersion ?? '데이터셋 확인 필요'} · ${formatValuationMarket(row.valuation)}`,
+        `${reportRowSourceLabel(row)}\n${presentReviewStatus(row.review.status)}${row.basisEvidenceDigest === null ? '' : '\n50% 필요경비 근거 연결됨'}`,
       ]),
     })
 
@@ -784,26 +843,26 @@ export async function renderTaxReportPdf(
       title: '자산별 연간 총평균 근거',
       emptyLabel: '기록된 자산별 총평균 근거가 없습니다.',
       columns: [
-        { header: '자산 / 원가모드', width: 108 },
-        { header: '분자(원천 정수)', width: 108, align: 'right' },
-        { header: '분모(원천 최소단위)', width: 108, align: 'right' },
-        { header: '단가(원천 정수)', width: 100, align: 'right' },
+        { header: '자산 / 원가 기준', width: 108 },
+        { header: '취득원가 합계', width: 108, align: 'right' },
+        { header: '취득 수량', width: 108, align: 'right' },
+        { header: '평균 취득단가', width: 100, align: 'right' },
         { header: '반올림', width: 87 },
       ],
       rows: model.v2.assetSummaries.map((row) => [
-        `${row.taxAssetId}\n${row.basisMode}`,
+        `${presentTaxAsset(row.taxAssetId)}\n${presentBasisMode(row.basisMode)}`,
         row.annualAverage.status === 'NOT_APPLICABLE'
           ? '해당 없음(50% 특례)'
-          : row.annualAverage.numerator ?? '미확정',
+          : row.annualAverage.numerator === null ? '미확정' : formatReportAmount({ status: 'KNOWN', amount: row.annualAverage.numerator }, model.denominationAssetId),
         row.annualAverage.status === 'NOT_APPLICABLE'
           ? '해당 없음(50% 특례)'
-          : row.annualAverage.denominator ?? '미확정',
+          : row.annualAverage.denominator === null ? '미확정' : formatAssetQuantity(row.annualAverage.denominator, row.taxAssetId, row.assetAtomicDecimals),
         row.annualAverage.status === 'NOT_APPLICABLE'
           ? '해당 없음(50% 특례)'
-          : row.annualAverage.unitCost ?? '미확정',
+          : row.annualAverage.unitCost === null ? '미확정' : formatReportAmount({ status: 'KNOWN', amount: row.annualAverage.unitCost }, model.denominationAssetId),
         row.annualAverage.status === 'NOT_APPLICABLE'
           ? '해당 없음'
-          : row.annualAverage.rounding ?? '기록 없음',
+          : row.annualAverage.rounding === null ? '기록 없음' : formatRounding(row.annualAverage.rounding),
       ]),
     })
 
@@ -815,9 +874,7 @@ export async function renderTaxReportPdf(
         columns: [
           { header: '자산', width: 66 },
           { header: '법정 적용 사유', width: 130 },
-          { header: '국세청 지정 ID', width: 88 },
-          { header: '지정 정책 버전', width: 88 },
-          { header: '법정 적용 증거 digest', width: 139 },
+          { header: '원본 근거', width: 315 },
         ],
         rows: deemedEvidence,
       })
@@ -827,15 +884,15 @@ export async function renderTaxReportPdf(
       title: '기초가액 적용 근거',
       emptyLabel: '기록된 기초가액 근거가 없습니다.',
       columns: [
-        { header: '자산 / 상태', width: 108 },
+        { header: '자산 / 확인 상태', width: 108 },
         { header: '적용 규칙', width: 125 },
         { header: '실제취득가', width: 102, align: 'right' },
         { header: '2026년 말 시가', width: 102, align: 'right' },
-        { header: '이전 확정 run', width: 76 },
+        { header: '이전 확정 장부', width: 76 },
       ],
       rows: model.v2.assetSummaries.map((row) => [
-        `${row.taxAssetId}\n${row.openingBasisProvenance.status}`,
-        row.openingBasisProvenance.basisRule ?? '해당 없음',
+        `${presentTaxAsset(row.taxAssetId)}\n${row.openingBasisProvenance.status === 'KNOWN' ? '확인됨' : row.openingBasisProvenance.status === 'NOT_APPLICABLE' ? '해당 없음' : '확인 필요'}`,
+        row.openingBasisProvenance.basisRule === 'ACTUAL_ACQUISITION' ? '실제 취득가액 기준' : row.openingBasisProvenance.basisRule === 'PRE_EFFECTIVE_MAX_ACTUAL_MARKET' ? '실제 취득가액과 기준일 시가 중 높은 금액' : row.openingBasisProvenance.basisRule === 'PRIOR_FINAL_RUN' ? '이전 확정 장부의 기초가액' : '해당 없음',
         row.openingBasisProvenance.actualAcquisitionAmount === null
           ? '해당 없음'
           : formatReportAmount(
@@ -848,9 +905,7 @@ export async function renderTaxReportPdf(
             { status: 'KNOWN', amount: row.openingBasisProvenance.marketValueAt2026End },
             model.denominationAssetId,
           ),
-        row.openingBasisProvenance.sourceRunId === null
-          ? '해당 없음'
-          : shortId(row.openingBasisProvenance.sourceRunId),
+        row.openingBasisProvenance.sourceRunId === null ? '해당 없음' : '이전 확정 장부에 연결됨',
       ]),
     })
   }
@@ -859,7 +914,7 @@ export async function renderTaxReportPdf(
     title: '처분별 장부',
     emptyLabel: '기록된 처분 항목이 없습니다.',
     columns: [
-      { header: '자산 / 최소 단위 수량', width: 92 },
+      { header: '자산 / 수량', width: 92 },
       { header: '처분가액', width: 88, align: 'right' },
       { header: '취득원가', width: 88, align: 'right' },
       { header: '필요경비', width: 78, align: 'right' },
@@ -867,12 +922,12 @@ export async function renderTaxReportPdf(
       { header: '근거', width: 83 },
     ],
     rows: model.disposals.map((row) => [
-      `${row.taxAssetId}\n${formatDecimal(row.quantity)}`,
+      `${presentTaxAsset(row.taxAssetId)}\n${formatAssetQuantity(row.quantity, row.taxAssetId, row.assetAtomicDecimals)}`,
       formatReportAmount(row.grossProceeds, model.denominationAssetId),
       formatReportAmount(row.basis, model.denominationAssetId),
       formatReportAmount(row.ancillaryExpense, model.denominationAssetId),
       formatReportAmount(row.gainLoss, model.denominationAssetId),
-      `${formatCostMethod(row.costMethod)}\n${shortId(row.movementId)}`,
+      `${formatCostMethod(row.costMethod)}\n원본 거래 자료에 연결됨`,
     ]),
   })
 
@@ -881,18 +936,18 @@ export async function renderTaxReportPdf(
       title: '가상자산 수수료 별도 처분',
       emptyLabel: '가상자산으로 지급한 별도 수수료 처분이 없습니다.',
       columns: [
-        { header: '자산 / 원천 최소단위', width: 95 },
+        { header: '자산 / 수량', width: 95 },
         { header: '처분가액', width: 90, align: 'right' },
         { header: '원가', width: 90, align: 'right' },
         { header: '손익', width: 90, align: 'right' },
-        { header: '원가모드 / Movement', width: 146 },
+        { header: '원가 기준 / 원본 근거', width: 146 },
       ],
       rows: model.v2.feeAssetDisposals.map((row) => [
-        `${formatKstTimestamp(row.occurredAt)}\n${row.taxAssetId} · ${formatDecimal(row.quantity)}`,
+        `${formatKstTimestamp(row.occurredAt)}\n${formatAssetQuantity(row.quantity, row.taxAssetId, row.assetAtomicDecimals)}`,
         formatReportAmount(row.grossProceeds, model.denominationAssetId),
         formatReportAmount(row.basis, model.denominationAssetId),
         formatReportAmount(row.gainLoss, model.denominationAssetId),
-        `${row.basisMode}\n${reportRowSourceLabel(row)}\n${row.review.status}${row.basisEvidenceDigest === null ? '' : `\n50% 근거 ${shortId(row.basisEvidenceDigest)}`}`,
+        `${presentBasisMode(row.basisMode)}\n${reportRowSourceLabel(row)}\n${presentReviewStatus(row.review.status)}${row.basisEvidenceDigest === null ? '' : '\n50% 필요경비 근거 연결됨'}`,
       ]),
     })
 
@@ -901,20 +956,20 @@ export async function renderTaxReportPdf(
       emptyLabel: '기록된 대여소득 또는 보상자산 취득이 없습니다.',
       columns: [
         { header: '구분', width: 112 },
-        { header: '자산 / 원천 최소단위', width: 112 },
+        { header: '자산 / 수량', width: 112 },
         { header: '원화 금액 구성', width: 112, align: 'right' },
-        { header: 'Movement', width: 175 },
+        { header: '계정 / 원본 근거', width: 175 },
       ],
       rows: [
         ...model.v2.incomeRows.map((row) => [
-          `${formatKstTimestamp(row.occurredAt)}\n${row.transactionType}`,
-          `${row.taxAssetId}\n${formatDecimal(row.quantity)}`,
+          `${formatKstTimestamp(row.occurredAt)}\n${presentTransactionType(row.transactionType)}`,
+          `${presentTaxAsset(row.taxAssetId)}\n${formatAssetQuantity(row.quantity, row.taxAssetId, row.assetAtomicDecimals)}`,
           formatReportAmount(row.income, model.denominationAssetId),
-          `${reportRowAccountLabel(row.account)}\n${reportRowSourceLabel(row)}\n${row.review.status}`,
+          `${reportRowAccountLabel(row.account)}\n${reportRowSourceLabel(row)}\n${presentReviewStatus(row.review.status)}`,
         ]),
         ...model.v2.acquisitions.map((row) => [
-          `${formatKstTimestamp(row.occurredAt)}\n${row.transactionType}`,
-          `${row.taxAssetId}\n${formatDecimal(row.quantity)}`,
+          `${formatKstTimestamp(row.occurredAt)}\n${presentTransactionType(row.transactionType)}`,
+          `${presentTaxAsset(row.taxAssetId)}\n${formatAssetQuantity(row.quantity, row.taxAssetId, row.assetAtomicDecimals)}`,
           [
             `취득대금 ${formatReportAmount(row.consideration, model.denominationAssetId)}`,
             `취득수수료 ${formatReportAmount(row.acquisitionAncillaryExpense, model.denominationAssetId)}`,
@@ -923,7 +978,7 @@ export async function renderTaxReportPdf(
           [
             reportRowAccountLabel(row.account),
             reportRowSourceLabel(row),
-            row.review.status,
+            presentReviewStatus(row.review.status),
             ...incomePolicyMappingLines(row.incomePolicyMapping),
           ].join('\n'),
         ]),
@@ -940,10 +995,10 @@ export async function renderTaxReportPdf(
         { header: '원본 결합 / 검토', width: 143 },
       ],
       rows: model.v2.nonTaxableTransfers.map((row) => [
-        `${formatKstTimestamp(row.occurredAt)}\n${row.taxAssetId}`,
+        `${formatKstTimestamp(row.occurredAt)}\n${formatAssetQuantity(row.quantity, row.taxAssetId, row.assetAtomicDecimals)}`,
         reportRowAccountLabel(row.from),
         reportRowAccountLabel(row.to),
-        `${reportRowSourceLabel(row)}\n${row.review.status}`,
+        `${reportRowSourceLabel(row)}\n${presentReviewStatus(row.review.status)}`,
       ]),
     })
   }
@@ -953,17 +1008,17 @@ export async function renderTaxReportPdf(
     emptyLabel: '기록된 자기이체가 없습니다.',
     columns: [
       { header: '자산', width: 82 },
-      { header: '최소 단위 수량', width: 102, align: 'right' },
+      { header: '수량', width: 102, align: 'right' },
       { header: '이전 원가', width: 104, align: 'right' },
       { header: '원가 방식', width: 112 },
       { header: '근거', width: 111 },
     ],
     rows: model.transfers.map((row) => [
-      row.taxAssetId,
-      formatDecimal(row.quantity),
+      presentTaxAsset(row.taxAssetId),
+      formatAssetQuantity(row.quantity, row.taxAssetId, row.assetAtomicDecimals),
       formatReportAmount(row.basis, model.denominationAssetId),
       `${formatCostMethod(row.fromCostMethod)} → ${formatCostMethod(row.toCostMethod)}`,
-      shortId(row.movementId),
+      '원본 거래 자료에 연결됨',
     ]),
   })
 
@@ -972,15 +1027,15 @@ export async function renderTaxReportPdf(
     emptyLabel: '기록된 과세 제외 전환이 없습니다.',
     columns: [
       { header: '자산', width: 86 },
-      { header: '전환 전 최소 단위', width: 112, align: 'right' },
-      { header: '전환 후 최소 단위', width: 112, align: 'right' },
-      { header: 'Relation', width: 201 },
+      { header: '전환 전 수량', width: 112, align: 'right' },
+      { header: '전환 후 수량', width: 112, align: 'right' },
+      { header: '근거', width: 201 },
     ],
     rows: model.excludedConversions.map((row) => [
-      row.taxAssetId,
-      formatDecimal(row.fromQuantity),
-      formatDecimal(row.toQuantity),
-      shortId(row.relationId),
+      presentTaxAsset(row.taxAssetId),
+      '수량 단위 확인 필요',
+      '수량 단위 확인 필요',
+      '원본 거래 자료에 연결됨',
     ]),
   })
 
@@ -988,7 +1043,7 @@ export async function renderTaxReportPdf(
   if (calculationRows.length > 0) {
     sectionTitle(
       '적용 계산 기준',
-      'Tax Engine이 이 자료에 함께 제공한 계산 기준만 표시합니다.',
+      '이 자료에 적용된 계산 기준을 표시합니다.',
     )
     drawKeyValues(calculationRows, '적용 계산 기준')
   }
@@ -996,10 +1051,10 @@ export async function renderTaxReportPdf(
   if (model.v2) {
     sectionTitle(
       '적용 정책과 법령 근거',
-      'Tax Engine이 이 계산에 고정한 정책 artifact와 적용기간 및 법령 조항입니다.',
+      '이 계산에 적용된 정책 기간과 법령 근거입니다.',
     )
     drawKeyValues([
-      ['정책 적용 모드', model.v2.policy.applicationMode],
+      ['정책 적용', model.v2.policy.applicationMode === 'ENACTED' ? '시행 기준' : '시뮬레이션 기준'],
       ['정책 적용기간', `${formatKstTimestamp(model.v2.policy.effectiveFrom)} ~ ${formatKstTimestamp(model.v2.policy.effectiveThrough)}`],
       [
         '신고용 반올림 기준',
@@ -1007,7 +1062,6 @@ export async function renderTaxReportPdf(
           ? '승인됨'
           : '승인 전 · 현재 세액은 추정치',
       ],
-      ['정책 source-set hash', model.v2.policy.sourceSetDigest],
       ...model.v2.policy.legalReferences.map((reference) => [
         `${reference.law} ${reference.article}${reference.paragraphs.length ? ` ${reference.paragraphs.join(', ')}` : ''}`,
         [
@@ -1021,36 +1075,11 @@ export async function renderTaxReportPdf(
     ], '적용 정책과 법령 근거')
   }
 
-  ensureSpace(370)
+  ensureSpace(72)
   sectionTitle(
-    '산출 방법과 재현 정보',
-    '아래 식별자는 장부 계산에 사용된 정확한 정책과 엔진 실행을 추적하기 위한 정보입니다.',
+    '원본 근거 확인',
+    '거래별 원본 자료와 계산 근거는 장부 화면의 “원본 근거 보기”에서 확인할 수 있습니다.',
   )
-  drawKeyValues([
-    ['세금 장부 실행 ID', model.methodology.taxInventoryRunId],
-    ['세액 추정 ID', model.methodology.taxEstimateId],
-    ['Lot 실행 ID', model.methodology.lotRunId],
-    [
-      model.methodology.sourceLedgerGenerationId
-        ? '원천 원장 generation ID'
-        : '생성 작업 ID',
-      model.methodology.sourceLedgerGenerationId ??
-        model.methodology.generationId ?? '기록 없음',
-    ],
-    ['스키마 hash', model.methodology.schemaDigest],
-    [
-      '정책 이름·버전',
-      `${model.methodology.policy.name} ${model.methodology.policy.version}`,
-    ],
-    ['정책 artifact hash', model.methodology.policy.artifactDigest],
-    [
-      '엔진 이름·버전',
-      `${model.methodology.engine.name} ${model.methodology.engine.version}`,
-    ],
-    ['엔진 artifact hash', model.methodology.engine.artifactDigest],
-    ['입력 hash', model.inputDigest],
-    ['근거 묶음 hash', model.evidencePackDigest],
-  ], '산출 방법과 재현 정보')
 
   const range = doc.bufferedPageRange()
   for (let pageIndex = range.start; pageIndex < range.start + range.count; pageIndex += 1) {
@@ -1063,15 +1092,10 @@ export async function renderTaxReportPdf(
       .lineWidth(0.5)
       .stroke()
     doc.fillColor(colors.muted).fontSize(7)
-      .text(
-        `Report ID ${shortId(model.reportId)}`,
-        page.marginX,
-        page.height - 28,
-        {
-          width: contentWidth * 0.72,
-          lineBreak: false,
-        },
-      )
+      .text('Daejang 가상자산 세금 장부', page.marginX, page.height - 28, {
+        width: contentWidth * 0.72,
+        lineBreak: false,
+      })
     doc.text(
       `${pageIndex - range.start + 1} / ${range.count}`,
       page.marginX + contentWidth * 0.72,

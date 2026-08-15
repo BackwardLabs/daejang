@@ -57,6 +57,29 @@ describe('buildReportAssetPresentations', () => {
       .toEqual({})
   })
 
+  it('uses the sealed report scale without inventing a ticker when ledger metadata is unavailable', () => {
+    const sealedScaleOnly = {
+      assetSummaries: [{
+        taxAssetId: 'tax-asset-btc',
+        assetAtomicDecimals: 8,
+      }],
+      disposals: [],
+      feeAssetDisposals: [],
+      acquisitions: [],
+      incomeRows: [],
+      transfers: [],
+      nonTaxableTransfers: [],
+    } as unknown as TaxReportV2DetailModel
+
+    expect(buildReportAssetPresentations(sealedScaleOnly, [])).toEqual({
+      'tax-asset-btc': {
+        symbol: '기록된 자산',
+        decimals: 8,
+        metadata: '발행본에 기록된 수량 단위',
+      },
+    })
+  })
+
   it('uses the canonical chain native symbol instead of the storage sentinel', () => {
     const nativeReport = {
       ...report,

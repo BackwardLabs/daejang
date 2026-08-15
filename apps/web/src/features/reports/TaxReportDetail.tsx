@@ -87,12 +87,12 @@ const finalityPresentation: Record<
   { description: string; label: string }
 > = {
   FINAL: {
-    label: 'FINAL · 평가 입력 확정',
+    label: '가격 자료 확인됨',
     description:
-      'Tax Engine이 사용한 가격·평가 입력이 확정 상태라는 뜻입니다. 연간 데이터 마감 완료를 뜻하지 않습니다.',
+      '계산에 사용한 가격 자료가 확인된 상태입니다. 연간 데이터 마감까지 완료됐다는 뜻은 아닙니다.',
   },
   PROVISIONAL: {
-    label: 'PROVISIONAL · 평가 입력 잠정',
+    label: '가격 자료 일부 확인 필요',
     description:
       '가격·평가 입력이 잠정 상태이므로 이후 근거가 바뀌면 계산도 달라질 수 있습니다.',
   },
@@ -132,9 +132,9 @@ const filingStatusPresentation: Record<
   { description: string; label: string }
 > = {
   READY: {
-    label: '엔진 판정: 신고 준비 조건 충족',
+    label: '신고 준비 조건 충족',
     description:
-      'Tax Engine이 현재 입력에 차단 항목이 없다고 판정했습니다. 원화 단위와 최종 신고 적합성을 별도로 검토해야 합니다.',
+      '현재 입력에서 차단 항목이 없습니다. 원화 단위와 최종 신고 적합성은 별도로 확인해야 합니다.',
   },
   BLOCKED: {
     label: '검토 필요',
@@ -147,13 +147,13 @@ const calculationContractPresentation: Record<
   { description: string; label: string; tone: 'ready' | 'warning' }
 > = {
   ANNUAL_TOTAL_AVERAGE: {
-    label: '연간 총평균 원가 계약 기록됨',
+    label: '연간 평균 취득가액 기준',
     description:
-      '이 발행본에 원가 방식과 계산 묶음 규칙이 기록되어 있다는 뜻입니다. 원화 단위, 세액 또는 신고 적합성까지 검증됐다는 뜻은 아닙니다.',
+      '연간 취득 내역을 합산해 처분 취득가액을 계산한 발행본입니다. 원화 단위, 세액 또는 신고 적합성까지 검증됐다는 뜻은 아닙니다.',
     tone: 'ready',
   },
   LEGACY: {
-    label: '주소별 이동평균/FIFO 과거 계산본',
+    label: '이전 계산 기준',
     description:
       '이 발행본은 연간 총평균 전환 전 계산 계약을 사용합니다. 총평균법 기준 신고 자료로 해석하면 안 됩니다.',
     tone: 'warning',
@@ -283,6 +283,9 @@ function EmptyRows({ children }: { children: string }) {
   return <p className="tax-report-detail__empty">{children}</p>
 }
 
+export const shouldShowLegacyMachineDetails = (hostname?: string) =>
+  hostname === 'localhost'
+
 export function TaxReportDetail({
   report,
   pointerVersion,
@@ -370,6 +373,88 @@ export function TaxReportDetail({
       })
     return () => controller.abort()
   }, [activeTab, evidencePack?.reportId, report.reportId])
+
+  // V1 reports were sealed without a per-asset ledger scale. Rendering their
+  // raw integers as customer quantities can silently produce a 10^n error, and
+  // the old trace surface exposed internal identifiers. Keep this historical
+  // format readable, but reserve transaction-level quantities for V2.
+  const legacyMachineDetailsEnabled = shouldShowLegacyMachineDetails(
+    globalThis.location?.hostname,
+  )
+  if (!legacyMachineDetailsEnabled) return (
+    <article
+      className="tax-report-detail"
+      aria-labelledby="tax-report-detail-title"
+    >
+      <header className="tax-report-detail__header">
+        <div>
+          <span>이전 형식 장부</span>
+          <h2 id="tax-report-detail-title">{report.taxYear}년 가상자산 세무 장부</h2>
+          <p>
+            {pointerVersion === undefined ? '발행본' : `발행본 ${String(pointerVersion)}`}
+            {isCurrent ? ' · 현재 장부' : ' · 이전 발행본'} · {new Date(report.issuedAt).toLocaleString('ko-KR')} 발행
+          </p>
+        </div>
+        <div className="tax-report-detail__header-actions">
+          <a href={pdfHref} download>{isFilingReady ? '신고 준비 자료 PDF' : '검토용 PDF'}</a>
+        </div>
+      </header>
+
+      <section className="tax-report-detail__status-board" aria-labelledby="tax-report-status-title">
+        <header>
+          <div>
+            <span>현재 상태</span>
+            <h3 id="tax-report-status-title">이 장부를 신고에 사용하기 전 확인할 내용</h3>
+          </div>
+          <p>가격 자료, 연간 마감, 계산 완결성, 신고 준비 상태를 각각 확인합니다.</p>
+        </header>
+        <dl>
+          <div><dt>가격 자료</dt><dd><b>{finality.label}</b><small>{finality.description}</small></dd></div>
+          <div><dt>연간 마감</dt><dd><b>{taxYearClose.label}</b><small>{taxYearClose.description}</small></dd></div>
+          <div><dt>계산 결과</dt><dd><b>{resultStatus.label}</b><small>{resultStatus.description}</small></dd></div>
+          <div><dt>신고 준비</dt><dd><b>{filingStatus.label}</b><small>{filingStatus.description}</small></dd></div>
+        </dl>
+      </section>
+
+      <section className="tax-report-detail__section" aria-labelledby="tax-report-summary-title">
+        <header>
+          <div><span>계산 요약</span><h3 id="tax-report-summary-title">연간 세금 계산 요약</h3></div>
+          <p>아래 금액은 이 발행본에 저장된 원화 기준 결과입니다.</p>
+        </header>
+        <dl className="tax-report-detail__summary-grid">
+          <div><dt>총 처분가액</dt><dd><AmountValue amount={report.totals.grossProceeds} denomination={report.denominationAssetId} /></dd></div>
+          <div><dt>총 취득원가</dt><dd><AmountValue amount={report.totals.acquisitionCost} denomination={report.denominationAssetId} /></dd></div>
+          <div><dt>총 필요경비</dt><dd><AmountValue amount={report.totals.ancillaryExpense} denomination={report.denominationAssetId} /></dd></div>
+          <div><dt>연간 손익</dt><dd><AmountValue amount={report.summary.gainLoss} denomination={report.denominationAssetId} /></dd></div>
+          <div><dt>과세표준</dt><dd><AmountValue amount={report.summary.taxableBase} denomination={report.denominationAssetId} /></dd></div>
+          <div><dt>예상 총 세액</dt><dd><AmountValue amount={report.summary.totalTax} denomination={report.denominationAssetId} /></dd></div>
+        </dl>
+      </section>
+
+      <section className="tax-report-detail__section" aria-labelledby="tax-report-legacy-method-title">
+        <header>
+          <div><span>계산 방식</span><h3 id="tax-report-legacy-method-title">이전 발행본의 계산 기준</h3></div>
+          <p>{calculationContract.description}</p>
+        </header>
+        <dl className="tax-report-detail__summary-grid">
+          <div><dt>원가 방식</dt><dd>{calculationContract.label}</dd></div>
+          <div><dt>국세율</dt><dd>{report.summary.calculationRule ? rateLabel(report.summary.calculationRule.nationalRate) : '기준 확인 필요'}</dd></div>
+          <div><dt>지방세율</dt><dd>{report.summary.calculationRule ? rateLabel(report.summary.calculationRule.localRate) : '기준 확인 필요'}</dd></div>
+          <div><dt>세액 반올림</dt><dd>{report.summary.calculationRule ? roundingLabel(report.summary.calculationRule.taxRounding) : '기준 확인 필요'}</dd></div>
+        </dl>
+        <p className="tax-report-detail__calculation-unit-note">
+          이 형식에는 자산별 장부 소수점 자릿수가 함께 보관되어 있지 않습니다. 따라서 거래별 수량을 추정해서 표시하지 않습니다. 새 발행본에서는 장부 단위가 확인된 수량만 표시합니다.
+        </p>
+      </section>
+
+      {report.limitations.length > 0 ? (
+        <section className="tax-report-detail__section" aria-labelledby="tax-report-legacy-limitations-title">
+          <header><div><span>확인 필요</span><h3 id="tax-report-legacy-limitations-title">검토가 필요한 항목</h3></div><p>{report.limitations.length.toLocaleString('ko-KR')}건</p></header>
+          <p>세부 원인과 원본 거래 자료는 새 형식 장부에서 확인할 수 있습니다. 이 형식에서는 내부 식별자와 원시 데이터를 표시하지 않습니다.</p>
+        </section>
+      ) : null}
+    </article>
+  )
 
   const toggleAsset = (taxAssetId: string) => {
     setExpandedAssetIds((current) => {

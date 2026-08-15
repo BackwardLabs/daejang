@@ -21,26 +21,24 @@ const final = new Set(['APPROVED', 'REJECTED', 'MANUAL_REVIEW'])
 const lifecycleLabel: Record<string, string> = {
   PREPARING: '증명 자료 준비 중',
   PREPARED: '증명 자료 준비 완료',
-  SUBMISSION_QUEUED: '온체인 제출 대기',
-  SUBMITTING: '온체인 제출 중',
-  SUBMITTED: '온체인 제출 완료',
+  SUBMISSION_QUEUED: '블록체인 기록 대기',
+  SUBMITTING: '블록체인 기록 중',
+  SUBMITTED: '블록체인 기록 완료',
   REVIEW_QUEUED: '검증 대기',
   REVIEWING: '검증 중',
-  APPROVED: '온체인 검증 완료',
-  REJECTED: '온체인 검증 반려',
+  APPROVED: '블록체인 기록 검증 완료',
+  REJECTED: '블록체인 기록 검증 반려',
   MANUAL_REVIEW: '사람 검토 필요',
   RETRY_REQUIRED: '다시 시도 필요',
   RECONCILIATION_REQUIRED: '상태 확인 필요',
   PREPARATION_FAILED: '증명 준비 실패',
-  SUBMISSION_FAILED: '온체인 제출 실패',
-  REVIEW_FAILED: '온체인 검증 실패',
+  SUBMISSION_FAILED: '블록체인 기록 실패',
+  REVIEW_FAILED: '블록체인 기록 검증 실패',
   PENDING: '처리 대기',
 }
 
 export function ReportAttestationControl({
   reportId,
-  reportModelDigest,
-  pointerVersion,
   eligible,
   api = localReportAttestationApi,
 }: {
@@ -133,17 +131,14 @@ export function ReportAttestationControl({
     }
   }
 
-  const shortHex = (value: string) =>
-    value.length > 20 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value
-
   return (
-    <section className="tax-report-v2__attestation" aria-label="온체인 장부 검증">
+    <section className="tax-report-v2__attestation" aria-label="블록체인 기록 검증">
       <div>
-        <span>ONCHAIN VERIFICATION</span>
-        <h4>온체인 장부 검증</h4>
+        <span>기록 검증</span>
+        <h4>블록체인 기록 검증</h4>
         <p>
           {eligible
-            ? '현재 확정 장부의 정본 commitment를 제출하고 검증합니다.'
+            ? '현재 확정 장부의 변경 이력 확인 정보를 제출하고 검증합니다.'
             : status?.submissionEvidence
               ? '이 발행본에 남은 온체인 증명을 읽기 전용으로 확인합니다.'
             : '연간 자료·마감 확인 후 가능합니다.'}
@@ -152,7 +147,7 @@ export function ReportAttestationControl({
       <div className="tax-report-v2__attestation-action">
         {status ? (
           <span data-status={status.lifecycle}>
-            {lifecycleLabel[status.lifecycle] ?? status.lifecycle}
+            {lifecycleLabel[status.lifecycle] ?? '기록 상태 확인 필요'}
           </span>
         ) : null}
         {verification ? (
@@ -164,9 +159,8 @@ export function ReportAttestationControl({
         ) : null}
         {status?.submissionEvidence ? (
           <dl className="tax-report-v2__attestation-evidence">
-            <div><dt>네트워크</dt><dd>GIWA Sepolia · eip155:91342</dd></div>
-            <div><dt>Tx</dt><dd><code title={status.submissionEvidence.transactionHash} aria-label={`transaction ${status.submissionEvidence.transactionHash}`}>{shortHex(status.submissionEvidence.transactionHash)}</code></dd></div>
-            <div><dt>UID</dt><dd><code title={status.submissionEvidence.attestationUID} aria-label={`attestation UID ${status.submissionEvidence.attestationUID}`}>{shortHex(status.submissionEvidence.attestationUID)}</code></dd></div>
+            <div><dt>기록 네트워크</dt><dd>GIWA 테스트 네트워크</dd></div>
+            <div><dt>검증 기록</dt><dd>원본 근거 보관됨</dd></div>
           </dl>
         ) : null}
         <button
@@ -189,18 +183,16 @@ export function ReportAttestationControl({
           <div>
             <header>
               <div>
-                <span>IMMUTABLE ATTESTATION</span>
+                <span>기록 제출</span>
                 <h4 id="report-attestation-confirm-title">변경 불가 증명 대상 확인</h4>
               </div>
               <button type="button" onClick={() => setConfirmOpen(false)} aria-label="증명 확인 닫기">닫기</button>
             </header>
-            <p>제출하면 이 발행본의 commitment가 네트워크에 남습니다. 잘못된 발행본은 수정할 수 없고 새 revision을 발행해야 합니다.</p>
+            <p>제출하면 이 발행본의 변경 이력 확인 정보가 네트워크에 남습니다. 수정이 필요하면 새 발행본을 만들어야 합니다.</p>
             <dl>
-              <div><dt>네트워크</dt><dd>GIWA Sepolia · eip155:91342</dd></div>
-              <div><dt>장부 pointer version</dt><dd>{String(pointerVersion)}</dd></div>
-              <div><dt>증명 revision</dt><dd>1 · 불변 reportId의 첫 증명</dd></div>
-              <div><dt>Report ID</dt><dd><code>{reportId}</code></dd></div>
-              <div><dt>Model digest</dt><dd><code>{reportModelDigest}</code></dd></div>
+              <div><dt>기록 네트워크</dt><dd>GIWA 테스트 네트워크</dd></div>
+              <div><dt>발행본</dt><dd>현재 발행본</dd></div>
+              <div><dt>증명 범위</dt><dd>이 발행본의 계산 결과와 원본 근거</dd></div>
             </dl>
             <footer>
               <button type="button" onClick={() => setConfirmOpen(false)}>취소</button>
@@ -214,16 +206,15 @@ export function ReportAttestationControl({
           <div>
             <header>
               <div>
-                <span>ATTESTATION COMPLETE</span>
-                <h4 id="report-attestation-success-title">온체인 증명 완료</h4>
+                <span>기록 완료</span>
+                <h4 id="report-attestation-success-title">블록체인 기록 완료</h4>
               </div>
-              <button type="button" onClick={() => setSuccessOpen(false)} aria-label="온체인 증명 완료 닫기">닫기</button>
+              <button type="button" onClick={() => setSuccessOpen(false)} aria-label="블록체인 기록 완료 닫기">닫기</button>
             </header>
-            <p>이 reportId의 commitment가 변경 불가 증명으로 제출됐습니다. 아래 값으로 네트워크 기록을 다시 확인할 수 있습니다.</p>
+            <p>이 발행본의 변경 이력 확인 정보가 네트워크에 기록되었습니다. 원본 근거 보기에서 연결 상태를 확인할 수 있습니다.</p>
             <dl>
-              <div><dt>네트워크</dt><dd>GIWA Sepolia · eip155:91342</dd></div>
-              <div><dt>Transaction hash</dt><dd><code>{status.submissionEvidence.transactionHash}</code></dd></div>
-              <div><dt>Attestation UID</dt><dd><code>{status.submissionEvidence.attestationUID}</code></dd></div>
+              <div><dt>기록 네트워크</dt><dd>GIWA 테스트 네트워크</dd></div>
+              <div><dt>검증 기록</dt><dd>원본 근거 보관됨</dd></div>
             </dl>
           </div>
         </div>

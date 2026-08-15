@@ -10,10 +10,10 @@ const mode = process.env.VITE_REPORTS_UI_MODE ?? 'product'
 const profiles = {
   product: {
     required: [
-      'TAX LEDGER',
+      '연간 세금 요약',
       '신고 준비 자료 PDF',
       '검토용 PDF',
-      '장부 revision',
+      '발행 이력',
     ],
     forbidden: [
       'SYNTHETIC · GIWA SEPOLIA TESTNET',
@@ -29,11 +29,11 @@ const profiles = {
       '/report-attestations/synthetic-publication',
     ],
     forbidden: [
-      'TAX LEDGER',
+      '연간 세금 요약',
       '/tax-reports/',
       '신고 준비 자료 PDF',
       '검토용 PDF',
-      '장부 revision',
+      '발행 이력',
       '/report-payments/capabilities',
       'FINAL 현재 세금 결과 내려받기',
     ],

@@ -264,9 +264,19 @@ const report: TaxReportV2DetailModel = {
   issuedAt: '2027-07-01T00:00:00Z',
 }
 
+const assetPresentations = {
+  BTC: { symbol: 'BTC', decimals: 8, metadata: '소수점 8자리' },
+  ETH: { symbol: 'ETH', decimals: 18, metadata: '소수점 18자리' },
+}
+
 describe('TaxReportDetailV2', () => {
   it('shows a compact partial-year summary and all engine-owned detail tabs', async () => {
-    render(<TaxReportDetailV2 report={report} pointerVersion={3} isCurrent />)
+    render(<TaxReportDetailV2
+      report={report}
+      assetPresentations={assetPresentations}
+      pointerVersion={3}
+      isCurrent
+    />)
 
     expect(screen.getByRole('heading', {
       name: '2027 가상자산 세금 리포트',
@@ -323,46 +333,47 @@ describe('TaxReportDetailV2', () => {
       'aria-labelledby',
       'tax-report-v2-tab-assets',
     )
-    expect(screen.getByText('총평균 분자 · 연간 취득가액(원천 정수)')).toBeInTheDocument()
-    expect(screen.getAllByText('70,000,000', { exact: false }).length).toBeGreaterThan(0)
+    expect(screen.getByText('원가 계산 방식')).toBeInTheDocument()
+    expect(screen.getByText('연간 취득수량 · 취득가액').parentElement)
+      .toHaveTextContent('1 BTC')
     expect(screen.getByText('실제 취득가액 · 연간 총평균')).toBeInTheDocument()
     expect(screen.getByText('해당 없음')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '소득·처분' }))
-    expect(screen.getByText(/LENDING_INCOME_ASSET/u)).toBeInTheDocument()
-    expect(screen.getByText(/FEE_ASSET_DISPOSAL/u)).toBeInTheDocument()
-    const incomeSummary = screen.getByText(/LENDING_INCOME_ASSET · ETH/u)
+    expect(screen.getByText(/대여 수익\(자산\)/u)).toBeInTheDocument()
+    expect(screen.getByText(/수수료로 사용한 자산 처분/u)).toBeInTheDocument()
+    const incomeSummary = screen.getByText(/대여 수익\(자산\) · ETH/u)
     fireEvent.click(incomeSummary)
     expect(incomeSummary.closest('details')).toHaveAttribute('open')
     expect(
       screen.getAllByText(/2027\. 02\. 01\. 09:00:00 KST/u).length,
     ).toBeGreaterThan(0)
-    expect(screen.getAllByText('EVM_WALLET · wallet-1').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/FILE · 원본 결합 완료/u).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/fragment fragment-1/u).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/원천 최소단위 수량/u).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/UPBIT · fixture-v1 · KRW-ETH/u).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByText(/OTHER_ACQUISITION · ETH/u))
+    expect(screen.getAllByText('개인 지갑').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/원본 자료 연결 · 확인됨/u).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/fragment fragment-1/u)).not.toBeInTheDocument()
+    expect(screen.queryByText(/원천 최소단위 수량/u)).not.toBeInTheDocument()
+    expect(screen.getAllByText(/UPBIT · KRW-ETH/u).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByText(/기타 취득 · ETH/u))
     expect(screen.getByText('취득 대가')).toBeInTheDocument()
     expect(screen.getByText('취득 부대비용')).toBeInTheDocument()
     expect(screen.getByText('총 취득가액')).toBeInTheDocument()
-    expect(screen.getByText('보상 분류')).toBeInTheDocument()
-    expect(screen.getByText('AIRDROP')).toBeInTheDocument()
-    expect(screen.getByText('reward-policy-v1')).toBeInTheDocument()
-    expect(screen.getByText('8'.repeat(64))).toBeInTheDocument()
-    expect(screen.getByText(/TRANSFER · BTC/u)).toBeInTheDocument()
-    expect(screen.getByText(/SELF_TRANSFER · ETH/u)).toBeInTheDocument()
-    expect(screen.getByText('relation relation-1')).toBeInTheDocument()
+    expect(screen.getByText('취득 분류')).toBeInTheDocument()
+    expect(screen.getByText('에어드롭')).toBeInTheDocument()
+    expect(screen.queryByText('reward-policy-v1')).not.toBeInTheDocument()
+    expect(screen.queryByText('8'.repeat(64))).not.toBeInTheDocument()
+    expect(screen.getByText(/취득원가 이월 이체 · BTC/u)).toBeInTheDocument()
+    expect(screen.getByText(/본인 계정 간 이동 · ETH/u)).toBeInTheDocument()
+    expect(screen.queryByText('relation relation-1')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '계산·법적 근거' }))
-    expect(screen.getByText('거주자 × 과세연도 × 세무자산')).toBeInTheDocument()
+    expect(screen.getByText('자산별·연도별 합산')).toBeInTheDocument()
     expect(screen.getByText('승인 전 · 현재 세액은 추정치')).toBeInTheDocument()
-    expect(screen.getByText('UPBIT')).toBeInTheDocument()
+    expect(screen.getByText('업비트 거래내역')).toBeInTheDocument()
     expect(screen.getByText(/소득세법 제37조/u)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '국가법령정보센터 원문' })).toHaveAttribute(
       'href', 'https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=280405',
     )
-    expect(screen.getByText('7월 이후 자료가 없습니다.')).toBeInTheDocument()
+    expect(screen.getByText('자료 수집 범위를 확인해 주세요')).toBeInTheDocument()
     expect(screen.getAllByText(/누락:/u).length).toBeGreaterThan(0)
   })
 
@@ -379,7 +390,7 @@ describe('TaxReportDetailV2', () => {
     }} />)
 
     const assetLabel = screen.getByText('Optimism · 0x420000…000006')
-    expect(assetLabel).toHaveAttribute('title', canonicalAssetId)
+    expect(assetLabel).toHaveAttribute('title', '자산 정보 확인 필요')
   })
 
   it('uses bound ledger metadata while retaining the canonical coordinate', () => {
@@ -404,10 +415,7 @@ describe('TaxReportDetailV2', () => {
     />)
 
     const assetLabel = screen.getByText('WETH')
-    expect(assetLabel).toHaveAttribute(
-      'title',
-      'Optimism · 0x420000…000006 · 소수점 18자리',
-    )
+    expect(assetLabel).toHaveAttribute('title', '소수점 18자리')
     expect(screen.queryByText(canonicalAssetId)).not.toBeInTheDocument()
   })
 
@@ -548,18 +556,19 @@ describe('TaxReportDetailV2', () => {
       basisEvidenceDigest: evidenceDigest,
     }
 
-    render(<TaxReportDetailV2 report={deemedReport} />)
+    render(<TaxReportDetailV2 report={deemedReport} assetPresentations={assetPresentations} />)
     fireEvent.click(screen.getByRole('tab', { name: '자산별 장부' }))
-    expect(screen.getAllByText('해당 없음 · 50% 필요경비 특례').length)
+    expect(screen.getAllByText('50% 필요경비 특례 적용').length)
       .toBeGreaterThan(0)
     expect(screen.getByText('국세청 지정 사유')).toBeInTheDocument()
-    expect(screen.getByText('nts-designation-1')).toBeInTheDocument()
-    expect(screen.getByText('2027-v1')).toBeInTheDocument()
-    expect(screen.getByText(evidenceDigest)).toBeInTheDocument()
+    expect(screen.queryByText('nts-designation-1')).not.toBeInTheDocument()
+    expect(screen.queryByText('2027-v1')).not.toBeInTheDocument()
+    expect(screen.queryByText(evidenceDigest)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '소득·처분' }))
-    fireEvent.click(screen.getByText(/DISPOSAL · BTC · 50% 필요경비 특례/u))
-    expect(screen.getAllByText(evidenceDigest).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByText(/매도·사용 · BTC · 50% 필요경비 특례/u))
+    expect(screen.getByText('50% 특례 근거')).toBeInTheDocument()
+    expect(screen.queryByText(evidenceDigest)).not.toBeInTheDocument()
   })
 
   it('labels a direct valuation as market-not-applicable instead of unresolved', () => {
@@ -573,12 +582,21 @@ describe('TaxReportDetailV2', () => {
       },
     }
 
-    render(<TaxReportDetailV2 report={directReport} />)
+    render(<TaxReportDetailV2 report={directReport} assetPresentations={assetPresentations} />)
     fireEvent.click(screen.getByRole('tab', { name: '소득·처분' }))
-    fireEvent.click(screen.getByText(/OTHER_ACQUISITION · ETH/u))
+    fireEvent.click(screen.getByText(/기타 취득 · ETH/u))
 
     expect(screen.getByText(
-      'UPBIT · fixture-v1 · 직접 평가 · 시장 코드 해당 없음',
+      'UPBIT · 직접 평가 · 시장 코드 해당 없음',
     )).toBeInTheDocument()
+  })
+
+  it('hides raw atomic quantities when the ledger asset decimals are unavailable', () => {
+    render(<TaxReportDetailV2 report={report} />)
+    fireEvent.click(screen.getByRole('tab', { name: '자산별 장부' }))
+
+    expect(screen.getByText('기초수량 · 기초가액').parentElement)
+      .toHaveTextContent('수량 단위 확인 필요')
+    expect(screen.queryByText('100000000')).not.toBeInTheDocument()
   })
 })

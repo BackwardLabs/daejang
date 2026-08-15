@@ -62,6 +62,28 @@ const reportAssetBindings = (report: TaxReportV2DetailModel) => {
   return bindings
 }
 
+const sealedReportScales = (report: TaxReportV2DetailModel) => {
+  const result = new Map<string, number | null>()
+  const register = (taxAssetId: string, decimals: number | null | undefined) => {
+    if (decimals === null || decimals === undefined) return
+    const existing = result.get(taxAssetId)
+    result.set(taxAssetId, existing === undefined || existing === decimals ? decimals : null)
+  }
+
+  for (const row of [
+    ...(report.assetSummaries ?? []),
+    ...(report.disposals ?? []),
+    ...(report.feeAssetDisposals ?? []),
+    ...(report.acquisitions ?? []),
+    ...(report.incomeRows ?? []),
+    ...(report.transfers ?? []),
+    ...(report.nonTaxableTransfers ?? []),
+  ]) {
+    register(row.taxAssetId, row.assetAtomicDecimals)
+  }
+  return result
+}
+
 export const buildReportAssetPresentations = (
   report: TaxReportV2DetailModel,
   ledgerItems: LedgerEventModel[],
@@ -78,6 +100,7 @@ export const buildReportAssetPresentations = (
 
   const result: ReportAssetPresentations = {}
   const bindings = reportAssetBindings(report)
+  const sealedScales = sealedReportScales(report)
   const taxAssetIds = new Set([
     ...report.assetSummaries.map((asset) => asset.taxAssetId),
     ...bindings.keys(),
@@ -99,6 +122,15 @@ export const buildReportAssetPresentations = (
         match.symbol === 'NATIVE' && /^asset:eip155:(?:1|10):native$/u.test(taxAssetId)
           ? { ...match, symbol: 'ETH' }
           : match
+    } else {
+      const sealedDecimals = sealedScales.get(taxAssetId)
+      if (sealedDecimals !== undefined && sealedDecimals !== null) {
+        result[taxAssetId] = {
+          symbol: '기록된 자산',
+          decimals: sealedDecimals,
+          metadata: '발행본에 기록된 수량 단위',
+        }
+      }
     }
   }
 

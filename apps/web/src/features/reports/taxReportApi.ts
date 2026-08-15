@@ -348,6 +348,7 @@ export type TaxReportV2DetailModel = {
   }
   assetSummaries: Array<{
     taxAssetId: string
+    assetAtomicDecimals?: number | null
     openingQuantity: string
     openingBasis: TaxReportV2AmountModel
     openingBasisProvenance: {
@@ -395,6 +396,7 @@ export type TaxReportV2DetailModel = {
     fromLegId: string
     toLegId: string
     taxAssetId: string
+    assetAtomicDecimals?: number | null
     quantity: string
     occurredAt: string
     from: TaxReportV2AccountModel
@@ -445,6 +447,7 @@ export type TaxReportV2DetailModel = {
 
 export type TaxReportV2DisposalModel = TaxReportDisposalModel & {
   transactionType: 'DISPOSAL' | 'FEE_ASSET_DISPOSAL'
+  assetAtomicDecimals?: number | null
   relatedMovementId: string | null
   incurredExpense: TaxReportV2AmountModel
   basisMode: 'ACTUAL_TOTAL_AVERAGE' | 'DEEMED_EXPENSE_50'
@@ -470,6 +473,7 @@ type TaxReportV2MovementModel = {
   kind: string
   taxAssetId: string
   ledgerAssetId: string
+  assetAtomicDecimals?: number | null
   quantity: string
   valuationId: string | null
   occurredAt: string
@@ -522,6 +526,7 @@ export type TaxReportV2RowReviewModel = {
 
 export type TaxReportV2TransferModel = TaxReportTransferModel & {
   transactionType: 'TRANSFER'
+  assetAtomicDecimals?: number | null
   occurredAt: string
   from: TaxReportV2AccountModel
   to: TaxReportV2AccountModel

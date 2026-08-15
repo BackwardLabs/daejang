@@ -133,16 +133,15 @@ const model = (
 })
 
 describe('tax report PDF renderer', () => {
-  it('renders the approved reward acquisition policy evidence', () => {
+  it('renders reward acquisition evidence without internal policy identifiers', () => {
     const policyDigest = digest('reward-policy')
     expect(incomePolicyMappingLines({
       eventSubtype: 'AIRDROP',
       policyVersion: 'reward-policy-v1',
       policyArtifactDigest: policyDigest,
     })).toEqual([
-      '보상 분류 AIRDROP',
-      '정책 reward-policy-v1',
-      `정책 근거 ${policyDigest.slice(0, 12)}…${policyDigest.slice(-12)}`,
+      '보상 자산 취득 기준 적용',
+      '원본 정책 근거 자료에 연결됨',
     ])
     expect(incomePolicyMappingLines(null)).toEqual([])
   })
@@ -231,7 +230,8 @@ describe('tax report PDF renderer', () => {
           },
         },
         assetSummaries: [{
-          taxAssetId: 'BTC', openingQuantity: '0', openingBasis: known('0'),
+          taxAssetId: 'BTC', assetAtomicDecimals: 8,
+          openingQuantity: '0', openingBasis: known('0'),
           openingBasisProvenance: {
             status: 'NOT_APPLICABLE', basisRule: null,
             actualAcquisitionAmount: null, marketValueAt2026End: null,
@@ -299,7 +299,7 @@ describe('tax report PDF renderer', () => {
     expect(output.subarray(0, 5).toString('ascii')).toBe('%PDF-')
     expect(output.byteLength).toBeGreaterThan(15_000)
     expect(reportStatusKeyValues(input)).toContainEqual([
-      '세금 결과', 'ESTIMATED_TAX_DUE',
+      '세금 결과', '예상 세액 있음',
     ])
     expect(deemedExpenseEvidenceRows(input)).toEqual([])
 
@@ -329,8 +329,7 @@ describe('tax report PDF renderer', () => {
     }
     expect(deemedExpenseEvidenceRows(deemedInput)).toEqual([
       [
-        'BTC', 'NTS_DESIGNATED_OTHER', 'nts-designation-1', '2027-v1',
-        evidenceDigest,
+        'BTC', '국세청 지정 요건에 따른 적용', '원본 근거 자료에 연결됨',
       ],
     ])
     const deemedOutput = await renderTaxReportPdf(deemedInput, {
@@ -379,11 +378,11 @@ describe('tax report PDF renderer', () => {
       kind: '신고 준비 자료',
       title: '2027년 가상자산 신고 준비 자료',
       description:
-        'Tax Engine에서 확정 계산과 차단 항목 없음을 판정한 자료입니다. 원화 단위와 세액 적합성은 별도 검토가 필요하며, 실제 신고 제출 또는 세무서 접수 완료를 뜻하지 않습니다.',
+        '확정된 계산 결과와 제한사항을 함께 정리한 자료입니다. 실제 신고 제출 또는 세무서 접수 완료를 뜻하지 않습니다.',
     })
     expect(reportStatusKeyValues(readyModel)).toContainEqual([
       '신고 준비 상태',
-      'READY · 엔진상 차단 항목 없음',
+      '신고 준비 완료',
     ])
     expect(reportDocumentPresentation(model())).toMatchObject({
       kind: '검토 자료',
@@ -419,10 +418,10 @@ describe('tax report PDF renderer', () => {
       kind: '정책 시뮬레이션 검토 자료',
     })
     expect(reportStatusKeyValues(model())).toEqual([
-      ['평가 입력', 'FINAL · 평가 입력 확정'],
-      ['연간 마감', 'UNVERIFIED · 연간 입력 마감 미확인'],
-      ['결과 완결성', 'PARTIAL · 일부 계산 항목 미확정'],
-      ['신고 준비 상태', 'BLOCKED · 엔진상 차단 항목 있음'],
+      ['평가 입력', '가격 자료 확정'],
+      ['연간 마감', '연간 입력 마감 미확인'],
+      ['결과 완결성', '일부 계산 항목 미확정'],
+      ['신고 준비 상태', '신고 전 확인 필요'],
       ['현재 용도', '검토 자료'],
       ['제한사항', '1건'],
       ['별도 확인', '원화 단위와 세액 적합성'],
@@ -453,12 +452,12 @@ describe('tax report PDF renderer', () => {
     }
   })
 
-  it('shows annual total-average in Korean while preserving its identifier', () => {
+  it('shows annual total-average in user-facing Korean', () => {
     expect(formatCostMethod('ANNUAL_TOTAL_AVERAGE')).toBe(
-      '연간 총평균법 (ANNUAL_TOTAL_AVERAGE)',
+      '연간 총평균법',
     )
     expect(formatCostMethod('UNRECOGNIZED_METHOD')).toBe(
-      'UNRECOGNIZED_METHOD',
+      '원가 계산 방식 확인 필요',
     )
   })
 
@@ -466,21 +465,21 @@ describe('tax report PDF renderer', () => {
     expect(reportCalculationKeyValues(model())).toEqual([
       [
         '원가 방식 판정',
-        '원가 방식: 연간 총평균법 (ANNUAL_TOTAL_AVERAGE)',
+        '원가 방식: 연간 총평균법',
       ],
       ['계산 범위', '거주자 × 과세연도 × 과세자산'],
       [
         '취득원가 계산 방식',
-        '연간 총평균법 (ANNUAL_TOTAL_AVERAGE)',
+        '연간 총평균법',
       ],
       ['기본공제', '2,500,000 KRW'],
       ['실제 적용 공제', '2,500,000 KRW'],
-      ['국세율', '20% (20/100)'],
-      ['지방세율', '2% (2/100)'],
-      ['세액 반올림', '절사 (FLOOR)'],
+      ['국세율', '20%'],
+      ['지방세율', '2%'],
+      ['세액 반올림', '원 단위 미만 절사'],
       [
         '취득원가 배분 반올림',
-        '연간 총평균 누적 배분 절사 (CUMULATIVE_FLOOR_ANNUAL_POOL)',
+        '연간 총평균 기준 누적 배분 후 절사',
       ],
     ])
 
@@ -539,7 +538,7 @@ describe('tax report PDF renderer', () => {
     expect(formatValuationMarket({
       marketStatus: 'UNKNOWN',
       market: null,
-    })).toBe('market 미확정')
+    })).toBe('시장 정보 확인 필요')
   })
 
   it('renders a deterministic 2026 PDF', async () => {
