@@ -45,6 +45,17 @@ PostgreSQL source 저장까지 확인합니다. 운영 `.env`나 secret은 이�
 전체 구조와 저장소별 확인 범위는 [로컬 dev E2E 실행 방법](docs/local-dev-e2e.md)에
 정리되어 있습니다.
 
+화면을 직접 확인할 때는 자동 정리되는 `make test` 대신 아래 유지형 환경을 사용합니다.
+
+```bash
+make dev-e2e-up       # http://localhost:15173
+make dev-e2e-status
+make dev-e2e-down     # 확인을 마친 뒤에만 실행
+```
+
+고정 테스트 계정은 `test@example.test` / `test1234!`입니다. Web UI port는 Mac
+Studio의 loopback에만 열리며, 개인 노트북에서는 문서의 SSH tunnel을 사용합니다.
+
 여러 저장소를 함께 고친 경우에는 Posting candidate를 먼저 만들고, 그 이미지를
 JIT와 Tax 시나리오가 이어서 사용하도록 전체 경계를 한 명령으로 확인할 수 있습니다.
 

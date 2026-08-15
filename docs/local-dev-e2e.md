@@ -46,9 +46,10 @@ docker login backwardlabss-mac-studio.tail344fa1.ts.net
 gh auth status
 ```
 
-Docker Desktop이 읽을 DB checkout은 `/Users/Shared` 아래처럼 Docker file sharing이
-허용된 경로에 두는 편이 안전하다. Registry 주소가 달라진 경우에만
-`REGISTRY=새주소 make test`로 덮어쓴다.
+DB 초기화·검증 SQL은 host 경로를 container에 bind mount하지 않고 표준입력으로
+PostgreSQL에 전달한다. 따라서 개인 worktree가 `/Users/<사용자>/code` 아래에 있어도
+Docker Desktop의 file sharing 경로를 추가할 필요가 없다. Registry 주소가 달라진
+경우에만 `REGISTRY=새주소 make test`로 덮어쓴다.
 
 여러 저장소의 변경을 함께 검증하려면 `daejang`에서 전체 시나리오를 실행한다.
 
@@ -71,6 +72,66 @@ flowchart TD
     C -.-> X
     D -.-> X
     E -.-> X
+```
+
+## 화면을 직접 확인할 때
+
+`make test`는 자동 검증이므로 성공·실패와 관계없이 container와 일회용 DB를
+정리한다. 브라우저로 화면을 보면서 API와 DB 반영 결과를 확인할 때는 유지형 환경을
+별도로 실행한다.
+
+```bash
+make dev-e2e-up
+```
+
+이 명령은 현재 checkout으로 Web UI, Web API, Engine, PDF parser image를 만들고
+일회용 PostgreSQL에 연결한 다음 백그라운드에서 계속 실행한다. Mac Studio에서는
+[http://localhost:15173](http://localhost:15173)으로 접속한다.
+
+```text
+이메일: test@example.test
+비밀번호: test1234!
+```
+
+상태와 로그는 다음 명령으로 확인한다.
+
+```bash
+make dev-e2e-status
+make dev-e2e-logs
+```
+
+코드를 더 고친 경우 `make dev-e2e-down`으로 기존 환경을 내린 뒤 다시
+`make dev-e2e-up`을 실행한다. Docker build cache를 재사용하므로 바뀌지 않은 layer는
+다시 만들지 않는다. 확인을 마친 뒤에만 다음 명령으로 일회용 DB까지 제거한다.
+
+```bash
+make dev-e2e-down
+```
+
+개인 노트북에서 볼 때는 Mac Studio의 외부 포트를 열지 않고 SSH tunnel을 사용한다.
+아래 명령은 개인 노트북에서 실행한다.
+
+```bash
+ssh -N -T \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -L 15173:127.0.0.1:15173 \
+  <Mac-Studio-사용자>@backwardlabss-mac-studio.tail344fa1.ts.net
+```
+
+터널이 열린 동안 개인 노트북 브라우저에서
+[http://localhost:15173](http://localhost:15173)에 접속한다. Compose port는 Mac
+Studio의 `127.0.0.1`에만 bind되므로 Tailscale이나 공유기에서 별도 포트를 열지 않는다.
+
+```mermaid
+flowchart LR
+    L["개인 노트북 브라우저\nlocalhost:15173"] -->|"SSH tunnel"| M["Mac Studio\n127.0.0.1:15173"]
+    M --> W["Web UI candidate"]
+    W --> A["Web API candidate"]
+    A --> E["Engine candidate"]
+    E --> P["PDF parser candidate"]
+    A --> D["일회용 PostgreSQL"]
+    E --> D
 ```
 
 ## 저장소별 실제 경계

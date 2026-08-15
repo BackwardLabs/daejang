@@ -16,6 +16,12 @@ export default defineConfig(({ mode }) => {
   const reportsEntry = fileURLToPath(
     new URL(reportsPageEntry(reportsUiMode), import.meta.url),
   )
+  const apiProxy = {
+    '/api': {
+      target: process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:3000',
+      changeOrigin: false,
+    },
+  }
 
   return {
     plugins: [react()],
@@ -25,12 +31,10 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      proxy: {
-        '/api': {
-          target: process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:3000',
-          changeOrigin: false,
-        },
-      },
+      proxy: apiProxy,
+    },
+    preview: {
+      proxy: apiProxy,
     },
     test: {
       environment: 'jsdom',

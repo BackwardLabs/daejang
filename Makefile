@@ -4,10 +4,25 @@ DAEJANG_POSTING_SERVICE_DIR ?= ../daejang-posting-service
 DAEJANG_TAX_ENGINE_DIR ?= ../daejang-tax-engine
 SCHEMA_DIR ?= /Users/shared/Projects/01_Daejang/schema
 REGISTRY ?= backwardlabss-mac-studio.tail344fa1.ts.net
+DAEJANG_DEV_E2E_WEB_PORT ?= 15173
 
-.PHONY: test test-system
+.PHONY: test test-system dev-e2e-up dev-e2e-down dev-e2e-status dev-e2e-logs
 test:
-	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" ./scripts/dev-e2e.sh
+	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" ./scripts/dev-e2e.sh test
+
+dev-e2e-up:
+	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \
+		DAEJANG_DEV_E2E_WEB_PORT="$(DAEJANG_DEV_E2E_WEB_PORT)" \
+		./scripts/dev-e2e.sh up
+
+dev-e2e-down:
+	@./scripts/dev-e2e.sh down
+
+dev-e2e-status:
+	@./scripts/dev-e2e.sh status
+
+dev-e2e-logs:
+	@./scripts/dev-e2e.sh logs
 
 test-system: test
 	@$(MAKE) -C "$(DAEJANG_POSTING_SERVICE_DIR)" test \

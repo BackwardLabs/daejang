@@ -86,6 +86,42 @@ services:
     depends_on:
       engine: { condition: service_started }
 
+  web-api:
+    image: ${DAEJANG_WEB_API_CANDIDATE_IMAGE}
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3000
+      PUBLIC_ORIGIN: http://localhost:${DAEJANG_DEV_E2E_WEB_PORT}
+      DATABASE_URL: ${WEB_DATABASE_URL}
+      RATE_LIMIT_HMAC_SECRET: dev-e2e-rate-limit-secret-only
+      REPORTS_UI_MODE: product
+      UPBIT_PDF_IMPORT_ENABLED: "true"
+      ENGINE_GRPC_INSECURE_TARGET: unix:/run/daejang/engine/engine.sock
+      PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+      PRIVATE_OBJECT_ENCRYPTION_KEY: CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: dev-e2e-only
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    volumes:
+      - engine_socket:/run/daejang/engine:ro
+      - private_objects:/var/lib/daejang/private
+    depends_on:
+      engine: { condition: service_started }
+
+  web-ui:
+    image: ${DAEJANG_WEB_UI_CANDIDATE_IMAGE}
+    environment:
+      VITE_API_PROXY_TARGET: http://web-api:3000
+    ports:
+      - 127.0.0.1:${DAEJANG_DEV_E2E_WEB_PORT}:5173
+    depends_on:
+      web-api: { condition: service_healthy }
+
 volumes:
   pdf_parser_socket: {}
   engine_socket: {}
+  private_objects: {}
