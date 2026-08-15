@@ -66,8 +66,7 @@ function isUserRejection(error: unknown) {
   )
 }
 
-function readCurrentEvmConnection() {
-  const caipAddress = reownAppKit?.getCaipAddress('eip155')
+function parseEvmConnection(caipAddress: string | undefined) {
   if (!caipAddress) return null
 
   const [, chainId, address] = caipAddress.split(':')
@@ -79,6 +78,10 @@ function readCurrentEvmConnection() {
   }
 }
 
+function readCurrentEvmConnection() {
+  return parseEvmConnection(reownAppKit?.getCaipAddress('eip155'))
+}
+
 function waitForExplicitEvmConnection(
   signal: AbortSignal,
   openWalletPicker: () => Promise<unknown>,
@@ -87,64 +90,93 @@ function waitForExplicitEvmConnection(
     const startedAt = Date.now()
     let intervalId = 0
     let modalOpened = false
+    let modalClosedAt: number | null = null
+    let settled = false
+    let connectionExpected = false
+    let unsubscribeAccount: (() => void) | undefined
     let unsubscribeEvents: (() => void) | undefined
     let unsubscribeState: (() => void) | undefined
-    let walletSelected = false
+
+    function resolveConnection(
+      connection: { address: string; chainId: string } | null,
+    ) {
+      if (!connectionExpected || settled || !connection) return false
+
+      settled = true
+      finish()
+      resolve(connection)
+      return true
+    }
+
+    function resolveCurrentConnection() {
+      return resolveConnection(readCurrentEvmConnection())
+    }
 
     unsubscribeEvents = reownAppKit?.subscribeEvents((state) => {
       if (state.data.event === 'SELECT_WALLET') {
-        walletSelected = true
+        connectionExpected = true
+        resolveCurrentConnection()
         return
       }
 
       if (!modalOpened || state.data.event !== 'CONNECT_SUCCESS') return
-
-      const connection = readCurrentEvmConnection()
-      if (connection) {
-        finish()
-        resolve(connection)
-      }
+      connectionExpected = true
+      resolveCurrentConnection()
     })
+
+    unsubscribeAccount = reownAppKit?.subscribeAccount((account) => {
+      if (!modalOpened || !account.isConnected) return
+      connectionExpected = true
+      if (resolveConnection(parseEvmConnection(account.caipAddress))) return
+      resolveCurrentConnection()
+    }, 'eip155')
 
     unsubscribeState = reownAppKit?.subscribeState((state) => {
       if (state.open) {
         modalOpened = true
+        modalClosedAt = null
         return
       }
 
       if (!modalOpened) return
-
-      if (walletSelected) {
-        const connection = readCurrentEvmConnection()
-        if (connection) {
-          finish()
-          resolve(connection)
-          return
-        }
-      }
-
-      finish()
-      reject({ code: 4001 })
+      if (resolveCurrentConnection()) return
+      modalClosedAt = Date.now()
     })
 
     function finish() {
       window.clearInterval(intervalId)
+      unsubscribeAccount?.()
       unsubscribeEvents?.()
       unsubscribeState?.()
       signal.removeEventListener('abort', handleAbort)
     }
 
     function handleAbort() {
+      if (settled) return
+      settled = true
       finish()
       reject(new DOMException('Wallet connection aborted.', 'AbortError'))
     }
 
     intervalId = window.setInterval(() => {
+      if (resolveCurrentConnection()) return
+
+      if (modalClosedAt !== null) {
+        const closeGracePeriod = connectionExpected ? 5_000 : 500
+        if (Date.now() - modalClosedAt >= closeGracePeriod) {
+          settled = true
+          finish()
+          reject({ code: 4001 })
+          return
+        }
+      }
+
       if (Date.now() - startedAt >= 120_000) {
+        settled = true
         finish()
         reject(new Error('Wallet connection timed out.'))
       }
-    }, 250)
+    }, 100)
 
     signal.addEventListener('abort', handleAbort, { once: true })
     if (signal.aborted) {
@@ -153,6 +185,8 @@ function waitForExplicitEvmConnection(
     }
 
     void openWalletPicker().catch((error: unknown) => {
+      if (settled) return
+      settled = true
       finish()
       reject(error)
     })

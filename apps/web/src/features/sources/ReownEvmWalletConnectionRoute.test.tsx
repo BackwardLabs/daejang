@@ -2,8 +2,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  caipAddress: 'eip155:1:0x1234567890abcdef1234567890abcdef12345678',
+  caipAddress: 'eip155:1:0x1234567890abcdef1234567890abcdef12345678' as
+    | string
+    | undefined,
   connect: vi.fn(),
+  accountCallback: undefined as ((state: any) => void) | undefined,
   eventCallback: undefined as ((state: any) => void) | undefined,
   listSources: vi.fn(),
   open: vi.fn(),
@@ -24,6 +27,10 @@ vi.mock('./reownAppKit.ts', () => ({
   reownAppKit: {
     getCaipAddress: () => mocks.caipAddress,
     getProvider: vi.fn(),
+    subscribeAccount: (callback: (state: any) => void) => {
+      mocks.accountCallback = callback
+      return vi.fn()
+    },
     subscribeEvents: (callback: (state: any) => void) => {
       mocks.eventCallback = callback
       return vi.fn()
@@ -83,6 +90,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
   beforeEach(() => {
     mocks.caipAddress =
       'eip155:1:0x1234567890abcdef1234567890abcdef12345678'
+    mocks.accountCallback = undefined
     mocks.eventCallback = undefined
     mocks.provider = 'other'
     mocks.stateCallback = undefined
@@ -148,11 +156,46 @@ describe('ReownEvmWalletConnectionRoute', () => {
     expect(mocks.listSources).toHaveBeenCalledTimes(1)
   })
 
+  it('waits for the selected wallet address to settle after the modal closes', async () => {
+    mocks.caipAddress = undefined
+    const onLaunchFailed = vi.fn()
+
+    render(
+      <ReownEvmWalletConnectionRoute
+        launchImmediately
+        onLaunchFailed={onLaunchFailed}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('connect-wallet'))
+    await waitFor(() => {
+      expect(mocks.open).toHaveBeenCalledTimes(1)
+    })
+
+    await act(async () => {
+      selectCurrentWallet()
+    })
+    expect(onLaunchFailed).not.toHaveBeenCalled()
+    expect(mocks.listSources).not.toHaveBeenCalled()
+
+    await act(async () => {
+      mocks.accountCallback?.({
+        caipAddress:
+          'eip155:1:0x1234567890abcdef1234567890abcdef12345678',
+        isConnected: true,
+      })
+    })
+
+    await waitFor(() => {
+      expect(mocks.listSources).toHaveBeenCalledTimes(1)
+    })
+    expect(onLaunchFailed).not.toHaveBeenCalled()
+  })
+
   it('reports an already-active wallet immediately after explicit selection', async () => {
     mocks.listSources.mockResolvedValue({
       items: [
         {
-          address: mocks.caipAddress.split(':').at(-1),
+          address: mocks.caipAddress!.split(':').at(-1),
           status: 'ACTIVE',
           type: 'EVM_WALLET',
         },
@@ -183,7 +226,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     mocks.listSources.mockResolvedValue({
       items: [
         {
-          address: mocks.caipAddress.split(':').at(-1),
+          address: mocks.caipAddress!.split(':').at(-1),
           status: 'ACTIVE',
           type: 'EVM_WALLET',
         },
