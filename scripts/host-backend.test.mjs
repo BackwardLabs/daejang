@@ -622,7 +622,10 @@ const taxQuoteConfig = (assetIds = []) => ({
     assetId: 'asset-krw-upbit',
     atomicUnits: '100000000',
   },
-  assets: assetIds.map((assetId) => ({ assetId })),
+  assets: assetIds.map((assetId) => ({
+    assetId,
+    baseAtomicUnits: '100000000',
+  })),
 })
 
 test('loads canonical tax identities only from exact current posting legs', () => {
@@ -649,6 +652,14 @@ test('loads canonical tax identities only from exact current posting legs', () =
   assert.match(
     currentTaxProfileRowsQuery,
     /target\.kind = 'ASSET'[\s\S]*target\.target_id = posting\.asset_id/,
+  )
+  assert.match(
+    currentTaxProfileRowsQuery,
+    /posting_observation\.leg_id = posting\.leg_id[\s\S]*asset\.decimals/,
+  )
+  assert.match(
+    currentTaxProfileRowsQuery,
+    /JOIN subject_evidence\.published_fragment AS fragment[\s\S]*asset\.asset_id = posting\.asset_id/,
   )
   assert.equal(
     currentTaxProfileRowsQuery.includes(
@@ -728,6 +739,7 @@ test('builds profiles for every subject from canonical quote-supported assets', 
       account_id: 'cex-account:upbit:3',
       asset_id: 'asset-unquoted-upbit',
       tax_asset_id: 'tax-asset-unquoted',
+      atomic_decimals: 8,
     },
   ], taxQuoteConfig(['asset-btc-upbit', 'asset-zbt-upbit']))
 
@@ -751,10 +763,12 @@ test('builds profiles for every subject from canonical quote-supported assets', 
     {
       ledgerAssetId: 'asset-krw-upbit',
       taxAssetId: 'tax-asset-krw',
+      atomicDecimals: 8,
     },
     {
       ledgerAssetId: 'asset-zbt-upbit',
       taxAssetId: 'tax-asset-zbt',
+      atomicDecimals: 8,
     },
   ])
   assert.deepEqual(profiles.profiles[0].valuationExcludedAssetIds, [])
@@ -764,6 +778,7 @@ test('builds profiles for every subject from canonical quote-supported assets', 
   assert.deepEqual(profiles.profiles[3].assetBindings, [{
     ledgerAssetId: 'asset-krw-upbit',
     taxAssetId: 'tax-asset-krw',
+    atomicDecimals: 8,
   }])
   assert.deepEqual(profiles.profiles[3].valuationExcludedAssetIds, [
     'cex-document-asset:upbit:decimal8:btc',
@@ -774,10 +789,12 @@ test('builds profiles for every subject from canonical quote-supported assets', 
     {
       ledgerAssetId: 'asset-krw-upbit',
       taxAssetId: 'tax-asset-krw',
+      atomicDecimals: 8,
     },
     {
       ledgerAssetId: 'asset-unquoted-upbit',
       taxAssetId: 'tax-asset-unquoted',
+      atomicDecimals: 8,
     },
   ])
   assert.deepEqual(profiles.profiles[6].valuationExcludedAssetIds, [
@@ -810,6 +827,7 @@ test('builds 2025 through 2027 profiles for every current ledger subject', () =>
   assert.deepEqual(profiles.profiles[0].assetBindings, [{
     ledgerAssetId: 'asset-krw-upbit',
     taxAssetId: 'tax-asset-krw',
+    atomicDecimals: 8,
   }])
   assert.deepEqual(
     profiles.profiles.map(({ valuationExcludedAssetIds }) =>
@@ -845,6 +863,36 @@ test('fails closed when one ledger asset has conflicting tax identities', () => 
   )
 })
 
+test('fails closed when a bound asset scale is missing or contradicts quote config', () => {
+  assert.throws(
+    () => createTaxProfiles([{
+      subject_id: 'subject-a',
+      account_id: 'account-a',
+      asset_id: 'asset-direct-only',
+      tax_asset_id: 'tax-asset-direct-only',
+    }], taxQuoteConfig()),
+    /Exact atomic decimals are missing for subject-a\/asset-direct-only/,
+  )
+
+  assert.throws(
+    () => createTaxProfiles([{
+      subject_id: 'subject-a',
+      account_id: 'account-a',
+      asset_id: 'asset-btc-upbit',
+      tax_asset_id: 'tax-asset-btc',
+      atomic_decimals: 18,
+    }], taxQuoteConfig(['asset-btc-upbit'])),
+    /Ledger and quote atomic decimals differ for subject-a\/asset-btc-upbit: 18 and 8/,
+  )
+
+  const malformed = taxQuoteConfig(['asset-btc-upbit'])
+  malformed.assets[0].baseAtomicUnits = '100000001'
+  assert.throws(
+    () => createTaxProfiles([], malformed),
+    /Tax quote asset asset-btc-upbit atomic units must be an exact power of ten/,
+  )
+})
+
 test('excludes an asset when any current leg lacks the exact tax identity', () => {
   const profiles = createTaxProfiles([
     {
@@ -870,6 +918,7 @@ test('excludes an asset when any current leg lacks the exact tax identity', () =
   assert.deepEqual(profiles.profiles[0].assetBindings, [{
     ledgerAssetId: 'asset-krw-upbit',
     taxAssetId: 'tax-asset-krw',
+    atomicDecimals: 8,
   }])
   assert.deepEqual(profiles.profiles[0].valuationExcludedAssetIds, [
     'asset-btc-upbit',
