@@ -2,11 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  caipAddress: 'eip155:1:0x1234567890abcdef1234567890abcdef12345678' as
-    | string
-    | undefined,
+  caipAddress: 'eip155:1:0x1234567890abcdef1234567890abcdef12345678',
   connect: vi.fn(),
-  accountCallback: undefined as ((state: any) => void) | undefined,
   eventCallback: undefined as ((state: any) => void) | undefined,
   listSources: vi.fn(),
   open: vi.fn(),
@@ -27,10 +24,6 @@ vi.mock('./reownAppKit.ts', () => ({
   reownAppKit: {
     getCaipAddress: () => mocks.caipAddress,
     getProvider: vi.fn(),
-    subscribeAccount: (callback: (state: any) => void) => {
-      mocks.accountCallback = callback
-      return vi.fn()
-    },
     subscribeEvents: (callback: (state: any) => void) => {
       mocks.eventCallback = callback
       return vi.fn()
@@ -88,10 +81,8 @@ function selectCurrentWallet() {
 
 describe('ReownEvmWalletConnectionRoute', () => {
   beforeEach(() => {
-    Reflect.deleteProperty(window, 'ethereum')
     mocks.caipAddress =
       'eip155:1:0x1234567890abcdef1234567890abcdef12345678'
-    mocks.accountCallback = undefined
     mocks.eventCallback = undefined
     mocks.provider = 'other'
     mocks.stateCallback = undefined
@@ -104,7 +95,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     })
   })
 
-  it('opens Reown even when an old account remains in its cache', async () => {
+  it('does not accept a persisted CAIP address before this attempt selects a wallet', async () => {
     const onLaunchFailed = vi.fn()
 
     render(
@@ -115,21 +106,21 @@ describe('ReownEvmWalletConnectionRoute', () => {
     )
     fireEvent.click(screen.getByTestId('connect-wallet'))
 
-    await waitFor(() => {
-      expect(mocks.open).toHaveBeenCalledTimes(1)
-    })
+    await act(async () => Promise.resolve())
+    expect(mocks.listSources).toHaveBeenCalledTimes(1)
+    expect(onLaunchFailed).not.toHaveBeenCalled()
+
     await act(async () => {
       selectCurrentWallet()
     })
 
     await waitFor(() => {
-      expect(mocks.listSources).toHaveBeenCalledTimes(1)
+      expect(mocks.listSources).toHaveBeenCalledTimes(2)
     })
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
 
-  it('returns to source selection when the Reown picker is cancelled', async () => {
-    mocks.caipAddress = undefined
+  it('treats closing the picker without a new selection as cancellation', async () => {
     const onLaunchFailed = vi.fn()
 
     render(
@@ -148,60 +139,20 @@ describe('ReownEvmWalletConnectionRoute', () => {
 
     await waitFor(() => {
       expect(onLaunchFailed).toHaveBeenCalledWith(
-        expect.objectContaining({ ok: false }),
+        expect.objectContaining({
+          error: { code: 'CONNECTION_REJECTED' },
+          ok: false,
+        }),
       )
-    }, { timeout: 2_000 })
-    expect(mocks.listSources).not.toHaveBeenCalled()
-  })
-
-  it('uses allAccounts when Reown discards its caipAddress cache', async () => {
-    mocks.caipAddress = undefined
-    const onLaunchFailed = vi.fn()
-
-    render(
-      <ReownEvmWalletConnectionRoute
-        launchImmediately
-        onLaunchFailed={onLaunchFailed}
-      />,
-    )
-    fireEvent.click(screen.getByTestId('connect-wallet'))
-    await waitFor(() => {
-      expect(mocks.open).toHaveBeenCalledTimes(1)
     })
-
-    await act(async () => {
-      selectCurrentWallet()
-    })
-    expect(onLaunchFailed).not.toHaveBeenCalled()
-    expect(mocks.listSources).not.toHaveBeenCalled()
-
-    await act(async () => {
-      mocks.accountCallback?.({
-        allAccounts: [
-          {
-            address: '0x1234567890abcdef1234567890abcdef12345678',
-            caipAddress:
-              'eip155:1:0x1234567890abcdef1234567890abcdef12345678',
-            chainId: 1,
-            namespace: 'eip155',
-          },
-        ],
-        caipAddress: undefined,
-        isConnected: false,
-      })
-    })
-
-    await waitFor(() => {
-      expect(mocks.listSources).toHaveBeenCalledTimes(1)
-    })
-    expect(onLaunchFailed).not.toHaveBeenCalled()
+    expect(mocks.listSources).toHaveBeenCalledTimes(1)
   })
 
   it('reports an already-active wallet immediately after explicit selection', async () => {
     mocks.listSources.mockResolvedValue({
       items: [
         {
-          address: mocks.caipAddress!.split(':').at(-1),
+          address: mocks.caipAddress.split(':').at(-1),
           status: 'ACTIVE',
           type: 'EVM_WALLET',
         },
@@ -228,4 +179,49 @@ describe('ReownEvmWalletConnectionRoute', () => {
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
 
+  it('skips the wallet picker when the current wallet is already an active source', async () => {
+    mocks.listSources.mockResolvedValue({
+      items: [
+        {
+          address: mocks.caipAddress.split(':').at(-1),
+          status: 'ACTIVE',
+          type: 'EVM_WALLET',
+        },
+      ],
+    })
+    const onAlreadyConnected = vi.fn()
+
+    render(
+      <ReownEvmWalletConnectionRoute
+        launchImmediately
+        onAlreadyConnected={onAlreadyConnected}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('connect-wallet'))
+
+    await waitFor(() => {
+      expect(onAlreadyConnected).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.open).not.toHaveBeenCalled()
+    expect(mocks.connect).not.toHaveBeenCalled()
+  })
+
+  it('keeps the direct wallet happy path after an explicit connect click', async () => {
+    mocks.provider = 'metamask'
+    const onLaunchFailed = vi.fn()
+
+    render(
+      <ReownEvmWalletConnectionRoute
+        launchImmediately
+        onLaunchFailed={onLaunchFailed}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('connect-wallet'))
+
+    await waitFor(() => {
+      expect(mocks.connect).toHaveBeenCalledWith('metamask')
+      expect(mocks.listSources).toHaveBeenCalledTimes(2)
+    })
+    expect(onLaunchFailed).not.toHaveBeenCalled()
+  })
 })

@@ -28,9 +28,9 @@ parser_candidate_image="daejang-pdf-parser:dev-e2e-$user_segment"
 posting_image=${DAEJANG_POSTING_IMAGE:-"$registry/daejang/posting-service:latest"}
 tax_engine_image=${DAEJANG_TAX_ENGINE_IMAGE:-"$registry/daejang/tax-engine:latest"}
 tax_dev_e2e_image=${DAEJANG_TAX_DEV_E2E_IMAGE:-"$registry/daejang/tax-engine-dev-e2e:latest"}
-# Reown이 공식 예제에 제공하는 localhost 전용 공개 Project ID다. 팀 Project ID가
-# 있으면 DAEJANG_DEV_E2E_REOWN_PROJECT_ID로 덮어쓴다.
-reown_project_id=${DAEJANG_DEV_E2E_REOWN_PROJECT_ID:-b56e18d47c72ab683b10814fe9495694}
+# main Web 빌드와 같은 팀의 공개 Reown Project ID를 기본값으로 사용한다.
+# 다른 Reown 프로젝트를 검증할 때는 DAEJANG_DEV_E2E_REOWN_PROJECT_ID로 덮어쓴다.
+reown_project_id=${DAEJANG_DEV_E2E_REOWN_PROJECT_ID:-c5f8295da4fda205b905f32fd523f4c9}
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || {
