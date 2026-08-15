@@ -25,6 +25,7 @@ export type ReportPrintCountsV1 = {
 
 export type ReportPrintAssetSummaryV1 = {
   taxAssetId: string
+  assetAtomicDecimals?: number | null
   disposalCount: number
   quantity: string
   grossProceeds: ReportPrintAmountV1
@@ -70,6 +71,7 @@ export type ReportPrintDisposalV1 = {
   movementId: string
   eventId: string
   taxAssetId: string
+  assetAtomicDecimals?: number | null
   ledgerAssetId: string
   quantity: string
   grossProceeds: ReportPrintAmountV1
@@ -84,6 +86,7 @@ export type ReportPrintTransferV1 = {
   movementId: string
   eventId: string
   taxAssetId: string
+  assetAtomicDecimals?: number | null
   quantity: string
   basis: ReportPrintAmountV1
   fromCostMethod: string
@@ -274,6 +277,7 @@ export const createReportPrintModel = (
   },
   assetSummaries: report.assetSummaries.map((row) => ({
     taxAssetId: row.taxAssetId,
+    assetAtomicDecimals: null,
     disposalCount: row.disposalCount,
     quantity: row.quantity,
     grossProceeds: printAmount(row.grossProceeds),
@@ -285,6 +289,7 @@ export const createReportPrintModel = (
     movementId: row.movementId,
     eventId: row.eventId,
     taxAssetId: row.taxAssetId,
+    assetAtomicDecimals: null,
     ledgerAssetId: row.ledgerAssetId,
     quantity: row.quantity,
     grossProceeds: printAmount(row.grossProceeds),
@@ -300,6 +305,7 @@ export const createReportPrintModel = (
     movementId: row.movementId,
     eventId: row.eventId,
     taxAssetId: row.taxAssetId,
+    assetAtomicDecimals: null,
     quantity: row.quantity,
     basis: printAmount(row.basis),
     fromCostMethod: row.fromCostMethod,
@@ -402,6 +408,7 @@ const createReportPrintModelV2 = (
   },
   assetSummaries: report.assetSummaries.map((row) => ({
     taxAssetId: row.taxAssetId,
+    assetAtomicDecimals: row.assetAtomicDecimals,
     disposalCount: [
       ...report.disposals,
       ...report.feeAssetDisposals,
@@ -416,6 +423,7 @@ const createReportPrintModelV2 = (
     movementId: row.movementId,
     eventId: row.eventId,
     taxAssetId: row.taxAssetId,
+    assetAtomicDecimals: row.assetAtomicDecimals,
     ledgerAssetId: row.ledgerAssetId,
     quantity: row.quantity,
     grossProceeds: printAmountV2(row.grossProceeds),
@@ -429,6 +437,7 @@ const createReportPrintModelV2 = (
     movementId: row.movementId,
     eventId: row.eventId,
     taxAssetId: row.taxAssetId,
+    assetAtomicDecimals: row.assetAtomicDecimals,
     quantity: row.quantity,
     basis: printAmountV2(row.basis),
     fromCostMethod: row.fromCostMethod,

@@ -251,6 +251,29 @@ const artifact = (value: unknown): TaxReportModelArtifact => {
 }
 
 describe('ReportModel V2 public projection', () => {
+  it('keeps a sealed ledger scale and never infers one for older rows', () => {
+    const report = reportFixture()
+    Object.assign(report.assetSummaries[0]!, { assetAtomicDecimals: 8 })
+    Object.assign(report.disposals[0]!, { assetAtomicDecimals: 8 })
+    Object.assign(report.transfers[0]!, { assetAtomicDecimals: 18 })
+
+    const projected = decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    )
+
+    expect(projected.assetSummaries[0]!.assetAtomicDecimals).toBe(8)
+    expect(projected.disposals[0]!.assetAtomicDecimals).toBe(8)
+    expect(projected.transfers[0]!.assetAtomicDecimals).toBe(18)
+
+    delete (report.assetSummaries[0]! as Record<string, unknown>)
+      .assetAtomicDecimals
+    expect(decodeAndProjectTaxReportModelV2(
+      artifact(report),
+      reportId,
+    ).assetSummaries[0]!.assetAtomicDecimals).toBeNull()
+  })
+
   it('projects exact V2 calculation and coverage fields without private identities', () => {
     const projected = decodeAndProjectTaxReportModelV2(
       artifact(reportFixture()),

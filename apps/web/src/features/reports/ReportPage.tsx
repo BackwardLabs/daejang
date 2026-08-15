@@ -57,7 +57,12 @@ const revisionLabel = (report: TaxReportModel, isCurrent: boolean) => {
   if (!isCurrent && String(report.pointerVersion) === '0') {
     return '이전 발행본'
   }
-  return `revision ${String(report.pointerVersion)}`
+  return `발행본 ${String(report.pointerVersion)}`
+}
+
+const generationFinalityLabel: Record<string, string> = {
+  FINAL: '확정 기준',
+  PROVISIONAL: '잠정 기준',
 }
 
 const statusPriority = (status: TaxReportGenerationStatusModel) => {
@@ -120,31 +125,29 @@ const generationPresentation = (
     )
 
   if (status.blockedReasonCode === 'APPLICATION_PENDING') return {
-    tone: 'pending', eyebrow: 'APPLICATION REQUIRED',
+    tone: 'pending', eyebrow: '신청 필요',
     title: '세무 장부 신청을 먼저 완료해 주세요',
-    body: '신청이 완료되기 전에는 Tax Engine 계산 결과를 노출하지 않습니다.',
+    body: '신청이 완료되기 전에는 세금 계산 결과를 표시하지 않습니다.',
   }
   if (status.state === 'BUILDING') return {
-    tone: 'building', eyebrow: 'BUILDING', title: '세무 장부를 생성하고 있습니다',
+    tone: 'building', eyebrow: '계산 중', title: '세무 장부를 생성하고 있습니다',
     body: '원장과 가격 근거를 묶어 연간 총평균 방식으로 다시 계산 중입니다.',
   }
   if (status.state === 'FAILED') return {
-    tone: 'error', eyebrow: 'GENERATION FAILED', title: '장부 생성에 실패했습니다',
-    body: status.failureCode
-      ? `오류 코드 ${status.failureCode}를 기준으로 서버 작업 상태를 확인해 주세요.`
-      : '계산 파이프라인 상태를 확인한 뒤 다시 생성해야 합니다.',
+    tone: 'error', eyebrow: '생성 실패', title: '장부 생성에 실패했습니다',
+    body: '계산 작업을 완료하지 못했습니다. 잠시 후 상태를 다시 확인해 주세요.',
   }
   if (
     status.state === 'REVIEW_REQUIRED' &&
     canReadCurrent(status) &&
     hasReadableCurrent
   ) return {
-    tone: 'review', eyebrow: 'REVIEW REQUIRED',
+    tone: 'review', eyebrow: '확인 필요',
     title: '검토가 필요한 잠정 장부입니다',
     body: '현재 확보된 데이터로 계산한 추정 결과는 계속 확인할 수 있습니다. 누락 구간과 검토 항목을 보완한 뒤 전체 연도를 다시 계산해야 확정할 수 있습니다.',
   }
   if (hasAuthoritativeNoTaxEvents) return {
-    tone: 'empty', eyebrow: 'NO TAX EVENTS',
+    tone: 'empty', eyebrow: '과세 대상 거래 없음',
     title: `${status.taxYear}년 과세 이벤트가 없습니다`,
     body: '전체 과세기간의 검증된 데이터에서 처분·대여소득 등 과세 계산 대상이 확인되지 않았습니다.',
   }
@@ -154,12 +157,12 @@ const generationPresentation = (
       status.blockedReasonCode ?? '',
     )
   ) return {
-    tone: 'review', eyebrow: 'REVIEW REQUIRED', title: '최신 장부를 다시 확인해야 합니다',
+    tone: 'review', eyebrow: '확인 필요', title: '최신 장부를 다시 확인해야 합니다',
     body: '원장 변경, 데이터 범위 또는 계산 결과 정합성 문제로 읽을 수 있는 최신 장부가 없습니다. 검토를 마치고 다시 계산해 주세요.',
   }
   return {
-    tone: 'empty', eyebrow: 'NOT STARTED', title: '아직 생성된 장부가 없습니다',
-    body: '데이터가 연결되고 Tax Engine의 연간 계산이 시작되면 이곳에 상태와 결과가 표시됩니다.',
+    tone: 'empty', eyebrow: '아직 준비 중', title: '아직 생성된 장부가 없습니다',
+    body: '데이터가 연결되고 연간 계산이 시작되면 이곳에 상태와 결과가 표시됩니다.',
   }
 }
 
@@ -170,7 +173,7 @@ const reportPageHeader = (status: TaxReportGenerationStatusModel | null) => {
   }
   if (status?.state === 'BUILDING') return {
     title: '리포트 생성 중',
-    description: 'Tax Engine의 실제 처리 상태를 확인합니다. 완료되면 결과 화면으로 자동 전환됩니다.',
+    description: '계산 진행 상태를 확인합니다. 완료되면 결과 화면으로 자동 전환됩니다.',
   }
   if (status?.state === 'FAILED') return {
     title: '리포트 상태를 불러오지 못했습니다',
@@ -190,7 +193,7 @@ const reportPageHeader = (status: TaxReportGenerationStatusModel | null) => {
   }
   return {
     title: '세무 장부',
-    description: 'Tax Engine이 발행한 계산 결과를 장부로 검토하고, 선택한 revision의 PDF를 생성합니다.',
+    description: '발행된 계산 결과를 장부로 검토하고, 선택한 발행본의 PDF를 생성합니다.',
   }
 }
 
@@ -216,7 +219,7 @@ function ReportGenerationState({
 
   if (standalone && presentation.tone === 'building') {
     const steps = [
-      ['현재 상태', '생성 작업이 실행 중입니다', 'BUILDING'],
+      ['현재 상태', '생성 작업이 실행 중입니다', '진행 중'],
       ['안내', '다른 화면으로 이동해도 작업은 계속됩니다', '완료'],
       ['다음 표시', '리포트가 준비되면 계산 결과와 근거를 표시합니다', '숨김'],
       ['표시 제한', 'PDF와 블록체인 증명은 준비된 리포트에서만 사용할 수 있습니다', '대기'],
@@ -292,7 +295,7 @@ function ReportGenerationState({
           <a href="/ledger">거래 검토 보기</a>
         </div>
         <dl>
-          <div><dt>완료 상태</dt><dd>{status.finality} · 과세 이벤트 없음</dd></div>
+          <div><dt>완료 상태</dt><dd>{generationFinalityLabel[status.finality] ?? '계산 기준 확인 필요'} · 과세 이벤트 없음</dd></div>
           <div><dt>사용 가능 항목</dt><dd>데이터 범위 · 거래 검토</dd></div>
         </dl>
       </section>
@@ -313,8 +316,8 @@ function ReportGenerationState({
       </div>
       <dl>
         <div><dt>대상 연도</dt><dd>{status.taxYear}</dd></div>
-        <div><dt>계산 구분</dt><dd>{status.finality}</dd></div>
-        <div><dt>상태 코드</dt><dd>{status.blockedReasonCode ?? status.state}</dd></div>
+        <div><dt>계산 구분</dt><dd>{generationFinalityLabel[status.finality] ?? '계산 기준 확인 필요'}</dd></div>
+        <div><dt>현재 상태</dt><dd>{presentation.title}</dd></div>
       </dl>
       {status.state === 'BUILDING' ? (
         <small className="report-generation-state__polling" role="status">
@@ -535,12 +538,12 @@ export function ReportWorkspacePage() {
       aria-labelledby="tax-report-v2-revision-title"
     >
       <h3 className="sr-only" id="tax-report-v2-revision-title">
-        장부 revision
+        발행 이력
       </h3>
       <label>
         <span className="sr-only">발행본 전환</span>
         <select
-          aria-label="장부 revision 선택"
+          aria-label="발행본 선택"
           value={selectedReportId}
           onChange={(event) => setSelectedReportId(event.target.value)}
         >
@@ -583,7 +586,7 @@ export function ReportWorkspacePage() {
           </h2>
           {taxStatus === 'loading' ? (
             <p className="report-api-state" role="status">
-              생성된 장부와 revision 이력을 불러오는 중입니다.
+              생성된 장부와 발행 이력을 불러오는 중입니다.
             </p>
           ) : null}
           {taxStatus === 'error' ? (
@@ -629,7 +632,7 @@ export function ReportWorkspacePage() {
 
           {revisions.length > 0 && !showsV2Detail ? (
             <section className="tax-report-revisions" aria-labelledby="tax-report-revisions-title">
-              <h3 id="tax-report-revisions-title">장부 revision</h3>
+              <h3 id="tax-report-revisions-title">발행 이력</h3>
               <div>
                 <span>{selectedReportId === currentReport?.reportId ? '현재 장부' : '이전 발행본'}</span>
                 <strong>
@@ -647,7 +650,7 @@ export function ReportWorkspacePage() {
               <label>
                 <span>발행본 전환</span>
                 <select
-                  aria-label="장부 revision 선택"
+                  aria-label="발행본 선택"
                   value={selectedReportId}
                   onChange={(event) => setSelectedReportId(event.target.value)}
                 >
@@ -677,7 +680,7 @@ export function ReportWorkspacePage() {
           ) : null}
           {detailStatus === 'error' ? (
             <p className="report-detail-state is-error" role="alert">
-              revision 이력은 유지되지만 선택한 상세 장부를 불러오지
+              발행 이력은 유지되지만 선택한 상세 장부를 불러오지
               못했습니다.
             </p>
           ) : null}

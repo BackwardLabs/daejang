@@ -396,7 +396,7 @@ describe('ReportPage', () => {
       screen.queryByRole('heading', { name: '발행 산출물 이력' }),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '장부 revision' }),
+      screen.getByRole('heading', { name: '발행 이력' }),
     ).toBeInTheDocument()
     expect(screen.getAllByText('미확정').length).toBeGreaterThanOrEqual(4)
     expect(
@@ -404,7 +404,7 @@ describe('ReportPage', () => {
     ).toBeInTheDocument()
     expect(screen.getAllByText('0 KRW').length).toBeGreaterThan(0)
     expect(
-      screen.getByText('PROVISIONAL · 평가 입력 잠정'),
+      screen.getByText('가격 자료 일부 확인 필요'),
     ).toBeInTheDocument()
     expect(screen.getByText('일부 미확정')).toBeInTheDocument()
     expect(screen.getByText('검토 필요')).toBeInTheDocument()
@@ -415,7 +415,7 @@ describe('ReportPage', () => {
       screen.getByRole('heading', { name: '적용 계산 기준' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('연간 총평균 원가 계약 기록됨'),
+      screen.getByText('연간 평균 취득가액 기준'),
     ).toBeInTheDocument()
     expect(screen.getByText('연간 총평균법')).toBeInTheDocument()
     expect(
@@ -663,7 +663,7 @@ describe('ReportPage', () => {
     render(<ReportWorkspacePage />)
 
     expect(
-      await screen.findByText('주소별 이동평균/FIFO 과거 계산본'),
+      await screen.findByText('이전 계산 기준'),
     ).toBeInTheDocument()
     expect(screen.getByText('주소별')).toBeInTheDocument()
     expect(screen.getByText('이동평균법, 선입선출법')).toBeInTheDocument()
@@ -684,10 +684,10 @@ describe('ReportPage', () => {
     render(<ReportWorkspacePage />)
 
     expect(
-      await screen.findByText('revision 2', { selector: 'strong' }),
+      await screen.findByText('발행본 2', { selector: 'strong' }),
     ).toHaveTextContent('현재')
     expect(
-      screen.queryByRole('option', { name: /revision 0/u }),
+      screen.queryByRole('option', { name: /발행본 0/u }),
     ).not.toBeInTheDocument()
     expect(screen.queryByText('이전 발행본')).not.toBeInTheDocument()
   })
@@ -752,7 +752,7 @@ describe('ReportPage', () => {
     expect(screen.getByText('연간 마감 확인됨')).toBeInTheDocument()
     expect(screen.getByText('전체 확정')).toBeInTheDocument()
     expect(
-      screen.getByText('엔진 판정: 신고 준비 조건 충족'),
+      screen.getByText('신고 준비 조건 충족'),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: '신고 준비 자료 PDF' }),
@@ -908,7 +908,7 @@ describe('ReportPage', () => {
       ),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: '장부 revision' }),
+      screen.getByRole('heading', { name: '발행 이력' }),
     ).toBeInTheDocument()
     expect(
       screen.queryByRole('link', { name: /PDF/u }),
@@ -923,10 +923,10 @@ describe('ReportPage', () => {
     expect(
       await screen.findByRole('alert'),
     ).toHaveTextContent(
-      'revision 이력은 유지되지만 선택한 상세 장부를 불러오지 못했습니다.',
+      '발행 이력은 유지되지만 선택한 상세 장부를 불러오지 못했습니다.',
     )
     expect(
-      screen.getByRole('heading', { name: '장부 revision' }),
+      screen.getByRole('heading', { name: '발행 이력' }),
     ).toBeInTheDocument()
   })
 
@@ -954,7 +954,7 @@ describe('ReportPage', () => {
       await screen.findByRole('heading', { name: '장부 계산 요약' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('revision 2', { selector: 'strong' }),
+      screen.getByText('발행본 2', { selector: 'strong' }),
     ).toHaveTextContent('현재')
     expect(
       screen.getByRole('link', { name: '검토용 PDF' }),
@@ -1017,7 +1017,7 @@ describe('ReportPage', () => {
     render(<ReportWorkspacePage />)
 
     expect(
-      await screen.findByText('revision 2', { selector: 'strong' }),
+      await screen.findByText('발행본 2', { selector: 'strong' }),
     ).toHaveTextContent('현재')
     expect(
       await screen.findByRole('link', { name: '검토용 PDF' }),
@@ -1026,7 +1026,7 @@ describe('ReportPage', () => {
       '/api/v1/tax-reports/tax-report-1/artifacts/pdf',
     )
     expect(
-      screen.getByRole('option', { name: /revision 1/u }),
+      screen.getByRole('option', { name: /발행본 1/u }),
     ).toBeInTheDocument()
   })
 
@@ -1107,7 +1107,7 @@ describe('ReportPage', () => {
     expect(await screen.findByRole('heading', {
       name: '아직 생성된 장부가 없습니다',
     })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
         String(url).includes('/tax-reports/2025/history'),
@@ -1223,7 +1223,7 @@ describe('ReportPage', () => {
     expect(await screen.findByRole('heading', {
       name: '세무 장부 신청을 먼저 완료해 주세요',
     })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
         String(url).includes('/tax-reports/2027/history'),
@@ -1272,7 +1272,7 @@ describe('ReportPage', () => {
       'true',
     )
     expect(screen.getByText('자동 새로고침')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
         String(url).includes('/tax-reports/2027/current'),
@@ -1343,7 +1343,7 @@ describe('ReportPage', () => {
     expect(await screen.findByRole('heading', {
       name: '최신 장부를 다시 확인해야 합니다',
     })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '장부 revision' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
         String(url).includes('/tax-reports/2027/history'),
