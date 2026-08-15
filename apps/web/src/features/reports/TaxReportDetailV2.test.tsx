@@ -270,6 +270,32 @@ const assetPresentations = {
 }
 
 describe('TaxReportDetailV2', () => {
+  it('routes report review items to the unresolved ledger workspace', () => {
+    render(<TaxReportDetailV2
+      report={{
+        ...report,
+        limitations: [{
+          ...report.limitations[0]!,
+          code: 'TRANSFER_ENDPOINT_REVIEW_REQUIRED',
+          movementId: 'movement-review-1',
+          reviewId: 'review-1',
+          reviewRevisionId: 'review-revision-1',
+        }],
+      }}
+      assetPresentations={assetPresentations}
+    />)
+
+    expect(screen.getByRole('heading', {
+      name: '1건의 거래를 확인해 주세요',
+    })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /1건 검토하기/u }))
+      .toHaveAttribute('href', '/ledger?view=review')
+    expect(screen.getByRole('link', { name: /이체 상대 정보를 확인해 주세요/u }))
+      .toHaveAttribute('href', '/ledger?view=review')
+    expect(screen.getByText(/처분 손익의 미확정 행 수와는 다릅니다/u))
+      .toBeInTheDocument()
+  })
+
   it('shows a compact partial-year summary and all engine-owned detail tabs', async () => {
     render(<TaxReportDetailV2
       report={report}
@@ -281,13 +307,18 @@ describe('TaxReportDetailV2', () => {
     expect(screen.getByRole('heading', {
       name: '2027 가상자산 세금 리포트',
     })).toBeInTheDocument()
-    expect(screen.getByText('현재 계산에 반영된 데이터 범위')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /반영 기간/u }))
+      .toHaveTextContent('2027. 01. 01. KST ~ 2027. 06. 30. KST')
+    expect(screen.queryByText('현재 계산에 반영된 데이터 범위')).not.toBeInTheDocument()
     expect(screen.getByRole('table', {
       name: '자산별 손익 요약',
     })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '자산별 손익' })).toBeInTheDocument()
-    expect(screen.getByRole('button', {
+    expect(screen.queryByRole('button', {
       name: /계산식·법적 근거 보기/u,
+    })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', {
+      name: '현재 발행본의 처분가액 비교',
     })).toBeInTheDocument()
     expect(screen.getByText('528,000 KRW')).toBeInTheDocument()
     expect(screen.getByText('2027. 07. 01. 09:00:00 KST')).toBeInTheDocument()
@@ -297,10 +328,6 @@ describe('TaxReportDetailV2', () => {
       'href',
       `/api/v1/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`,
     )
-    const coverageNote = screen.getByRole('note')
-    expect(coverageNote).toHaveTextContent('2027. 01. 01.')
-    expect(coverageNote).toHaveTextContent('2027. 06. 30.')
-    expect(coverageNote).not.toHaveTextContent('누락 구간')
     expect(screen.getByRole('heading', {
       name: '직접 검토할 거래가 없습니다',
     })).toBeInTheDocument()
@@ -389,7 +416,9 @@ describe('TaxReportDetailV2', () => {
       }],
     }} />)
 
-    const assetLabel = screen.getByText('Optimism · 0x420000…000006')
+    const assetLabel = screen.getByText('Optimism · 0x420000…000006', {
+      selector: '.tax-report-v2__asset-label',
+    })
     expect(assetLabel).toHaveAttribute('title', '자산 정보 확인 필요')
   })
 
@@ -414,7 +443,9 @@ describe('TaxReportDetailV2', () => {
       }}
     />)
 
-    const assetLabel = screen.getByText('WETH')
+    const assetLabel = screen.getByText('WETH', {
+      selector: '.tax-report-v2__asset-label',
+    })
     expect(assetLabel).toHaveAttribute('title', '소수점 18자리')
     expect(screen.queryByText(canonicalAssetId)).not.toBeInTheDocument()
   })

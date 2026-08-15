@@ -101,12 +101,37 @@ const dashboardResponse = (transactionCount: number, openReviewCount: number) =>
 })
 
 afterEach(() => {
+  window.history.replaceState(null, '', '/')
   window.localStorage.clear()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 describe('LedgerPage', () => {
+  it('opens the unresolved-review workspace from the report review link', async () => {
+    window.history.replaceState(null, '', '/ledger?view=review')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/dashboard?')) return dashboardResponse(0, 1)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [] })
+      if (isReviewListRequest(url) && !init?.method) {
+        return jsonResponse({ items: [reviewSummary] })
+      }
+      if (url.endsWith('/reviews/review-1') && !init?.method) {
+        return jsonResponse({ review: reviewDetail })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect(await screen.findByText(
+      '선택한 연도에 발생한 검토 필요 거래를 보여줍니다',
+    )).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '검토 필요 1건' }))
+      .toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('starts from the current supported calendar year', () => {
     expect(defaultAppYear(new Date('2025-07-30T00:00:00Z'))).toBe('2025')
     expect(defaultAppYear(new Date('2026-07-30T00:00:00Z'))).toBe('2026')

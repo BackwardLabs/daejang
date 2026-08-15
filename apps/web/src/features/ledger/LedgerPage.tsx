@@ -48,6 +48,11 @@ const ledgerRowsPerPage = 20
 
 type LedgerSourceFilter = 'ALL' | 'CEX' | 'WALLET'
 
+const initialLedgerView = (): 'ledger' | 'review' =>
+  new URLSearchParams(window.location.search).get('view') === 'review'
+    ? 'review'
+    : 'ledger'
+
 const matchesLedgerSourceFilter = (
   event: LedgerEventModel,
   sourceFilter: LedgerSourceFilter,
@@ -659,7 +664,7 @@ export function LedgerPage() {
   const [resolutionStatus, setResolutionStatus] = useState<'idle' | 'submitting' | 'refreshing' | 'success' | 'error' | 'stale' | 'stale-error' | 'conflict' | 'reanalyze'>('idle')
   const [resolutionIntentKey, setResolutionIntentKey] = useState<string>()
   const [reviewCompletion, setReviewCompletion] = useState<string>()
-  const [view, setView] = useState<'ledger' | 'review'>('ledger')
+  const [view, setView] = useState<'ledger' | 'review'>(initialLedgerView)
   const [ledgerStatus, setLedgerStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [ledgerReloadKey, setLedgerReloadKey] = useState(0)
   const [metrics, setMetrics] = useState<DashboardModel>()

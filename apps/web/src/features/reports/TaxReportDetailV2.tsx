@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { requestRaw } from '../../api/client.ts'
+import { AppLink } from '../../components/AppLink.tsx'
 import type {
   TaxReportModel,
   TaxReportV2AmountModel,
@@ -251,6 +252,13 @@ const basisReasonLabel: Record<string, string> = {
   NTS_DESIGNATED_OTHER: '국세청 지정 사유',
 }
 
+const chartAtomicAmount = (value: TaxReportV2AmountModel) => {
+  if (!value.hasAmount || value.amount === null || !/^\d+$/.test(value.amount)) {
+    return null
+  }
+  return BigInt(value.amount)
+}
+
 function Amount({
   value,
   denomination,
@@ -394,7 +402,6 @@ export function TaxReportDetailV2({
     `/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`
   const pdfHref =
     `/api/v1${pdfPath}`
-  const partialCoverage = report.dataCoverage.status !== 'COMPLETE'
   const policy = report.methodology.policy
   const formatAmount = (value: TaxReportV2AmountModel) => amountLabel(
     value,
@@ -428,6 +435,12 @@ export function TaxReportDetailV2({
     (item) => item.reviewId !== null && item.reviewRevisionId !== null,
   )
   const reviewItems = reviewableLimitations.slice(0, 3)
+  const chartAssets = report.assetSummaries
+    .map((asset) => ({ asset, amount: chartAtomicAmount(asset.grossProceeds) }))
+    .filter((item): item is typeof item & { amount: bigint } => item.amount !== null)
+    .sort((left, right) => left.amount === right.amount ? 0 : left.amount > right.amount ? -1 : 1)
+    .slice(0, 6)
+  const chartMaximum = chartAssets[0]?.amount ?? 0n
   const attestationEligible =
     isCurrent &&
     generationState === 'ACTIVE' &&
@@ -512,6 +525,14 @@ export function TaxReportDetailV2({
         <span className="tax-report-v2__status-time">
           최근 계산 <time dateTime={report.calculatedAsOf}>{dateTimeLabel(report.calculatedAsOf)}</time>
         </span>
+        <button
+          type="button"
+          className="tax-report-v2__status-coverage"
+          onClick={() => setActiveTab('basis')}
+        >
+          <span>반영 기간</span>
+          <strong>{dateLabel(report.dataCoverage.from)} ~ {dateLabel(report.dataCoverage.through)}</strong>
+        </button>
         <div className="tax-report-v2__meta">
           <span data-tone={report.reportFinality === 'FINAL' ? 'success' : 'warning'}>
             {statusLabel[report.reportFinality] ?? '상태 확인 필요'}
@@ -526,21 +547,6 @@ export function TaxReportDetailV2({
         <div className="tax-report-v2__status-spacer" />
         {revisionControl}
       </section>
-
-      {partialCoverage ? (
-        <aside className="tax-report-v2__coverage" role="note">
-          <div>
-            <strong>현재 계산에 반영된 데이터 범위</strong>
-            <p>
-              <b>{dateLabel(report.dataCoverage.from)} ~ {dateLabel(report.dataCoverage.through)}</b>
-              까지 계산했습니다. 과세기간 전체가 확정되기 전에는 금액을 잠정값으로 표시합니다.
-            </p>
-          </div>
-          <button type="button" onClick={() => setActiveTab('basis')}>
-            데이터 범위 보기 →
-          </button>
-        </aside>
-      ) : null}
 
       <nav
         className="tax-report-v2__tabs"
@@ -647,35 +653,54 @@ export function TaxReportDetailV2({
               </h4>
               <p>
                 {reviewItems.length > 0
-                  ? '거래별 확인 결과는 다음 계산에 반영됩니다.'
+                  ? '장부 작업에 연결된 미확인 거래입니다. 처분 손익의 미확정 행 수와는 다릅니다.'
                   : `남은 제한 ${report.limitations.length}건은 데이터 범위·취득원가·정책 상태이며 거래 검토 건수와 다릅니다.`}
               </p>
               <div>
                 {reviewItems.length === 0 ? (
                   <p>장부 작업에서 추가로 처리할 항목은 없습니다.</p>
                 ) : reviewItems.map((item, index) => (
-                  <button
-                    type="button"
+                  <AppLink
+                    href="/ledger?view=review"
                     key={`${item.code}-${item.movementId ?? index}`}
-                    onClick={() => setActiveTab('events')}
                   >
                     <span>{limitationCopy(item.code).title}</span>
                     <small>{limitationCopy(item.code).description}</small>
-                  </button>
+                  </AppLink>
                 ))}
               </div>
-              <button className="tax-report-v2__review-link" type="button" onClick={() => setActiveTab('events')}>
+              <AppLink className="tax-report-v2__review-link" href="/ledger?view=review">
                 {reviewItems.length > 0 ? `${reviewableLimitations.length}건 검토하기` : '제한 사유 확인하기'} →
-              </button>
+              </AppLink>
             </section>
           </div>
-          <button className="tax-report-v2__calculation-link" type="button" onClick={() => setActiveTab('basis')}>
-            <span>
-              <strong>계산 기준 · 거주자별 연간 총평균법</strong>
-              <small>기초 재고와 연간 전체 취득을 자산별로 합산하며, 연중 결과는 예상값으로 표시합니다</small>
-            </span>
-            <b>계산식·법적 근거 보기 →</b>
-          </button>
+          <section className="tax-report-v2__asset-chart" aria-labelledby="tax-report-v2-asset-chart-title">
+            <header>
+              <div>
+                <span>자산별 처분 규모</span>
+                <h4 id="tax-report-v2-asset-chart-title">현재 발행본의 처분가액 비교</h4>
+              </div>
+              <small>확인된 처분가액 기준 · 최대 6개 자산</small>
+            </header>
+            {chartAssets.length === 0 ? (
+              <p>비교할 수 있는 처분가액이 아직 없습니다.</p>
+            ) : (
+              <div className="tax-report-v2__asset-chart-rows">
+                {chartAssets.map(({ asset, amount }) => {
+                  const width = chartMaximum === 0n
+                    ? 0
+                    : Number((amount * 10_000n) / chartMaximum) / 100
+                  return (
+                    <div key={asset.taxAssetId}>
+                      <strong title={describeAsset(asset.taxAssetId)}>{displayAsset(asset.taxAssetId)}</strong>
+                      <span><i style={{ width: `${width}%` }} /></span>
+                      <small>{formatAmount(asset.grossProceeds)}</small>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </section>
         </section>
       ) : null}
 
