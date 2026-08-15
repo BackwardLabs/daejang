@@ -2,7 +2,10 @@ import { Pool } from 'pg'
 
 import { buildApp } from './app.js'
 import { PostgresAccountAuthStore } from './auth/account-auth-store.js'
-import { ResendVerificationEmailSender } from './auth/email-auth.js'
+import {
+  DevelopmentVerificationEmailSender,
+  ResendVerificationEmailSender,
+} from './auth/email-auth.js'
 import { PostgresRateLimitStore } from './auth/rate-limit.js'
 import { PostgresSessionStore } from './auth/postgres-session-store.js'
 import { loadConfig } from './config.js'
@@ -163,10 +166,14 @@ const start = async () => {
       ...(config.emailAuth.enabled
         ? {
             verificationEmailSender:
-              new ResendVerificationEmailSender(
-                config.emailAuth.resendApiKey as string,
-                config.emailAuth.from as string,
-              ),
+              config.emailAuth.developmentVerificationCode
+                ? new DevelopmentVerificationEmailSender(
+                    config.emailAuth.developmentVerificationCode,
+                  )
+                : new ResendVerificationEmailSender(
+                    config.emailAuth.resendApiKey as string,
+                    config.emailAuth.from as string,
+                  ),
           }
         : {}),
       ...(pool

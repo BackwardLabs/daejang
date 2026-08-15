@@ -95,6 +95,9 @@ services:
       PUBLIC_ORIGIN: http://localhost:${DAEJANG_DEV_E2E_WEB_PORT}
       DATABASE_URL: ${WEB_DATABASE_URL}
       RATE_LIMIT_HMAC_SECRET: dev-e2e-rate-limit-secret-only
+      SIGNUP_ENABLED: "true"
+      EMAIL_AUTH_ENABLED: "true"
+      EMAIL_VERIFICATION_DEV_CODE: "000000"
       REPORTS_UI_MODE: product
       UPBIT_PDF_IMPORT_ENABLED: "true"
       ENGINE_GRPC_INSECURE_TARGET: unix:/run/daejang/engine/engine.sock
