@@ -264,7 +264,6 @@ function ConfiguredReownRoute({
   launchImmediately = false,
   onAlreadyConnected,
   onExitRequested,
-  onLaunchFailed,
   pendingView,
 }: ReownRouteProps) {
   const { open } = useAppKit()
@@ -475,9 +474,9 @@ function ConfiguredReownRoute({
         onAlreadyConnected?.()
         return
       }
-      onLaunchFailed?.(result)
+      setInitialConnectionComplete(true)
     },
-    [onAlreadyConnected, onLaunchFailed],
+    [onAlreadyConnected],
   )
 
   return (

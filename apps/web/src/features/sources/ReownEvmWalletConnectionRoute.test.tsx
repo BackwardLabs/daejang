@@ -121,7 +121,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     expect(onLaunchFailed).not.toHaveBeenCalled()
   })
 
-  it('treats closing the picker without a new selection as cancellation', async () => {
+  it('keeps the connection page open when the picker is cancelled', async () => {
     mocks.caipAddress = undefined
     const onLaunchFailed = vi.fn()
 
@@ -140,12 +140,7 @@ describe('ReownEvmWalletConnectionRoute', () => {
     })
 
     await waitFor(() => {
-      expect(onLaunchFailed).toHaveBeenCalledWith(
-        expect.objectContaining({
-          error: { code: 'CONNECTION_REJECTED' },
-          ok: false,
-        }),
-      )
+      expect(onLaunchFailed).not.toHaveBeenCalled()
     })
     expect(mocks.listSources).not.toHaveBeenCalled()
   })
