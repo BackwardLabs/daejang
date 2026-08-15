@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiClientError } from '../../api/client.ts'
 import { loadLedger } from '../../api/productApi.ts'
 import { AppSidebar } from '../../components/AppSidebar.tsx'
+import { AppLink } from '../../components/AppLink.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import {
   loadAppPreferences,
@@ -53,11 +54,134 @@ const mergeRevisions = (
   return [...revisions.values()].sort(newestFirst)
 }
 
-const revisionLabel = (report: TaxReportModel, isCurrent: boolean) => {
-  if (!isCurrent && String(report.pointerVersion) === '0') {
-    return '이전 발행본'
-  }
-  return `발행본 ${String(report.pointerVersion)}`
+const revisionDateTimeLabel = (value: string) =>
+  `${new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Seoul',
+  }).format(new Date(value))} KST`
+
+const revisionDateLabel = (value: string) =>
+  new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'Asia/Seoul',
+  }).format(new Date(value))
+
+const revisionDateKey = (value: string) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: 'Asia/Seoul',
+  }).formatToParts(new Date(value))
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+function ReportRevisionPicker({
+  currentReportId,
+  onSelect,
+  revisions,
+  selectedReportId,
+}: {
+  currentReportId?: string
+  onSelect: (reportId: string) => void
+  revisions: TaxReportModel[]
+  selectedReportId?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const selected = revisions.find((report) => report.reportId === selectedReportId)
+  const groups = useMemo(() => {
+    const byDate = new Map<string, TaxReportModel[]>()
+    for (const report of revisions) {
+      const key = revisionDateKey(report.issuedAt)
+      byDate.set(key, [...(byDate.get(key) ?? []), report])
+    }
+    return [...byDate.entries()]
+  }, [revisions])
+
+  useEffect(() => {
+    if (!open) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+
+  if (!selected) return null
+
+  const selectedIsCurrent = selected.reportId === currentReportId
+  return (
+    <div className="tax-report-v2__revision-control" ref={rootRef}>
+      <button
+        type="button"
+        className="tax-report-v2__revision-trigger"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>
+          <strong>{revisionDateTimeLabel(selected.issuedAt)}</strong>
+          <small>
+            {selectedIsCurrent ? '현재 발행본' : '이전 발행본'}
+            {String(selected.pointerVersion) !== '0'
+              ? ` · 발행 ${String(selected.pointerVersion)}`
+              : ''}
+          </small>
+        </span>
+        <i aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="tax-report-v2__revision-popover" role="listbox" aria-label="발행본 선택">
+          {groups.map(([date, reports]) => (
+            <section key={date} aria-label={revisionDateLabel(reports[0]!.issuedAt)}>
+              <h4>{revisionDateLabel(reports[0]!.issuedAt)}</h4>
+              {reports.map((report) => {
+                const isCurrent = report.reportId === currentReportId
+                const isSelected = report.reportId === selectedReportId
+                return (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    key={report.reportId}
+                    onClick={() => {
+                      onSelect(report.reportId)
+                      setOpen(false)
+                    }}
+                  >
+                    <strong>{revisionDateTimeLabel(report.issuedAt)}</strong>
+                    <small>
+                      {isCurrent ? '현재 발행본' : '이전 발행본'}
+                      {String(report.pointerVersion) !== '0'
+                        ? ` · 발행 ${String(report.pointerVersion)}`
+                        : ''}
+                    </small>
+                  </button>
+                )
+              })}
+            </section>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 const generationFinalityLabel: Record<string, string> = {
@@ -216,6 +340,72 @@ function ReportGenerationState({
       ? { href: '/ledger', label: '장부 검토' }
       : null
   const standalone = !hasReadableCurrent
+
+  if (
+    standalone &&
+    (
+      status.blockedReasonCode === 'APPLICATION_PENDING' ||
+      (
+        status.state === 'NOT_STARTED' &&
+        status.outcome === null &&
+        ['NOT_STARTED', 'GENERATION_NOT_ACTIVE'].includes(
+          status.blockedReasonCode ?? '',
+        )
+      )
+    )
+  ) {
+    const applicationPending =
+      status.blockedReasonCode === 'APPLICATION_PENDING'
+    return (
+      <section
+        className="report-generation-state report-generation-state--getting-started"
+        data-standalone="true"
+        data-tone={presentation.tone}
+      >
+        <div className="report-generation-state__onboarding">
+          <div className="report-generation-state__empty-icon" aria-hidden="true">＋</div>
+          <header>
+            <h3>
+              {applicationPending
+                ? '리포트 신청을 기다리고 있습니다'
+                : '아직 생성된 장부가 없습니다'}
+            </h3>
+            <p>
+              {applicationPending
+                ? '신청이 끝나면 등록된 데이터로 예상 리포트를 만듭니다.'
+                : '거래 데이터를 연결하면 계산 상태를 확인하고 세무 장부를 준비할 수 있습니다.'}
+            </p>
+          </header>
+          <div className="report-generation-state__actions">
+            <AppLink href={applicationPending ? '/sources' : '/sources/new'}>
+              {applicationPending ? '신청 상태 확인' : '데이터 소스 연결'}
+            </AppLink>
+            <AppLink href={applicationPending ? '/ledger' : '/dashboard'}>
+              {applicationPending ? '거래 데이터 보기' : '계산 상태 확인'}
+            </AppLink>
+          </div>
+          <div className="report-generation-state__guidance">
+            <article>
+              <strong>{applicationPending ? '표시 원칙' : '먼저 할 일'}</strong>
+              <span>
+                {applicationPending
+                  ? '계산 결과가 생길 때까지 금액을 표시하지 않습니다.'
+                  : '거래소 문서 또는 개인 지갑을 연결해 주세요.'}
+              </span>
+            </article>
+            <article>
+              <strong>{applicationPending ? '생성 후 제공' : '장부 생성'}</strong>
+              <span>
+                {applicationPending
+                  ? '계산 근거 · PDF · 블록체인 증명을 제공합니다.'
+                  : '계산이 시작되면 진행 상태와 결과를 이 화면에 표시합니다.'}
+              </span>
+            </article>
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   if (standalone && presentation.tone === 'building') {
     const steps = [
@@ -532,32 +722,20 @@ export function ReportWorkspacePage() {
   const showsV2Detail =
     detailStatus === 'ready' &&
     reportDetail?.schemaVersion === 'giwa.tax-report-model.v2'
-  const v2RevisionControl = revisions.length > 0 ? (
-    <section
-      className="tax-report-v2__revision-control"
-      aria-labelledby="tax-report-v2-revision-title"
-    >
-      <h3 className="sr-only" id="tax-report-v2-revision-title">
-        발행 이력
-      </h3>
-      <label>
-        <span className="sr-only">발행본 전환</span>
-        <select
-          aria-label="발행본 선택"
-          value={selectedReportId}
-          onChange={(event) => setSelectedReportId(event.target.value)}
-        >
-          {revisions.map((report) => {
-            const isCurrent = report.reportId === currentReport?.reportId
-            return (
-              <option key={report.reportId} value={report.reportId}>
-                {revisionLabel(report, isCurrent)}{isCurrent ? ' · 현재' : ''}
-              </option>
-            )
-          })}
-        </select>
-      </label>
-    </section>
+  const showsInitialLoadingSurface = taxStatus === 'loading'
+  const showsV2LoadingSurface =
+    taxStatus === 'ready' && Boolean(selectedReportId) && detailStatus === 'loading'
+  const showsReportLoadingSurface =
+    showsInitialLoadingSurface || showsV2LoadingSurface
+  const showsModernReportSurface =
+    showsV2Detail || showsReportLoadingSurface
+  const revisionControl = revisions.length > 0 ? (
+    <ReportRevisionPicker
+      currentReportId={currentReport?.reportId}
+      onSelect={setSelectedReportId}
+      revisions={revisions}
+      selectedReportId={selectedReportId}
+    />
   ) : null
 
   return (
@@ -568,7 +746,7 @@ export function ReportWorkspacePage() {
         onYearChange={handleYearChange}
       />
       <main className="report-main">
-        {!showsV2Detail ? (
+        {!showsModernReportSurface ? (
           <PageHeader
             description={pageHeader.description}
             eyebrow="TAX LEDGER"
@@ -584,11 +762,6 @@ export function ReportWorkspacePage() {
           <h2 className="sr-only" id="tax-report-section-title">
             {year}년 가상자산 세무 장부
           </h2>
-          {taxStatus === 'loading' ? (
-            <p className="report-api-state" role="status">
-              생성된 장부와 발행 이력을 불러오는 중입니다.
-            </p>
-          ) : null}
           {taxStatus === 'error' ? (
             <p className="report-api-state" role="alert">
               장부를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
@@ -608,7 +781,7 @@ export function ReportWorkspacePage() {
             ) : null
           ) : null}
 
-          {!showsV2Detail && taxStatus === 'ready' && generationStatus &&
+          {!showsModernReportSurface && taxStatus === 'ready' && generationStatus &&
           (generationStatus.state === 'REVIEW_REQUIRED' ||
             !canReadCurrent(generationStatus)) && revisions.length > 0 ? (
             <ReportGenerationState
@@ -618,7 +791,7 @@ export function ReportWorkspacePage() {
             />
           ) : null}
 
-          {!showsV2Detail && currentReport && generationStatus && canReadCurrent(generationStatus) &&
+          {!showsModernReportSurface && currentReport && generationStatus && canReadCurrent(generationStatus) &&
           generationStatus.coverageStatus !== 'COMPLETE' ? (
             <aside className="report-coverage-notice" role="note">
               <strong>전체 연도 중 현재 확보된 데이터까지만 반영했습니다.</strong>
@@ -630,44 +803,43 @@ export function ReportWorkspacePage() {
             </aside>
           ) : null}
 
-          {revisions.length > 0 && !showsV2Detail ? (
+          {revisions.length > 0 && !showsModernReportSurface ? (
             <section className="tax-report-revisions" aria-labelledby="tax-report-revisions-title">
               <h3 id="tax-report-revisions-title">발행 이력</h3>
               <div>
                 <span>{selectedReportId === currentReport?.reportId ? '현재 장부' : '이전 발행본'}</span>
-                <strong>
-                  {selectedReport
-                    ? revisionLabel(
-                        selectedReport,
-                        selectedReport.reportId === currentReport?.reportId,
-                      )
-                    : '발행본 선택'}
-                  {selectedReport?.reportId === currentReport?.reportId
-                    ? <em>현재</em>
-                    : null}
-                </strong>
+                <strong>{selectedReport ? revisionDateTimeLabel(selectedReport.issuedAt) : '발행본 선택'}</strong>
               </div>
-              <label>
-                <span>발행본 전환</span>
-                <select
-                  aria-label="발행본 선택"
-                  value={selectedReportId}
-                  onChange={(event) => setSelectedReportId(event.target.value)}
-                >
-                  {revisions.map((report) => {
-                    const isCurrent = report.reportId === currentReport?.reportId
-                    return (
-                      <option key={report.reportId} value={report.reportId}>
-                        {revisionLabel(report, isCurrent)}{isCurrent ? ' · 현재' : ''} · {new Date(report.issuedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
-                      </option>
-                    )
-                  })}
-                </select>
-              </label>
+              {revisionControl}
             </section>
           ) : null}
 
-          {detailStatus === 'loading' ? (
+          {showsReportLoadingSurface ? (
+            <article className="tax-report-v2 tax-report-v2--loading" aria-busy="true">
+              <header className="tax-report-v2__header">
+                <div>
+                  <h1>{year} 가상자산 세금 리포트</h1>
+                  <p>
+                    {showsInitialLoadingSurface
+                      ? '발행된 계산 결과와 장부 상태를 확인하고 있습니다.'
+                      : '선택한 발행본의 계산 결과를 불러오고 있습니다.'}
+                  </p>
+                </div>
+              </header>
+              <section className="tax-report-v2__status" aria-label="리포트 불러오는 중">
+                <span className="tax-report-v2__status-context">귀속연도 {year}</span>
+                <div className="tax-report-v2__status-spacer" />
+                {showsV2LoadingSurface ? revisionControl : null}
+              </section>
+              <div className="tax-report-v2__loading-body" role="status">
+                <span />
+                <span />
+                <span />
+                <p>계산 결과와 근거를 불러오는 중입니다.</p>
+              </div>
+            </article>
+          ) : null}
+          {detailStatus === 'loading' && !showsReportLoadingSurface ? (
             <p className="report-detail-state" role="status">
               선택한 장부의 상세 내역을 불러오는 중입니다.
             </p>
@@ -697,7 +869,7 @@ export function ReportWorkspacePage() {
                 }
                 isCurrent={selectedReportId === currentReport?.reportId}
                 filingStatus={selectedReport?.filingStatus}
-                revisionControl={v2RevisionControl}
+                revisionControl={revisionControl}
                 generationState={
                   selectedReportId === currentReport?.reportId &&
                   (generationStatus?.state === 'ACTIVE' ||

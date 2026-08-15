@@ -379,6 +379,18 @@ beforeEach(() => {
 })
 
 describe('ReportPage', () => {
+  it('shows the current report shell immediately instead of flashing the legacy page', () => {
+    render(<ReportWorkspacePage />)
+
+    expect(
+      screen.getByRole('heading', { name: '2027 가상자산 세금 리포트' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('TAX LEDGER')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: '세무 장부' }),
+    ).not.toBeInTheDocument()
+  })
+
   it('presents one revisioned ledger workspace without legacy or EAS controls', async () => {
     render(<ReportWorkspacePage />)
 
@@ -683,13 +695,14 @@ describe('ReportPage', () => {
 
     render(<ReportWorkspacePage />)
 
-    expect(
-      await screen.findByText('발행본 2', { selector: 'strong' }),
-    ).toHaveTextContent('현재')
-    expect(
-      screen.queryByRole('option', { name: /발행본 0/u }),
-    ).not.toBeInTheDocument()
-    expect(screen.queryByText('이전 발행본')).not.toBeInTheDocument()
+    await screen.findByRole('heading', { name: '장부 계산 요약' })
+    const revisionTrigger = await screen.findByRole('button', {
+      name: /2027\. 02\. 01\. 09:00 KST.*현재 발행본 · 발행 2/u,
+    })
+    fireEvent.click(revisionTrigger)
+    expect(screen.getByRole('listbox', { name: '발행본 선택' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /발행 0/u })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '발행본 선택' })).not.toBeInTheDocument()
   })
 
   it('renders a large disposal ledger inside the exact report detail', async () => {
@@ -953,9 +966,9 @@ describe('ReportPage', () => {
     expect(
       await screen.findByRole('heading', { name: '장부 계산 요약' }),
     ).toBeInTheDocument()
-    expect(
-      screen.getByText('발행본 2', { selector: 'strong' }),
-    ).toHaveTextContent('현재')
+    expect(screen.getByRole('button', {
+      name: /2027\. 02\. 01\. 09:00 KST.*현재 발행본 · 발행 2/u,
+    })).toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: '검토용 PDF' }),
     ).toHaveAttribute(
@@ -1016,17 +1029,21 @@ describe('ReportPage', () => {
 
     render(<ReportWorkspacePage />)
 
-    expect(
-      await screen.findByText('발행본 2', { selector: 'strong' }),
-    ).toHaveTextContent('현재')
+    const revisionTrigger = await screen.findByRole('button', {
+      name: /2027\. 02\. 01\. 09:00 KST.*현재 발행본 · 발행 2/u,
+    })
+    expect(revisionTrigger).toBeInTheDocument()
     expect(
       await screen.findByRole('link', { name: '검토용 PDF' }),
     ).toHaveAttribute(
       'href',
       '/api/v1/tax-reports/tax-report-1/artifacts/pdf',
     )
+    fireEvent.click(revisionTrigger)
     expect(
-      screen.getByRole('option', { name: /발행본 1/u }),
+      screen.getByRole('option', {
+        name: /2027\. 01\. 01\. 09:00 KST.*이전 발행본 · 발행 1/u,
+      }),
     ).toBeInTheDocument()
   })
 
@@ -1107,6 +1124,15 @@ describe('ReportPage', () => {
     expect(await screen.findByRole('heading', {
       name: '아직 생성된 장부가 없습니다',
     })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '데이터 소스 연결' })).toHaveAttribute(
+      'href',
+      '/sources/new',
+    )
+    expect(screen.getByRole('link', { name: '계산 상태 확인' })).toHaveAttribute(
+      'href',
+      '/dashboard',
+    )
+    expect(screen.queryByText('대상 연도')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
@@ -1123,7 +1149,7 @@ describe('ReportPage', () => {
   it.each([
     {
       name: 'application pending',
-      title: '세무 장부 신청을 먼저 완료해 주세요',
+      title: '리포트 신청을 기다리고 있습니다',
       finality: 'PROVISIONAL' as const,
       overrides: { blockedReasonCode: 'APPLICATION_PENDING' },
     },
@@ -1221,8 +1247,16 @@ describe('ReportPage', () => {
     render(<ReportWorkspacePage />)
 
     expect(await screen.findByRole('heading', {
-      name: '세무 장부 신청을 먼저 완료해 주세요',
+      name: '리포트 신청을 기다리고 있습니다',
     })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '신청 상태 확인' })).toHaveAttribute(
+      'href',
+      '/sources',
+    )
+    expect(screen.getByRole('link', { name: '거래 데이터 보기' })).toHaveAttribute(
+      'href',
+      '/ledger',
+    )
     expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
