@@ -49,6 +49,7 @@ PostgreSQL source 저장까지 확인합니다. 운영 `.env`나 secret은 이�
 
 ```bash
 make dev-e2e-up       # http://localhost:15173
+make dev-e2e-test     # 같은 환경에서 반복 실행
 make dev-e2e-status
 make dev-e2e-down     # 확인을 마친 뒤에만 실행
 ```

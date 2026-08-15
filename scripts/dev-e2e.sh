@@ -79,10 +79,10 @@ db_compose_from_state() {
 
 action=${1:-test}
 case "$action" in
-    test|up|down|status|logs) ;;
+    test|up|run-tests|down|status|logs) ;;
     --run-container-tests|--run-persistent) ;;
     *)
-        printf 'usage: %s {test|up|down|status|logs}\n' "$0" >&2
+        printf 'usage: %s {test|up|run-tests|down|status|logs}\n' "$0" >&2
         exit 2
         ;;
 esac
@@ -129,6 +129,13 @@ fi
 if [[ "$action" == logs ]]; then
     require_state
     app_compose_from_state logs --follow --tail=200 web-ui web-api engine pdf-parser
+    exit 0
+fi
+
+if [[ "$action" == run-tests ]]; then
+    require_state
+    app_compose_from_state run --rm --no-deps web-api-tests
+    printf '%s\n' 'dev E2E 테스트가 통과했습니다. 실행 환경과 일회용 DB는 그대로 유지합니다.'
     exit 0
 fi
 
@@ -191,7 +198,10 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
         "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
             --file "$compose_file" --project-name "$project_name" \
             down --volumes --remove-orphans >/dev/null 2>&1 || true
-        rm -f "$env_file" "$state_file"
+        rm -f "$env_file"
+        if [[ "$action" == --run-persistent ]]; then
+            rm -f "$state_file"
+        fi
         rmdir "$runtime_dir" 2>/dev/null || true
         exit "$exit_status"
     }
@@ -269,7 +279,7 @@ else
 fi
 
 printf '%s\n' '현재 daejang checkout으로 후보 이미지를 만듭니다.'
-if [[ "$action" == test ]]; then
+if [[ "$action" == test || "$action" == up ]]; then
     "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
         --file "$repo_root/apps/web-api/Dockerfile" --target test \
         --tag "$web_test_image" "$repo_root"

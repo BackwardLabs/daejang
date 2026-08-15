@@ -93,6 +93,18 @@ make dev-e2e-up
 비밀번호: test1234!
 ```
 
+환경을 올린 뒤에는 같은 DB·network·Engine을 유지한 채 테스트만 반복한다.
+
+```bash
+make dev-e2e-test
+make dev-e2e-test
+```
+
+이 명령은 image를 다시 만들거나 Registry image를 다시 pull하지 않는다. migration을
+다시 적용하거나 환경을 내리지도 않고, 테스트 container 하나만 실행 후 제거한다.
+따라서 화면을 열어 둔 상태에서 코드를 확인하고 여러 번 테스트할 수 있다. 현재 코드를
+다시 image에 반영해야 할 때만 기존 환경을 내리고 `make dev-e2e-up`을 다시 실행한다.
+
 상태와 로그는 다음 명령으로 확인한다.
 
 ```bash
