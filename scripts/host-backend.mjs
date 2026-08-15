@@ -1979,11 +1979,45 @@ const loadTaxBinaryReleaseManifest = () => {
 const taxDenominationAssetId = 'asset-krw-upbit'
 const taxDenominationTaxAssetId = 'tax-asset-krw'
 
+const atomicDecimalsFromUnits = (value, label) => {
+  if (typeof value !== 'string' || !/^10*$/.test(value)) {
+    throw new Error(`${label} atomic units must be an exact power of ten`)
+  }
+  const atomicDecimals = value.length - 1
+  if (atomicDecimals > 18) {
+    throw new Error(`${label} atomic decimals must be between 0 and 18`)
+  }
+  return atomicDecimals
+}
+
 export const createTaxProfiles = (rows, upbitConfig) => {
   if (upbitConfig?.denomination?.assetId !== taxDenominationAssetId) {
     throw new Error(
       `Tax quote denomination must be ${taxDenominationAssetId}`,
     )
+  }
+  const atomicDecimalsByConfiguredAsset = new Map([[
+    taxDenominationAssetId,
+    atomicDecimalsFromUnits(
+      upbitConfig.denomination.atomicUnits,
+      `Tax quote denomination ${taxDenominationAssetId}`,
+    ),
+  ]])
+  for (const asset of upbitConfig.assets ?? []) {
+    if (typeof asset.assetId !== 'string' || asset.assetId.length === 0) {
+      throw new Error('Tax quote asset ID is required')
+    }
+    const atomicDecimals = atomicDecimalsFromUnits(
+      asset.baseAtomicUnits,
+      `Tax quote asset ${asset.assetId}`,
+    )
+    const existing = atomicDecimalsByConfiguredAsset.get(asset.assetId)
+    if (existing !== undefined && existing !== atomicDecimals) {
+      throw new Error(
+        `Conflicting configured atomic decimals for ${asset.assetId}: ${existing} and ${atomicDecimals}`,
+      )
+    }
+    atomicDecimalsByConfiguredAsset.set(asset.assetId, atomicDecimals)
   }
   const quoteAssetIds = new Set(
     (upbitConfig.assets ?? []).map(({ assetId }) => assetId),
@@ -1995,6 +2029,7 @@ export const createTaxProfiles = (rows, upbitConfig) => {
       assets: new Set(),
       taxAssetIds: new Map(),
       identityMissingAssetIds: new Set(),
+      atomicDecimals: new Map(),
     }
     subject.accounts.add(row.account_id)
     subject.assets.add(row.asset_id)
@@ -2004,6 +2039,21 @@ export const createTaxProfiles = (rows, upbitConfig) => {
       subject.taxAssetIds.set(row.asset_id, taxAssetIds)
     } else {
       subject.identityMissingAssetIds.add(row.asset_id)
+    }
+    if (row.atomic_decimals !== null && row.atomic_decimals !== undefined) {
+      const atomicDecimals = Number(row.atomic_decimals)
+      if (
+        !Number.isSafeInteger(atomicDecimals) ||
+        atomicDecimals < 0 ||
+        atomicDecimals > 18
+      ) {
+        throw new Error(
+          `Invalid ledger atomic decimals for ${row.subject_id}/${row.asset_id}`,
+        )
+      }
+      const decimals = subject.atomicDecimals.get(row.asset_id) ?? new Set()
+      decimals.add(atomicDecimals)
+      subject.atomicDecimals.set(row.asset_id, decimals)
     }
     subjects.set(row.subject_id, subject)
   }
@@ -2045,10 +2095,37 @@ export const createTaxProfiles = (rows, upbitConfig) => {
         `Conflicting tax asset identity for ${subjectId}/${taxDenominationAssetId}: expected ${taxDenominationTaxAssetId}, got ${conflictingDenominationTaxAssetId}`,
       )
     }
-    const assetBindings = [{
-      ledgerAssetId: taxDenominationAssetId,
-      taxAssetId: taxDenominationTaxAssetId,
-    }]
+    const assetBinding = (ledgerAssetId, taxAssetId) => {
+      const observed = [...(
+        subject.atomicDecimals.get(ledgerAssetId) ?? []
+      )].sort((left, right) => left - right)
+      if (observed.length > 1) {
+        throw new Error(
+          `Conflicting ledger atomic decimals for ${subjectId}/${ledgerAssetId}: ${observed.join(', ')}`,
+        )
+      }
+      const configured = atomicDecimalsByConfiguredAsset.get(ledgerAssetId)
+      if (
+        observed.length === 1 &&
+        configured !== undefined &&
+        observed[0] !== configured
+      ) {
+        throw new Error(
+          `Ledger and quote atomic decimals differ for ${subjectId}/${ledgerAssetId}: ${observed[0]} and ${configured}`,
+        )
+      }
+      const atomicDecimals = observed[0] ?? configured
+      if (atomicDecimals === undefined) {
+        throw new Error(
+          `Exact atomic decimals are missing for ${subjectId}/${ledgerAssetId}`,
+        )
+      }
+      return { ledgerAssetId, taxAssetId, atomicDecimals }
+    }
+    const assetBindings = [assetBinding(
+      taxDenominationAssetId,
+      taxDenominationTaxAssetId,
+    )]
     // Preserve an exact economic identity for Lot/Tax even when Upbit has no
     // candle mapping. Those assets are direct-consideration-only below.
     for (const assetId of [...subject.assets].sort()) {
@@ -2058,7 +2135,7 @@ export const createTaxProfiles = (rows, upbitConfig) => {
         !assetId.startsWith('cex-document-asset:') &&
         taxAssetId !== undefined
       ) {
-        assetBindings.push({ ledgerAssetId: assetId, taxAssetId })
+        assetBindings.push(assetBinding(assetId, taxAssetId))
       }
     }
     const boundAssetIds = new Set(
@@ -2164,7 +2241,15 @@ export const currentTaxProfileRowsQuery = `
     event.subject_id,
     posting.account_id,
     posting.asset_id,
-    tax_identity.tax_asset_id
+    tax_identity.tax_asset_id,
+    CASE
+      WHEN linked_asset_scale.atomic_decimals IS NULL
+        THEN fallback_asset_scale.atomic_decimals
+      WHEN fallback_asset_scale.atomic_decimals IS NULL
+        OR fallback_asset_scale.atomic_decimals = linked_asset_scale.atomic_decimals
+        THEN linked_asset_scale.atomic_decimals
+      ELSE NULL
+    END AS atomic_decimals
   FROM ledger.interpreted_event AS event
   JOIN ledger.event_revision AS revision
     ON revision.subject_id = event.subject_id
@@ -2210,6 +2295,41 @@ export const currentTaxProfileRowsQuery = `
       AND evidence.leg_id = posting.leg_id
       AND evidence.kind = 'ASSERTION'
   ) AS tax_identity ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT CASE
+      WHEN count(*) > 0
+       AND count(asset.decimals) = count(*)
+       AND count(DISTINCT asset.decimals) = 1
+        THEN max(asset.decimals)
+    END AS atomic_decimals
+    FROM ledger.posting_observation AS posting_observation
+    JOIN subject_evidence.observation AS observation
+      ON observation.subject_id = posting_observation.subject_id
+     AND observation.fragment_id = posting_observation.observation_fragment_id
+     AND observation.observation_id = posting_observation.observation_id
+    JOIN subject_evidence.asset AS asset
+      ON asset.subject_id = observation.subject_id
+     AND asset.fragment_id = observation.fragment_id
+     AND asset.asset_id = observation.asset_id
+    WHERE posting_observation.subject_id = posting.subject_id
+      AND posting_observation.event_id = posting.event_id
+      AND posting_observation.revision_id = posting.revision_id
+      AND posting_observation.leg_id = posting.leg_id
+  ) AS linked_asset_scale ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT CASE
+      WHEN count(*) > 0
+       AND count(asset.decimals) = count(*)
+       AND count(DISTINCT asset.decimals) = 1
+        THEN max(asset.decimals)
+    END AS atomic_decimals
+    FROM subject_evidence.asset AS asset
+    JOIN subject_evidence.published_fragment AS fragment
+      ON fragment.subject_id = asset.subject_id
+     AND fragment.fragment_id = asset.fragment_id
+    WHERE asset.subject_id = posting.subject_id
+      AND asset.asset_id = posting.asset_id
+  ) AS fallback_asset_scale ON TRUE
   WHERE event.current_revision_id IS NOT NULL
     AND event.subject_id ~ '${canonicalWebSubjectIDPattern}'
   ORDER BY
