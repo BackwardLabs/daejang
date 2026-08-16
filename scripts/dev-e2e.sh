@@ -83,7 +83,7 @@ app_compose_from_state() {
     app_env=$(state_value APP_ENV_FILE)
     app_project=$(state_value APP_PROJECT_NAME)
     "${compose_command[@]}" --env-file "$app_env" --project-directory "$repo_root" \
-        --file "$compose_file" --project-name "$app_project" "$@"
+        --file "$compose_file" --project-name "$app_project" --profile review "$@"
 }
 
 db_compose_from_state() {
@@ -238,7 +238,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
 
     compose_profiles=()
     review_services=()
-    if [[ "$action" == --run-review-local-tests ]]; then
+    if [[ "$action" == --run-review-local-tests || "$action" == --run-persistent ]]; then
         compose_profiles=(--profile review)
         review_services=(
             reviewroom-api reviewroom-delivery reviewroom-anchor
@@ -290,7 +290,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'PUBLICATION_TRUST_KEY=%s\n' "$publication_trust_key"
     } >> "$env_file"
 
-    if [[ "$action" == --run-review-local-tests ]]; then
+    if [[ "$action" == --run-review-local-tests || "$action" == --run-persistent ]]; then
         # ReviewRoom runs from the candidate image in this project, so the run
         # exercises the artifact that would be deployed rather than the source
         # tree, and no ReviewRoom needs to be running outside the run.
@@ -396,7 +396,7 @@ if [[ "$action" == test-review-giwa ]]; then
         exit 2
     fi
     RUN_REVIEW_RESOLUTION_E2E_TESTS=1
-elif [[ "$action" == test-review-local ]]; then
+elif [[ "$action" == test-review-local || "$action" == up ]]; then
     # Self-contained: brings up its own chain, registry, database and ReviewRoom,
     # so the proof is anchored on the disposable chain rather than GIWA Sepolia.
     e2e_suffix=${e2e_suffix:-"review-local-$(date -u +%Y%m%d%H%M%S)-$$-$(python3 -c 'import secrets; print(secrets.token_hex(4), end="")')"}
