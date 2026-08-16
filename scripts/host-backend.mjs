@@ -1138,7 +1138,7 @@ const buildTaxBinaries = () => {
     ['./cmd/tax-backfill', join(binaryRoot, 'tax-backfill')],
     ['./cmd/upbit-candle-sync', join(binaryRoot, 'upbit-candle-sync')],
   ]) {
-    run('go', ['build', '-o', output, command], {
+    run('go', ['build', '-trimpath', '-buildvcs=false', '-o', output, command], {
       cwd: taxRepository,
       env: {
         ...baseEnvironment(),
@@ -1205,7 +1205,7 @@ const build = () => {
       join(binaryRoot, 'action-runtime-reclassify'),
     ],
   ]) {
-    run('go', ['build', '-o', output, command], {
+    run('go', ['build', '-trimpath', '-buildvcs=false', '-o', output, command], {
       cwd: join(repositoryRoot, 'services', 'engine'),
       env: {
         ...baseEnvironment(),
@@ -1213,7 +1213,14 @@ const build = () => {
       },
     })
   }
-  run('go', ['build', '-o', join(binaryRoot, 'posting-worker'), './cmd/posting-worker'], {
+  run('go', [
+    'build',
+    '-trimpath',
+    '-buildvcs=false',
+    '-o',
+    join(binaryRoot, 'posting-worker'),
+    './cmd/posting-worker',
+  ], {
     cwd: postingRepository,
     env: {
       ...baseEnvironment(),

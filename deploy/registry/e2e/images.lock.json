@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "registry": "backwardlabss-mac-studio.tail344fa1.ts.net",
+  "platform": "linux/arm64",
+  "generatedAt": "2026-08-14T17:32:16Z",
+  "images": {
+    "web-api": {
+      "sourceRepository": "daejang",
+      "commit": "123d9f56b6b1ee19141a29d068e1534388a01a8e",
+      "tag": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/web-api:sha-123d9f56b6b1ee19141a29d068e1534388a01a8e",
+      "digest": "sha256:b4e8211fabd2a1d4f102bbf0ac0f829244d4ccfd9b0ea6a4e911aefd1bf8e0a8",
+      "ref": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/web-api@sha256:b4e8211fabd2a1d4f102bbf0ac0f829244d4ccfd9b0ea6a4e911aefd1bf8e0a8"
+    },
+    "engine": {
+      "sourceRepository": "daejang",
+      "commit": "123d9f56b6b1ee19141a29d068e1534388a01a8e",
+      "tag": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/engine:sha-123d9f56b6b1ee19141a29d068e1534388a01a8e",
+      "digest": "sha256:e150068bd9631c572b39aa6915fe882ae73978abc947a9bd607408c6dbe8d726",
+      "ref": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/engine@sha256:e150068bd9631c572b39aa6915fe882ae73978abc947a9bd607408c6dbe8d726"
+    },
+    "pdf-parser": {
+      "sourceRepository": "daejang",
+      "commit": "123d9f56b6b1ee19141a29d068e1534388a01a8e",
+      "tag": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/pdf-parser:sha-123d9f56b6b1ee19141a29d068e1534388a01a8e",
+      "digest": "sha256:c6dbe0a1479eaea8ce77a5dba1de47c1a1fb19141e6998dba6003a185608aeee",
+      "ref": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/pdf-parser@sha256:c6dbe0a1479eaea8ce77a5dba1de47c1a1fb19141e6998dba6003a185608aeee"
+    },
+    "jit-engine": {
+      "sourceRepository": "daejang-jit-engine",
+      "commit": "0b2619d09ad9294ef108dc1df4427a689e301c45",
+      "tag": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/jit-engine:sha-0b2619d09ad9294ef108dc1df4427a689e301c45",
+      "digest": "sha256:f8dfe2f20988d6aa0517b5cba349361d8e1737b8e798dacc354daafe3e0954c4",
+      "ref": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/jit-engine@sha256:f8dfe2f20988d6aa0517b5cba349361d8e1737b8e798dacc354daafe3e0954c4"
+    },
+    "posting-service": {
+      "sourceRepository": "daejang-posting-service",
+      "commit": "db8ce5329ceb1785720d04ff6b6ff60bdeb918fc",
+      "tag": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/posting-service:sha-db8ce5329ceb1785720d04ff6b6ff60bdeb918fc",
+      "digest": "sha256:bb4cc74c5ae69dbf889613db60c30195c1c303229c0a2a80d2c394f65b924b62",
+      "ref": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/posting-service@sha256:bb4cc74c5ae69dbf889613db60c30195c1c303229c0a2a80d2c394f65b924b62"
+    },
+    "tax-engine": {
+      "sourceRepository": "daejang-tax-engine",
+      "commit": "56c5243df700fb57ee66fd18a15d245d438c485c",
+      "tag": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/tax-engine:sha-56c5243df700fb57ee66fd18a15d245d438c485c",
+      "digest": "sha256:df1c526da3ce90b9781cf8818850e160eee91772560a98eb050df6ef846378fa",
+      "ref": "backwardlabss-mac-studio.tail344fa1.ts.net/daejang/tax-engine@sha256:df1c526da3ce90b9781cf8818850e160eee91772560a98eb050df6ef846378fa"
+    }
+  }
+}
