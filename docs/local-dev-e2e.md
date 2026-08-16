@@ -268,6 +268,22 @@ volume과 Posting worker를 사용한다. 다만 고정 Tax profile에 없는 �
 추측하지 않고 명시적으로 실패하므로, 임의 PDF의 세금 결과까지 검증하려면 그 재현 입력에
 맞는 profile·asset mapping fixture를 별도로 추가해야 한다.
 
+`make test`의 인증 Web API 검증은 선택한 연도의 current/detail 응답뿐 아니라 exact
+`EvidencePack`과 실제 렌더링된 PDF도 확인한다. PDF는 `%PDF-` signature, 15KB 이상의
+본문, `Content-Length`, `X-Report-Id`, 연도별 파일명과 본문 SHA-256 `ETag`가 모두
+일치해야 통과한다. 2025·2026 산출물은 신고용 확정 보고서가 아니라 정책 시뮬레이션
+검토 자료이며, 2027 산출물도 FINAL/READY 조건을 별도로 충족하기 전에는 검토 자료다.
+Review GIWA E2E fixture에는 `OWN_ACCOUNT` 검토 대상 입금과 별도의 CEX 매수가 함께
+있다. Review 적용 전 current Report가 해당 OPEN Review limitation을 포함하는지 확인한
+뒤, 적용 완료 후 generation pointer와 Report pointer가 모두 전진하고 새 Report에서 그
+limitation이 제거되는지 검증한다. 이어 새 Report의 detail, exact `EvidencePack`, 실제
+렌더링 PDF와 무결성 header를 다시 확인한다. generation/report DB binding과 산출물 조회
+전후의 stable-read fence도 확인하므로 이전 current Report를 잘못 읽거나 조회 도중 pointer가
+교체되면 실패한다. source PDF 검증과 Review 적용 검증은 같은
+subject의 current pointer를 놓고 경합하지 않도록 별도 Vitest invocation으로 분리하며,
+항상 source 검증을 먼저 끝낸 뒤 Review mutation을 실행한다. 이 결과도 현재 runtime의
+`REVIEW_REQUIRED + REPORT`인 `PROVISIONAL` 검토 자료이며 신고용 FINAL/READY가 아니다.
+
 ## 저장소별 실제 경계
 
 | 실행 위치 | 현재 코드로 만드는 것 | 끝까지 확인하는 흐름 |

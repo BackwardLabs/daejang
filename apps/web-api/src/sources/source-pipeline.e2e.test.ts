@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -443,7 +443,7 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     })
   }, 120_000)
 
-  it(`serves the selected ${configuredTaxYear} Posting and Tax result through the authenticated Web API`, async () => {
+  it(`serves the selected ${configuredTaxYear} Posting, Tax, evidence, and PDF result through the authenticated Web API`, async () => {
     const response = await inject({
       method: 'GET',
       url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
@@ -473,5 +473,42 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
         },
       },
     })
+
+    const evidence = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${encodeURIComponent(current.report.reportId)}/evidence`,
+    }, productSessionCookie)
+    expect(evidence.statusCode, evidence.body).toBe(200)
+    expect(evidence.json()).toMatchObject({
+      evidencePack: {
+        reportId: current.report.reportId,
+        taxYear: configuredTaxYear,
+      },
+    })
+    expect(evidence.body).not.toContain('subjectId')
+    expect(evidence.body).not.toContain('residentId')
+
+    const pdf = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${encodeURIComponent(current.report.reportId)}/artifacts/pdf`,
+    }, productSessionCookie)
+    expect(pdf.statusCode, pdf.body).toBe(200)
+    expect(pdf.headers['content-type']).toBe('application/pdf')
+    expect(pdf.rawPayload.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    expect(pdf.rawPayload.byteLength).toBeGreaterThan(15_000)
+    expect(pdf.headers['content-length']).toBe(String(pdf.rawPayload.byteLength))
+    expect(pdf.headers['x-report-id']).toBe(current.report.reportId)
+    expect(pdf.headers.etag).toBe(
+      `"sha256-${createHash('sha256').update(pdf.rawPayload).digest('hex')}"`,
+    )
+    const expectedFilePrefix = configuredTaxYear < 2027
+      ? 'daejang-tax-simulation'
+      : 'daejang-tax-report'
+    const safeReportId = current.report.reportId
+      .replace(/[^A-Za-z0-9_-]/g, '_')
+      .slice(0, 96)
+    expect(pdf.headers['content-disposition']).toContain(
+      `${expectedFilePrefix}-${configuredTaxYear}-${safeReportId}.pdf`,
+    )
   })
 })

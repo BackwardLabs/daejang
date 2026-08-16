@@ -10,6 +10,7 @@ import { PostgresSessionStore } from '../auth/postgres-session-store.js'
 import { PostgresRateLimitStore } from '../auth/rate-limit.js'
 import type { AppConfig } from '../config.js'
 import { EngineMtlsClient } from '../engine/mtls-client.js'
+import { PostgresTaxReportReader } from '../tax-report/postgres-tax-report-reader.js'
 
 const enabled = process.env.RUN_REVIEW_RESOLUTION_E2E_TESTS === '1'
 const dockerHostEnabled = process.env.ALLOW_DOCKER_HOST_E2E === '1'
@@ -245,6 +246,76 @@ type ProofVector = {
   }>
 }
 
+type TaxReportGenerationStatus = {
+  generationId: string | null
+  state: string
+  taxYear: number
+  finality: string
+  pointerVersion: number
+  outcome: string | null
+  completedAt: string | null
+  blockedReasonCode: string | null
+  hasCurrentReport: boolean
+}
+
+type CurrentTaxReport = {
+  report: {
+    reportId: string
+    taxYear: number
+    finality: string
+    pointerVersion: number
+  }
+}
+
+type TaxReportDetail = {
+  report: {
+    schemaVersion: string
+    reportId: string
+    evidencePackDigest: string
+    taxYear: number
+    status: string
+    filingAction: string
+    filingStatus: string
+    reportFinality: string
+    limitations: Array<{
+      reviewId: string | null
+      reviewRevisionId: string | null
+    }>
+    summary: {
+      calculationRule: {
+        basisAllocationRounding: string
+      }
+    }
+    methodology: {
+      taxInventoryRunId: string
+      taxEstimateId: string
+      lotRunId: string
+      sourceLedgerGenerationId: string
+      schemaDigest: string
+    }
+  }
+}
+
+type TaxEvidencePack = {
+  evidencePack: {
+    schemaVersion: string
+    reportId: string
+    artifactDigest: string
+    taxYear: number
+    methodology: TaxReportDetail['report']['methodology']
+  }
+}
+
+type ReportBindingRow = {
+  status_generation_id: string
+  status_generation_pointer_version: string
+  report_generation_id: string
+  report_generation_pointer_version: string
+  report_id: string
+  report_pointer_version: string
+  bound_report_pointer_version: string
+}
+
 describeWithReviewResolution('authenticated Review resolution E2E', () => {
   let ownerPool: Pool | undefined
   let webPool: Pool | undefined
@@ -257,6 +328,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     webPool = new Pool({ connectionString: webDatabaseUrl })
     engine = EngineMtlsClient.connectInsecureLoopback(engineTarget!, false)
     await engine.waitForReady(10_000)
+    const taxReportReader = new PostgresTaxReportReader(webPool)
     context = await buildApp({
       config: config(webDatabaseUrl!),
       logger: false,
@@ -264,6 +336,10 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       sessionStore: new PostgresSessionStore(webPool),
       rateLimitStore: new PostgresRateLimitStore(webPool),
       engineDataClient: engine,
+      taxReportReader,
+      taxReportGenerationStatusReader: taxReportReader,
+      taxReportModelReader: engine,
+      taxEvidencePackReader: engine,
     })
 
     const login = await context.app.inject({
@@ -376,6 +452,52 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     const openReview = await ownAccountReview()
     invariant(openReview.revisionId !== '', 'Review detail omitted its current revision')
     invariant(/^[1-9][0-9]*$/.test(openReview.pointerVersion), 'Review detail returned an invalid pointer')
+
+    const initialGenerationResponse = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${configuredTaxYear}/status?finality=PROVISIONAL`,
+    })
+    invariant(initialGenerationResponse.statusCode === 200, 'Initial Tax generation status request failed')
+    const initialGeneration = initialGenerationResponse
+      .json<{ status: TaxReportGenerationStatus }>()
+      .status
+    invariant(
+      initialGeneration.generationId !== null &&
+      initialGeneration.state === 'REVIEW_REQUIRED' &&
+      initialGeneration.taxYear === configuredTaxYear &&
+      initialGeneration.finality === 'PROVISIONAL' &&
+      initialGeneration.pointerVersion >= 1 &&
+      initialGeneration.outcome === 'REPORT' &&
+      initialGeneration.completedAt !== null &&
+      initialGeneration.blockedReasonCode === 'REVIEW_REQUIRED' &&
+      initialGeneration.hasCurrentReport === true,
+      'Initial provisional Tax report generation was not ready for Review resolution',
+    )
+    const initialCurrentResponse = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
+    })
+    invariant(initialCurrentResponse.statusCode === 200, 'Initial current Tax report request failed')
+    const initialCurrent = initialCurrentResponse.json<CurrentTaxReport>().report
+    invariant(
+      initialCurrent.taxYear === configuredTaxYear &&
+      initialCurrent.finality === 'PROVISIONAL' &&
+      initialCurrent.pointerVersion >= 1,
+      'Initial current Tax report identity was inconsistent',
+    )
+    const initialDetailResponse = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${encodeURIComponent(initialCurrent.reportId)}`,
+    })
+    invariant(initialDetailResponse.statusCode === 200, 'Initial Tax report detail request failed')
+    const initialDetail = initialDetailResponse.json<TaxReportDetail>().report
+    invariant(
+      initialDetail.reportId === initialCurrent.reportId &&
+      initialDetail.limitations.some((limitation) =>
+        limitation.reviewId === openReview.id &&
+        limitation.reviewRevisionId === openReview.revisionId),
+      'Initial Tax report did not contain the OPEN Review limitation',
+    )
 
     const stableIntentDigest = createHash('sha256')
       .update(`review-resolution-e2e\0${openReview.id}\0OWN_ACCOUNT`)
@@ -495,6 +617,206 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       'Review delivery terminal state was inconsistent',
     )
 
+    const reportGeneration = await poll<TaxReportGenerationStatus>(
+      'post-Review Tax report generation outcome',
+      async () => {
+        const response = await inject({
+          method: 'GET',
+          url: `/api/v1/tax-reports/${configuredTaxYear}/status?finality=PROVISIONAL`,
+        })
+        invariant(response.statusCode === 200, 'Tax report generation status request failed')
+        const status = response.json<{ status: TaxReportGenerationStatus }>().status
+        if (
+          status.state === 'BUILDING' ||
+          status.blockedReasonCode === 'APPLICATION_PENDING' ||
+          status.generationId === initialGeneration.generationId ||
+          status.pointerVersion <= initialGeneration.pointerVersion
+        ) {
+          return undefined
+        }
+        return status
+      },
+    )
+    invariant(
+      reportGeneration.generationId !== null &&
+      reportGeneration.state === 'REVIEW_REQUIRED' &&
+      reportGeneration.taxYear === configuredTaxYear &&
+      reportGeneration.finality === 'PROVISIONAL' &&
+      reportGeneration.pointerVersion > initialGeneration.pointerVersion &&
+      reportGeneration.outcome === 'REPORT' &&
+      reportGeneration.completedAt !== null &&
+      reportGeneration.blockedReasonCode === 'REVIEW_REQUIRED' &&
+      reportGeneration.hasCurrentReport === true,
+      `Post-Review Tax generation did not publish the expected provisional report: ${JSON.stringify({
+        generationId: reportGeneration.generationId,
+        state: reportGeneration.state,
+        taxYear: reportGeneration.taxYear,
+        finality: reportGeneration.finality,
+        pointerVersion: reportGeneration.pointerVersion,
+        outcome: reportGeneration.outcome,
+        completedAt: reportGeneration.completedAt,
+        blockedReasonCode: reportGeneration.blockedReasonCode,
+        hasCurrentReport: reportGeneration.hasCurrentReport,
+      })}`,
+    )
+    const currentReport = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
+    })
+    invariant(
+      currentReport.statusCode === 200,
+      'Post-Review provisional Tax report was not exposed as current',
+    )
+    const current = currentReport.json<CurrentTaxReport>().report
+    invariant(
+      current.reportId !== initialCurrent.reportId &&
+      current.taxYear === configuredTaxYear &&
+      current.finality === 'PROVISIONAL' &&
+      current.pointerVersion > initialCurrent.pointerVersion,
+      'Post-Review current Tax report did not advance from the pre-Review report',
+    )
+
+    const detailResponse = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${encodeURIComponent(current.reportId)}`,
+    })
+    invariant(detailResponse.statusCode === 200, 'Post-Review Tax report detail request failed')
+    const detail = detailResponse.json<TaxReportDetail>().report
+    const expectedFilingAction = configuredTaxYear < 2027
+      ? 'FILING_NOT_APPLICABLE'
+      : 'REVIEW_REQUIRED'
+    const hasResolvedReviewLimitation = detail.limitations.some((limitation) =>
+      limitation.reviewId === openReview.id)
+    invariant(
+      detail.schemaVersion === 'giwa.tax-report-model.v2' &&
+      detail.reportId === current.reportId &&
+      detail.taxYear === configuredTaxYear &&
+      detail.status === 'PARTIAL' &&
+      detail.filingAction === expectedFilingAction &&
+      detail.filingStatus === 'BLOCKED' &&
+      detail.reportFinality === 'PROVISIONAL' &&
+      detail.summary.calculationRule.basisAllocationRounding ===
+        'CUMULATIVE_FLOOR_ANNUAL_POOL' &&
+      !hasResolvedReviewLimitation,
+      `Post-Review Tax report detail did not reflect the resolved Review: ${JSON.stringify({
+        schemaVersion: detail.schemaVersion,
+        reportIdentityMatches: detail.reportId === current.reportId,
+        taxYear: detail.taxYear,
+        status: detail.status,
+        filingAction: detail.filingAction,
+        filingStatus: detail.filingStatus,
+        reportFinality: detail.reportFinality,
+        basisAllocationRounding: detail.summary.calculationRule.basisAllocationRounding,
+        limitationCount: detail.limitations.length,
+        hasResolvedReviewLimitation,
+      })}`,
+    )
+
+    const evidenceResponse = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${encodeURIComponent(current.reportId)}/evidence`,
+    })
+    invariant(evidenceResponse.statusCode === 200, 'Post-Review EvidencePack request failed')
+    const evidence = evidenceResponse.json<TaxEvidencePack>().evidencePack
+    invariant(
+      evidence.schemaVersion === 'giwa.tax-evidence-pack.v2' &&
+      evidence.reportId === current.reportId &&
+      evidence.artifactDigest === detail.evidencePackDigest &&
+      evidence.taxYear === configuredTaxYear &&
+      evidence.methodology.taxInventoryRunId === detail.methodology.taxInventoryRunId &&
+      evidence.methodology.taxEstimateId === detail.methodology.taxEstimateId &&
+      evidence.methodology.lotRunId === detail.methodology.lotRunId &&
+      evidence.methodology.sourceLedgerGenerationId ===
+        detail.methodology.sourceLedgerGenerationId &&
+      evidence.methodology.schemaDigest === detail.methodology.schemaDigest &&
+      !evidenceResponse.body.includes('subjectId') &&
+      !evidenceResponse.body.includes('residentId'),
+      'Post-Review EvidencePack did not match the Tax report decision roots',
+    )
+
+    const pdfResponse = await inject({
+      method: 'GET',
+      url: `/api/v1/tax-reports/${encodeURIComponent(current.reportId)}/artifacts/pdf`,
+    })
+    const pdfSha256 = createHash('sha256').update(pdfResponse.rawPayload).digest('hex')
+    const expectedFilePrefix = configuredTaxYear < 2027
+      ? 'daejang-tax-simulation'
+      : 'daejang-tax-report'
+    const safeReportId = current.reportId
+      .replace(/[^A-Za-z0-9_-]/g, '_')
+      .slice(0, 96)
+    invariant(
+      pdfResponse.statusCode === 200 &&
+      pdfResponse.headers['content-type'] === 'application/pdf' &&
+      pdfResponse.rawPayload.subarray(0, 5).toString('ascii') === '%PDF-' &&
+      pdfResponse.rawPayload.byteLength > 15_000 &&
+      pdfResponse.headers['content-length'] === String(pdfResponse.rawPayload.byteLength) &&
+      pdfResponse.headers['x-report-id'] === current.reportId &&
+      pdfResponse.headers.etag === `"sha256-${pdfSha256}"` &&
+      String(pdfResponse.headers['content-disposition']).includes(
+        `${expectedFilePrefix}-${configuredTaxYear}-${safeReportId}.pdf`,
+      ),
+      'Post-Review rendered PDF or its integrity headers were inconsistent',
+    )
+
+    const binding = await ownerPool!.query<ReportBindingRow>(
+      `SELECT status.generation_id AS status_generation_id,
+              status.pointer_version::text AS status_generation_pointer_version,
+              current.generation_id AS report_generation_id,
+              current.generation_pointer_version::text AS report_generation_pointer_version,
+              current.report_id,
+              current.pointer_version::text AS report_pointer_version,
+              current.bound_report_pointer_version::text AS bound_report_pointer_version
+       FROM reporting.current_tax_report_generation_status_read_v2 AS status
+       JOIN reporting.current_tax_report_read_v2 AS current
+         ON current.subject_id=status.subject_id
+        AND current.resident_id=status.resident_id
+        AND current.tax_year=status.tax_year
+        AND current.finality=status.finality
+        AND current.generation_id=status.generation_id
+       WHERE status.subject_id=$1 AND status.tax_year=$2 AND status.finality='PROVISIONAL'`,
+      [testAccount.id, configuredTaxYear],
+    )
+    invariant(binding.rows.length === 1, 'Post-Review generation/report binding was not unique')
+    const bound = binding.rows[0]!
+    invariant(
+      bound.status_generation_id === reportGeneration.generationId &&
+      Number(bound.status_generation_pointer_version) === reportGeneration.pointerVersion &&
+      bound.report_generation_id === reportGeneration.generationId &&
+      Number(bound.report_generation_pointer_version) === reportGeneration.pointerVersion &&
+      bound.report_id === current.reportId &&
+      Number(bound.report_pointer_version) === current.pointerVersion &&
+      Number(bound.bound_report_pointer_version) === current.pointerVersion,
+      'Post-Review current Report was not atomically bound to the observed generation',
+    )
+
+    const [stableGenerationResponse, stableCurrentResponse] = await Promise.all([
+      inject({
+        method: 'GET',
+        url: `/api/v1/tax-reports/${configuredTaxYear}/status?finality=PROVISIONAL`,
+      }),
+      inject({
+        method: 'GET',
+        url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
+      }),
+    ])
+    invariant(
+      stableGenerationResponse.statusCode === 200 &&
+      stableCurrentResponse.statusCode === 200,
+      'Post-Review stable report fence could not reread the current scope',
+    )
+    const stableGeneration = stableGenerationResponse
+      .json<{ status: TaxReportGenerationStatus }>()
+      .status
+    const stableCurrent = stableCurrentResponse.json<CurrentTaxReport>().report
+    invariant(
+      stableGeneration.generationId === reportGeneration.generationId &&
+      stableGeneration.pointerVersion === reportGeneration.pointerVersion &&
+      stableCurrent.reportId === current.reportId &&
+      stableCurrent.pointerVersion === current.pointerVersion,
+      'Post-Review report scope changed while its detail, evidence, or PDF was read',
+    )
+
     const statusPath = `/internal/v2/review-resolutions/${encodeURIComponent(event.event_id)}`
     const status = await poll<ReviewRoomStatus>('ReviewRoom canonical status', async () => {
       const response = await reviewRoomJson(statusPath, 'GET')
@@ -575,6 +897,10 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
 
     process.stdout.write(`GIWA_REVIEW_E2E_RESULT ${JSON.stringify({
       chainId: vectorAnchor.chainId,
+      reportGenerationId: reportGeneration.generationId,
+      reportId: current.reportId,
+      reportPointerVersion: current.pointerVersion,
+      reportPdfSha256: pdfSha256,
       proofId: vectorProof.proofId,
       taxYear: configuredTaxYear,
       transactionHash: vectorAnchor.transactionHash,

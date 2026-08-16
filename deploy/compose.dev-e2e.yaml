@@ -180,14 +180,11 @@ services:
     image: ${DAEJANG_WEB_API_TEST_IMAGE}
     working_dir: /app
     command:
-      - npm
-      - run
-      - test
-      - --workspace
-      - '@daejang/web-api'
-      - --
-      - src/sources/source-pipeline.e2e.test.ts
-      - src/reviews/review-resolution.e2e.test.ts
+      - /bin/sh
+      - -ec
+      - |
+        npm run test --workspace @daejang/web-api -- src/sources/source-pipeline.e2e.test.ts
+        exec npm run test --workspace @daejang/web-api -- src/reviews/review-resolution.e2e.test.ts
     environment:
       RUN_SOURCE_PIPELINE_E2E_TESTS: "1"
       RUN_REVIEW_RESOLUTION_E2E_TESTS: ${RUN_REVIEW_RESOLUTION_E2E_TESTS}

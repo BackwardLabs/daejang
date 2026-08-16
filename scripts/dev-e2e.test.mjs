@@ -47,6 +47,53 @@ test('the selected product tax year reaches the fixture and both API verifiers',
   assert.match(reviewResolutionTest, /taxYear: configuredTaxYear/)
 })
 
+test('the connected source pipeline verifies exact report evidence and rendered PDF integrity', () => {
+  assert.match(sourcePipelineTest, /tax-reports\/\$\{encodeURIComponent\(current\.report\.reportId\)\}\/evidence/)
+  assert.match(sourcePipelineTest, /tax-reports\/\$\{encodeURIComponent\(current\.report\.reportId\)\}\/artifacts\/pdf/)
+  assert.match(sourcePipelineTest, /application\/pdf/)
+  assert.match(sourcePipelineTest, /%PDF-/)
+  assert.match(sourcePipelineTest, /createHash\('sha256'\)/)
+})
+
+test('the Review flow verifies a causally newer report, evidence, and rendered PDF', () => {
+  assert.match(reviewResolutionTest, /post-Review Tax report generation outcome/)
+  assert.match(reviewResolutionTest, /state === 'REVIEW_REQUIRED'/)
+  assert.match(reviewResolutionTest, /pointerVersion > initialGeneration\.pointerVersion/)
+  assert.match(reviewResolutionTest, /outcome === 'REPORT'/)
+  assert.match(reviewResolutionTest, /blockedReasonCode === 'REVIEW_REQUIRED'/)
+  assert.match(reviewResolutionTest, /hasCurrentReport === true/)
+  assert.match(reviewResolutionTest, /current\.reportId !== initialCurrent\.reportId/)
+  assert.match(reviewResolutionTest, /giwa\.tax-report-model\.v2/)
+  assert.match(reviewResolutionTest, /giwa\.tax-evidence-pack\.v2/)
+  assert.match(reviewResolutionTest, /Post-Review rendered PDF/)
+  assert.match(reviewResolutionTest, /taxReportModelReader: engine/)
+  assert.match(reviewResolutionTest, /taxEvidencePackReader: engine/)
+  assert.match(reviewResolutionTest, /current_tax_report_generation_status_read_v2/)
+  assert.match(reviewResolutionTest, /current_tax_report_read_v2/)
+  assert.match(reviewResolutionTest, /stableGeneration\.generationId === reportGeneration\.generationId/)
+  assert.match(reviewResolutionTest, /stableCurrent\.reportId === current\.reportId/)
+})
+
+test('connected report verification runs before the mutating Review flow', () => {
+  const service = compose.match(
+    /^  web-api-tests:\n[\s\S]*?(?=^  web-api:\n)/m,
+  )?.[0]
+  assert.ok(service)
+  const sourceCommand =
+    'npm run test --workspace @daejang/web-api -- src/sources/source-pipeline.e2e.test.ts'
+  const reviewCommand =
+    'npm run test --workspace @daejang/web-api -- src/reviews/review-resolution.e2e.test.ts'
+  assert.match(service, /command:\n\s+- \/bin\/sh\n\s+- -ec\n\s+- \|/)
+  assert.equal(
+    (service.match(/npm run test --workspace @daejang\/web-api --/g) ?? []).length,
+    2,
+  )
+  assert.notEqual(service.indexOf(sourceCommand), -1)
+  assert.notEqual(service.indexOf(reviewCommand), -1)
+  assert.ok(service.indexOf(sourceCommand) < service.indexOf(reviewCommand))
+  assert.doesNotMatch(service, /--no-file-parallelism/)
+})
+
 test('GIWA Review E2E is explicit, fail-closed, and does not load a checkout env file', () => {
   assert.match(runner, /test-review-giwa/)
   assert.match(runner, /RUN_REVIEW_RESOLUTION_E2E_TESTS=1/)
