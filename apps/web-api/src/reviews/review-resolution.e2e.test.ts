@@ -17,7 +17,13 @@ const dockerHostEnabled = process.env.ALLOW_DOCKER_HOST_E2E === '1'
 const e2eTimeoutMilliseconds = 360_000
 const requestTimeoutMilliseconds = 10_000
 const pollIntervalMilliseconds = 1_000
+// The proof must be anchored on the chain the ReviewRoom under test targets.
+// That is GIWA Sepolia for the published run, and a disposable local chain when
+// the suite runs fully self-contained, so the expectation follows the target
+// rather than assuming one.
 const giwaSepoliaChainId = '91342'
+const expectedAnchorChainId =
+  process.env.REVIEW_E2E_ANCHOR_CHAIN_ID || giwaSepoliaChainId
 
 const testAccount = {
   id: '00000000-0000-4000-8000-00000000e2e1',
@@ -822,8 +828,8 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       status.resolution.resolutionCode === 'OWN_ACCOUNT' &&
       status.resolution.proof.status === 'ANCHORED' &&
       status.resolution.anchor.status === 'CONFIRMED' &&
-      status.resolution.anchor.chainId === giwaSepoliaChainId,
-      'ReviewRoom canonical status was not anchored on GIWA Sepolia',
+      status.resolution.anchor.chainId === expectedAnchorChainId,
+      `ReviewRoom canonical status was not anchored on chain ${expectedAnchorChainId}`,
     )
     invariant(
       status.applicationReceipts.some((receipt) =>
@@ -853,9 +859,9 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     invariant(
       vector.schema === 'daejang.review-proof-vector/v1' &&
       vector.complete === true &&
-      vector.verificationCheckpoint.chainId === giwaSepoliaChainId &&
+      vector.verificationCheckpoint.chainId === expectedAnchorChainId &&
       vector.items.length === 1,
-      'ReviewRoom proof vector did not complete on GIWA Sepolia',
+      `ReviewRoom proof vector did not complete on chain ${expectedAnchorChainId}`,
     )
     const vectorItem = vector.items[0]!
     invariant(
@@ -876,7 +882,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     invariant(
       vectorAnchor !== undefined &&
       vectorProof !== undefined &&
-      vectorAnchor.chainId === giwaSepoliaChainId &&
+      vectorAnchor.chainId === expectedAnchorChainId &&
       /^0x[0-9a-fA-F]{64}$/.test(vectorAnchor.transactionHash) &&
       vectorAnchor.transactionHash === status.resolution.anchor.transactionHash &&
       /^0x[0-9a-fA-F]{64}$/.test(vectorProof.proofId) &&

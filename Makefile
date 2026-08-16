@@ -10,7 +10,7 @@ DAEJANG_DEV_E2E_REOWN_PROJECT_ID ?= c5f8295da4fda205b905f32fd523f4c9
 DAEJANG_TAXD_DB_MIGRATION_VERSION ?= 90
 DAEJANG_E2E_SUFFIX ?=
 
-.PHONY: test test-review-giwa test-system dev-e2e-up dev-e2e-test dev-e2e-down dev-e2e-status dev-e2e-logs
+.PHONY: test test-review-giwa test-review-local test-system dev-e2e-up dev-e2e-test dev-e2e-down dev-e2e-status dev-e2e-logs
 test:
 	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \
 		DAEJANG_TAXD_DB_MIGRATION_VERSION="$(DAEJANG_TAXD_DB_MIGRATION_VERSION)" \
@@ -22,6 +22,13 @@ test-review-giwa:
 		DAEJANG_TAXD_DB_MIGRATION_VERSION="$(DAEJANG_TAXD_DB_MIGRATION_VERSION)" \
 		DAEJANG_E2E_SUFFIX="$(DAEJANG_E2E_SUFFIX)" \
 		./scripts/dev-e2e.sh test-review-giwa
+
+test-review-local:
+	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \
+		DAEJANG_REVIEWROOM_DIR="$(DAEJANG_REVIEWROOM_DIR)" \
+		DAEJANG_TAXD_DB_MIGRATION_VERSION="$(DAEJANG_TAXD_DB_MIGRATION_VERSION)" \
+		DAEJANG_E2E_SUFFIX="$(DAEJANG_E2E_SUFFIX)" \
+		./scripts/dev-e2e.sh test-review-local
 
 dev-e2e-up:
 	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \

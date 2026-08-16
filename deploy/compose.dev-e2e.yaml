@@ -195,6 +195,7 @@ services:
       TEST_ENGINE_GRPC_TARGET: unix:/run/daejang/engine/engine.sock
       REVIEWROOM_INTERNAL_API_URL: ${REVIEWROOM_INTERNAL_API_URL}
       REVIEWROOM_PROOF_VECTOR_TOKEN: ${REVIEWROOM_PROOF_VECTOR_TOKEN}
+      REVIEW_E2E_ANCHOR_CHAIN_ID: ${REVIEW_E2E_ANCHOR_CHAIN_ID}
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
@@ -240,9 +241,211 @@ services:
     depends_on:
       web-api: { condition: service_healthy }
 
+  # ── ReviewRoom ────────────────────────────────────────────────────────────
+  # Only started for the Review run. The API verifies ReviewProofRegistryV2 on
+  # chain before it serves anything, so the run brings up its own chain and
+  # deploys its own registry; pointing a test at the deployed registry would
+  # anchor test proofs into the real proof stream.
+  reviewroom-chain:
+    profiles: ["review"]
+    image: ghcr.io/foundry-rs/foundry:latest
+    entrypoint: ["anvil"]
+    command: ["--host", "0.0.0.0", "--chain-id", "31337", "--silent"]
+    healthcheck:
+      test: ["CMD", "cast", "chain-id", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  reviewroom-registry:
+    profiles: ["review"]
+    image: ghcr.io/foundry-rs/foundry:latest
+    # Compiles and writes the shared coordinates into fresh named volumes, which
+    # start out owned by root.
+    user: root
+    environment:
+      E2E_RPC_URL: http://reviewroom-chain:8545
+      REGISTRY_ENV_FILE: /run/reviewroom-chain/chain.env
+      REGISTRY_BUILD_DIR: /run/reviewroom-build
+    # Inlined rather than mounted from the repository: this file must not bind
+    # mount anything out of the checkout, because the checkout may sit under a
+    # path Docker Desktop cannot share.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        rpc_url=$${E2E_RPC_URL}
+        until cast chain-id --rpc-url "$$rpc_url" >/dev/null 2>&1; do sleep 1; done
+
+        # Generated per run and funded from the disposable chain, so no key is
+        # committed and none is reused between runs. Read the JSON form: the
+        # human-readable output goes to stderr. Nothing here echoes the key.
+        wallet=$$(cast wallet new --json)
+        key=$$(printf '%s' "$$wallet" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
+        addr=$$(printf '%s' "$$wallet" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p')
+        [ -n "$$key" ] && [ -n "$$addr" ] || { echo "no attester key" >&2; exit 1; }
+        cast rpc --rpc-url "$$rpc_url" anvil_setBalance "$$addr" 0xde0b6b3a7640000 >/dev/null
+
+        # Compile into the work volume. The contracts are mounted read-only so a
+        # run cannot modify the checkout it was given, and the operator does not
+        # have to remember to build them first.
+        forge build --root /contracts \
+          --out /run/reviewroom-build/artifacts \
+          --cache-path /run/reviewroom-build/cache >/dev/null
+        artifact=/run/reviewroom-build/artifacts/ReviewProofRegistryV2.sol/ReviewProofRegistryV2.json
+        bytecode=$$(sed -n 's/.*"bytecode":{"object":"\(0x[^"]*\)".*/\1/p' "$$artifact")
+        [ -n "$$bytecode" ] || { echo "no creation bytecode" >&2; exit 1; }
+
+        # Deploy the compiled artifact instead of forge create, which recompiles
+        # and writes into the read-only contracts directory.
+        args=$$(cast abi-encode 'constructor(address)' "$$addr" | sed 's/^0x//')
+        receipt=$$(cast send --json --rpc-url "$$rpc_url" --private-key "$$key" \
+          --create "$${bytecode}$${args}")
+        registry=$$(printf '%s' "$$receipt" | sed -n 's/.*"contractAddress":"\([^"]*\)".*/\1/p')
+        [ -n "$$registry" ] && [ "$$registry" != null ] || { echo "no address" >&2; exit 1; }
+
+        # The API refuses to start unless the attester is allowed.
+        cast send "$$registry" 'setAttester(address,bool)' "$$addr" true \
+          --rpc-url "$$rpc_url" --private-key "$$key" >/dev/null
+
+        code=$$(cast code "$$registry" --rpc-url "$$rpc_url")
+        [ -n "$$code" ] && [ "$$code" != 0x ] || { echo "no runtime code" >&2; exit 1; }
+
+        mkdir -p /run/reviewroom-chain
+        {
+          echo "CHAIN_RPC_URL=$$rpc_url"
+          echo "CHAIN_ID=$$(cast chain-id --rpc-url "$$rpc_url")"
+          echo "REVIEW_PROOF_REGISTRY_ADDRESS=$$registry"
+          echo "REVIEW_PROOF_REGISTRY_CODE_HASH=$$(cast keccak "$$code")"
+          echo "REVIEW_PROOF_REGISTRY_DEPLOYMENT_ID=local-canonical-v2"
+          echo "REVIEW_PROOF_REGISTRY_DEPLOYMENT_BLOCK=$$(cast block-number --rpc-url "$$rpc_url")"
+          echo "ANCHOR_PRIVATE_KEY=$$key"
+        } > /run/reviewroom-chain/chain.env
+        echo "registry $$registry deployed"
+    volumes:
+      - ${DAEJANG_REVIEWROOM_DIR}/contracts:/contracts:ro
+      - reviewroom_chain_env:/run/reviewroom-chain
+      - reviewroom_build:/run/reviewroom-build
+    depends_on:
+      reviewroom-chain: { condition: service_healthy }
+
+  reviewroom-postgres:
+    profiles: ["review"]
+    # ReviewRoom keeps its own database. The canonical Review rows stay in the
+    # central disposable database that the other services share.
+    image: postgres:18.4-alpine3.24
+    environment:
+      POSTGRES_DB: reviewroom
+      POSTGRES_USER: reviewroom
+      POSTGRES_PASSWORD: reviewroom-local-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reviewroom -d reviewroom"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  reviewroom-migrate:
+    profiles: ["review"]
+    image: ${DAEJANG_REVIEWROOM_IMAGE}
+    command: ["node", "dist/scripts/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://reviewroom:reviewroom-local-only@reviewroom-postgres:5432/reviewroom?sslmode=disable
+    depends_on:
+      reviewroom-postgres: { condition: service_healthy }
+
+  reviewroom-api:
+    profiles: ["review"]
+    image: ${DAEJANG_REVIEWROOM_IMAGE}
+    # The registry address and runtime code hash only exist once the contract is
+    # deployed, so they arrive as a file rather than as Compose variables.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        . /run/reviewroom-chain/chain.env
+        export CHAIN_RPC_URL CHAIN_ID
+        export REVIEW_PROOF_REGISTRY_ADDRESS REVIEW_PROOF_REGISTRY_CODE_HASH
+        export REVIEW_PROOF_REGISTRY_DEPLOYMENT_ID REVIEW_PROOF_REGISTRY_DEPLOYMENT_BLOCK
+        exec node dist/src/index.js
+    environment:
+      NODE_ENV: production
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: "8081"
+      DATABASE_URL: postgres://reviewroom:reviewroom-local-only@reviewroom-postgres:5432/reviewroom?sslmode=disable
+      INTERNAL_API_TOKEN: ${REVIEWROOM_INTERNAL_API_TOKEN}
+      RESOLUTION_INGEST_API_TOKEN: ${REVIEWROOM_RESOLUTION_INGEST_TOKEN}
+      APPLICATION_RECEIPT_API_TOKEN: ${REVIEWROOM_APPLICATION_RECEIPT_TOKEN}
+      PROOF_VECTOR_API_TOKEN: ${REVIEWROOM_PROOF_VECTOR_TOKEN}
+      # Must decode to exactly 32 bytes: "reviewroom-local-e2e-commitment!"
+      REVIEW_COMMITMENT_KEY_BASE64: cmV2aWV3cm9vbS1sb2NhbC1lMmUtY29tbWl0bWVudCE=
+      MAX_RESPONSE_REVISIONS_PER_CASE: "10"
+      PROOF_VECTOR_MIN_CONFIRMATIONS: "1"
+    ports:
+      # The Review suite only accepts a loopback or host.docker.internal origin
+      # for ReviewRoom, so the API is reached through a published loopback port
+      # rather than by service name.
+      - 127.0.0.1:${DAEJANG_DEV_E2E_REVIEWROOM_PORT}:8081
+    volumes:
+      - reviewroom_chain_env:/run/reviewroom-chain:ro
+    depends_on:
+      reviewroom-registry: { condition: service_completed_successfully }
+      reviewroom-migrate: { condition: service_completed_successfully }
+
+  reviewroom-anchor:
+    profiles: ["review"]
+    image: ${DAEJANG_REVIEWROOM_IMAGE}
+    # Anchors each commitment on the disposable chain. Without it a resolution
+    # reaches ReviewRoom but its proof never becomes final, so the Review suite
+    # waits for a canonical status that cannot arrive. The signing key comes from
+    # the same file as the registry coordinates because the bootstrap generated
+    # both together.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        . /run/reviewroom-chain/chain.env
+        export CHAIN_RPC_URL CHAIN_ID ANCHOR_PRIVATE_KEY
+        export REVIEW_PROOF_REGISTRY_ADDRESS REVIEW_PROOF_REGISTRY_CODE_HASH
+        export REVIEW_PROOF_REGISTRY_DEPLOYMENT_ID REVIEW_PROOF_REGISTRY_DEPLOYMENT_BLOCK
+        exec node dist/src/worker.js
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://reviewroom:reviewroom-local-only@reviewroom-postgres:5432/reviewroom?sslmode=disable
+      ANCHOR_LEASE_SECONDS: "30"
+      ANCHOR_MISSING_TRANSACTION_GRACE_SECONDS: "60"
+      ANCHOR_CONFIRMATIONS: "1"
+      ANCHOR_POLL_INTERVAL_MS: "250"
+    healthcheck:
+      disable: true
+    volumes:
+      - reviewroom_chain_env:/run/reviewroom-chain:ro
+    depends_on:
+      reviewroom-api: { condition: service_healthy }
+
+  reviewroom-delivery:
+    profiles: ["review"]
+    image: ${DAEJANG_REVIEWROOM_IMAGE}
+    command: ["node", "dist/src/deliveryWorker.js"]
+    # Reads REVIEWROOM deliveries from the central disposable database and calls
+    # the ReviewRoom API. It holds neither the commitment key nor a chain signer.
+    environment:
+      NODE_ENV: production
+      DAEJANG_DATABASE_URL: ${EVENT_DATABASE_URL}
+      REVIEWROOM_INTERNAL_API_URL: http://reviewroom-api:8081
+      REVIEWROOM_RESOLUTION_INGEST_TOKEN: ${REVIEWROOM_RESOLUTION_INGEST_TOKEN}
+      REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP: "true"
+      REVIEWROOM_DELIVERY_POLL_INTERVAL_MS: "250"
+    # The image healthcheck probes the API endpoint, which this workload does
+    # not serve.
+    healthcheck:
+      disable: true
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      reviewroom-api: { condition: service_healthy }
+
 volumes:
   pdf_parser_socket: {}
   engine_socket: {}
   private_objects: {}
   pipeline_artifacts: {}
   pipeline_state: {}
+  reviewroom_chain_env: {}
+  reviewroom_build: {}

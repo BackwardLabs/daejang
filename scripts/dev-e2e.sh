@@ -31,6 +31,9 @@ parser_candidate_image="daejang-pdf-parser:dev-e2e-$user_segment"
 posting_image=${DAEJANG_POSTING_IMAGE:-"$registry/daejang/posting-service:latest"}
 tax_engine_image=${DAEJANG_TAX_ENGINE_IMAGE:-"$registry/daejang/tax-engine:latest"}
 tax_dev_e2e_image=${DAEJANG_TAX_DEV_E2E_IMAGE:-"$registry/daejang/tax-engine-dev-e2e:latest"}
+# ReviewRoom is a dependency of this repository rather than something it builds,
+# so the Review run pulls its published image like Posting and Tax do.
+reviewroom_image=${DAEJANG_REVIEWROOM_IMAGE:-"$registry/daejang/reviewroom:latest"}
 # main Web 빌드와 같은 팀의 공개 Reown Project ID를 기본값으로 사용한다.
 # 다른 Reown 프로젝트를 검증할 때는 DAEJANG_DEV_E2E_REOWN_PROJECT_ID로 덮어쓴다.
 reown_project_id=${DAEJANG_DEV_E2E_REOWN_PROJECT_ID:-c5f8295da4fda205b905f32fd523f4c9}
@@ -94,10 +97,10 @@ db_compose_from_state() {
 
 action=${1:-test}
 case "$action" in
-    test|test-review-giwa|up|run-tests|down|status|logs) ;;
-    --run-container-tests|--run-review-container-tests|--run-persistent) ;;
+    test|test-review-giwa|test-review-local|up|run-tests|down|status|logs) ;;
+    --run-container-tests|--run-review-container-tests|--run-review-local-tests|--run-persistent) ;;
     *)
-        printf 'usage: %s {test|test-review-giwa|up|run-tests|down|status|logs}\n' "$0" >&2
+        printf 'usage: %s {test|test-review-giwa|test-review-local|up|run-tests|down|status|logs}\n' "$0" >&2
         exit 2
         ;;
 esac
@@ -156,7 +159,8 @@ if [[ "$action" == run-tests ]]; then
     exit 0
 fi
 
-if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests || "$action" == --run-persistent ]]; then
+if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests
+    || "$action" == --run-review-local-tests || "$action" == --run-persistent ]]; then
     for required_variable in \
         DAEJANG_E2E_OWNER_DATABASE_URL DAEJANG_E2E_WEB_DATABASE_URL \
         DAEJANG_E2E_SOURCE_DATABASE_URL DAEJANG_E2E_QUERY_DATABASE_URL \
@@ -169,7 +173,8 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         }
     done
 
-    if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests ]]; then
+    if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests
+        || "$action" == --run-review-local-tests ]]; then
         runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/daejang-dev-e2e.XXXXXX")
         env_file="$runtime_dir/compose.env"
         project_name="daejang-$user_segment-dev-e2e-$$"
@@ -213,6 +218,12 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT=%s\n' "$REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT"
         printf 'REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=%s\n' "$REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP"
         printf 'REVIEWROOM_PROOF_VECTOR_TOKEN=%s\n' "${REVIEWROOM_PROOF_VECTOR_TOKEN:-}"
+        printf 'REVIEWROOM_INTERNAL_API_TOKEN=%s\n' "${REVIEWROOM_INTERNAL_API_TOKEN:-}"
+        printf 'REVIEWROOM_RESOLUTION_INGEST_TOKEN=%s\n' "${REVIEWROOM_RESOLUTION_INGEST_TOKEN:-}"
+        printf 'DAEJANG_REVIEWROOM_IMAGE=%s\n' "$reviewroom_image"
+        printf 'DAEJANG_REVIEWROOM_DIR=%s\n' "$reviewroom_dir"
+        printf 'DAEJANG_DEV_E2E_REVIEWROOM_PORT=%s\n' "${reviewroom_port:-18081}"
+        printf 'REVIEW_E2E_ANCHOR_CHAIN_ID=%s\n' "${REVIEW_E2E_ANCHOR_CHAIN_ID:-}"
         printf 'ACTIVATION_SHA256=%064d\n' 0
         printf 'PUBLICATION_TRUST_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
         printf 'OWNER_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_OWNER_DATABASE_URL")"
@@ -225,9 +236,18 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'TAX_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_TAX_DATABASE_URL")"
     } > "$env_file"
 
+    compose_profiles=()
+    review_services=()
+    if [[ "$action" == --run-review-local-tests ]]; then
+        compose_profiles=(--profile review)
+        review_services=(
+            reviewroom-api reviewroom-delivery reviewroom-anchor
+            reviewroom-registry reviewroom-chain
+        )
+    fi
     current_compose=(
         "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root"
-        --file "$compose_file" --project-name "$project_name"
+        --file "$compose_file" --project-name "$project_name" "${compose_profiles[@]}"
     )
 
     reviewroom_delivery_pid=''
@@ -240,17 +260,16 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
             wait "$reviewroom_delivery_pid" >/dev/null 2>&1 || true
         fi
         if (( exit_status != 0 )); then
-            "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
-                --file "$compose_file" --project-name "$project_name" \
-                logs --no-color --tail=200 posting-worker tax-engine engine web-api || true
-            if [[ -n "$reviewroom_delivery_log" && -f "$reviewroom_delivery_log" ]]; then
-                printf '%s\n' '[ReviewRoom delivery worker]'
-                tail -n 100 "$reviewroom_delivery_log" || true
-            fi
+            "${current_compose[@]}" \
+                logs --no-color --tail=200 \
+                posting-worker tax-engine engine web-api "${review_services[@]}" || true
         fi
-        "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
-            --file "$compose_file" --project-name "$project_name" \
-            down --volumes --remove-orphans >/dev/null 2>&1 || true
+        if [[ -n "$reviewroom_delivery_log" && -f "$reviewroom_delivery_log" ]] \
+            && (( exit_status != 0 )); then
+            printf '%s\n' '[ReviewRoom delivery worker]'
+            tail -n 100 "$reviewroom_delivery_log" || true
+        fi
+        "${current_compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
         rm -f "$env_file"
         [[ -z "$reviewroom_delivery_log" ]] || rm -f "$reviewroom_delivery_log"
         if [[ "$action" == --run-persistent ]]; then
@@ -271,7 +290,16 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'PUBLICATION_TRUST_KEY=%s\n' "$publication_trust_key"
     } >> "$env_file"
 
-    if [[ "$action" == --run-review-container-tests ]]; then
+    if [[ "$action" == --run-review-local-tests ]]; then
+        # ReviewRoom runs from the candidate image in this project, so the run
+        # exercises the artifact that would be deployed rather than the source
+        # tree, and no ReviewRoom needs to be running outside the run.
+        printf '%s\n' 'ReviewRoom 체인·레지스트리·API·worker를 시작합니다.'
+        "${current_compose[@]}" up --detach --wait reviewroom-delivery reviewroom-anchor
+    elif [[ "$action" == --run-review-container-tests ]]; then
+        # The GIWA run targets a ReviewRoom that already exists outside this
+        # project, so only the delivery worker is started here, from the source
+        # checkout it was given.
         reviewroom_delivery_log="$runtime_dir/reviewroom-delivery.log"
         printf '%s\n' '일회용 중앙 DB의 ReviewRoom delivery worker를 시작합니다.'
         DOTENV_CONFIG_PATH=/dev/null \
@@ -299,7 +327,8 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
     "${current_compose[@]}" up --detach --wait "${app_services[@]}"
     "${current_compose[@]}" run --rm --no-deps pipeline-verify
 
-    if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests ]]; then
+    if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests
+        || "$action" == --run-review-local-tests ]]; then
         "${current_compose[@]}" run --rm --no-deps web-api-tests
         exit 0
     fi
@@ -340,6 +369,8 @@ if [[ ! "$web_port" =~ ^[0-9]+$ ]] || (( web_port < 1 || web_port > 65535 )); th
 fi
 
 if [[ "$action" == test-review-giwa ]]; then
+    # Anchors on GIWA Sepolia, so it needs a ReviewRoom that already targets that
+    # chain. Use test-review-local for a self-contained run.
     e2e_suffix=${e2e_suffix:-"review-giwa-$(date -u +%Y%m%d%H%M%S)-$$-$(python3 -c 'import secrets; print(secrets.token_hex(4), end="")')"}
     for required_variable in \
         REVIEWROOM_INTERNAL_API_URL REVIEWROOM_APPLICATION_RECEIPT_TOKEN \
@@ -355,10 +386,6 @@ if [[ "$action" == test-review-giwa ]]; then
             exit 2
         fi
     done
-    [[ -x "$reviewroom_dir/node_modules/.bin/tsx" && -f "$reviewroom_dir/src/deliveryWorker.ts" ]] || {
-        printf '%s\n' 'DAEJANG_REVIEWROOM_DIR에 실행 가능한 ReviewRoom checkout이 필요합니다.' >&2
-        exit 2
-    }
     require_command curl
     REVIEWROOM_DELIVERY_API_URL=${REVIEWROOM_DELIVERY_API_URL:-$REVIEWROOM_INTERNAL_API_URL}
     REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=${REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP:-false}
@@ -369,6 +396,40 @@ if [[ "$action" == test-review-giwa ]]; then
         exit 2
     fi
     RUN_REVIEW_RESOLUTION_E2E_TESTS=1
+elif [[ "$action" == test-review-local ]]; then
+    # Self-contained: brings up its own chain, registry, database and ReviewRoom,
+    # so the proof is anchored on the disposable chain rather than GIWA Sepolia.
+    e2e_suffix=${e2e_suffix:-"review-local-$(date -u +%Y%m%d%H%M%S)-$$-$(python3 -c 'import secrets; print(secrets.token_hex(4), end="")')"}
+    for token_variable in \
+        REVIEWROOM_INTERNAL_API_TOKEN REVIEWROOM_APPLICATION_RECEIPT_TOKEN \
+        REVIEWROOM_RESOLUTION_INGEST_TOKEN REVIEWROOM_PROOF_VECTOR_TOKEN
+    do
+        if [[ -z "${!token_variable:-}" ]]; then
+            printf -v "$token_variable" '%s' \
+                "$(python3 -c 'import secrets; print(secrets.token_hex(24), end="")')"
+        fi
+        required_value=${!token_variable}
+        if [[ ${#required_value} -lt 32 ]]; then
+            printf '%s must contain at least 32 characters.\n' "$token_variable" >&2
+            exit 2
+        fi
+    done
+    export REVIEWROOM_INTERNAL_API_TOKEN REVIEWROOM_APPLICATION_RECEIPT_TOKEN
+    export REVIEWROOM_RESOLUTION_INGEST_TOKEN REVIEWROOM_PROOF_VECTOR_TOKEN
+export REVIEWROOM_INTERNAL_API_TOKEN
+export REVIEW_E2E_ANCHOR_CHAIN_ID
+    # The Review suite only accepts a loopback or host.docker.internal origin,
+    # so ReviewRoom is reached through a published loopback port rather than by
+    # Compose service name.
+    reviewroom_port=${DAEJANG_DEV_E2E_REVIEWROOM_PORT:-18081}
+    REVIEWROOM_INTERNAL_API_URL=http://host.docker.internal:$reviewroom_port
+    REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=true
+    [[ -d "$reviewroom_dir/contracts" ]] || {
+        printf '%s\n' 'DAEJANG_REVIEWROOM_DIR에 contracts가 있는 ReviewRoom checkout이 필요합니다.' >&2
+        exit 2
+    }
+    RUN_REVIEW_RESOLUTION_E2E_TESTS=1
+    REVIEW_E2E_ANCHOR_CHAIN_ID=31337
 else
     e2e_suffix=${e2e_suffix:-web-account}
     REVIEWROOM_INTERNAL_API_URL=${REVIEWROOM_INTERNAL_API_URL:-http://127.0.0.1:65535}
@@ -397,6 +458,8 @@ export REVIEWROOM_INTERNAL_API_URL REVIEWROOM_APPLICATION_RECEIPT_TOKEN
 export REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP
 export REVIEWROOM_DELIVERY_API_URL RUN_REVIEW_RESOLUTION_E2E_TESTS
 export REVIEWROOM_RESOLUTION_INGEST_TOKEN REVIEWROOM_PROOF_VECTOR_TOKEN
+export REVIEWROOM_INTERNAL_API_TOKEN
+export REVIEW_E2E_ANCHOR_CHAIN_ID
 if [[ "$action" == up && ! "$reown_project_id" =~ ^[[:xdigit:]]{32}$ ]]; then
     printf '%s\n' 'DAEJANG_DEV_E2E_REOWN_PROJECT_ID는 Reown의 32자리 Project ID여야 합니다.' >&2
     exit 2
@@ -456,7 +519,8 @@ else
 fi
 
 printf '%s\n' '현재 daejang checkout으로 후보 이미지를 만듭니다.'
-if [[ "$action" == test || "$action" == test-review-giwa || "$action" == up ]]; then
+if [[ "$action" == test || "$action" == test-review-giwa \
+    || "$action" == test-review-local || "$action" == up ]]; then
     "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
         --file "$repo_root/apps/web-api/Dockerfile" --target test \
         --tag "$web_test_image" "$repo_root"
@@ -506,6 +570,7 @@ fi
 case "$action" in
     up) container_action=--run-persistent ;;
     test-review-giwa) container_action=--run-review-container-tests ;;
+    test-review-local) container_action=--run-review-local-tests ;;
     *) container_action=--run-container-tests ;;
 esac
 
