@@ -1174,7 +1174,7 @@ describe('ReportPage', () => {
     },
     {
       name: 'review required',
-      title: '최신 장부를 다시 확인해야 합니다',
+      title: '장부 검토가 필요합니다',
       finality: 'PROVISIONAL' as const,
       overrides: {
         state: 'REVIEW_REQUIRED', generationId: '4'.repeat(64), pointerVersion: 1,
@@ -1375,8 +1375,20 @@ describe('ReportPage', () => {
     render(<ReportWorkspacePage />)
 
     expect(await screen.findByRole('heading', {
-      name: '최신 장부를 다시 확인해야 합니다',
+      name: '장부 검토가 필요합니다',
     })).toBeInTheDocument()
+    expect(screen.getByRole('heading', {
+      name: '장부 검토가 필요합니다',
+    }).closest('.report-generation-state')).toHaveClass(
+      'report-generation-state--getting-started',
+    )
+    expect(screen.getByRole('link', { name: '장부 검토' })).toHaveAttribute(
+      'href',
+      '/ledger',
+    )
+    expect(screen.getByRole('heading', { name: '세무 장부' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '재검토 필요' })).not.toBeInTheDocument()
+    expect(screen.queryByText('최신 장부를 다시 확인해야 합니다')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
     expect(
       vi.mocked(fetch).mock.calls.some(([url]) =>
@@ -1417,7 +1429,7 @@ describe('ReportPage', () => {
 
     expect(
       await screen.findByRole('heading', {
-        name: '최신 장부를 다시 확인해야 합니다',
+        name: '장부 검토가 필요합니다',
       }),
     ).toBeInTheDocument()
     expect(
