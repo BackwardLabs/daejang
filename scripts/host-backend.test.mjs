@@ -171,13 +171,13 @@ test('preflights both production RPC chain identities before services start', as
 })
 
 test('pins taxd to the current required database migration', () => {
-  assert.equal(hostTaxDBMigrationVersion, '77')
+  assert.equal(hostTaxDBMigrationVersion, '90')
   assert.match(
     readFileSync(
       new URL('../deploy/workers.runtime.env.example', import.meta.url),
       'utf8',
     ),
-    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=77$/mu,
+    /^DAEJANG_TAXD_DB_MIGRATION_VERSION=90$/mu,
   )
 })
 
