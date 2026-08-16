@@ -4,8 +4,11 @@ set -euo pipefail
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 db_dir=${DAEJANG_DB_DIR:-"$repo_root/../daejang-db"}
+reviewroom_dir=${DAEJANG_REVIEWROOM_DIR:-"$repo_root/../daejang-reviewroom"}
 registry=${REGISTRY:-backwardlabss-mac-studio.tail344fa1.ts.net}
 web_port=${DAEJANG_DEV_E2E_WEB_PORT:-15173}
+tax_db_migration_version=${DAEJANG_TAXD_DB_MIGRATION_VERSION:-90}
+e2e_suffix=${DAEJANG_E2E_SUFFIX:-}
 e2e_subject_id=00000000-0000-4000-8000-00000000e2e1
 compose_file="$repo_root/deploy/compose.dev-e2e.yaml"
 state_dir=${DAEJANG_DEV_E2E_STATE_DIR:-"$repo_root/.runtime/dev-e2e"}
@@ -41,6 +44,12 @@ require_command() {
 
 docker_host_dsn() {
     printf '%s' "$1" | sed 's/@127\.0\.0\.1:/@host.docker.internal:/'
+}
+
+docker_host_url() {
+    printf '%s' "$1" | sed \
+        -e 's#://127\.0\.0\.1:#://host.docker.internal:#' \
+        -e 's#://localhost:#://host.docker.internal:#'
 }
 
 state_value() {
@@ -85,15 +94,16 @@ db_compose_from_state() {
 
 action=${1:-test}
 case "$action" in
-    test|up|run-tests|down|status|logs) ;;
-    --run-container-tests|--run-persistent) ;;
+    test|test-review-giwa|up|run-tests|down|status|logs) ;;
+    --run-container-tests|--run-review-container-tests|--run-persistent) ;;
     *)
-        printf 'usage: %s {test|up|run-tests|down|status|logs}\n' "$0" >&2
+        printf 'usage: %s {test|test-review-giwa|up|run-tests|down|status|logs}\n' "$0" >&2
         exit 2
         ;;
 esac
 
 require_command docker
+require_command python3
 if docker compose version >/dev/null 2>&1; then
     compose_command=(docker compose)
 elif [[ -x /Applications/Docker.app/Contents/Resources/cli-plugins/docker-compose ]]; then
@@ -146,7 +156,7 @@ if [[ "$action" == run-tests ]]; then
     exit 0
 fi
 
-if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; then
+if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests || "$action" == --run-persistent ]]; then
     for required_variable in \
         DAEJANG_E2E_OWNER_DATABASE_URL DAEJANG_E2E_WEB_DATABASE_URL \
         DAEJANG_E2E_SOURCE_DATABASE_URL DAEJANG_E2E_QUERY_DATABASE_URL \
@@ -159,7 +169,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
         }
     done
 
-    if [[ "$action" == --run-container-tests ]]; then
+    if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests ]]; then
         runtime_dir=$(mktemp -d "${TMPDIR:-/tmp}/daejang-dev-e2e.XXXXXX")
         env_file="$runtime_dir/compose.env"
         project_name="daejang-$user_segment-dev-e2e-$$"
@@ -193,8 +203,16 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
         printf 'DAEJANG_POSTING_IMAGE=%s\n' "$posting_image"
         printf 'DAEJANG_TAX_ENGINE_IMAGE=%s\n' "$tax_engine_image"
         printf 'DAEJANG_TAX_DEV_E2E_IMAGE=%s\n' "$tax_dev_e2e_image"
+        printf 'DAEJANG_TAXD_DB_MIGRATION_VERSION=%s\n' "$tax_db_migration_version"
         printf 'DAEJANG_DEV_E2E_WEB_PORT=%s\n' "$web_port"
         printf 'DAEJANG_E2E_SUBJECT_ID=%s\n' "$e2e_subject_id"
+        printf 'DAEJANG_E2E_SUFFIX=%s\n' "$e2e_suffix"
+        printf 'RUN_REVIEW_RESOLUTION_E2E_TESTS=%s\n' "${RUN_REVIEW_RESOLUTION_E2E_TESTS:-0}"
+        printf 'REVIEWROOM_INTERNAL_API_URL=%s\n' "$REVIEWROOM_INTERNAL_API_URL"
+        printf 'REVIEWROOM_APPLICATION_RECEIPT_TOKEN=%s\n' "$REVIEWROOM_APPLICATION_RECEIPT_TOKEN"
+        printf 'REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT=%s\n' "$REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT"
+        printf 'REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=%s\n' "$REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP"
+        printf 'REVIEWROOM_PROOF_VECTOR_TOKEN=%s\n' "${REVIEWROOM_PROOF_VECTOR_TOKEN:-}"
         printf 'ACTIVATION_SHA256=%064d\n' 0
         printf 'PUBLICATION_TRUST_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
         printf 'OWNER_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_OWNER_DATABASE_URL")"
@@ -212,18 +230,29 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
         --file "$compose_file" --project-name "$project_name"
     )
 
+    reviewroom_delivery_pid=''
+    reviewroom_delivery_log=''
     cleanup_compose() {
         exit_status=$?
         trap - EXIT
+        if [[ -n "$reviewroom_delivery_pid" ]]; then
+            kill "$reviewroom_delivery_pid" >/dev/null 2>&1 || true
+            wait "$reviewroom_delivery_pid" >/dev/null 2>&1 || true
+        fi
         if (( exit_status != 0 )); then
             "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
                 --file "$compose_file" --project-name "$project_name" \
                 logs --no-color --tail=200 posting-worker tax-engine engine web-api || true
+            if [[ -n "$reviewroom_delivery_log" && -f "$reviewroom_delivery_log" ]]; then
+                printf '%s\n' '[ReviewRoom delivery worker]'
+                tail -n 100 "$reviewroom_delivery_log" || true
+            fi
         fi
         "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
             --file "$compose_file" --project-name "$project_name" \
             down --volumes --remove-orphans >/dev/null 2>&1 || true
         rm -f "$env_file"
+        [[ -z "$reviewroom_delivery_log" ]] || rm -f "$reviewroom_delivery_log"
         if [[ "$action" == --run-persistent ]]; then
             rm -f "$state_file"
         fi
@@ -242,6 +271,27 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
         printf 'PUBLICATION_TRUST_KEY=%s\n' "$publication_trust_key"
     } >> "$env_file"
 
+    if [[ "$action" == --run-review-container-tests ]]; then
+        reviewroom_delivery_log="$runtime_dir/reviewroom-delivery.log"
+        printf '%s\n' '일회용 중앙 DB의 ReviewRoom delivery worker를 시작합니다.'
+        DOTENV_CONFIG_PATH=/dev/null \
+        DOTENV_CONFIG_QUIET=true \
+        DAEJANG_DATABASE_URL="$DAEJANG_E2E_EVENT_DATABASE_URL" \
+        REVIEWROOM_INTERNAL_API_URL="$REVIEWROOM_DELIVERY_API_URL" \
+        REVIEWROOM_RESOLUTION_INGEST_TOKEN="$REVIEWROOM_RESOLUTION_INGEST_TOKEN" \
+        REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP="$REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP" \
+        "$reviewroom_dir/node_modules/.bin/tsx" \
+            "$reviewroom_dir/src/deliveryWorker.ts" \
+            >"$reviewroom_delivery_log" 2>&1 &
+        reviewroom_delivery_pid=$!
+        sleep 1
+        if ! kill -0 "$reviewroom_delivery_pid" >/dev/null 2>&1; then
+            wait "$reviewroom_delivery_pid" >/dev/null 2>&1 || true
+            printf '%s\n' 'ReviewRoom delivery worker가 시작되지 않았습니다.' >&2
+            exit 1
+        fi
+    fi
+
     app_services=(web-api posting-worker tax-engine)
     if [[ "$action" == --run-persistent ]]; then
         app_services=(web-ui posting-worker tax-engine)
@@ -249,7 +299,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-persistent ]]; th
     "${current_compose[@]}" up --detach --wait "${app_services[@]}"
     "${current_compose[@]}" run --rm --no-deps pipeline-verify
 
-    if [[ "$action" == --run-container-tests ]]; then
+    if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests ]]; then
         "${current_compose[@]}" run --rm --no-deps web-api-tests
         exit 0
     fi
@@ -280,10 +330,73 @@ if [[ "$action" == up && -e "$state_file" ]]; then
     printf '%s\n' '이미 유지 중인 dev E2E 환경이 있습니다. make dev-e2e-status로 확인하거나 make dev-e2e-down으로 제거하세요.' >&2
     exit 2
 fi
+if [[ ! "$tax_db_migration_version" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' 'DAEJANG_TAXD_DB_MIGRATION_VERSION은 양의 정수여야 합니다.' >&2
+    exit 2
+fi
 if [[ ! "$web_port" =~ ^[0-9]+$ ]] || (( web_port < 1 || web_port > 65535 )); then
     printf 'DAEJANG_DEV_E2E_WEB_PORT가 올바른 포트가 아닙니다: %s\n' "$web_port" >&2
     exit 2
 fi
+
+if [[ "$action" == test-review-giwa ]]; then
+    e2e_suffix=${e2e_suffix:-"review-giwa-$(date -u +%Y%m%d%H%M%S)-$$-$(python3 -c 'import secrets; print(secrets.token_hex(4), end="")')"}
+    for required_variable in \
+        REVIEWROOM_INTERNAL_API_URL REVIEWROOM_APPLICATION_RECEIPT_TOKEN \
+        REVIEWROOM_RESOLUTION_INGEST_TOKEN REVIEWROOM_PROOF_VECTOR_TOKEN
+    do
+        [[ -n "${!required_variable:-}" ]] || {
+            printf '%s is required for test-review-giwa.\n' "$required_variable" >&2
+            exit 2
+        }
+        required_value=${!required_variable}
+        if [[ "$required_variable" != REVIEWROOM_INTERNAL_API_URL && ${#required_value} -lt 32 ]]; then
+            printf '%s must contain at least 32 characters.\n' "$required_variable" >&2
+            exit 2
+        fi
+    done
+    [[ -x "$reviewroom_dir/node_modules/.bin/tsx" && -f "$reviewroom_dir/src/deliveryWorker.ts" ]] || {
+        printf '%s\n' 'DAEJANG_REVIEWROOM_DIR에 실행 가능한 ReviewRoom checkout이 필요합니다.' >&2
+        exit 2
+    }
+    require_command curl
+    REVIEWROOM_DELIVERY_API_URL=${REVIEWROOM_DELIVERY_API_URL:-$REVIEWROOM_INTERNAL_API_URL}
+    REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=${REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP:-false}
+    if ! curl --fail --silent --max-time 5 \
+        "${REVIEWROOM_DELIVERY_API_URL%/}/health" >/dev/null 2>&1
+    then
+        printf '%s\n' 'ReviewRoom API health check에 실패했습니다.' >&2
+        exit 2
+    fi
+    RUN_REVIEW_RESOLUTION_E2E_TESTS=1
+else
+    e2e_suffix=${e2e_suffix:-web-account}
+    REVIEWROOM_INTERNAL_API_URL=${REVIEWROOM_INTERNAL_API_URL:-http://127.0.0.1:65535}
+    REVIEWROOM_APPLICATION_RECEIPT_TOKEN=${REVIEWROOM_APPLICATION_RECEIPT_TOKEN:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")')}
+    REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=${REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP:-true}
+    REVIEWROOM_DELIVERY_API_URL=${REVIEWROOM_DELIVERY_API_URL:-$REVIEWROOM_INTERNAL_API_URL}
+    RUN_REVIEW_RESOLUTION_E2E_TESTS=${RUN_REVIEW_RESOLUTION_E2E_TESTS:-0}
+fi
+if [[ ! "$e2e_suffix" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]; then
+    printf '%s\n' 'DAEJANG_E2E_SUFFIX는 1~63자의 소문자 영숫자 및 하이픈만 사용할 수 있습니다.' >&2
+    exit 2
+fi
+REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT=${REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT:-10s}
+REVIEWROOM_INTERNAL_API_URL=$(docker_host_url "$REVIEWROOM_INTERNAL_API_URL")
+case "$REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP" in
+    true|false) ;;
+    *)
+        printf '%s\n' 'REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP는 true 또는 false여야 합니다.' >&2
+        exit 2
+        ;;
+esac
+export DAEJANG_TAXD_DB_MIGRATION_VERSION="$tax_db_migration_version"
+export DAEJANG_REVIEWROOM_DIR="$reviewroom_dir"
+export DAEJANG_E2E_SUFFIX="$e2e_suffix"
+export REVIEWROOM_INTERNAL_API_URL REVIEWROOM_APPLICATION_RECEIPT_TOKEN
+export REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP
+export REVIEWROOM_DELIVERY_API_URL RUN_REVIEW_RESOLUTION_E2E_TESTS
+export REVIEWROOM_RESOLUTION_INGEST_TOKEN REVIEWROOM_PROOF_VECTOR_TOKEN
 if [[ "$action" == up && ! "$reown_project_id" =~ ^[[:xdigit:]]{32}$ ]]; then
     printf '%s\n' 'DAEJANG_DEV_E2E_REOWN_PROJECT_ID는 Reown의 32자리 Project ID여야 합니다.' >&2
     exit 2
@@ -302,15 +415,25 @@ trap cleanup_build EXIT
 umask 077
 gh auth token > "$token_file"
 
-dependency_images=(
-    "$registry/daejang/web-api:latest"
-    "$registry/daejang/engine:latest"
-    "$registry/daejang/pdf-parser:latest"
-    "$registry/daejang/jit-engine:latest"
-    "$posting_image"
-    "$tax_engine_image"
-    "$tax_dev_e2e_image"
-)
+dependency_images=("$posting_image" "$tax_engine_image" "$tax_dev_e2e_image")
+case "${DAEJANG_E2E_SKIP_BASELINE_PULL:-0}" in
+    0)
+        dependency_images=(
+            "$registry/daejang/web-api:latest"
+            "$registry/daejang/engine:latest"
+            "$registry/daejang/pdf-parser:latest"
+            "$registry/daejang/jit-engine:latest"
+            "${dependency_images[@]}"
+        )
+        ;;
+    1)
+        printf '%s\n' 'Registry 기준 image pull을 생략하고 로컬 후보 및 실행 의존 image만 검증합니다.'
+        ;;
+    *)
+        printf '%s\n' 'DAEJANG_E2E_SKIP_BASELINE_PULL은 0 또는 1이어야 합니다.' >&2
+        exit 2
+        ;;
+esac
 printf 'Registry 또는 지정된 최신 기준 이미지 %d개를 확인합니다.\n' "${#dependency_images[@]}"
 for full_image in "${dependency_images[@]}"; do
     if [[ "$full_image" == "$registry/"* ]]; then
@@ -333,7 +456,7 @@ else
 fi
 
 printf '%s\n' '현재 daejang checkout으로 후보 이미지를 만듭니다.'
-if [[ "$action" == test || "$action" == up ]]; then
+if [[ "$action" == test || "$action" == test-review-giwa || "$action" == up ]]; then
     "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
         --file "$repo_root/apps/web-api/Dockerfile" --target test \
         --tag "$web_test_image" "$repo_root"
@@ -380,12 +503,20 @@ if [[ "$action" == up ]]; then
     db_args=(--keep "${db_args[@]}")
 fi
 
+case "$action" in
+    up) container_action=--run-persistent ;;
+    test-review-giwa) container_action=--run-review-container-tests ;;
+    *) container_action=--run-container-tests ;;
+esac
+
 DAEJANG_LOCAL_TEST_NAME=daejang-dev-e2e \
 "$db_dir/scripts/with-disposable-postgres.sh" \
     "${db_args[@]}" \
     -- "$repo_root/scripts/dev-e2e.sh" \
-    "$([[ "$action" == up ]] && printf '%s' --run-persistent || printf '%s' --run-container-tests)"
+    "$container_action"
 
 if [[ "$action" == test ]]; then
     printf '%s\n' 'daejang dev E2E가 통과했습니다.'
+elif [[ "$action" == test-review-giwa ]]; then
+    printf '%s\n' '사용자 Review 선택부터 GIWA testnet proof 검증까지 통과했습니다.'
 fi
