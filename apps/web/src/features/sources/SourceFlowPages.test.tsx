@@ -5,14 +5,7 @@ import { SourceMethodIntroPage } from './SourceMethodIntroPage.tsx'
 import { SourceTypeSelectionPage } from './SourceTypeSelectionPage.tsx'
 
 vi.mock('./ReownEvmWalletConnectionRoute.tsx', () => ({
-  ReownEvmWalletConnectionRoute: ({
-    launchImmediately,
-  }: {
-    launchImmediately?: boolean
-  }) =>
-    launchImmediately ? (
-      <div aria-label="Reown 지갑 연결" role="dialog" />
-    ) : null,
+  ReownEvmWalletConnectionRoute: () => <div>지갑 연결 내용</div>,
 }))
 
 afterEach(() => vi.unstubAllGlobals())
@@ -896,12 +889,12 @@ describe('source flow pages', () => {
     expect(screen.queryByText('PDF 업로드')).not.toBeInTheDocument()
   })
 
-  it('opens Reown directly without leaving source selection', async () => {
+  it('opens wallet selection without leaving source selection', async () => {
     window.history.pushState({}, '', '/sources/new')
     render(<SourceTypeSelectionPage />)
 
     expect(
-      screen.queryByRole('dialog', { name: 'Reown 지갑 연결' }),
+      screen.queryByRole('dialog', { name: '지갑 연결' }),
     ).not.toBeInTheDocument()
 
     fireEvent.click(
@@ -909,9 +902,21 @@ describe('source flow pages', () => {
     )
 
     expect(
-      await screen.findByRole('dialog', { name: 'Reown 지갑 연결' }),
+      await screen.findByRole('dialog', { name: '지갑 연결' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '데이터 소스 추가' }),
     ).toBeInTheDocument()
     expect(window.location.pathname).toBe('/sources/new')
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(
+      screen.queryByRole('dialog', { name: '지갑 연결' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '데이터 소스 추가' }),
+    ).toBeInTheDocument()
   })
 
   it('explains the Upbit PDF flow without linking to a disabled registration path', () => {
