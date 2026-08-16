@@ -12,6 +12,10 @@ DEPLOYED_STATE_FILE="$RUNTIME_ROOT/deployed-release.tsv"
 BACKEND_SOURCE_STATE_FILE="$RUNTIME_ROOT/backend-source-checkouts.tsv"
 BACKEND_DEPLOYED_STATE_FILE="$RUNTIME_ROOT/backend-deployed-release.tsv"
 INDEXER_STATE_FILE="$RUNTIME_ROOT/evm-indexer-deployed.tsv"
+RELEASE_ROOT="${GIWA_RELEASE_ROOT:-$DAEJANG_ROOT/releases}"
+PUBLISHER_STATE_FILE="${DAEJANG_PUBLISHER_STATE_FILE:-/Users/Shared/DaejangRegistry/publisher/state.json}"
+PROMOTION_LOCK_DIR="$RELEASE_ROOT/.promotion.lock"
+MANIFEST_TOOL="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/release-manifest.mjs"
 
 repositories=(
   "evm-indexer|$INDEXER_DIR|BackwardLabs/daejang-evm-indexer"
@@ -28,14 +32,23 @@ repositories=(
 
 usage() {
   cat <<'EOF'
-usage: scripts/mac-studio-release.sh status|preflight|sync|deploy-indexer|deploy-backend|deploy
+usage: scripts/mac-studio-release.sh <command> [arguments]
 
-  status          Show checkout state and the last recorded deployed release.
-  preflight       Verify deploy user, repository identity, main branch, clean state and GitHub access.
-  sync            Fast-forward every deployment checkout to GitHub main and record exact commits.
-  deploy-indexer  Sync, build and restart only the EVM bulk indexer.
-  deploy-backend  Sync and restart only the Daejang backend, leaving an in-progress indexer checkout untouched.
-  deploy          Sync, deploy the indexer, restart the Daejang backend and print final status.
+  status
+      Show Production checkout state and current/previous Release pointers.
+  preflight
+      Verify clean repositories, expected origins and GitHub access without moving HEAD.
+  prepare <release-id> [--publisher-main] [repository=commit ...]
+      Create a candidate manifest. Existing Production commits are the baseline.
+  verify <release-id>
+      Verify immutable images and run the candidate system E2E in temporary worktrees.
+  promote <release-id>
+      Checkout the approved commits, deploy them and atomically move current/previous.
+  rollback
+      Restore the source commits and Release pointer captured by the last promotion.
+
+Legacy restart commands deploy-indexer, deploy-backend and deploy never pull main.
+The old sync command is intentionally disabled; Production moves only through promote.
 EOF
 }
 
@@ -64,10 +77,9 @@ assert_deploy_user() {
 }
 
 assert_repository() {
-  local name="$1" directory="$2" slug="$3" branch origin dirty
-  [[ -d "$directory/.git" ]] || { echo "$name: missing clone at $directory" >&2; return 1; }
-  branch="$(git -C "$directory" branch --show-current)"
-  [[ "$branch" == main ]] || { echo "$name: deployment checkout must stay on main (found $branch)" >&2; return 1; }
+  local name="$1" directory="$2" slug="$3" origin dirty
+  git -C "$directory" rev-parse --git-dir >/dev/null 2>&1 \
+    || { echo "$name: missing Git checkout at $directory" >&2; return 1; }
   dirty="$(git -C "$directory" status --porcelain --untracked-files=normal)"
   [[ -z "$dirty" ]] || { echo "$name: deployment checkout is dirty" >&2; return 1; }
   origin="$(git -C "$directory" remote get-url origin)"
@@ -114,7 +126,7 @@ assert_fast_forward() {
   git -C "$directory" show-ref --verify --quiet refs/remotes/origin/main \
     || { echo "$name: origin/main was not fetched" >&2; return 1; }
   git -C "$directory" merge-base --is-ancestor HEAD origin/main \
-    || { echo "$name: local main diverged from origin/main; refusing deployment" >&2; return 1; }
+    || { echo "$name: Production HEAD is not contained in origin/main" >&2; return 1; }
 }
 
 merge_repository() {
@@ -215,25 +227,241 @@ preflight() {
 }
 
 sync_sources() {
-  preflight
-  for_each_repository merge_repository
-  record_source_state
+  echo "sync is disabled: create and promote an explicit Release instead" >&2
+  return 2
 }
 
 sync_backend_sources() {
-  preflight_backend
-  for_each_backend_repository merge_repository
-  record_backend_repository_set "$BACKEND_SOURCE_STATE_FILE" recorded_at
+  echo "backend source sync is disabled: use an explicit Release" >&2
+  return 2
 }
 
 sync_indexer_source() {
-  local entry name directory slug
-  entry="$(find_repository evm-indexer)"
-  IFS='|' read -r name directory slug <<<"$entry"
-  assert_repository "$name" "$directory" "$slug"
-  fetch_repository "$name" "$directory" "$slug"
-  assert_fast_forward "$name" "$directory" "$slug"
-  merge_repository "$name" "$directory" "$slug"
+  echo "indexer source sync is disabled: use an explicit Release" >&2
+  return 2
+}
+
+release_directory() {
+  local release_id="$1"
+  [[ "$release_id" =~ ^[0-9]{8}(-[a-z0-9][a-z0-9.-]*)?$ ]] \
+    || { echo "invalid Release ID: $release_id" >&2; return 2; }
+  printf '%s/%s\n' "$RELEASE_ROOT" "$release_id"
+}
+
+current_release_target() {
+  local pointer="$RELEASE_ROOT/current"
+  if [[ -L "$pointer" ]]; then
+    python3 - "$pointer" <<'PY'
+import os, sys
+print(os.path.realpath(sys.argv[1]))
+PY
+  fi
+}
+
+assert_checkouts_match_manifest() {
+  local manifest_file="$1" entry name directory slug expected actual
+  [[ -r "$manifest_file" ]] || return 0
+  for entry in "${repositories[@]}"; do
+    IFS='|' read -r name directory slug <<<"$entry"
+    expected="$(jq -r --arg name "$name" '.sources[$name] // empty' "$manifest_file")"
+    actual="$(git -C "$directory" rev-parse HEAD)"
+    [[ -n "$expected" && "$actual" == "$expected" ]] \
+      || { echo "$name: Production HEAD $actual does not match current Release $expected" >&2; return 1; }
+  done
+}
+
+assert_checkouts_match_current_release() {
+  local current_target
+  current_target="$(current_release_target)"
+  [[ -n "$current_target" ]] || return 0
+  assert_checkouts_match_manifest "$current_target/release.json"
+}
+
+acquire_promotion_lock() {
+  mkdir -p "$RELEASE_ROOT"
+  if mkdir "$PROMOTION_LOCK_DIR" 2>/dev/null; then
+    printf '%s\n' "$$" > "$PROMOTION_LOCK_DIR/pid"
+    return
+  fi
+  local existing_pid=''
+  [[ -r "$PROMOTION_LOCK_DIR/pid" ]] && existing_pid="$(sed -n '1p' "$PROMOTION_LOCK_DIR/pid")"
+  if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+    echo "another Release operation is active as PID $existing_pid" >&2
+    return 1
+  fi
+  find "$PROMOTION_LOCK_DIR" -depth -delete 2>/dev/null || true
+  mkdir "$PROMOTION_LOCK_DIR"
+  printf '%s\n' "$$" > "$PROMOTION_LOCK_DIR/pid"
+}
+
+release_promotion_lock() {
+  if [[ -r "$PROMOTION_LOCK_DIR/pid" ]] && [[ "$(sed -n '1p' "$PROMOTION_LOCK_DIR/pid")" == "$$" ]]; then
+    find "$PROMOTION_LOCK_DIR" -depth -delete 2>/dev/null || true
+  fi
+}
+
+prepare_release() {
+  local release_id="${1:-}"
+  shift || true
+  assert_deploy_user
+  command -v git >/dev/null
+  command -v node >/dev/null
+  command -v jq >/dev/null
+  [[ -r "$PUBLISHER_STATE_FILE" ]] \
+    || { echo "missing Publisher state: $PUBLISHER_STATE_FILE" >&2; return 1; }
+  for_each_repository assert_repository
+  assert_checkouts_match_current_release
+  for_each_repository fetch_repository
+  GIWA_DAEJANG_ROOT="$DAEJANG_ROOT" GIWA_RELEASE_ROOT="$RELEASE_ROOT" \
+    DAEJANG_PUBLISHER_STATE_FILE="$PUBLISHER_STATE_FILE" \
+    node "$MANIFEST_TOOL" prepare "$release_id" "$@"
+}
+
+validate_release_images() {
+  local release_dir="$1" image_name ref expected_commit revision
+  while IFS=$'\t' read -r image_name ref expected_commit; do
+    echo "$image_name: pulling $ref"
+    docker pull "$ref" >/dev/null
+    revision="$(docker image inspect \
+      --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+      "$ref")"
+    [[ "$revision" == "$expected_commit" ]] \
+      || { echo "$image_name: image revision $revision does not match $expected_commit" >&2; return 1; }
+  done < <(jq -r '.images | to_entries[] | [.key, .value.ref, .value.commit] | @tsv' \
+    "$release_dir/images.lock.json")
+}
+
+verification_worktree() {
+  local release_dir="$1" verify_root="$2" name="$3" entry directory slug commit
+  entry="$(find_repository "$name")"
+  IFS='|' read -r _ directory slug <<<"$entry"
+  commit="$(jq -r --arg name "$name" '.sources[$name]' "$release_dir/release.json")"
+  git -C "$directory" worktree add --detach "$verify_root/$name" "$commit" >/dev/null
+}
+
+remove_verification_worktrees() {
+  local verify_root="$1" name entry directory slug
+  for name in daejang daejang-db daejang-jit-engine daejang-posting-service daejang-tax-engine schema; do
+    entry="$(find_repository "$name")"
+    IFS='|' read -r _ directory slug <<<"$entry"
+    if [[ -e "$verify_root/$name/.git" ]]; then
+      git -C "$directory" worktree remove --force "$verify_root/$name" >/dev/null 2>&1 || true
+    fi
+  done
+  [[ -d "$verify_root" ]] && find "$verify_root" -depth -delete 2>/dev/null || true
+}
+
+run_release_system_e2e() {
+  local release_dir="$1" verify_root posting_ref tax_ref tax_fixture_ref registry_host
+  verify_root="$(mktemp -d "$RELEASE_ROOT/.verify-$(basename "$release_dir").XXXXXX")"
+  cleanup_release_verification() {
+    remove_verification_worktrees "$verify_root"
+  }
+  trap cleanup_release_verification RETURN
+
+  local name
+  for name in daejang daejang-db daejang-jit-engine daejang-posting-service daejang-tax-engine schema; do
+    verification_worktree "$release_dir" "$verify_root" "$name"
+  done
+
+  posting_ref="$(jq -r '.images["posting-service"].ref' "$release_dir/images.lock.json")"
+  tax_ref="$(jq -r '.images["tax-engine"].ref' "$release_dir/images.lock.json")"
+  tax_fixture_ref="$(jq -r '.images["tax-engine-dev-e2e"].ref' "$release_dir/images.lock.json")"
+  registry_host="${posting_ref%%/*}"
+
+  DAEJANG_POSTING_IMAGE="$posting_ref" \
+  DAEJANG_TAX_ENGINE_IMAGE="$tax_ref" \
+  DAEJANG_TAX_DEV_E2E_IMAGE="$tax_fixture_ref" \
+    make -C "$verify_root/daejang" test \
+      DAEJANG_DB_DIR="$verify_root/daejang-db" REGISTRY="$registry_host"
+
+  make -C "$verify_root/daejang-posting-service" test \
+    DAEJANG_DB_DIR="$verify_root/daejang-db" REGISTRY="$registry_host"
+  make -C "$verify_root/daejang-jit-engine" test \
+    DAEJANG_DB_DIR="$verify_root/daejang-db" \
+    SCHEMA_DIR="$verify_root/schema" REGISTRY="$registry_host" \
+    POSTING_IMAGE="$posting_ref"
+  make -C "$verify_root/daejang-tax-engine" test \
+    DAEJANG_DB_DIR="$verify_root/daejang-db" REGISTRY="$registry_host" \
+    POSTING_IMAGE="$posting_ref"
+
+  trap - RETURN
+  cleanup_release_verification
+}
+
+verify_release() {
+  local release_id="${1:-}" release_dir manifest_digest temporary
+  assert_deploy_user
+  command -v docker >/dev/null
+  command -v jq >/dev/null
+  command -v node >/dev/null
+  release_dir="$(release_directory "$release_id")"
+  [[ -d "$release_dir" ]] || { echo "Release not found: $release_dir" >&2; return 1; }
+  manifest_digest="$(GIWA_DAEJANG_ROOT="$DAEJANG_ROOT" GIWA_RELEASE_ROOT="$RELEASE_ROOT" \
+    node "$MANIFEST_TOOL" validate "$release_dir")"
+  validate_release_images "$release_dir"
+  run_release_system_e2e "$release_dir"
+
+  temporary="$release_dir/.verification.json.$$"
+  jq -n \
+    --arg verifiedAt "$(date -u +%FT%TZ)" \
+    --arg manifestDigest "$manifest_digest" \
+    '{schemaVersion: 1, status: "passed", verifiedAt: $verifiedAt,
+      manifestDigest: $manifestDigest,
+      checks: ["immutable-images", "daejang-system-e2e", "posting-e2e", "jit-e2e", "tax-e2e"]}' \
+    > "$temporary"
+  chmod 660 "$temporary"
+  mv "$temporary" "$release_dir/verification.json"
+  echo "Release $release_id verification passed."
+}
+
+capture_repository_heads() {
+  local target="$1" entry name directory slug
+  : > "$target"
+  for entry in "${repositories[@]}"; do
+    IFS='|' read -r name directory slug <<<"$entry"
+    printf '%s\t%s\n' "$name" "$(git -C "$directory" rev-parse HEAD)" >> "$target"
+  done
+}
+
+checkout_repository_set() {
+  local source_file="$1" entry name directory slug commit
+  for entry in "${repositories[@]}"; do
+    IFS='|' read -r name directory slug <<<"$entry"
+    commit="$(jq -r --arg name "$name" '.sources[$name]' "$source_file")"
+    [[ "$commit" =~ ^[0-9a-f]{40}$ ]] \
+      || { echo "$name: missing commit in $source_file" >&2; return 1; }
+    git -C "$directory" cat-file -e "$commit^{commit}"
+    git -C "$directory" switch --detach "$commit" >/dev/null
+    echo "$name: ${commit:0:12}"
+  done
+}
+
+restore_repository_heads() {
+  local state_file="$1" name commit entry directory slug
+  while IFS=$'\t' read -r name commit; do
+    entry="$(find_repository "$name")"
+    IFS='|' read -r _ directory slug <<<"$entry"
+    git -C "$directory" switch --detach "$commit" >/dev/null || return 1
+  done < "$state_file"
+}
+
+atomic_release_link() {
+  local link_name="$1" target="$2" temporary="$RELEASE_ROOT/.$link_name.$$"
+  [[ "$target" == "$RELEASE_ROOT/"* ]] \
+    || { echo "refusing Release pointer outside $RELEASE_ROOT: $target" >&2; return 1; }
+  ln -s "$target" "$temporary"
+  mv -f "$temporary" "$RELEASE_ROOT/$link_name"
+}
+
+assert_release_verified() {
+  local release_dir="$1" expected actual status
+  expected="$(GIWA_DAEJANG_ROOT="$DAEJANG_ROOT" GIWA_RELEASE_ROOT="$RELEASE_ROOT" \
+    node "$MANIFEST_TOOL" validate "$release_dir")"
+  status="$(jq -r '.status // empty' "$release_dir/verification.json")"
+  actual="$(jq -r '.manifestDigest // empty' "$release_dir/verification.json")"
+  [[ "$status" == passed && "$actual" == "$expected" ]] \
+    || { echo "Release verification is missing or stale: $(basename "$release_dir")" >&2; return 1; }
 }
 
 restart_indexer() {
@@ -293,7 +521,7 @@ deploy_indexer() {
   assert_deploy_user
   command -v git >/dev/null
   command -v go >/dev/null
-  sync_indexer_source
+  for_each_repository assert_repository
   restart_indexer
 }
 
@@ -308,24 +536,161 @@ restart_backend_with_migrations() {
 }
 
 deploy_backend() {
-  sync_backend_sources
+  assert_deploy_user
+  for_each_backend_repository assert_repository
   npm --prefix "$DAEJANG_ROOT/daejang" ci
   restart_backend_with_migrations
   record_backend_repository_set "$BACKEND_DEPLOYED_STATE_FILE" deployed_at
 }
 
 deploy_all() {
-  sync_sources
+  assert_deploy_user
+  for_each_repository assert_repository
   npm --prefix "$DAEJANG_ROOT/daejang" ci
   restart_indexer
   restart_backend_with_migrations
   record_deployed_state
 }
 
+promote_release() {
+  local release_id="${1:-}" release_dir old_heads previous_target rollback_tmp
+  local checkout_started=false deployment_started=false
+  assert_deploy_user
+  command -v git >/dev/null
+  command -v jq >/dev/null
+  command -v node >/dev/null
+  release_dir="$(release_directory "$release_id")"
+  [[ -d "$release_dir" ]] || { echo "Release not found: $release_dir" >&2; return 1; }
+  assert_release_verified "$release_dir"
+  for_each_repository assert_repository
+  assert_checkouts_match_current_release
+  for_each_repository fetch_repository
+  acquire_promotion_lock
+  trap release_promotion_lock RETURN
+
+  old_heads="$(mktemp "$RELEASE_ROOT/.pre-promotion-heads.XXXXXX")"
+  capture_repository_heads "$old_heads"
+  previous_target="$(current_release_target)"
+  rollback_tmp="$release_dir/.rollback.json.$$"
+  jq -Rn \
+    --arg capturedAt "$(date -u +%FT%TZ)" \
+    --arg previousTarget "$previous_target" \
+    '[inputs | split("\t") | {key: .[0], value: .[1]}] | from_entries |
+      {schemaVersion: 1, capturedAt: $capturedAt, previousTarget: $previousTarget, sources: .}' \
+    < "$old_heads" > "$rollback_tmp"
+  chmod 660 "$rollback_tmp"
+  mv "$rollback_tmp" "$release_dir/rollback.json"
+
+  rollback_failed_promotion() {
+    local status=$?
+    trap - ERR
+    if [[ "$checkout_started" == true ]]; then
+      echo "Promotion failed; restoring previous Production commits." >&2
+      restore_repository_heads "$old_heads" || true
+      if [[ "$deployment_started" == true ]]; then
+        npm --prefix "$DAEJANG_ROOT/daejang" ci || true
+        restart_indexer || true
+        restart_backend_with_migrations || true
+      fi
+    fi
+    find "$old_heads" -delete 2>/dev/null || true
+    release_promotion_lock
+    return "$status"
+  }
+  trap rollback_failed_promotion ERR
+
+  checkout_started=true
+  checkout_repository_set "$release_dir/release.json"
+  deployment_started=true
+  deploy_all
+
+  if [[ -n "$previous_target" ]]; then
+    atomic_release_link previous "$previous_target"
+  fi
+  atomic_release_link current "$release_dir"
+  jq -n \
+    --arg deployedAt "$(date -u +%FT%TZ)" \
+    --arg deployedBy "$(id -un)" \
+    '{schemaVersion: 1, status: "deployed", deployedAt: $deployedAt, deployedBy: $deployedBy}' \
+    > "$release_dir/deployment.json"
+  chmod 660 "$release_dir/deployment.json"
+
+  trap - ERR
+  find "$old_heads" -delete
+  release_promotion_lock
+  echo "Release $release_id is now Production."
+}
+
+rollback_release() {
+  local active_dir rollback_file previous_target active_target current_heads
+  local checkout_started=false
+  assert_deploy_user
+  acquire_promotion_lock
+  trap release_promotion_lock RETURN
+  active_dir="$(current_release_target)"
+  [[ -n "$active_dir" ]] || { release_promotion_lock; echo "current Release pointer is missing" >&2; return 1; }
+  rollback_file="$active_dir/rollback.json"
+  [[ -r "$rollback_file" ]] \
+    || { release_promotion_lock; echo "Rollback metadata is missing: $rollback_file" >&2; return 1; }
+  previous_target="$(jq -r '.previousTarget // empty' "$rollback_file")"
+  [[ -d "$previous_target" && "$previous_target" == "$RELEASE_ROOT/"* ]] \
+    || { release_promotion_lock; echo "previous Release target is invalid: $previous_target" >&2; return 1; }
+  for_each_repository assert_repository
+  assert_checkouts_match_manifest "$active_dir/release.json"
+  current_heads="$(mktemp "$RELEASE_ROOT/.pre-rollback-heads.XXXXXX")"
+  capture_repository_heads "$current_heads"
+
+  rollback_failed_rollback() {
+    local status=$?
+    trap - ERR
+    if [[ "$checkout_started" == true ]]; then
+      echo "Rollback failed; restoring the active Release commits." >&2
+      restore_repository_heads "$current_heads" || true
+    fi
+    find "$current_heads" -delete 2>/dev/null || true
+    release_promotion_lock
+    return "$status"
+  }
+  trap rollback_failed_rollback ERR
+
+  checkout_started=true
+  checkout_repository_set "$rollback_file"
+  deploy_all
+  active_target="$active_dir"
+  atomic_release_link current "$previous_target"
+  atomic_release_link previous "$active_target"
+
+  trap - ERR
+  find "$current_heads" -delete
+  release_promotion_lock
+  echo "Production rolled back to $(basename "$previous_target")."
+}
+
+show_release_pointers() {
+  local pointer target
+  echo
+  for pointer in current previous; do
+    if [[ -L "$RELEASE_ROOT/$pointer" ]]; then
+      target="$(python3 - "$RELEASE_ROOT/$pointer" <<'PY'
+import os, sys
+print(os.path.realpath(sys.argv[1]))
+PY
+)"
+      printf '%-10s %s\n' "$pointer" "$target"
+    else
+      printf '%-10s %s\n' "$pointer" missing
+    fi
+  done
+}
+
 case "${1:-}" in
-  status) for_each_repository show_repository; show_recorded_state ;;
+  status) for_each_repository show_repository; show_release_pointers; show_recorded_state ;;
   preflight) preflight ;;
   sync) sync_sources ;;
+  prepare) shift; prepare_release "$@" ;;
+  verify) shift; verify_release "$@" ;;
+  promote) shift; promote_release "$@" ;;
+  rollback) rollback_release ;;
   deploy-indexer) deploy_indexer ;;
   deploy-backend) deploy_backend ;;
   deploy) deploy_all ;;

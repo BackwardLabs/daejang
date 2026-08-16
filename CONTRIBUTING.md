@@ -3,7 +3,7 @@
 로컬 환경 준비부터 브랜치 생성, 검증, PR과 병합까지의 실행 순서는 [개발 가이드](docs/development-guide.md)를 확인하세요. 이 문서는 협업 정책의 원본이고, 개발 가이드는 실제 명령과 순서를 설명합니다.
 
 배포되는 서비스·migration의 격리 Docker 검증, main 병합 뒤 image digest 검증과 배포 순서는 [컨테이너 통합 검증과 release image 흐름](docs/release-image-flow.md)을 따릅니다.
-Mac Studio의 공용 checkout은 [Mac Studio 개발·배포 가이드](docs/mac-studio-source-and-deployment.md)에 따라 `main` fast-forward와 배포에만 사용합니다.
+Mac Studio의 공용 checkout은 [Mac Studio 개발·배포 가이드](docs/mac-studio-source-and-deployment.md)에 따라 승인된 Release SHA의 Production checkout과 배포에만 사용합니다. 자동 `main` fast-forward는 하지 않습니다.
 
 ## 이슈 작성
 
