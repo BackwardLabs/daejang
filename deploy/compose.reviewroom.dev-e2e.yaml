@@ -1,0 +1,118 @@
+# ReviewRoom on a disposable local chain, for end-to-end runs.
+#
+# The production stack in compose.reviewroom.yaml expects a deployed
+# ReviewProofRegistryV2 and secrets from a secret manager. Neither exists in a
+# local run, and pointing a test at the deployed registry would anchor test
+# proofs into the real proof stream. So this file brings up its own chain,
+# deploys its own registry, and generates its own keys per run.
+#
+# Ordering matters and cannot be expressed with plain variables: the API
+# verifies the registry's runtime code hash at startup, and that hash only
+# exists once the contract is deployed. bootstrap runs first and hands the
+# coordinates to the API through a shared file.
+#
+#   chain -> bootstrap (deploy + authorize) -> migrate -> api
+#
+# Requires a Foundry build of the contracts on the host first, because the
+# artifacts are not in the ReviewRoom image:
+#
+#   npm --prefix <reviewroom> run build:contracts
+services:
+  reviewroom-chain:
+    image: ghcr.io/foundry-rs/foundry:latest
+    entrypoint: ["anvil"]
+    command: ["--host", "0.0.0.0", "--chain-id", "31337", "--silent"]
+    healthcheck:
+      test: ["CMD", "cast", "chain-id", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [reviewroom-e2e]
+
+  reviewroom-registry:
+    image: ghcr.io/foundry-rs/foundry:latest
+    working_dir: /contracts
+    # Writes the shared coordinates file into a fresh named volume, which starts
+    # out owned by root.
+    user: root
+    environment:
+      E2E_RPC_URL: http://reviewroom-chain:8545
+      REGISTRY_ENV_FILE: /run/reviewroom-chain/chain.env
+    entrypoint: ["/bin/sh"]
+    command: ["/opt/bootstrap-local-registry.sh"]
+    volumes:
+      - ${DAEJANG_REVIEWROOM_DIR:?Set DAEJANG_REVIEWROOM_DIR to an owned daejang-reviewroom clone}/contracts:/contracts:ro
+      - ./reviewroom/bootstrap-local-registry.sh:/opt/bootstrap-local-registry.sh:ro
+      - reviewroom-chain-env:/run/reviewroom-chain
+    depends_on:
+      reviewroom-chain:
+        condition: service_healthy
+    networks: [reviewroom-e2e]
+
+  reviewroom-postgres:
+    image: postgres:18.4-alpine3.24
+    environment:
+      POSTGRES_DB: reviewroom
+      POSTGRES_USER: reviewroom
+      # Disposable chain, disposable database, disposable password.
+      POSTGRES_PASSWORD: reviewroom-local-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reviewroom -d reviewroom"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [reviewroom-e2e]
+
+  reviewroom-migrate:
+    image: ${DAEJANG_REVIEWROOM_IMAGE:?Set DAEJANG_REVIEWROOM_IMAGE to the ReviewRoom candidate image}
+    command: ["node", "dist/scripts/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://reviewroom:reviewroom-local-only@reviewroom-postgres:5432/reviewroom?sslmode=disable
+    depends_on:
+      reviewroom-postgres:
+        condition: service_healthy
+    networks: [reviewroom-e2e]
+
+  reviewroom-api:
+    image: ${DAEJANG_REVIEWROOM_IMAGE:?Set DAEJANG_REVIEWROOM_IMAGE to the ReviewRoom candidate image}
+    # The registry coordinates are only known after bootstrap, so they arrive as
+    # a file rather than as Compose variables.
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        . /run/reviewroom-chain/chain.env
+        export CHAIN_RPC_URL CHAIN_ID
+        export REVIEW_PROOF_REGISTRY_ADDRESS REVIEW_PROOF_REGISTRY_CODE_HASH
+        export REVIEW_PROOF_REGISTRY_DEPLOYMENT_ID REVIEW_PROOF_REGISTRY_DEPLOYMENT_BLOCK
+        exec node dist/src/index.js
+    environment:
+      NODE_ENV: production
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: "8081"
+      DATABASE_URL: postgres://reviewroom:reviewroom-local-only@reviewroom-postgres:5432/reviewroom?sslmode=disable
+      # Test-only tokens. They must be distinct from each other, and they never
+      # leave this disposable network.
+      INTERNAL_API_TOKEN: reviewroom-local-internal-token-000000000000
+      RESOLUTION_INGEST_API_TOKEN: reviewroom-local-ingest-token-0000000000000
+      APPLICATION_RECEIPT_API_TOKEN: reviewroom-local-receipt-token-000000000000
+      PROOF_VECTOR_API_TOKEN: reviewroom-local-proof-vector-token-00000000
+      # Must decode to exactly 32 bytes: "reviewroom-local-e2e-commitment!"
+      REVIEW_COMMITMENT_KEY_BASE64: cmV2aWV3cm9vbS1sb2NhbC1lMmUtY29tbWl0bWVudCE=
+      MAX_RESPONSE_REVISIONS_PER_CASE: "10"
+      PROOF_VECTOR_MIN_CONFIRMATIONS: "1"
+    ports:
+      - 127.0.0.1:${DAEJANG_REVIEWROOM_PORT:-18081}:8081
+    volumes:
+      - reviewroom-chain-env:/run/reviewroom-chain:ro
+    depends_on:
+      reviewroom-registry:
+        condition: service_completed_successfully
+      reviewroom-migrate:
+        condition: service_completed_successfully
+    networks: [reviewroom-e2e]
+
+networks:
+  reviewroom-e2e:
+
+volumes:
+  reviewroom-chain-env:
