@@ -281,8 +281,8 @@ const generationPresentation = (
       status.blockedReasonCode ?? '',
     )
   ) return {
-    tone: 'review', eyebrow: '확인 필요', title: '최신 장부를 다시 확인해야 합니다',
-    body: '원장 변경, 데이터 범위 또는 계산 결과 정합성 문제로 읽을 수 있는 최신 장부가 없습니다. 검토를 마치고 다시 계산해 주세요.',
+    tone: 'review', eyebrow: '확인 필요', title: '장부 검토가 필요합니다',
+    body: '확인이 필요한 거래를 검토하면 다음 계산에서 최신 장부를 준비할 수 있습니다.',
   }
   return {
     tone: 'empty', eyebrow: '아직 준비 중', title: '아직 생성된 장부가 없습니다',
@@ -311,10 +311,6 @@ const reportPageHeader = (status: TaxReportGenerationStatusModel | null) => {
     title: '과세 이벤트 없음',
     description: '전체 과세기간의 검증된 데이터에서 과세 계산 대상이 확인되지 않았습니다.',
   }
-  if (status?.state === 'REVIEW_REQUIRED' && !canReadCurrent(status)) return {
-    title: '재검토 필요',
-    description: '최신 원장과 계산 결과의 정합성을 확인한 뒤 장부를 다시 생성해야 합니다.',
-  }
   return {
     title: '세무 장부',
     description: '발행된 계산 결과를 장부로 검토하고, 선택한 발행본의 PDF를 생성합니다.',
@@ -341,21 +337,22 @@ function ReportGenerationState({
       : null
   const standalone = !hasReadableCurrent
 
-  if (
-    standalone &&
+  const applicationPending =
+    status.blockedReasonCode === 'APPLICATION_PENDING'
+  const needsReview = presentation.tone === 'review'
+  const gettingStarted =
+    applicationPending ||
+    needsReview ||
+    (presentation.tone === 'empty' && status.outcome !== 'NO_TAX_EVENTS') ||
     (
-      status.blockedReasonCode === 'APPLICATION_PENDING' ||
-      (
-        status.state === 'NOT_STARTED' &&
-        status.outcome === null &&
-        ['NOT_STARTED', 'GENERATION_NOT_ACTIVE'].includes(
-          status.blockedReasonCode ?? '',
-        )
+      status.state === 'NOT_STARTED' &&
+      status.outcome === null &&
+      ['NOT_STARTED', 'GENERATION_NOT_ACTIVE'].includes(
+        status.blockedReasonCode ?? '',
       )
     )
-  ) {
-    const applicationPending =
-      status.blockedReasonCode === 'APPLICATION_PENDING'
+
+  if (standalone && gettingStarted) {
     return (
       <section
         className="report-generation-state report-generation-state--getting-started"
@@ -368,17 +365,27 @@ function ReportGenerationState({
             <h3>
               {applicationPending
                 ? '리포트 신청을 기다리고 있습니다'
-                : '아직 생성된 장부가 없습니다'}
+                : needsReview
+                  ? '장부 검토가 필요합니다'
+                  : '아직 생성된 장부가 없습니다'}
             </h3>
             <p>
               {applicationPending
                 ? '신청이 끝나면 등록된 데이터로 예상 리포트를 만듭니다.'
-                : '거래 데이터를 연결하면 계산 상태를 확인하고 세무 장부를 준비할 수 있습니다.'}
+                : needsReview
+                  ? '확인이 필요한 거래를 검토하면 다음 계산에서 최신 장부를 준비할 수 있습니다.'
+                  : '거래 데이터를 연결하면 계산 상태를 확인하고 세무 장부를 준비할 수 있습니다.'}
             </p>
           </header>
           <div className="report-generation-state__actions">
-            <AppLink href={applicationPending ? '/sources' : '/sources/new'}>
-              {applicationPending ? '신청 상태 확인' : '데이터 소스 연결'}
+            <AppLink
+              href={applicationPending ? '/sources' : needsReview ? '/ledger' : '/sources/new'}
+            >
+              {applicationPending
+                ? '신청 상태 확인'
+                : needsReview
+                  ? '장부 검토'
+                  : '데이터 소스 연결'}
             </AppLink>
             <AppLink href={applicationPending ? '/ledger' : '/dashboard'}>
               {applicationPending ? '거래 데이터 보기' : '계산 상태 확인'}
@@ -390,15 +397,25 @@ function ReportGenerationState({
               <span>
                 {applicationPending
                   ? '계산 결과가 생길 때까지 금액을 표시하지 않습니다.'
-                  : '거래소 문서 또는 개인 지갑을 연결해 주세요.'}
+                  : needsReview
+                    ? '미확인 거래와 데이터 범위를 확인해 주세요.'
+                    : '거래소 문서 또는 개인 지갑을 연결해 주세요.'}
               </span>
             </article>
             <article>
-              <strong>{applicationPending ? '생성 후 제공' : '장부 생성'}</strong>
+              <strong>
+                {applicationPending
+                  ? '생성 후 제공'
+                  : needsReview
+                    ? '검토 후'
+                    : '장부 생성'}
+              </strong>
               <span>
                 {applicationPending
                   ? '계산 근거 · PDF · 블록체인 증명을 제공합니다.'
-                  : '계산이 시작되면 진행 상태와 결과를 이 화면에 표시합니다.'}
+                  : needsReview
+                    ? '검토 결과가 반영되면 이 화면에 새 장부를 표시합니다.'
+                    : '계산이 시작되면 진행 상태와 결과를 이 화면에 표시합니다.'}
               </span>
             </article>
           </div>
