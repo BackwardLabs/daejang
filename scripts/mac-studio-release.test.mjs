@@ -104,6 +104,15 @@ test('ReviewRoom delivery uses the explicit central DB network', () => {
   )
 })
 
+test('Release script supports either Docker Compose CLI form', () => {
+  const body = functionBody('docker_compose')
+
+  assert.match(body, /docker compose version/)
+  assert.match(body, /command -v docker-compose/)
+  assert.match(body, /docker-compose "\$@"/)
+  assert.match(releaseScript, /REVIEWROOM_IMAGE_REF="\$image_ref" docker_compose/)
+})
+
 test('system verification includes the ReviewRoom canonical E2E worktree', () => {
   const body = functionBody('run_release_system_e2e')
 

@@ -59,6 +59,19 @@ The old sync command is intentionally disabled; Production moves only through pr
 EOF
 }
 
+docker_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+    return
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+    return
+  fi
+  echo "Docker Compose is required (docker compose or docker-compose)" >&2
+  return 1
+}
+
 for_each_repository() {
   local callback="$1" entry name directory slug
   for entry in "${repositories[@]}"; do
@@ -230,7 +243,7 @@ preflight() {
   command -v npm >/dev/null
   command -v go >/dev/null
   command -v docker >/dev/null
-  docker compose version >/dev/null
+  docker_compose version >/dev/null
   [[ -r "$REVIEWROOM_COMPOSE_FILE" ]] \
     || { echo "ReviewRoom Compose file is missing: $REVIEWROOM_COMPOSE_FILE" >&2; return 1; }
   [[ -r "$REVIEWROOM_DEPLOY_ENV_FILE" ]] \
@@ -372,7 +385,7 @@ reviewroom_compose() {
   # A process environment value takes precedence over --env-file. This keeps a
   # stale or accidental REVIEWROOM_IMAGE_REF in the private file from moving a
   # verified Release to another image.
-  REVIEWROOM_IMAGE_REF="$image_ref" docker compose \
+  REVIEWROOM_IMAGE_REF="$image_ref" docker_compose \
     --env-file "$REVIEWROOM_DEPLOY_ENV_FILE" \
     --project-directory "$DAEJANG_ROOT/daejang" \
     --project-name daejang-reviewroom \
@@ -666,7 +679,7 @@ restart_backend_with_migrations() {
 deploy_reviewroom() {
   local release_dir="$1" image_ref
   command -v docker >/dev/null
-  docker compose version >/dev/null
+  docker_compose version >/dev/null
   image_ref="$(reviewroom_image_reference "$release_dir")"
 
   # config is a fail-closed check for the private Compose interpolation file
