@@ -47,14 +47,7 @@ if (enabled && !engineTarget) {
 }
 
 const describeWithPipeline = enabled ? describe : describe.skip
-const configuredTaxYear = (() => {
-  if (!enabled) return 2025 as const
-  const raw = process.env.DAEJANG_TAX_DEV_E2E_TAX_YEAR
-  if (!raw || !/^(2025|2026|2027)$/.test(raw)) {
-    throw new Error('DAEJANG_TAX_DEV_E2E_TAX_YEAR must be one of 2025, 2026, or 2027')
-  }
-  return Number(raw) as 2025 | 2026 | 2027
-})()
+const fixtureTaxYear = 2025 as const
 const fixturePassword = 'synthetic-pdf-password-do-not-persist'
 const productAccount = {
   id: '00000000-0000-4000-8000-00000000e2e1',
@@ -443,16 +436,16 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     })
   }, 120_000)
 
-  it(`serves the selected ${configuredTaxYear} Posting, Tax, evidence, and PDF result through the authenticated Web API`, async () => {
+  it('serves the fixed 2025 Posting, Tax, evidence, and PDF result through the authenticated Web API', async () => {
     const response = await inject({
       method: 'GET',
-      url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
+      url: `/api/v1/tax-reports/${fixtureTaxYear}/current?finality=PROVISIONAL`,
     }, productSessionCookie)
     expect(response.statusCode, response.body).toBe(200)
     const current = response.json<{ report: { reportId: string } }>()
     expect(current).toMatchObject({
       report: {
-        taxYear: configuredTaxYear,
+        taxYear: fixtureTaxYear,
         finality: 'PROVISIONAL',
       },
     })
@@ -465,7 +458,7 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     expect(detail.json()).toMatchObject({
       report: {
         reportId: current.report.reportId,
-        taxYear: configuredTaxYear,
+        taxYear: fixtureTaxYear,
         summary: {
           calculationRule: {
             basisAllocationRounding: 'CUMULATIVE_FLOOR_ANNUAL_POOL',
@@ -482,7 +475,7 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     expect(evidence.json()).toMatchObject({
       evidencePack: {
         reportId: current.report.reportId,
-        taxYear: configuredTaxYear,
+        taxYear: fixtureTaxYear,
       },
     })
     expect(evidence.body).not.toContain('subjectId')
@@ -501,14 +494,12 @@ describeWithPipeline('wallet and Upbit PDF source pipeline E2E', () => {
     expect(pdf.headers.etag).toBe(
       `"sha256-${createHash('sha256').update(pdf.rawPayload).digest('hex')}"`,
     )
-    const expectedFilePrefix = configuredTaxYear < 2027
-      ? 'daejang-tax-simulation'
-      : 'daejang-tax-report'
+    const expectedFilePrefix = 'daejang-tax-simulation'
     const safeReportId = current.report.reportId
       .replace(/[^A-Za-z0-9_-]/g, '_')
       .slice(0, 96)
     expect(pdf.headers['content-disposition']).toContain(
-      `${expectedFilePrefix}-${configuredTaxYear}-${safeReportId}.pdf`,
+      `${expectedFilePrefix}-${fixtureTaxYear}-${safeReportId}.pdf`,
     )
   })
 })

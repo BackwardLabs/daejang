@@ -30,21 +30,20 @@ test('dev E2E uses the configurable DB migration boundary', () => {
   assert.match(compose, /^\s+DAEJANG_TAX_DEV_E2E_SUFFIX: \$\{DAEJANG_E2E_SUFFIX\}$/m)
 })
 
-test('the selected product tax year reaches the fixture and both API verifiers', () => {
-  assert.match(makefile, /^DAEJANG_TAX_DEV_E2E_TAX_YEAR \?= 2025$/m)
-  assert.match(runner, /case "\$tax_year" in\n\s+2025\|2026\|2027\)/)
-  assert.match(runner, /DAEJANG_TAX_DEV_E2E_TAX_YEAR=%s/)
-  assert.match(runner, /actual ledger publication|실제 ledger publication|fixture Event는 아직 미래/)
+test('the product fixture and both API verifiers remain fixed to 2025', () => {
+  assert.doesNotMatch(makefile, /DAEJANG_TAX_DEV_E2E_TAX_YEAR/)
+  assert.doesNotMatch(runner, /DAEJANG_TAX_DEV_E2E_TAX_YEAR|tax_year/)
   assert.equal(
-    (compose.match(/DAEJANG_TAX_DEV_E2E_TAX_YEAR: \$\{DAEJANG_TAX_DEV_E2E_TAX_YEAR:-2025\}/g) ?? []).length,
-    2,
+    (compose.match(/DAEJANG_TAX_DEV_E2E_TAX_YEAR: "2025"/g) ?? []).length,
+    1,
   )
   for (const verifier of [sourcePipelineTest, reviewResolutionTest]) {
-    assert.match(verifier, /\^\(2025\|2026\|2027\)\$/)
-    assert.match(verifier, /configuredTaxYear/)
+    assert.match(verifier, /const fixtureTaxYear = 2025 as const/)
+    assert.doesNotMatch(verifier, /configuredTaxYear|DAEJANG_TAX_DEV_E2E_TAX_YEAR/)
   }
-  assert.doesNotMatch(sourcePipelineTest, /tax-reports\/2025\/current/)
-  assert.match(reviewResolutionTest, /taxYear: configuredTaxYear/)
+  assert.match(sourcePipelineTest, /tax-reports\/\$\{fixtureTaxYear\}\/current/)
+  assert.match(reviewResolutionTest, /taxYear: fixtureTaxYear/)
+  assert.match(reviewResolutionTest, /expectedFilingAction = 'FILING_NOT_APPLICABLE'/)
 })
 
 test('the connected source pipeline verifies exact report evidence and rendered PDF integrity', () => {
@@ -141,7 +140,7 @@ test('persistent source checks cannot add ledger data to the product Review subj
     sourcePipelineTest,
     /provisionEmailAccount\(ownerPool, sourcePipelineAccount\)/,
   )
-  assert.match(sourcePipelineTest, /tax-reports\/\$\{configuredTaxYear\}\/current[\s\S]*productSessionCookie/)
+  assert.match(sourcePipelineTest, /tax-reports\/\$\{fixtureTaxYear\}\/current[\s\S]*productSessionCookie/)
 })
 
 test('each public command dispatches exactly one internal container mode', () => {

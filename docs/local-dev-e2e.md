@@ -31,16 +31,9 @@ flowchart LR
 make test
 ```
 
-Tax/Report fixture의 기본 연도는 `2025`다. 현재 제품이 지원하는 전체 연도
-`2025`, `2026`, `2027` 중 하나를 같은 경로로 선택할 수 있다.
-
-```bash
-DAEJANG_TAX_DEV_E2E_TAX_YEAR=2026 make test
-```
-
-실제 ledger publication 시각보다 미래인 fixture Event는 Tax Engine의 인과성 fence를
-우회하지 않는다. 따라서 아직 시작하지 않은 연도는 runner가 실행 전에 거부하며, 해당
-연도가 시작되고 고정 fixture 시각이 지난 뒤 같은 명령으로 자동 실행 가능해진다.
+Tax/Report fixture는 재현 가능한 정책 시뮬레이션을 위해 의도적으로 `2025`에 고정한다.
+이는 제품 런타임의 지원 연도 범위와 별개이며, 이 fixture를 제품 지원 범위의 정의로
+사용하지 않는다.
 
 ### 사용자 Review 선택부터 GIWA testnet까지
 
@@ -53,7 +46,6 @@ DAEJANG_DB_DIR=../daejang-db-review-e2e \
 DAEJANG_REVIEWROOM_DIR=../daejang-reviewroom \
 DAEJANG_TAX_ENGINE_IMAGE=daejang-tax-engine:dev-e2e-runtime \
 DAEJANG_TAX_DEV_E2E_IMAGE=daejang-tax-engine:dev-e2e-fixture \
-DAEJANG_TAX_DEV_E2E_TAX_YEAR=2026 \
 make test-review-giwa
 ```
 
@@ -67,7 +59,6 @@ make test-review-giwa
 | `REVIEWROOM_RESOLUTION_INGEST_TOKEN` | 중앙 DB resolution을 ReviewRoom으로 전달 |
 | `REVIEWROOM_PROOF_VECTOR_TOKEN` | status 및 proof-vector 검증 |
 | `REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP` | 로컬 HTTP API일 때만 `true` |
-| `DAEJANG_TAX_DEV_E2E_TAX_YEAR` | 검증할 제품 연도 (`2025`, `2026`, `2027`; 기본 `2025`) |
 
 ReviewRoom API와 anchor worker는 같은 ReviewRoom DB를 사용하며 GIWA Sepolia chain ID
 `91342`에 연결된 상태여야 한다. ReviewRoom checkout의 dependency도 미리 설치되어 있어야
@@ -78,10 +69,9 @@ origin을 별도 지정한다.
 
 각 실행은 기본적으로 새로운 ID-safe fixture suffix를 생성하므로 persistent ReviewRoom
 DB에 이전 proof가 있어도 새 resolution event와 새 트랜잭션을 만든다. 재현 가능한 ID가
-필요하면 `DAEJANG_E2E_SUFFIX`를 소문자 영숫자와 하이픈으로 직접 지정할 수 있다. Tax
-fixture는 실제 durable ID namespace에 선택 연도를 추가하므로 같은 사용자 suffix를 서로
-다른 연도에 재사용해도 충돌하지 않는다. 같은 연도와 suffix를 다시 사용하면 ReviewRoom의
-idempotent replay가 정상 동작해 새 트랜잭션은 생기지 않는다.
+필요하면 `DAEJANG_E2E_SUFFIX`를 소문자 영숫자와 하이픈으로 직접 지정할 수 있다. 같은
+2025 fixture suffix를 다시 사용하면 ReviewRoom의 idempotent replay가 정상 동작해 새
+트랜잭션은 생기지 않는다.
 
 성공하면 공개 가능한 tax year, chain ID, proof ID, transaction hash만
 `GIWA_REVIEW_E2E_RESULT` 한 줄로 출력한다. resolution event나 내부 digest, fingerprint,
@@ -259,20 +249,19 @@ flowchart LR
     R --> A
 ```
 
-환경을 올릴 때 테스트 계정에는 선택한 연도의 Upbit BTC 매수 한 건이 고정 fixture로 들어간다.
+환경을 올릴 때 테스트 계정에는 2025년 Upbit BTC 매수 한 건이 고정 fixture로 들어간다.
 이 거래는 단순 화면 샘플이 아니라 Source publication부터 Posting, Ledger publication,
-Tax Engine, ReportModel까지 실제 runtime이 처리한다. 기본값은 `2025`이며
-`DAEJANG_TAX_DEV_E2E_TAX_YEAR`로 `2025`, `2026`, `2027`을 선택한다. 브라우저에서도 같은
-연도를 선택하면 장부와 보고서 결과를 확인할 수 있다. 이후 화면에서 추가한 PDF도 같은 artifact
+Tax Engine, ReportModel까지 실제 runtime이 처리한다. 브라우저에서 조회 기간을 2025년으로
+선택하면 장부와 보고서 결과를 확인할 수 있다. 이후 화면에서 추가한 PDF도 같은 artifact
 volume과 Posting worker를 사용한다. 다만 고정 Tax profile에 없는 계정·자산은 Tax가
 추측하지 않고 명시적으로 실패하므로, 임의 PDF의 세금 결과까지 검증하려면 그 재현 입력에
 맞는 profile·asset mapping fixture를 별도로 추가해야 한다.
 
-`make test`의 인증 Web API 검증은 선택한 연도의 current/detail 응답뿐 아니라 exact
+`make test`의 인증 Web API 검증은 2025년 current/detail 응답뿐 아니라 exact
 `EvidencePack`과 실제 렌더링된 PDF도 확인한다. PDF는 `%PDF-` signature, 15KB 이상의
-본문, `Content-Length`, `X-Report-Id`, 연도별 파일명과 본문 SHA-256 `ETag`가 모두
-일치해야 통과한다. 2025·2026 산출물은 신고용 확정 보고서가 아니라 정책 시뮬레이션
-검토 자료이며, 2027 산출물도 FINAL/READY 조건을 별도로 충족하기 전에는 검토 자료다.
+본문, `Content-Length`, `X-Report-Id`, 2025 simulation 파일명과 본문 SHA-256 `ETag`가
+모두 일치해야 통과한다. 이 산출물은 신고용 확정 보고서가 아니라 2025 정책 시뮬레이션
+검토 자료다.
 Review GIWA E2E fixture에는 `OWN_ACCOUNT` 검토 대상 입금과 별도의 CEX 매수가 함께
 있다. Review 적용 전 current Report가 해당 OPEN Review limitation을 포함하는지 확인한
 뒤, 적용 완료 후 generation pointer와 Report pointer가 모두 전진하고 새 Report에서 그

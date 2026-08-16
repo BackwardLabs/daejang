@@ -85,14 +85,7 @@ const ownerDatabaseUrl = disposableDatabaseUrl('TEST_DATABASE_URL')
 const webDatabaseUrl = disposableDatabaseUrl('TEST_WEB_DATABASE_URL')
 const engineTarget = engineUnixTarget()
 const reviewRoomApiOrigin = reviewRoomOrigin()
-const configuredTaxYear = (() => {
-  if (!enabled) return 2025 as const
-  const raw = requireEnvironment('DAEJANG_TAX_DEV_E2E_TAX_YEAR')
-  if (!/^(2025|2026|2027)$/.test(raw)) {
-    throw new Error('DAEJANG_TAX_DEV_E2E_TAX_YEAR must be one of 2025, 2026, or 2027')
-  }
-  return Number(raw) as 2025 | 2026 | 2027
-})()
+const fixtureTaxYear = 2025 as const
 const proofVectorToken = enabled
   ? requireEnvironment('REVIEWROOM_PROOF_VECTOR_TOKEN')
   : undefined
@@ -387,7 +380,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     let cursor = ''
     const seenCursors = new Set<string>()
     for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
-      const query = new URLSearchParams({ taxYear: String(configuredTaxYear), limit: '100' })
+      const query = new URLSearchParams({ taxYear: String(fixtureTaxYear), limit: '100' })
       if (cursor) query.set('cursor', cursor)
       const list = await inject({ method: 'GET', url: `/api/v1/reviews?${query.toString()}` })
       invariant(list.statusCode === 200, 'Authenticated Review list request failed')
@@ -416,7 +409,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       seenCursors.add(nextCursor)
       cursor = nextCursor
     }
-    throw new Error('No OPEN Review with the OWN_ACCOUNT option exists in the configured tax year')
+    throw new Error('No OPEN Review with the OWN_ACCOUNT option exists in the fixed 2025 fixture')
   }
 
   const reviewRoomJson = async (
@@ -448,14 +441,14 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     }
   }
 
-  it(`resolves a ${configuredTaxYear} OWN_ACCOUNT Review, applies it, and verifies its GIWA proof vector`, async () => {
+  it('resolves a 2025 OWN_ACCOUNT Review, applies it, and verifies its GIWA proof vector', async () => {
     const openReview = await ownAccountReview()
     invariant(openReview.revisionId !== '', 'Review detail omitted its current revision')
     invariant(/^[1-9][0-9]*$/.test(openReview.pointerVersion), 'Review detail returned an invalid pointer')
 
     const initialGenerationResponse = await inject({
       method: 'GET',
-      url: `/api/v1/tax-reports/${configuredTaxYear}/status?finality=PROVISIONAL`,
+      url: `/api/v1/tax-reports/${fixtureTaxYear}/status?finality=PROVISIONAL`,
     })
     invariant(initialGenerationResponse.statusCode === 200, 'Initial Tax generation status request failed')
     const initialGeneration = initialGenerationResponse
@@ -464,7 +457,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     invariant(
       initialGeneration.generationId !== null &&
       initialGeneration.state === 'REVIEW_REQUIRED' &&
-      initialGeneration.taxYear === configuredTaxYear &&
+      initialGeneration.taxYear === fixtureTaxYear &&
       initialGeneration.finality === 'PROVISIONAL' &&
       initialGeneration.pointerVersion >= 1 &&
       initialGeneration.outcome === 'REPORT' &&
@@ -475,12 +468,12 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     )
     const initialCurrentResponse = await inject({
       method: 'GET',
-      url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
+      url: `/api/v1/tax-reports/${fixtureTaxYear}/current?finality=PROVISIONAL`,
     })
     invariant(initialCurrentResponse.statusCode === 200, 'Initial current Tax report request failed')
     const initialCurrent = initialCurrentResponse.json<CurrentTaxReport>().report
     invariant(
-      initialCurrent.taxYear === configuredTaxYear &&
+      initialCurrent.taxYear === fixtureTaxYear &&
       initialCurrent.finality === 'PROVISIONAL' &&
       initialCurrent.pointerVersion >= 1,
       'Initial current Tax report identity was inconsistent',
@@ -622,7 +615,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       async () => {
         const response = await inject({
           method: 'GET',
-          url: `/api/v1/tax-reports/${configuredTaxYear}/status?finality=PROVISIONAL`,
+          url: `/api/v1/tax-reports/${fixtureTaxYear}/status?finality=PROVISIONAL`,
         })
         invariant(response.statusCode === 200, 'Tax report generation status request failed')
         const status = response.json<{ status: TaxReportGenerationStatus }>().status
@@ -640,7 +633,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     invariant(
       reportGeneration.generationId !== null &&
       reportGeneration.state === 'REVIEW_REQUIRED' &&
-      reportGeneration.taxYear === configuredTaxYear &&
+      reportGeneration.taxYear === fixtureTaxYear &&
       reportGeneration.finality === 'PROVISIONAL' &&
       reportGeneration.pointerVersion > initialGeneration.pointerVersion &&
       reportGeneration.outcome === 'REPORT' &&
@@ -661,7 +654,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     )
     const currentReport = await inject({
       method: 'GET',
-      url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
+      url: `/api/v1/tax-reports/${fixtureTaxYear}/current?finality=PROVISIONAL`,
     })
     invariant(
       currentReport.statusCode === 200,
@@ -670,7 +663,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     const current = currentReport.json<CurrentTaxReport>().report
     invariant(
       current.reportId !== initialCurrent.reportId &&
-      current.taxYear === configuredTaxYear &&
+      current.taxYear === fixtureTaxYear &&
       current.finality === 'PROVISIONAL' &&
       current.pointerVersion > initialCurrent.pointerVersion,
       'Post-Review current Tax report did not advance from the pre-Review report',
@@ -682,15 +675,13 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     })
     invariant(detailResponse.statusCode === 200, 'Post-Review Tax report detail request failed')
     const detail = detailResponse.json<TaxReportDetail>().report
-    const expectedFilingAction = configuredTaxYear < 2027
-      ? 'FILING_NOT_APPLICABLE'
-      : 'REVIEW_REQUIRED'
+    const expectedFilingAction = 'FILING_NOT_APPLICABLE'
     const hasResolvedReviewLimitation = detail.limitations.some((limitation) =>
       limitation.reviewId === openReview.id)
     invariant(
       detail.schemaVersion === 'giwa.tax-report-model.v2' &&
       detail.reportId === current.reportId &&
-      detail.taxYear === configuredTaxYear &&
+      detail.taxYear === fixtureTaxYear &&
       detail.status === 'PARTIAL' &&
       detail.filingAction === expectedFilingAction &&
       detail.filingStatus === 'BLOCKED' &&
@@ -722,7 +713,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       evidence.schemaVersion === 'giwa.tax-evidence-pack.v2' &&
       evidence.reportId === current.reportId &&
       evidence.artifactDigest === detail.evidencePackDigest &&
-      evidence.taxYear === configuredTaxYear &&
+      evidence.taxYear === fixtureTaxYear &&
       evidence.methodology.taxInventoryRunId === detail.methodology.taxInventoryRunId &&
       evidence.methodology.taxEstimateId === detail.methodology.taxEstimateId &&
       evidence.methodology.lotRunId === detail.methodology.lotRunId &&
@@ -739,9 +730,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       url: `/api/v1/tax-reports/${encodeURIComponent(current.reportId)}/artifacts/pdf`,
     })
     const pdfSha256 = createHash('sha256').update(pdfResponse.rawPayload).digest('hex')
-    const expectedFilePrefix = configuredTaxYear < 2027
-      ? 'daejang-tax-simulation'
-      : 'daejang-tax-report'
+    const expectedFilePrefix = 'daejang-tax-simulation'
     const safeReportId = current.reportId
       .replace(/[^A-Za-z0-9_-]/g, '_')
       .slice(0, 96)
@@ -754,7 +743,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       pdfResponse.headers['x-report-id'] === current.reportId &&
       pdfResponse.headers.etag === `"sha256-${pdfSha256}"` &&
       String(pdfResponse.headers['content-disposition']).includes(
-        `${expectedFilePrefix}-${configuredTaxYear}-${safeReportId}.pdf`,
+        `${expectedFilePrefix}-${fixtureTaxYear}-${safeReportId}.pdf`,
       ),
       'Post-Review rendered PDF or its integrity headers were inconsistent',
     )
@@ -775,7 +764,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
         AND current.finality=status.finality
         AND current.generation_id=status.generation_id
        WHERE status.subject_id=$1 AND status.tax_year=$2 AND status.finality='PROVISIONAL'`,
-      [testAccount.id, configuredTaxYear],
+      [testAccount.id, fixtureTaxYear],
     )
     invariant(binding.rows.length === 1, 'Post-Review generation/report binding was not unique')
     const bound = binding.rows[0]!
@@ -793,11 +782,11 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     const [stableGenerationResponse, stableCurrentResponse] = await Promise.all([
       inject({
         method: 'GET',
-        url: `/api/v1/tax-reports/${configuredTaxYear}/status?finality=PROVISIONAL`,
+        url: `/api/v1/tax-reports/${fixtureTaxYear}/status?finality=PROVISIONAL`,
       }),
       inject({
         method: 'GET',
-        url: `/api/v1/tax-reports/${configuredTaxYear}/current?finality=PROVISIONAL`,
+        url: `/api/v1/tax-reports/${fixtureTaxYear}/current?finality=PROVISIONAL`,
       }),
     ])
     invariant(
@@ -902,7 +891,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       reportPointerVersion: current.pointerVersion,
       reportPdfSha256: pdfSha256,
       proofId: vectorProof.proofId,
-      taxYear: configuredTaxYear,
+      taxYear: fixtureTaxYear,
       transactionHash: vectorAnchor.transactionHash,
     })}\n`)
   }, e2eTimeoutMilliseconds + 60_000)

@@ -8,7 +8,6 @@ reviewroom_dir=${DAEJANG_REVIEWROOM_DIR:-"$repo_root/../daejang-reviewroom"}
 registry=${REGISTRY:-backwardlabss-mac-studio.tail344fa1.ts.net}
 web_port=${DAEJANG_DEV_E2E_WEB_PORT:-15173}
 tax_db_migration_version=${DAEJANG_TAXD_DB_MIGRATION_VERSION:-90}
-tax_year=${DAEJANG_TAX_DEV_E2E_TAX_YEAR:-2025}
 e2e_suffix=${DAEJANG_E2E_SUFFIX:-}
 e2e_subject_id=00000000-0000-4000-8000-00000000e2e1
 compose_file="$repo_root/deploy/compose.dev-e2e.yaml"
@@ -205,7 +204,6 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'DAEJANG_TAX_ENGINE_IMAGE=%s\n' "$tax_engine_image"
         printf 'DAEJANG_TAX_DEV_E2E_IMAGE=%s\n' "$tax_dev_e2e_image"
         printf 'DAEJANG_TAXD_DB_MIGRATION_VERSION=%s\n' "$tax_db_migration_version"
-        printf 'DAEJANG_TAX_DEV_E2E_TAX_YEAR=%s\n' "$tax_year"
         printf 'DAEJANG_DEV_E2E_WEB_PORT=%s\n' "$web_port"
         printf 'DAEJANG_E2E_SUBJECT_ID=%s\n' "$e2e_subject_id"
         printf 'DAEJANG_E2E_SUFFIX=%s\n' "$e2e_suffix"
@@ -263,7 +261,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
     }
     trap cleanup_compose EXIT
 
-    printf '%s년 거래와 Posting/Tax runtime 설정을 준비합니다.\n' "$tax_year"
+    printf '%s\n' '고정 2025 거래와 Posting/Tax runtime 설정을 준비합니다.'
     "${current_compose[@]}" run --rm --no-deps pipeline-permissions
     fixture_state=$("${current_compose[@]}" run --rm --no-deps pipeline-fixture)
     activation_sha=$(printf '%s\n' "$fixture_state" | python3 -c 'import json,sys; print(json.load(sys.stdin)["activationSha256"])')
@@ -313,13 +311,12 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'DB_ENV_FILE=%s\n' "$DAEJANG_DB_ENV_FILE"
         printf 'DB_REPO_ROOT=%s\n' "$DAEJANG_DB_REPO_ROOT"
         printf 'WEB_PORT=%s\n' "$web_port"
-        printf 'TAX_YEAR=%s\n' "$tax_year"
     } > "$state_file"
     trap - EXIT
 
     printf '\nWeb UI를 계속 실행합니다: http://localhost:%s\n' "$web_port"
     printf '%s\n' '테스트 계정: test@example.test / test1234!'
-    printf '%s년 거래의 Posting, Tax, Report 결과가 준비되었습니다.\n' "$tax_year"
+    printf '%s\n' '2025년 고정 거래의 Posting, Tax, Report 결과가 준비되었습니다.'
     printf '%s\n' '종료할 때만 make dev-e2e-down을 실행하세요.'
     exit 0
 fi
@@ -335,18 +332,6 @@ if [[ "$action" == up && -e "$state_file" ]]; then
 fi
 if [[ ! "$tax_db_migration_version" =~ ^[1-9][0-9]*$ ]]; then
     printf '%s\n' 'DAEJANG_TAXD_DB_MIGRATION_VERSION은 양의 정수여야 합니다.' >&2
-    exit 2
-fi
-case "$tax_year" in
-    2025|2026|2027) ;;
-    *)
-        printf '%s\n' 'DAEJANG_TAX_DEV_E2E_TAX_YEAR는 제품 지원 연도 2025, 2026, 2027 중 하나여야 합니다.' >&2
-        exit 2
-        ;;
-esac
-fixture_time_is_past=$(python3 -c 'from datetime import datetime,timezone; import sys; print("true" if datetime.now(timezone.utc) >= datetime(int(sys.argv[1]),1,2,3,4,5,tzinfo=timezone.utc) else "false")' "$tax_year")
-if [[ "$fixture_time_is_past" != true ]]; then
-    printf '%s년 fixture Event는 아직 미래입니다. 실제 ledger publication 시각을 앞서는 Event를 허용하지 않습니다.\n' "$tax_year" >&2
     exit 2
 fi
 if [[ ! "$web_port" =~ ^[0-9]+$ ]] || (( web_port < 1 || web_port > 65535 )); then
@@ -406,7 +391,6 @@ case "$REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP" in
         ;;
 esac
 export DAEJANG_TAXD_DB_MIGRATION_VERSION="$tax_db_migration_version"
-export DAEJANG_TAX_DEV_E2E_TAX_YEAR="$tax_year"
 export DAEJANG_REVIEWROOM_DIR="$reviewroom_dir"
 export DAEJANG_E2E_SUFFIX="$e2e_suffix"
 export REVIEWROOM_INTERNAL_API_URL REVIEWROOM_APPLICATION_RECEIPT_TOKEN
