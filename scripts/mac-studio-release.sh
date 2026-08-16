@@ -16,6 +16,11 @@ RELEASE_ROOT="${GIWA_RELEASE_ROOT:-$DAEJANG_ROOT/releases}"
 PUBLISHER_STATE_FILE="${DAEJANG_PUBLISHER_STATE_FILE:-/Users/Shared/DaejangRegistry/publisher/state.json}"
 PROMOTION_LOCK_DIR="$RELEASE_ROOT/.promotion.lock"
 MANIFEST_TOOL="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/release-manifest.mjs"
+REVIEWROOM_COMPOSE_FILE="${REVIEWROOM_COMPOSE_FILE:-$DAEJANG_ROOT/daejang/deploy/compose.reviewroom.yaml}"
+# This file lives in the deploy user's private runtime directory. It supplies
+# only Compose interpolation values and paths to the least-privilege workload
+# env files; the manifest always supplies REVIEWROOM_IMAGE_REF itself.
+REVIEWROOM_DEPLOY_ENV_FILE="${REVIEWROOM_DEPLOY_ENV_FILE:-$RUNTIME_ROOT/reviewroom/compose.env}"
 
 repositories=(
   "evm-indexer|$INDEXER_DIR|BackwardLabs/daejang-evm-indexer"
@@ -207,6 +212,9 @@ preflight_backend() {
   command -v npm >/dev/null
   command -v go >/dev/null
   command -v docker >/dev/null
+  command -v forge >/dev/null
+  command -v anvil >/dev/null
+  command -v cast >/dev/null
   for_each_backend_repository assert_repository
   for_each_backend_repository fetch_repository
   for_each_backend_repository assert_fast_forward
@@ -220,6 +228,17 @@ preflight() {
   command -v npm >/dev/null
   command -v go >/dev/null
   command -v docker >/dev/null
+  docker compose version >/dev/null
+  [[ -r "$REVIEWROOM_COMPOSE_FILE" ]] \
+    || { echo "ReviewRoom Compose file is missing: $REVIEWROOM_COMPOSE_FILE" >&2; return 1; }
+  [[ -r "$REVIEWROOM_DEPLOY_ENV_FILE" ]] \
+    || { echo "ReviewRoom deployment env file is missing: $REVIEWROOM_DEPLOY_ENV_FILE" >&2; return 1; }
+  reviewroom_compose \
+    "registry.invalid/daejang/reviewroom@sha256:0000000000000000000000000000000000000000000000000000000000000000" \
+    config --quiet
+  reviewroom_compose \
+    "registry.invalid/daejang/reviewroom@sha256:0000000000000000000000000000000000000000000000000000000000000000" \
+    --profile migrate config --quiet
   for_each_repository assert_repository
   for_each_repository fetch_repository
   for_each_repository assert_fast_forward
@@ -331,6 +350,33 @@ validate_release_images() {
     "$release_dir/images.lock.json")
 }
 
+reviewroom_image_reference() {
+  local release_dir="$1" image_ref
+  image_ref="$(jq -er '.images.reviewroom.ref' "$release_dir/images.lock.json")" \
+    || { echo "ReviewRoom image is missing from $(basename "$release_dir")" >&2; return 1; }
+  [[ "$image_ref" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] \
+    || { echo "ReviewRoom image is not an immutable digest reference: $image_ref" >&2; return 1; }
+  printf '%s\n' "$image_ref"
+}
+
+reviewroom_compose() {
+  local image_ref="$1"
+  shift
+  [[ -r "$REVIEWROOM_COMPOSE_FILE" ]] \
+    || { echo "ReviewRoom Compose file is missing: $REVIEWROOM_COMPOSE_FILE" >&2; return 1; }
+  [[ -r "$REVIEWROOM_DEPLOY_ENV_FILE" ]] \
+    || { echo "ReviewRoom deployment env file is missing: $REVIEWROOM_DEPLOY_ENV_FILE" >&2; return 1; }
+
+  # A process environment value takes precedence over --env-file. This keeps a
+  # stale or accidental REVIEWROOM_IMAGE_REF in the private file from moving a
+  # verified Release to another image.
+  REVIEWROOM_IMAGE_REF="$image_ref" docker compose \
+    --env-file "$REVIEWROOM_DEPLOY_ENV_FILE" \
+    --project-directory "$DAEJANG_ROOT/daejang" \
+    --project-name daejang-reviewroom \
+    --file "$REVIEWROOM_COMPOSE_FILE" "$@"
+}
+
 verification_worktree() {
   local release_dir="$1" verify_root="$2" name="$3" entry directory slug commit
   entry="$(find_repository "$name")"
@@ -341,7 +387,7 @@ verification_worktree() {
 
 remove_verification_worktrees() {
   local verify_root="$1" name entry directory slug
-  for name in daejang daejang-db daejang-jit-engine daejang-posting-service daejang-tax-engine schema; do
+  for name in daejang daejang-db daejang-jit-engine daejang-posting-service daejang-reviewroom daejang-tax-engine schema; do
     entry="$(find_repository "$name")"
     IFS='|' read -r _ directory slug <<<"$entry"
     if [[ -e "$verify_root/$name/.git" ]]; then
@@ -351,8 +397,85 @@ remove_verification_worktrees() {
   [[ -d "$verify_root" ]] && find "$verify_root" -depth -delete 2>/dev/null || true
 }
 
+allocate_loopback_port() {
+  node -e '
+    const net = require("node:net")
+    const server = net.createServer()
+    server.listen(0, "127.0.0.1", () => {
+      process.stdout.write(String(server.address().port))
+      server.close()
+    })
+  '
+}
+
+run_reviewroom_release_e2e() {
+  local reviewroom_dir="$1" runtime_dir postgres_container anvil_log anvil_pid=''
+  local postgres_port anvil_port database_url rpc_url
+  command -v anvil >/dev/null
+  command -v cast >/dev/null
+  command -v forge >/dev/null
+  [[ -f "$reviewroom_dir/package-lock.json" ]] \
+    || { echo "ReviewRoom release worktree is incomplete: $reviewroom_dir" >&2; return 1; }
+
+  runtime_dir="$(mktemp -d "$RELEASE_ROOT/.reviewroom-e2e.XXXXXX")"
+  postgres_container="reviewroom-release-e2e-${$}-${RANDOM}"
+  anvil_log="$runtime_dir/anvil.log"
+  cleanup_reviewroom_release_e2e() {
+    local status=$?
+    trap - EXIT
+    if [[ -n "$anvil_pid" ]] && kill -0 "$anvil_pid" >/dev/null 2>&1; then
+      kill "$anvil_pid" >/dev/null 2>&1 || true
+      wait "$anvil_pid" >/dev/null 2>&1 || true
+    fi
+    docker stop "$postgres_container" >/dev/null 2>&1 || true
+    find "$runtime_dir" -depth -delete >/dev/null 2>&1 || true
+    return "$status"
+  }
+  trap cleanup_reviewroom_release_e2e EXIT
+
+  docker run --detach --rm --name "$postgres_container" \
+    --publish 127.0.0.1::5432 \
+    --env POSTGRES_DB=reviewroom \
+    --env POSTGRES_USER=reviewroom \
+    --env POSTGRES_PASSWORD=reviewroom \
+    postgres:18.4-alpine3.24 >/dev/null
+  for _ in $(seq 1 30); do
+    if docker exec "$postgres_container" pg_isready -U reviewroom -d reviewroom >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  docker exec "$postgres_container" pg_isready -U reviewroom -d reviewroom >/dev/null
+  postgres_port="$(docker port "$postgres_container" 5432/tcp | sed -n '1s/.*://p')"
+  [[ "$postgres_port" =~ ^[0-9]+$ ]] \
+    || { echo "ReviewRoom E2E could not determine the temporary PostgreSQL port" >&2; return 1; }
+
+  anvil_port="$(allocate_loopback_port)"
+  anvil --host 127.0.0.1 --port "$anvil_port" >"$anvil_log" 2>&1 &
+  anvil_pid=$!
+  for _ in $(seq 1 30); do
+    if cast chain-id --rpc-url "http://127.0.0.1:$anvil_port" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  if ! cast chain-id --rpc-url "http://127.0.0.1:$anvil_port" >/dev/null 2>&1; then
+    cat "$anvil_log" >&2
+    return 1
+  fi
+
+  database_url="postgres://reviewroom:reviewroom@127.0.0.1:${postgres_port}/reviewroom?sslmode=disable"
+  rpc_url="http://127.0.0.1:$anvil_port"
+  npm --prefix "$reviewroom_dir" ci
+  DATABASE_URL="$database_url" E2E_RPC_URL="$rpc_url" \
+    npm --prefix "$reviewroom_dir" run test:e2e:canonical
+
+  trap - EXIT
+  cleanup_reviewroom_release_e2e
+}
+
 run_release_system_e2e() {
-  local release_dir="$1" verify_root posting_ref tax_ref tax_fixture_ref registry_host
+  local release_dir="$1" verify_root posting_ref reviewroom_ref tax_ref tax_fixture_ref registry_host
   verify_root="$(mktemp -d "$RELEASE_ROOT/.verify-$(basename "$release_dir").XXXXXX")"
   cleanup_release_verification() {
     remove_verification_worktrees "$verify_root"
@@ -360,11 +483,12 @@ run_release_system_e2e() {
   trap cleanup_release_verification RETURN
 
   local name
-  for name in daejang daejang-db daejang-jit-engine daejang-posting-service daejang-tax-engine schema; do
+  for name in daejang daejang-db daejang-jit-engine daejang-posting-service daejang-reviewroom daejang-tax-engine schema; do
     verification_worktree "$release_dir" "$verify_root" "$name"
   done
 
   posting_ref="$(jq -r '.images["posting-service"].ref' "$release_dir/images.lock.json")"
+  reviewroom_ref="$(reviewroom_image_reference "$release_dir")"
   tax_ref="$(jq -r '.images["tax-engine"].ref' "$release_dir/images.lock.json")"
   tax_fixture_ref="$(jq -r '.images["tax-engine-dev-e2e"].ref' "$release_dir/images.lock.json")"
   registry_host="${posting_ref%%/*}"
@@ -384,6 +508,8 @@ run_release_system_e2e() {
   make -C "$verify_root/daejang-tax-engine" test \
     DAEJANG_DB_DIR="$verify_root/daejang-db" REGISTRY="$registry_host" \
     POSTING_IMAGE="$posting_ref"
+  echo "ReviewRoom canonical E2E: $reviewroom_ref"
+  run_reviewroom_release_e2e "$verify_root/daejang-reviewroom"
 
   trap - RETURN
   cleanup_release_verification
@@ -408,7 +534,7 @@ verify_release() {
     --arg manifestDigest "$manifest_digest" \
     '{schemaVersion: 1, status: "passed", verifiedAt: $verifiedAt,
       manifestDigest: $manifestDigest,
-      checks: ["immutable-images", "daejang-system-e2e", "posting-e2e", "jit-e2e", "tax-e2e"]}' \
+      checks: ["immutable-images", "daejang-system-e2e", "posting-e2e", "jit-e2e", "tax-e2e", "reviewroom-canonical-e2e"]}' \
     > "$temporary"
   chmod 660 "$temporary"
   mv "$temporary" "$release_dir/verification.json"
@@ -535,6 +661,31 @@ restart_backend_with_migrations() {
   npm --prefix "$application" run backend:status
 }
 
+deploy_reviewroom() {
+  local release_dir="$1" image_ref
+  command -v docker >/dev/null
+  docker compose version >/dev/null
+  image_ref="$(reviewroom_image_reference "$release_dir")"
+
+  # config is a fail-closed check for the private Compose interpolation file
+  # and all workload-specific secret-file paths. It emits no resolved secrets.
+  reviewroom_compose "$image_ref" config --quiet
+  reviewroom_compose "$image_ref" --profile migrate config --quiet
+  reviewroom_compose "$image_ref" pull
+  reviewroom_compose "$image_ref" up --detach postgres
+  reviewroom_compose "$image_ref" run --rm migrate
+  reviewroom_compose "$image_ref" up --detach --wait api anchor-worker delivery-worker
+  reviewroom_compose "$image_ref" ps
+}
+
+stop_reviewroom() {
+  local release_dir="$1" image_ref
+  image_ref="$(reviewroom_image_reference "$release_dir")"
+  # Never remove the named database volume during a failed first deployment or
+  # a source rollback. Migration/data recovery is a separately approved task.
+  reviewroom_compose "$image_ref" down --remove-orphans
+}
+
 deploy_backend() {
   assert_deploy_user
   for_each_backend_repository assert_repository
@@ -544,11 +695,14 @@ deploy_backend() {
 }
 
 deploy_all() {
+  local release_dir="$1"
+  [[ -d "$release_dir" ]] || { echo "Release directory is required for deployment" >&2; return 1; }
   assert_deploy_user
   for_each_repository assert_repository
   npm --prefix "$DAEJANG_ROOT/daejang" ci
   restart_indexer
   restart_backend_with_migrations
+  deploy_reviewroom "$release_dir"
   record_deployed_state
 }
 
@@ -588,9 +742,14 @@ promote_release() {
       echo "Promotion failed; restoring previous Production commits." >&2
       restore_repository_heads "$old_heads" || true
       if [[ "$deployment_started" == true ]]; then
-        npm --prefix "$DAEJANG_ROOT/daejang" ci || true
-        restart_indexer || true
-        restart_backend_with_migrations || true
+        if [[ -n "$previous_target" ]]; then
+          deploy_all "$previous_target" || true
+        else
+          npm --prefix "$DAEJANG_ROOT/daejang" ci || true
+          restart_indexer || true
+          restart_backend_with_migrations || true
+          stop_reviewroom "$release_dir" || true
+        fi
       fi
     fi
     find "$old_heads" -delete 2>/dev/null || true
@@ -602,7 +761,7 @@ promote_release() {
   checkout_started=true
   checkout_repository_set "$release_dir/release.json"
   deployment_started=true
-  deploy_all
+  deploy_all "$release_dir"
 
   if [[ -n "$previous_target" ]]; then
     atomic_release_link previous "$previous_target"
@@ -646,6 +805,7 @@ rollback_release() {
     if [[ "$checkout_started" == true ]]; then
       echo "Rollback failed; restoring the active Release commits." >&2
       restore_repository_heads "$current_heads" || true
+      deploy_all "$active_dir" || true
     fi
     find "$current_heads" -delete 2>/dev/null || true
     release_promotion_lock
@@ -655,7 +815,7 @@ rollback_release() {
 
   checkout_started=true
   checkout_repository_set "$rollback_file"
-  deploy_all
+  deploy_all "$previous_target"
   active_target="$active_dir"
   atomic_release_link current "$previous_target"
   atomic_release_link previous "$active_target"
@@ -693,6 +853,10 @@ case "${1:-}" in
   rollback) rollback_release ;;
   deploy-indexer) deploy_indexer ;;
   deploy-backend) deploy_backend ;;
-  deploy) deploy_all ;;
+  deploy)
+    current_release="$(current_release_target)"
+    [[ -n "$current_release" ]] || { echo "current Release pointer is missing" >&2; exit 1; }
+    deploy_all "$current_release"
+    ;;
   *) usage >&2; exit 2 ;;
 esac
