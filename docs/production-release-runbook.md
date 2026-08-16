@@ -39,9 +39,22 @@ Production 재시작 및 current 포인터 교체
 
 ReviewRoom은 Release manifest에 고정된 OCI digest로만 배포한다. 배포 전에
 [`deploy/reviewroom.compose.env.example`](../deploy/reviewroom.compose.env.example)를
-`$HOME/Library/Application Support/GIWA/production/reviewroom/compose.env`로 복사해
-권한을 `600`으로 제한하고, PostgreSQL 비밀번호와 네 workload의 개별 env 파일 경로를
-채운다. 실제 env 파일과 private key는 Git checkout 밖에 둔다.
+`/Users/Shared/Projects/01_Daejang/daejang/deploy/reviewroom.env`로 복사해
+`backwardlabs:upside`, mode `660`으로 제한한다. 이는 현재 Mac Studio의
+`deploy/production.env`, `daejang-db/.env`와 같은 운영 배치 규칙이다.
+
+workload 파일도 ReviewRoom checkout의 Git-ignored `.env.*` 파일로 둔다.
+
+| 파일 | 용도 |
+| --- | --- |
+| `daejang/deploy/reviewroom.env` | Postgres password와 네 workload env의 절대 경로 |
+| `daejang-reviewroom/.env.migrate` | ReviewRoom migration DB URL |
+| `daejang-reviewroom/.env.api` | API token, commitment/encryption key, JWT, proof 조회 설정 |
+| `daejang-reviewroom/.env.anchor-worker` | chain RPC/registry, anchor signer와 worker 설정 |
+| `daejang-reviewroom/.env.delivery-worker` | 중앙 Daejang DB consumer credential와 ingest token |
+
+각 파일의 key 목록은 `deploy/reviewroom.*.env.example`에 있다. 실제 파일은
+`.gitignore`에 포함되어 있으므로 Git에 add하지 않는다.
 
 `REVIEWROOM_IMAGE_REF`는 이 파일에 넣지 않는다. release script가 검증된
 `images.lock.json`의 `reviewroom@sha256:...` 값을 Compose 실행 환경에 주입한다.

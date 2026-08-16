@@ -10,6 +10,7 @@ CLAUDE.local.md
 deploy/web-api.env
 deploy/production.env
 deploy/production.env.backup*
+deploy/reviewroom.env
 
 # Node.js 및 빌드 산출물
 node_modules/

@@ -10,6 +10,10 @@ const manifestTool = await readFile(
   new URL('./release-manifest.mjs', import.meta.url),
   'utf8',
 )
+const reviewroomComposeEnvExample = await readFile(
+  new URL('../deploy/reviewroom.compose.env.example', import.meta.url),
+  'utf8',
+)
 
 const functionBody = (name) => {
   const start = releaseScript.indexOf(`${name}() {`)
@@ -56,6 +60,29 @@ test('Release deployment pins ReviewRoom to the manifest digest and migrates bef
   assert.ok(migrate > pull)
   assert.ok(start > migrate)
   assert.doesNotMatch(body, /:latest/)
+})
+
+test('ReviewRoom follows the Mac Studio checkout env convention', () => {
+  assert.match(
+    releaseScript,
+    /REVIEWROOM_DEPLOY_ENV_FILE="\$\{REVIEWROOM_DEPLOY_ENV_FILE:-\$DAEJANG_ROOT\/daejang\/deploy\/reviewroom\.env\}"/,
+  )
+  assert.doesNotMatch(releaseScript, /Library\/Application Support\/GIWA\/production\/reviewroom/)
+  assert.match(
+    reviewroomComposeEnvExample,
+    /\/Users\/Shared\/Projects\/01_Daejang\/daejang\/deploy\/reviewroom\.env/,
+  )
+  for (const name of [
+    'migrate',
+    'api',
+    'anchor-worker',
+    'delivery-worker',
+  ]) {
+    assert.match(
+      reviewroomComposeEnvExample,
+      new RegExp(`daejang-reviewroom/\\.env\\.${name}`),
+    )
+  }
 })
 
 test('system verification includes the ReviewRoom canonical E2E worktree', () => {

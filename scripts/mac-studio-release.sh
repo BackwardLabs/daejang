@@ -17,10 +17,12 @@ PUBLISHER_STATE_FILE="${DAEJANG_PUBLISHER_STATE_FILE:-/Users/Shared/DaejangRegis
 PROMOTION_LOCK_DIR="$RELEASE_ROOT/.promotion.lock"
 MANIFEST_TOOL="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/release-manifest.mjs"
 REVIEWROOM_COMPOSE_FILE="${REVIEWROOM_COMPOSE_FILE:-$DAEJANG_ROOT/daejang/deploy/compose.reviewroom.yaml}"
-# This file lives in the deploy user's private runtime directory. It supplies
-# only Compose interpolation values and paths to the least-privilege workload
-# env files; the manifest always supplies REVIEWROOM_IMAGE_REF itself.
-REVIEWROOM_DEPLOY_ENV_FILE="${REVIEWROOM_DEPLOY_ENV_FILE:-$RUNTIME_ROOT/reviewroom/compose.env}"
+# Follow the existing Mac Studio deployment convention: private deployment env
+# files live in their ignored locations inside the shared deployment checkout.
+# This supplies only Compose interpolation values and paths to the
+# least-privilege workload env files; the manifest always supplies
+# REVIEWROOM_IMAGE_REF itself.
+REVIEWROOM_DEPLOY_ENV_FILE="${REVIEWROOM_DEPLOY_ENV_FILE:-$DAEJANG_ROOT/daejang/deploy/reviewroom.env}"
 
 repositories=(
   "evm-indexer|$INDEXER_DIR|BackwardLabs/daejang-evm-indexer"
