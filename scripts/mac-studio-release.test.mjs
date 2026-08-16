@@ -14,6 +14,10 @@ const reviewroomComposeEnvExample = await readFile(
   new URL('../deploy/reviewroom.compose.env.example', import.meta.url),
   'utf8',
 )
+const reviewroomCompose = await readFile(
+  new URL('../deploy/compose.reviewroom.yaml', import.meta.url),
+  'utf8',
+)
 
 const functionBody = (name) => {
   const start = releaseScript.indexOf(`${name}() {`)
@@ -83,6 +87,21 @@ test('ReviewRoom follows the Mac Studio checkout env convention', () => {
       new RegExp(`daejang-reviewroom/\\.env\\.${name}`),
     )
   }
+})
+
+test('ReviewRoom delivery uses the explicit central DB network', () => {
+  assert.match(
+    reviewroomCompose,
+    /networks: \[reviewroom, daejang-db\]/,
+  )
+  assert.match(
+    reviewroomCompose,
+    /name: \$\{DAEJANG_DB_NETWORK:\?Set DAEJANG_DB_NETWORK to the central Daejang DB network\}/,
+  )
+  assert.match(
+    reviewroomComposeEnvExample,
+    /DAEJANG_DB_NETWORK=daejang-db_default/,
+  )
 })
 
 test('system verification includes the ReviewRoom canonical E2E worktree', () => {

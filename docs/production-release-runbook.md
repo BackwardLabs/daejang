@@ -56,6 +56,10 @@ workload 파일도 ReviewRoom checkout의 Git-ignored `.env.*` 파일로 둔다.
 각 파일의 key 목록은 `deploy/reviewroom.*.env.example`에 있다. 실제 파일은
 `.gitignore`에 포함되어 있으므로 Git에 add하지 않는다.
 
+delivery worker는 `DAEJANG_DB_NETWORK`로 지정된 중앙 DB Compose network에도
+연결한다. 현재 Mac Studio 값은 `daejang-db_default`이고, delivery DB URL의 host는
+ReviewRoom-local `postgres`와 충돌하지 않는 `daejang-db-postgres-1`이다.
+
 `REVIEWROOM_IMAGE_REF`는 이 파일에 넣지 않는다. release script가 검증된
 `images.lock.json`의 `reviewroom@sha256:...` 값을 Compose 실행 환경에 주입한다.
 따라서 `latest` 또는 수동 tag로 ReviewRoom을 배포할 수 없다. 다른 경로를 써야 하면

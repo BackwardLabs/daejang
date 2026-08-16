@@ -124,10 +124,16 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    networks: [reviewroom]
+    # The central Daejang DB is operated by a separate Compose project. The
+    # delivery URL uses its explicit container hostname, not `postgres`, which
+    # is reserved for the ReviewRoom-local database on the reviewroom network.
+    networks: [reviewroom, daejang-db]
 
 networks:
   reviewroom:
+  daejang-db:
+    external: true
+    name: ${DAEJANG_DB_NETWORK:?Set DAEJANG_DB_NETWORK to the central Daejang DB network}
 
 volumes:
   reviewroom-postgres:
