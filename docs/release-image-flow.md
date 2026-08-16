@@ -189,12 +189,13 @@ PR은 기본적으로 Draft로 만들고 제목과 본문을 한국어로 작성
 
 ## main 병합 후: Mac Studio 자동 publisher
 
-GitHub Actions가 private Registry로 image를 push하지 않는다. Mac Studio의 scheduler가 2분마다 다음 네 저장소의 원격 `main` SHA를 확인한다.
+GitHub Actions가 private Registry로 image를 push하지 않는다. Mac Studio의 scheduler가 2분마다 다음 다섯 저장소의 원격 `main` SHA를 확인한다.
 
 - `BackwardLabs/daejang`
 - `BackwardLabs/daejang-jit-engine`
 - `BackwardLabs/daejang-posting-service`
 - `BackwardLabs/daejang-tax-engine`
+- `BackwardLabs/daejang-reviewroom`
 
 main SHA가 마지막 성공 기록과 다르면 publisher가 다음 작업을 수행한다.
 
@@ -213,8 +214,27 @@ main SHA가 마지막 성공 기록과 다르면 publisher가 다음 작업을 �
 | `daejang-jit-engine` | `jit-engine:latest` |
 | `daejang-posting-service` | `posting-service:latest` |
 | `daejang-tax-engine` | `tax-engine:latest`, `tax-engine-dev-e2e:latest` |
+| `daejang-reviewroom` | `reviewroom:latest` |
 
 Registry 주소는 Mac Studio의 Tailscale MagicDNS에서 조회한다. 개발 저장소와 GitHub에는 Registry 비밀번호나 Tailscale auth key를 저장하지 않는다.
+
+### `daejang-reviewroom`을 병합한 경우
+
+`reviewroom:latest` 하나에 API, anchor worker와 delivery worker가 함께 들어 있다. 배포는 image가 아니라 command로 workload를 고르고, 그 단위로 필요한 secret만 주입한다.
+
+```text
+API              node dist/src/index.js          (기본 CMD)
+anchor worker    node dist/src/worker.js
+delivery worker  node dist/src/deliveryWorker.js
+```
+
+migration은 runtime이 아니라 배포 전 별도 job으로 같은 image에서 실행한다. runtime DB 역할에는 DDL 권한이 없다.
+
+```text
+node dist/scripts/migrate.js
+```
+
+image의 healthcheck는 API workload에만 맞다. worker 배포에서는 꺼야 한다.
 
 ### `daejang-db`를 병합한 경우
 
