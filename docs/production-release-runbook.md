@@ -35,6 +35,40 @@ Production 재시작 및 current 포인터 교체
 
 모든 명령은 운영 사용자 `backwardlabs`가 실행한다.
 
+### ReviewRoom 배포 설정
+
+ReviewRoom은 Release manifest에 고정된 OCI digest로만 배포한다. 배포 전에
+[`deploy/reviewroom.compose.env.example`](../deploy/reviewroom.compose.env.example)를
+`/Users/Shared/Projects/01_Daejang/daejang/deploy/reviewroom.env`로 복사해
+`backwardlabs:upside`, mode `660`으로 제한한다. 이는 현재 Mac Studio의
+`deploy/production.env`, `daejang-db/.env`와 같은 운영 배치 규칙이다.
+
+workload 파일도 ReviewRoom checkout의 Git-ignored `.env.*` 파일로 둔다.
+
+| 파일 | 용도 |
+| --- | --- |
+| `daejang/deploy/reviewroom.env` | Postgres password와 네 workload env의 절대 경로 |
+| `daejang-reviewroom/.env.migrate` | ReviewRoom migration DB URL |
+| `daejang-reviewroom/.env.api` | API token, commitment/encryption key, JWT, proof 조회 설정 |
+| `daejang-reviewroom/.env.anchor-worker` | chain RPC/registry, anchor signer와 worker 설정 |
+| `daejang-reviewroom/.env.delivery-worker` | 중앙 Daejang DB consumer credential와 ingest token |
+
+각 파일의 key 목록은 `deploy/reviewroom.*.env.example`에 있다. 실제 파일은
+`.gitignore`에 포함되어 있으므로 Git에 add하지 않는다.
+
+delivery worker는 `DAEJANG_DB_NETWORK`로 지정된 중앙 DB Compose network에도
+연결한다. 현재 Mac Studio 값은 `daejang-db_default`이고, delivery DB URL의 host는
+ReviewRoom-local `postgres`와 충돌하지 않는 `daejang-db-postgres-1`이다.
+
+`REVIEWROOM_IMAGE_REF`는 이 파일에 넣지 않는다. release script가 검증된
+`images.lock.json`의 `reviewroom@sha256:...` 값을 Compose 실행 환경에 주입한다.
+따라서 `latest` 또는 수동 tag로 ReviewRoom을 배포할 수 없다. 다른 경로를 써야 하면
+`REVIEWROOM_DEPLOY_ENV_FILE`과 `REVIEWROOM_COMPOSE_FILE`을 명시적으로 지정한다.
+
+`verify`의 ReviewRoom canonical E2E에는 Foundry의 `forge`, `anvil`, `cast`가 필요하다.
+`mac-studio:preflight`는 이 세 명령과 ReviewRoom Compose의 secret-file 경로를 모두
+검사하므로, Release를 만들기 전에 먼저 통과시킨다.
+
 ```bash
 cd /Users/Shared/Projects/01_Daejang/daejang
 
@@ -75,7 +109,9 @@ curl -fsS http://127.0.0.1:<web-port>/readyz
 
 상태 확인에는 `releases/current/release.json`의 source SHA와
 `images.lock.json`의 digest를 함께 남긴다. Web UI가 열리는 것만으로 완료 처리하지
-말고 PDF·Posting·Ledger·Tax·Report 흐름과 EVM 한 건을 확인한다.
+말고 PDF·Posting·Ledger·Tax·Report 흐름과 EVM 한 건을 확인한다. `verify`는 별도의
+PostgreSQL·Anvil에서 ReviewRoom canonical V2 E2E를 실행하고, `promote`는 같은
+ReviewRoom digest로 migration을 완료한 뒤 API·anchor worker·delivery worker를 기동한다.
 
 ## 롤백
 
@@ -86,9 +122,10 @@ npm run mac-studio:release -- rollback
 npm run mac-studio:release -- status
 ```
 
-롤백은 `releases/previous`를 기준으로 source checkout과 서비스를 복구한다. 운영
-DB의 데이터를 삭제하거나 migration을 되돌리는 작업은 포함하지 않으므로, 데이터
-복구가 필요하면 별도 백업 절차를 따른다.
+롤백은 `releases/previous`를 기준으로 source checkout과 서비스를 복구하고, 이전
+ReviewRoom digest로 API·worker를 다시 기동한다. 운영 DB의 데이터를 삭제하거나
+migration을 되돌리는 작업은 포함하지 않으므로, 데이터 복구가 필요하면 별도 백업
+절차를 따른다.
 
 ## Release 전에 막히는 조건
 
@@ -97,6 +134,7 @@ DB의 데이터를 삭제하거나 migration을 되돌리는 작업은 포함하
 - Publisher가 해당 source SHA의 immutable image를 발행하지 않음
 - image label의 `org.opencontainers.image.revision`이 manifest SHA와 다름
 - 전체 E2E 검증 결과가 없거나 manifest가 검증 후 변경됨
+- ReviewRoom Compose interpolation 파일 또는 workload별 secret env 파일이 없음
 
 이 조건들은 우회하지 않는다. 먼저 작업 중인 변경을 별도 worktree나 PR로 옮기고,
 필요한 image가 Publisher에 의해 성공적으로 발행된 뒤 새 Release를 만든다.

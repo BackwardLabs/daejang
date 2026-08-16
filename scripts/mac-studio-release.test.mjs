@@ -10,6 +10,14 @@ const manifestTool = await readFile(
   new URL('./release-manifest.mjs', import.meta.url),
   'utf8',
 )
+const reviewroomComposeEnvExample = await readFile(
+  new URL('../deploy/reviewroom.compose.env.example', import.meta.url),
+  'utf8',
+)
+const reviewroomCompose = await readFile(
+  new URL('../deploy/compose.reviewroom.yaml', import.meta.url),
+  'utf8',
+)
 
 const functionBody = (name) => {
   const start = releaseScript.indexOf(`${name}() {`)
@@ -40,6 +48,99 @@ test('all backend deployment paths use the migration gate', () => {
   }
 })
 
+test('Release deployment pins ReviewRoom to the manifest digest and migrates before workers start', () => {
+  const body = functionBody('deploy_reviewroom')
+  const config = body.indexOf('config --quiet')
+  const migrationConfig = body.indexOf('--profile migrate config --quiet')
+  const pull = body.indexOf('pull')
+  const migrate = body.indexOf('run --rm migrate')
+  const start = body.indexOf('up --detach --wait api anchor-worker delivery-worker')
+
+  assert.match(body, /reviewroom_image_reference/)
+  assert.match(body, /reviewroom_compose/)
+  assert.ok(config > 0)
+  assert.ok(migrationConfig > config)
+  assert.ok(pull > migrationConfig)
+  assert.ok(migrate > pull)
+  assert.ok(start > migrate)
+  assert.doesNotMatch(body, /:latest/)
+})
+
+test('ReviewRoom follows the Mac Studio checkout env convention', () => {
+  assert.match(
+    releaseScript,
+    /REVIEWROOM_DEPLOY_ENV_FILE="\$\{REVIEWROOM_DEPLOY_ENV_FILE:-\$DAEJANG_ROOT\/daejang\/deploy\/reviewroom\.env\}"/,
+  )
+  assert.doesNotMatch(releaseScript, /Library\/Application Support\/GIWA\/production\/reviewroom/)
+  assert.match(
+    reviewroomComposeEnvExample,
+    /\/Users\/Shared\/Projects\/01_Daejang\/daejang\/deploy\/reviewroom\.env/,
+  )
+  for (const name of [
+    'migrate',
+    'api',
+    'anchor-worker',
+    'delivery-worker',
+  ]) {
+    assert.match(
+      reviewroomComposeEnvExample,
+      new RegExp(`daejang-reviewroom/\\.env\\.${name}`),
+    )
+  }
+})
+
+test('ReviewRoom delivery uses the explicit central DB network', () => {
+  assert.match(
+    reviewroomCompose,
+    /networks: \[reviewroom, daejang-db\]/,
+  )
+  assert.match(
+    reviewroomCompose,
+    /name: \$\{DAEJANG_DB_NETWORK:\?Set DAEJANG_DB_NETWORK to the central Daejang DB network\}/,
+  )
+  assert.match(
+    reviewroomComposeEnvExample,
+    /DAEJANG_DB_NETWORK=daejang-db_default/,
+  )
+})
+
+test('Release script supports either Docker Compose CLI form', () => {
+  const body = functionBody('docker_compose')
+
+  assert.match(body, /docker compose version/)
+  assert.match(body, /command -v docker-compose/)
+  assert.match(body, /docker-compose "\$@"/)
+  assert.match(releaseScript, /REVIEWROOM_IMAGE_REF="\$image_ref" docker_compose/)
+})
+
+test('system verification includes the ReviewRoom canonical E2E worktree', () => {
+  const body = functionBody('run_release_system_e2e')
+
+  assert.match(body, /daejang-reviewroom/)
+  assert.match(body, /reviewroom_image_reference/)
+  assert.match(body, /run_reviewroom_release_e2e/)
+})
+
+test('ReviewRoom canonical E2E uses disposable PostgreSQL and Anvil', () => {
+  const body = functionBody('run_reviewroom_release_e2e')
+
+  assert.match(body, /postgres:18\.4-alpine3\.24/)
+  assert.match(body, /anvil --host 127\.0\.0\.1/)
+  assert.match(body, /npm --prefix .*test:e2e:canonical/)
+  assert.match(body, /docker stop .*postgres_container/)
+})
+
+test('all Release deployments restore the corresponding ReviewRoom digest', () => {
+  const promote = functionBody('promote_release')
+  const rollback = functionBody('rollback_release')
+  const deploy = functionBody('deploy_all')
+
+  assert.match(deploy, /deploy_reviewroom "\$release_dir"/)
+  assert.match(promote, /deploy_all "\$release_dir"/)
+  assert.match(promote, /deploy_all "\$previous_target"/)
+  assert.match(rollback, /deploy_all "\$previous_target"/)
+})
+
 test('deployment paths never move Production to origin/main', () => {
   for (const name of ['deploy_indexer', 'deploy_backend', 'deploy_all']) {
     const body = functionBody(name)
@@ -52,7 +153,7 @@ test('promotion verifies the manifest before changing checkouts and pointers', (
   const body = functionBody('promote_release')
   const verify = body.indexOf('assert_release_verified')
   const checkout = body.indexOf('checkout_repository_set')
-  const deploy = body.indexOf('deploy_all')
+  const deploy = body.indexOf('deploy_all "$release_dir"')
   const pointer = body.indexOf('atomic_release_link current')
 
   assert.ok(verify > 0)
@@ -64,7 +165,7 @@ test('promotion verifies the manifest before changing checkouts and pointers', (
 test('rollback restores recorded commits before moving the current pointer', () => {
   const body = functionBody('rollback_release')
   const checkout = body.indexOf('checkout_repository_set "$rollback_file"')
-  const deploy = body.indexOf('deploy_all')
+  const deploy = body.indexOf('deploy_all "$previous_target"')
   const pointer = body.indexOf('atomic_release_link current')
 
   assert.ok(checkout > 0)
@@ -77,4 +178,12 @@ test('candidate manifests pin source commits and immutable image digests', () =>
   assert.match(manifestTool, /image\.commit !== release\.sources/)
   assert.match(manifestTool, /image\.ref\?\.endsWith\(`@\$\{image\.digest\}`\)/)
   assert.match(manifestTool, /status: 'candidate'/)
+  assert.match(
+    manifestTool,
+    /imageRepositories = new Set\(\[\s*'daejang',[\s\S]*'daejang-reviewroom'/,
+  )
+  assert.match(
+    manifestTool,
+    /requiredImages = new Set\(\[[\s\S]*'reviewroom'/,
+  )
 })
