@@ -1,0 +1,14 @@
+name: daejang-registry
+
+services:
+  registry:
+    image: registry:3.0.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${REGISTRY_LOOPBACK_PORT:-5050}:5000"
+    volumes:
+      - ./config.yml:/etc/distribution/config.yml:ro
+      - ${REGISTRY_DATA_DIR:?Set REGISTRY_DATA_DIR in .env}:/var/lib/registry
+      - ${REGISTRY_AUTH_DIR:?Set REGISTRY_AUTH_DIR in .env}:/auth:ro
+    security_opt:
+      - no-new-privileges:true
