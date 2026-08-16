@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.backwardlabs.daejang-image-publisher</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@PUBLISHER_SCRIPT@</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@REGISTRY_DIR@</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Docker.app/Contents/Resources/bin</string>
+    <key>GH_CONFIG_DIR</key>
+    <string>@GH_CONFIG_DIR@</string>
+    <key>DOCKER_CONFIG</key>
+    <string>@DOCKER_CONFIG@</string>
+    <key>DAEJANG_PUBLISHER_STATE_DIR</key>
+    <string>@STATE_DIR@</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>120</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>@LOG_DIR@/publisher.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOG_DIR@/publisher.stderr.log</string>
+</dict>
+</plist>

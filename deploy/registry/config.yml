@@ -1,0 +1,29 @@
+version: 0.1
+
+log:
+  level: info
+  formatter: json
+  fields:
+    service: daejang-registry
+
+storage:
+  filesystem:
+    rootdirectory: /var/lib/registry
+  delete:
+    enabled: true
+  maintenance:
+    uploadpurging:
+      enabled: true
+      age: 168h
+      interval: 24h
+      dryrun: false
+
+http:
+  addr: :5000
+  headers:
+    X-Content-Type-Options: [nosniff]
+
+auth:
+  htpasswd:
+    realm: Daejang Registry
+    path: /auth/htpasswd
