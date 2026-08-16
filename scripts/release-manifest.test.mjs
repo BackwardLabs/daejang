@@ -91,6 +91,17 @@ test('prepares and validates an immutable Release from Publisher commits', async
             ),
           },
         },
+        'daejang-reviewroom': {
+          commit: commits['daejang-reviewroom'],
+          images: {
+            reviewroom: image(
+              'daejang-reviewroom',
+              'reviewroom',
+              commits['daejang-reviewroom'],
+              '8',
+            ),
+          },
+        },
         'daejang-tax-engine': {
           commit: commits['daejang-tax-engine'],
           images: {
@@ -135,9 +146,14 @@ test('prepares and validates an immutable Release from Publisher commits', async
   assert.match(digest, /^sha256:[0-9a-f]{64}$/)
   assert.deepEqual(release.sources, commits)
   assert.equal(images.images['posting-service'].scope, 'production')
+  assert.equal(images.images.reviewroom.scope, 'production')
   assert.equal(images.images['tax-engine-dev-e2e'].scope, 'verification')
   assert.equal(
     images.images['web-api'].commit,
     release.sources.daejang,
+  )
+  assert.equal(
+    images.images.reviewroom.commit,
+    release.sources['daejang-reviewroom'],
   )
 })

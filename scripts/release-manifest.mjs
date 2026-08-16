@@ -36,6 +36,7 @@ const imageRepositories = new Set([
   'daejang',
   'daejang-jit-engine',
   'daejang-posting-service',
+  'daejang-reviewroom',
   'daejang-tax-engine',
 ])
 const requiredImages = new Set([
@@ -44,6 +45,7 @@ const requiredImages = new Set([
   'pdf-parser',
   'jit-engine',
   'posting-service',
+  'reviewroom',
   'tax-engine',
   'tax-engine-dev-e2e',
 ])
