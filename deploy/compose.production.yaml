@@ -96,7 +96,7 @@ services:
       ENGINE_GRPC_CERT_PATH: /run/secrets/web-engine-client-cert.pem
       ENGINE_GRPC_KEY_PATH: /run/secrets/web-engine-client-key.pem
     volumes:
-      - private_objects:/var/lib/daejang/private
+      - ${PRIVATE_OBJECTS_PATH:?Set PRIVATE_OBJECTS_PATH to the host private-objects directory}:/var/lib/daejang/private
       - ${GIWA_REPORT_SECRETS_DIR:-./disabled-secrets}:/run/secrets/giwa-report:ro
       - ${ENGINE_CA_PATH}:/run/secrets/engine-ca.pem:ro
       - ${WEB_ENGINE_CLIENT_CERT_PATH}:/run/secrets/web-engine-client-cert.pem:ro
@@ -122,7 +122,7 @@ services:
       ENGINE_LISTEN: 0.0.0.0:50051
       DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
       DAEJANG_SOURCE_ARTIFACT_DATABASE_URL: ${SOURCE_ARTIFACT_DATABASE_URL}
-      DAEJANG_SOURCE_ARTIFACT_ROOT: /var/lib/daejang/source-artifacts/objects
+      DAEJANG_SOURCE_ARTIFACT_ROOT: /var/lib/daejang/source-artifacts/root
       DAEJANG_SOURCE_ARTIFACT_TEMP: /var/lib/daejang/source-artifacts/tmp
       DAEJANG_QUERY_DATABASE_URL: ${QUERY_DATABASE_URL}
       DAEJANG_REPORT_DATABASE_URL: ${REPORT_DATABASE_URL}
@@ -148,8 +148,8 @@ services:
       - ${ENGINE_CA_PATH}:/run/secrets/engine-ca.pem:ro
       - ${ENGINE_PROBE_CERT_PATH}:/run/secrets/probe-client-cert.pem:ro
       - ${ENGINE_PROBE_KEY_PATH}:/run/secrets/probe-client-key.pem:ro
-      - review_artifacts:/var/lib/daejang/review-artifacts
-      - source_artifacts:/var/lib/daejang/source-artifacts
+      - ${REVIEW_ARTIFACTS_PATH:?Set REVIEW_ARTIFACTS_PATH to the host review artifacts directory}:/var/lib/daejang/review-artifacts
+      - ${SOURCE_ARTIFACTS_PATH:?Set SOURCE_ARTIFACTS_PATH to the host source artifacts directory}:/var/lib/daejang/source-artifacts
       - pdf_parser_socket:/run/daejang/pdf-parser:ro
     depends_on:
       pdf-parser: { condition: service_healthy }
@@ -205,7 +205,7 @@ services:
       # The mounted bridge config uses tcp:// plus the container TLS paths below.
       DAEJANG_JIT_BRIDGE_CONFIG: /run/config/jit-bridge.json
     volumes:
-      - private_objects:/var/lib/daejang/private:ro
+      - ${PRIVATE_OBJECTS_PATH:?Set PRIVATE_OBJECTS_PATH to the host private-objects directory}:/var/lib/daejang/private:ro
       - ${JIT_BRIDGE_CONFIG_PATH}:/run/config/jit-bridge.json:ro
       - ${JIT_BRIDGE_CA_PATH}:/run/secrets/jit-ca.pem:ro
       - ${JIT_BRIDGE_CLIENT_CERT_PATH}:/run/secrets/jit-client-cert.pem:ro
@@ -219,7 +219,4 @@ networks:
     external: true
     name: ${DAEJANG_DB_NETWORK:-daejang-db_default}
 volumes:
-  private_objects: {}
-  source_artifacts: {}
-  review_artifacts: {}
   pdf_parser_socket: {}
