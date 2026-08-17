@@ -195,6 +195,7 @@ services:
       TEST_ENGINE_GRPC_TARGET: unix:/run/daejang/engine/engine.sock
       REVIEWROOM_INTERNAL_API_URL: ${REVIEWROOM_INTERNAL_API_URL}
       REVIEWROOM_PROOF_VECTOR_TOKEN: ${REVIEWROOM_PROOF_VECTOR_TOKEN}
+      REVIEW_E2E_ANCHOR_CHAIN_ID: ${REVIEW_E2E_ANCHOR_CHAIN_ID}
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
@@ -240,7 +241,132 @@ services:
     depends_on:
       web-api: { condition: service_healthy }
 
+  # ── ReviewRoom (일회용 체인 포함 풀 사이클) ────────────────────────────────
+  # production 과 같은 image·워크로드로 "확정 → 적용 → 영수증 → 온체인 앵커"
+  # 전체를 로컬에서 돌린다. 실제 배포된 컨트랙트에는 절대 쓰지 않는다 —
+  # 일회용 anvil 체인에 ReviewProofRegistryV2 를 새로 배포해 그쪽으로만 쓴다.
+  reviewroom-chain:
+    image: ghcr.io/foundry-rs/foundry:latest
+    entrypoint: ["anvil"]
+    # --block-time 1: proof vector 확인 수가 실체인처럼 자라도록 매초 블록 생성
+    command: ["--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "1", "--silent"]
+    healthcheck:
+      test: ["CMD", "cast", "chain-id", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  reviewroom-registry:
+    image: ghcr.io/foundry-rs/foundry:latest
+    # 볼륨에 chain env 를 쓰기 위해 root 로 돈다 (dev 전용 일회성 부트스트랩).
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    # anvil 기본 계정 0 의 사전 공개 개발용 키다. 일회용 체인 밖에서는 무의미하다.
+    command:
+      - |
+        set -e
+        cp -r /contracts /tmp/contracts && cd /tmp/contracts
+        forge build --out out --cache-path cache >/dev/null 2>&1
+        key=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+        address=$$(forge create --rpc-url http://reviewroom-chain:8545 \
+          --private-key "$$key" --broadcast --json \
+          src/ReviewProofRegistryV2.sol:ReviewProofRegistryV2 \
+          --constructor-args 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 | \
+          grep -oE '"deployedTo": *"0x[0-9a-fA-F]+"' | grep -oE '0x[0-9a-fA-F]+')
+        test -n "$$address"
+        cast send --rpc-url http://reviewroom-chain:8545 --private-key "$$key" \
+          "$$address" 'setAttester(address,bool)' \
+          0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 true >/dev/null
+        code_hash=$$(cast keccak "$$(cast code --rpc-url http://reviewroom-chain:8545 "$$address")")
+        {
+          printf 'CHAIN_ID=31337\n'
+          printf 'CHAIN_RPC_URL=http://reviewroom-chain:8545\n'
+          printf 'REVIEW_PROOF_REGISTRY_ADDRESS=%s\n' "$$address"
+          printf 'REVIEW_PROOF_REGISTRY_CODE_HASH=%s\n' "$$code_hash"
+          printf 'REVIEW_PROOF_REGISTRY_DEPLOYMENT_ID=dev-e2e-anvil\n'
+          printf 'ANCHOR_PRIVATE_KEY=%s\n' "$$key"
+        } > /chain/env
+        chmod 644 /chain/env
+        echo "registry deployed: $$address"
+    volumes:
+      - ${DAEJANG_REVIEWROOM_DIR:-../daejang-reviewroom}/contracts:/contracts:ro
+      - reviewroom_chain_env:/chain
+    depends_on:
+      reviewroom-chain: { condition: service_healthy }
+
+  reviewroom-postgres:
+    image: postgres:18.4-alpine3.24
+    environment:
+      POSTGRES_DB: reviewroom
+      POSTGRES_USER: reviewroom
+      POSTGRES_PASSWORD: dev-e2e-reviewroom-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reviewroom -d reviewroom"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  reviewroom-migrate:
+    image: ${DAEJANG_REVIEWROOM_IMAGE:-backwardlabss-mac-studio.tail344fa1.ts.net/daejang/reviewroom:latest}
+    command: ["node", "dist/scripts/migrate.js"]
+    environment:
+      DATABASE_URL: postgresql://reviewroom:dev-e2e-reviewroom-only@reviewroom-postgres:5432/reviewroom
+    depends_on:
+      reviewroom-postgres: { condition: service_healthy }
+
+  reviewroom-api:
+    image: ${DAEJANG_REVIEWROOM_IMAGE:-backwardlabss-mac-studio.tail344fa1.ts.net/daejang/reviewroom:latest}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["set -a && . /chain/env && set +a && exec node dist/src/index.js"]
+    environment:
+      DATABASE_URL: postgresql://reviewroom:dev-e2e-reviewroom-only@reviewroom-postgres:5432/reviewroom
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: "8081"
+      INTERNAL_API_TOKEN: ${REVIEWROOM_INTERNAL_API_TOKEN}
+      RESOLUTION_INGEST_API_TOKEN: ${REVIEWROOM_RESOLUTION_INGEST_TOKEN}
+      APPLICATION_RECEIPT_API_TOKEN: ${REVIEWROOM_APPLICATION_RECEIPT_TOKEN}
+      PROOF_VECTOR_API_TOKEN: ${REVIEWROOM_PROOF_VECTOR_TOKEN}
+      REVIEW_COMMITMENT_KEY_BASE64: ${REVIEWROOM_COMMITMENT_KEY_BASE64}
+    volumes:
+      - reviewroom_chain_env:/chain:ro
+    depends_on:
+      reviewroom-migrate: { condition: service_completed_successfully }
+      reviewroom-registry: { condition: service_completed_successfully }
+
+  reviewroom-anchor:
+    image: ${DAEJANG_REVIEWROOM_IMAGE:-backwardlabss-mac-studio.tail344fa1.ts.net/daejang/reviewroom:latest}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["set -a && . /chain/env && set +a && exec node dist/src/worker.js"]
+    environment:
+      DATABASE_URL: postgresql://reviewroom:dev-e2e-reviewroom-only@reviewroom-postgres:5432/reviewroom
+      ANCHOR_CONFIRMATIONS: "1"
+      ANCHOR_POLL_INTERVAL_MS: "500"
+    # image healthcheck 는 API endpoint 를 찌른다. worker 는 서빙하지 않는다.
+    healthcheck:
+      disable: true
+    volumes:
+      - reviewroom_chain_env:/chain:ro
+    depends_on:
+      reviewroom-api: { condition: service_started }
+
+  reviewroom-delivery:
+    image: ${DAEJANG_REVIEWROOM_IMAGE:-backwardlabss-mac-studio.tail344fa1.ts.net/daejang/reviewroom:latest}
+    command: ["node", "dist/src/deliveryWorker.js"]
+    environment:
+      DAEJANG_DATABASE_URL: ${OWNER_DATABASE_URL}
+      REVIEWROOM_INTERNAL_API_URL: http://reviewroom-api:8081
+      REVIEWROOM_RESOLUTION_INGEST_TOKEN: ${REVIEWROOM_RESOLUTION_INGEST_TOKEN}
+      REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP: "true"
+      REVIEWROOM_DELIVERY_POLL_INTERVAL_MS: "500"
+    healthcheck:
+      disable: true
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      reviewroom-api: { condition: service_started }
+
 volumes:
+  reviewroom_chain_env: {}
   pdf_parser_socket: {}
   engine_socket: {}
   private_objects: {}
