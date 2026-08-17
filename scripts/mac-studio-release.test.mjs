@@ -14,8 +14,9 @@ const reviewroomComposeEnvExample = await readFile(
   new URL('../deploy/reviewroom.compose.env.example', import.meta.url),
   'utf8',
 )
+// ReviewRoom 은 production compose 로 통합되었다 (#186).
 const reviewroomCompose = await readFile(
-  new URL('../deploy/compose.reviewroom.yaml', import.meta.url),
+  new URL('../deploy/compose.production.yaml', import.meta.url),
   'utf8',
 )
 
@@ -53,8 +54,8 @@ test('Release deployment pins ReviewRoom to the manifest digest and migrates bef
   const config = body.indexOf('config --quiet')
   const migrationConfig = body.indexOf('--profile migrate config --quiet')
   const pull = body.indexOf('pull')
-  const migrate = body.indexOf('run --rm migrate')
-  const start = body.indexOf('up --detach --wait api anchor-worker delivery-worker')
+  const migrate = body.indexOf('run --rm reviewroom-migrate')
+  const start = body.indexOf('up --detach --wait reviewroom-api reviewroom-anchor-worker reviewroom-delivery-worker')
 
   assert.match(body, /reviewroom_image_reference/)
   assert.match(body, /reviewroom_compose/)
@@ -92,11 +93,11 @@ test('ReviewRoom follows the Mac Studio checkout env convention', () => {
 test('ReviewRoom delivery uses the explicit central DB network', () => {
   assert.match(
     reviewroomCompose,
-    /networks: \[reviewroom, daejang-db\]/,
+    /networks: \[reviewroom, database\]/,
   )
   assert.match(
     reviewroomCompose,
-    /name: \$\{DAEJANG_DB_NETWORK:\?Set DAEJANG_DB_NETWORK to the central Daejang DB network\}/,
+    /name: \$\{DAEJANG_DB_NETWORK:-daejang-db_default\}/,
   )
   assert.match(
     reviewroomComposeEnvExample,
