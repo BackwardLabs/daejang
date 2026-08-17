@@ -212,11 +212,146 @@ services:
       - ${JIT_BRIDGE_CLIENT_KEY_PATH}:/run/secrets/jit-client-key.pem:ro
     networks: [backend, database]
 
+  # ── ReviewRoom ─────────────────────────────────────────────────────────────
+  # One image carries the API, anchor worker and delivery worker; each service
+  # picks its workload by command. docs/operations.md section 10 requires the
+  # three to receive different secrets, so each one reads its own env file.
+  #
+  # Migrations never run at startup. Run the migrate profile to completion
+  # before starting the rest:
+  #
+  #   docker-compose -f compose.production.yaml --env-file ... run --rm reviewroom-migrate
+
+  reviewroom-postgres:
+    # ReviewRoom keeps its own database. It stores commitments and anchor
+    # receipts, never the canonical Review rows, which stay in daejang-db.
+    # The alias keeps `postgres` working as the DB host inside the env files.
+    image: postgres:18.4-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${REVIEWROOM_POSTGRES_DB:-reviewroom}
+      POSTGRES_USER: ${REVIEWROOM_POSTGRES_USER:-reviewroom}
+      POSTGRES_PASSWORD: ${REVIEWROOM_POSTGRES_PASSWORD:?Set REVIEWROOM_POSTGRES_PASSWORD}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${REVIEWROOM_POSTGRES_USER:-reviewroom} -d ${REVIEWROOM_POSTGRES_DB:-reviewroom}
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - reviewroom_postgres:/var/lib/postgresql
+    networks:
+      reviewroom:
+        aliases: [postgres]
+
+  reviewroom-migrate:
+    image: ${REVIEWROOM_IMAGE_REF:?Set REVIEWROOM_IMAGE_REF to an immutable digest reference}
+    # Not started by `up`. Run it explicitly before a deployment.
+    profiles: ["migrate"]
+    command: ["node", "dist/scripts/migrate.js"]
+    env_file:
+      - ${REVIEWROOM_MIGRATE_ENV_FILE:?Set REVIEWROOM_MIGRATE_ENV_FILE to the migration credential file}
+    depends_on:
+      reviewroom-postgres:
+        condition: service_healthy
+    networks: [reviewroom]
+
+  reviewroom-api:
+    image: ${REVIEWROOM_IMAGE_REF:?Set REVIEWROOM_IMAGE_REF to an immutable digest reference}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    # Ingest, application receipt, proof vector and commitment key. Never the
+    # anchor signing key.
+    env_file:
+      - ${REVIEWROOM_API_ENV_FILE:?Set REVIEWROOM_API_ENV_FILE to the API secret file}
+    environment:
+      NODE_ENV: production
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: "8081"
+    ports:
+      # Loopback only. The delivery worker reaches it over the compose network
+      # and the report pipeline uses this published port.
+      - 127.0.0.1:${REVIEWROOM_API_PORT:-8081}:8081
+    depends_on:
+      reviewroom-postgres:
+        condition: service_healthy
+    networks: [reviewroom]
+
+  reviewroom-anchor-worker:
+    image: ${REVIEWROOM_IMAGE_REF:?Set REVIEWROOM_IMAGE_REF to an immutable digest reference}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    command: ["node", "dist/src/worker.js"]
+    # ReviewRoom DB, chain RPC, registry and the anchor signing key. Never the
+    # API tokens or the commitment key.
+    env_file:
+      - ${REVIEWROOM_ANCHOR_ENV_FILE:?Set REVIEWROOM_ANCHOR_ENV_FILE to the anchor worker secret file}
+    environment:
+      NODE_ENV: production
+    # The image healthcheck probes the API endpoint, which this workload does
+    # not serve.
+    healthcheck:
+      disable: true
+    depends_on:
+      reviewroom-postgres:
+        condition: service_healthy
+    networks: [reviewroom]
+
+  reviewroom-delivery-worker:
+    image: ${REVIEWROOM_IMAGE_REF:?Set REVIEWROOM_IMAGE_REF to an immutable digest reference}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    command: ["node", "dist/src/deliveryWorker.js"]
+    # Central daejang-db REVIEWROOM delivery credential and the ingest token
+    # only. Never the ReviewRoom commitment key or a chain signer.
+    env_file:
+      - ${REVIEWROOM_DELIVERY_ENV_FILE:?Set REVIEWROOM_DELIVERY_ENV_FILE to the delivery worker secret file}
+    environment:
+      NODE_ENV: production
+      REVIEWROOM_INTERNAL_API_URL: http://reviewroom-api:8081
+    healthcheck:
+      disable: true
+    depends_on:
+      reviewroom-api:
+        condition: service_healthy
+    # The central Daejang DB lives on the external database network. The
+    # delivery URL uses its explicit container hostname, never `postgres`,
+    # which resolves to the ReviewRoom-local database on this network.
+    networks: [reviewroom, database]
+
 networks:
   edge: {}
   backend: {}
+  reviewroom: {}
   database:
     external: true
     name: ${DAEJANG_DB_NETWORK:-daejang-db_default}
 volumes:
   pdf_parser_socket: {}
+  reviewroom_postgres:
+    # The data predates the stack merge; keep the volume the separate
+    # daejang-reviewroom project created so nothing is migrated or lost.
+    external: true
+    name: daejang-reviewroom_reviewroom-postgres
