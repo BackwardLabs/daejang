@@ -5,6 +5,11 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 db_dir=${DAEJANG_DB_DIR:-"$repo_root/../daejang-db"}
 reviewroom_dir=${DAEJANG_REVIEWROOM_DIR:-"$repo_root/../daejang-reviewroom"}
+jit_engine_dir=${DAEJANG_JIT_ENGINE_DIR:-"$repo_root/../daejang-jit-engine"}
+# 공유 Docker 데몬이 개인 checkout을 bind-mount할 수 없어 schema는 공용 read-only
+# checkout을 기본값으로 사용한다.
+schema_dir=${SCHEMA_DIR:-/Users/Shared/Projects/01_Daejang/schema}
+wallet_lane=${DAEJANG_DEV_E2E_WALLET:-0}
 registry=${REGISTRY:-backwardlabss-mac-studio.tail344fa1.ts.net}
 web_port=${DAEJANG_DEV_E2E_WEB_PORT:-15173}
 tax_db_migration_version=${DAEJANG_TAXD_DB_MIGRATION_VERSION:-92}
@@ -28,6 +33,8 @@ web_candidate_image="daejang-web-api:dev-e2e-$user_segment"
 web_ui_candidate_image="daejang-web-ui:dev-e2e-$user_segment"
 engine_candidate_image="daejang-engine:dev-e2e-$user_segment"
 parser_candidate_image="daejang-pdf-parser:dev-e2e-$user_segment"
+jit_candidate_image="daejang-jit-engine:dev-e2e-$user_segment"
+jit_test_image="daejang-jit-engine:dev-e2e-test-$user_segment"
 posting_image=${DAEJANG_POSTING_IMAGE:-"$registry/daejang/posting-service:latest"}
 tax_engine_image=${DAEJANG_TAX_ENGINE_IMAGE:-"$registry/daejang/tax-engine:latest"}
 tax_dev_e2e_image=${DAEJANG_TAX_DEV_E2E_IMAGE:-"$registry/daejang/tax-engine-dev-e2e:latest"}
@@ -157,12 +164,16 @@ if [[ "$action" == run-tests ]]; then
 fi
 
 if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests || "$action" == --run-persistent ]]; then
-    for required_variable in \
-        DAEJANG_E2E_OWNER_DATABASE_URL DAEJANG_E2E_WEB_DATABASE_URL \
-        DAEJANG_E2E_SOURCE_DATABASE_URL DAEJANG_E2E_QUERY_DATABASE_URL \
-        DAEJANG_E2E_REPORT_DATABASE_URL DAEJANG_E2E_EVENT_DATABASE_URL \
+    required_variables=(
+        DAEJANG_E2E_OWNER_DATABASE_URL DAEJANG_E2E_WEB_DATABASE_URL
+        DAEJANG_E2E_SOURCE_DATABASE_URL DAEJANG_E2E_QUERY_DATABASE_URL
+        DAEJANG_E2E_REPORT_DATABASE_URL DAEJANG_E2E_EVENT_DATABASE_URL
         DAEJANG_E2E_TAX_DATABASE_URL
-    do
+    )
+    if [[ "$wallet_lane" == 1 ]]; then
+        required_variables+=(DAEJANG_E2E_JIT_DATABASE_URL)
+    fi
+    for required_variable in "${required_variables[@]}"; do
         [[ -n "${!required_variable:-}" ]] || {
             printf '%s is required.\n' "$required_variable" >&2
             exit 2
@@ -215,6 +226,12 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'REVIEWROOM_PROOF_VECTOR_TOKEN=%s\n' "${REVIEWROOM_PROOF_VECTOR_TOKEN:-}"
         printf 'ACTIVATION_SHA256=%064d\n' 0
         printf 'PUBLICATION_TRUST_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+        printf 'EVM_PUBLICATION_TRUST_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+        printf 'DAEJANG_JIT_CANDIDATE_IMAGE=%s\n' "$jit_candidate_image"
+        printf 'DAEJANG_JIT_TEST_IMAGE=%s\n' "$jit_test_image"
+        printf 'DAEJANG_SCHEMA_DIR=%s\n' "$schema_dir"
+        printf 'JIT_DATABASE_URL=%s\n' "$(docker_host_dsn "${DAEJANG_E2E_JIT_DATABASE_URL:-}")"
+        printf 'RUN_EVM_PIPELINE_E2E_TESTS=%s\n' "${RUN_EVM_PIPELINE_E2E_TESTS:-0}"
         printf 'OWNER_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_OWNER_DATABASE_URL")"
         printf 'WEB_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_WEB_DATABASE_URL")"
         printf 'SOURCE_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_SOURCE_DATABASE_URL")"
@@ -229,6 +246,9 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root"
         --file "$compose_file" --project-name "$project_name"
     )
+    if [[ "$wallet_lane" == 1 ]]; then
+        current_compose+=(--profile wallet)
+    fi
 
     reviewroom_delivery_pid=''
     reviewroom_delivery_log=''
@@ -298,6 +318,15 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
     fi
     "${current_compose[@]}" up --detach --wait "${app_services[@]}"
     "${current_compose[@]}" run --rm --no-deps pipeline-verify
+
+    if [[ "$wallet_lane" == 1 ]]; then
+        printf '%s\n' '지갑(EVM) lane을 준비합니다: jitd fixture selection과 JIT claim policy를 만듭니다.'
+        jit_fixture_state=$("${current_compose[@]}" run --rm --no-deps jit-fixture)
+        evm_publication_trust_key=$(printf '%s\n' "$jit_fixture_state" | python3 -c 'import json,sys; print(json.load(sys.stdin)["evmPublicationTrustKey"])')
+        printf 'EVM_PUBLICATION_TRUST_KEY=%s\n' "$evm_publication_trust_key" >> "$env_file"
+        "${current_compose[@]}" run --rm --no-deps jit-permissions
+        "${current_compose[@]}" up --detach --wait jit-rpc jitd sync-worker posting-evm
+    fi
 
     if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests ]]; then
         "${current_compose[@]}" run --rm --no-deps web-api-tests
@@ -390,6 +419,15 @@ case "$REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP" in
         exit 2
         ;;
 esac
+case "$wallet_lane" in
+    0|1) ;;
+    *)
+        printf '%s\n' 'DAEJANG_DEV_E2E_WALLET은 0 또는 1이어야 합니다.' >&2
+        exit 2
+        ;;
+esac
+export DAEJANG_DEV_E2E_WALLET="$wallet_lane"
+export RUN_EVM_PIPELINE_E2E_TESTS="${RUN_EVM_PIPELINE_E2E_TESTS:-0}"
 export DAEJANG_TAXD_DB_MIGRATION_VERSION="$tax_db_migration_version"
 export DAEJANG_REVIEWROOM_DIR="$reviewroom_dir"
 export DAEJANG_E2E_SUFFIX="$e2e_suffix"
@@ -470,6 +508,24 @@ fi
 "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
     --file "$repo_root/services/engine/Dockerfile" --target parser-runtime \
     --tag "$parser_candidate_image" "$repo_root"
+if [[ "$wallet_lane" == 1 ]]; then
+    [[ -f "$jit_engine_dir/Dockerfile" ]] || {
+        printf 'daejang-jit-engine checkout을 찾을 수 없습니다: %s\n' "$jit_engine_dir" >&2
+        printf 'DAEJANG_JIT_ENGINE_DIR=/path/to/owned/daejang-jit-engine 으로 지정하세요.\n' >&2
+        exit 2
+    }
+    [[ -d "$schema_dir/cue.mod" ]] || {
+        printf 'schema checkout을 찾을 수 없습니다: %s\n' "$schema_dir" >&2
+        printf 'SCHEMA_DIR=/path/to/schema 로 지정하세요.\n' >&2
+        exit 2
+    }
+    "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
+        --file "$jit_engine_dir/Dockerfile" --target test \
+        --tag "$jit_test_image" "$jit_engine_dir"
+    "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
+        --file "$jit_engine_dir/Dockerfile" \
+        --tag "$jit_candidate_image" "$jit_engine_dir"
+fi
 if [[ "$action" == up ]]; then
     "${buildx[@]}" build --load \
         --build-arg "VITE_REOWN_PROJECT_ID=$reown_project_id" \
@@ -499,6 +555,9 @@ db_args=(
     --role-env DAEJANG_E2E_EVENT_DATABASE_URL=event
     --role-env DAEJANG_E2E_TAX_DATABASE_URL=tax
 )
+if [[ "$wallet_lane" == 1 ]]; then
+    db_args+=(--role-env DAEJANG_E2E_JIT_DATABASE_URL=jit)
+fi
 if [[ "$action" == up ]]; then
     db_args=(--keep "${db_args[@]}")
 fi

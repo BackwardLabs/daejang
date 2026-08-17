@@ -10,10 +10,18 @@ DAEJANG_DEV_E2E_REOWN_PROJECT_ID ?= c5f8295da4fda205b905f32fd523f4c9
 DAEJANG_TAXD_DB_MIGRATION_VERSION ?= 90
 DAEJANG_E2E_SUFFIX ?=
 
-.PHONY: test test-review-giwa test-system dev-e2e-up dev-e2e-test dev-e2e-down dev-e2e-status dev-e2e-logs
+.PHONY: test test-wallet test-review-giwa test-system dev-e2e-up dev-e2e-test dev-e2e-down dev-e2e-status dev-e2e-logs
 test:
 	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \
 		DAEJANG_TAXD_DB_MIGRATION_VERSION="$(DAEJANG_TAXD_DB_MIGRATION_VERSION)" \
+		./scripts/dev-e2e.sh test
+
+test-wallet:
+	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \
+		DAEJANG_JIT_ENGINE_DIR="$(DAEJANG_JIT_ENGINE_DIR)" \
+		SCHEMA_DIR="$(SCHEMA_DIR)" \
+		DAEJANG_TAXD_DB_MIGRATION_VERSION="$(DAEJANG_TAXD_DB_MIGRATION_VERSION)" \
+		DAEJANG_DEV_E2E_WALLET=1 RUN_EVM_PIPELINE_E2E_TESTS=1 \
 		./scripts/dev-e2e.sh test
 
 test-review-giwa:
