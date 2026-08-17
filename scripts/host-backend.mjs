@@ -545,6 +545,42 @@ const allServiceOrder = [
   'taxd',
   'web-api',
 ]
+// Compose 로 넘어간 서비스는 host supervisor 의 관리 대상에서 제외한다.
+// 호스트 의존 사슬(host web-api → host engine socket, host engine → host
+// parser socket)이 끊기는 조합은 기동을 거부한다: 사슬의 아래쪽을
+// 컨테이너로 보내려면 그 위쪽도 함께 보내야 한다.
+const containerizableServiceOrder = ['web-api', 'engine', 'pdf-parser']
+export const containerizedServiceNames = (
+  raw = process.env.GIWA_CONTAINERIZED_SERVICES ?? '',
+) => {
+  const names = raw.split(',').map((value) => value.trim()).filter(Boolean)
+  const set = new Set(names)
+  if (set.size !== names.length) {
+    throw new Error('GIWA_CONTAINERIZED_SERVICES has duplicate service names')
+  }
+  for (const name of names) {
+    if (!containerizableServiceOrder.includes(name)) {
+      throw new Error(
+        `GIWA_CONTAINERIZED_SERVICES supports only ` +
+          `${containerizableServiceOrder.join(', ')}: ${name}`,
+      )
+    }
+  }
+  if (set.has('pdf-parser') && !set.has('engine')) {
+    throw new Error(
+      'Containerizing pdf-parser requires containerizing engine: ' +
+        'the host engine reads the host parser socket',
+    )
+  }
+  if (set.has('engine') && !set.has('web-api')) {
+    throw new Error(
+      'Containerizing engine requires containerizing web-api: ' +
+        'the host web-api reads the host engine socket',
+    )
+  }
+  return set
+}
+
 const evmPostingEnabled = () => existsSync(evmPublicationClaimPolicy)
 const taxdEnabled = () => {
   const state = readTaxdProfileState()
@@ -1064,19 +1100,20 @@ const taxRuntimeReady = async (candidateDigest) => {
 }
 
 const coreRuntimeHealthy = async () => {
+  const containerized = containerizedServiceNames()
   const coreServices = hostActiveServiceOrder({
     evmPosting: evmPostingEnabled(),
     taxd: false,
-  })
+  }).filter((name) => !containerized.has(name))
   if (!coreServices.every(isRunning)) return false
   const jitSocket = join(socketRoot, 'jit.sock')
   return (
-    await parserReady() &&
+    (containerized.has('pdf-parser') || await parserReady()) &&
     existsSync(jitSocket) &&
     await unixReady(jitSocket) &&
-    engineReady() &&
+    (containerized.has('engine') || engineReady()) &&
     existsSync(join(stateRoot, 'worker.ready')) &&
-    await webReady()
+    (containerized.has('web-api') || await webReady())
   )
 }
 
@@ -3864,6 +3901,7 @@ const activateTaxRuntime = async (
 }
 
 const startServices = async ({ buildArtifacts = true } = {}) => {
+  const containerized = containerizedServiceNames()
   if (allServiceOrder.some(isRunning))
     throw new Error('Backend services are already running; use backend:restart')
   assertExternalRuntimeRoot()
@@ -3927,34 +3965,36 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     rmSync(jitSocket, { force: true })
     rmSync(engineSocket, { force: true })
 
-    spawnService(
-      'pdf-parser',
-      process.env.GIWA_PDF_PARSER_PYTHON ??
-        (existsSync(join(repositoryRoot, 'services', 'engine', '.venv-pdf-parser', 'bin', 'python'))
-          ? join(repositoryRoot, 'services', 'engine', '.venv-pdf-parser', 'bin', 'python')
-          : join(projectRoot, 'daejang', 'services', 'engine', '.venv-pdf-parser', 'bin', 'python')),
-      [
-        '-I',
-        '-B',
-        join(
-          repositoryRoot,
-          'services',
-          'engine',
-          'python',
-          'pdf_parser_server.py',
-        ),
-        '--socket',
-        parserSocket,
-        '--request-timeout-seconds',
-        '25',
-      ],
-      {
-        PATH: process.env.PATH,
-        TMPDIR: process.env.TMPDIR,
-        LANG: process.env.LANG,
-      },
-    )
-    await waitFor('PDF parser', parserReady)
+    if (!containerized.has('pdf-parser')) {
+      spawnService(
+        'pdf-parser',
+        process.env.GIWA_PDF_PARSER_PYTHON ??
+          (existsSync(join(repositoryRoot, 'services', 'engine', '.venv-pdf-parser', 'bin', 'python'))
+            ? join(repositoryRoot, 'services', 'engine', '.venv-pdf-parser', 'bin', 'python')
+            : join(projectRoot, 'daejang', 'services', 'engine', '.venv-pdf-parser', 'bin', 'python')),
+        [
+          '-I',
+          '-B',
+          join(
+            repositoryRoot,
+            'services',
+            'engine',
+            'python',
+            'pdf_parser_server.py',
+          ),
+          '--socket',
+          parserSocket,
+          '--request-timeout-seconds',
+          '25',
+        ],
+        {
+          PATH: process.env.PATH,
+          TMPDIR: process.env.TMPDIR,
+          LANG: process.env.LANG,
+        },
+      )
+      await waitFor('PDF parser', parserReady)
+    }
 
     const sourceURL = databaseURL(
       'daejang_source_app',
@@ -4062,8 +4102,10 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
       ENGINE_PDF_PARSER_SOCKET_PATH: parserSocket,
       ...privateObjectWriteEnvironment(process.env),
     })
-    spawnService('engine', join(binaryRoot, 'engine-api'), [], engineEnvironment)
-    await waitFor('Engine', () => Promise.resolve(engineReady()), 30_000)
+    if (!containerized.has('engine')) {
+      spawnService('engine', join(binaryRoot, 'engine-api'), [], engineEnvironment)
+      await waitFor('Engine', () => Promise.resolve(engineReady()), 30_000)
+    }
 
     const bridgeConfigSource = resolve(
       process.env.GIWA_JIT_BRIDGE_CONFIG ?? join(configRoot, 'jit-bridge.json'),
@@ -4225,21 +4267,23 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
         process.env.UPBIT_PDF_IMPORT_ENABLED ?? 'false',
       },
     )
-    spawnService(
-      'web-api',
-      'npm',
-      ['run', 'start:web-api:host-production'],
-      {
-        ...webAPIEnvironment,
-        GIWA_WEB_API_ENTRYPOINT: join(runtimeRoot, 'app', 'web-api', 'server.js'),
-      },
-      { cwd: repositoryRoot },
-    )
-    await waitFor(
-      'Web API',
-      webReady,
-      30_000,
-    )
+    if (!containerized.has('web-api')) {
+      spawnService(
+        'web-api',
+        'npm',
+        ['run', 'start:web-api:host-production'],
+        {
+          ...webAPIEnvironment,
+          GIWA_WEB_API_ENTRYPOINT: join(runtimeRoot, 'app', 'web-api', 'server.js'),
+        },
+        { cwd: repositoryRoot },
+      )
+      await waitFor(
+        'Web API',
+        webReady,
+        30_000,
+      )
+    }
 
     // Reclassification can immediately drive JIT, Posting, and ledger writes.
     // Enqueue only after every downstream service is stable so a deployment
@@ -4443,6 +4487,7 @@ const taxBackfill = (subjectID, eventID, taxYearInput) => withOperationLock(asyn
 })
 
 const status = () => {
+  const containerized = containerizedServiceNames()
   for (const name of allServiceOrder) {
     const state = isRunning(name) ? 'running' : 'stopped'
     let disabled = ''
@@ -4452,6 +4497,8 @@ const status = () => {
       const reason = readTaxdProfileState()?.reason ??
         'Tax profile runtime is not active'
       disabled = ` (disabled: ${reason})`
+    } else if (containerized.has(name)) {
+      disabled = ' (containerized: Docker Compose 가 관리)'
     }
     console.log(`${name}: ${state}${disabled}`)
   }

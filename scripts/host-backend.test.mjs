@@ -45,6 +45,7 @@ import {
   hostWebAPIRuntimePaths,
   hostEVMPostingWorkerArgs,
   hostEVMPostingWorkerEnvironment,
+  containerizedServiceNames,
   hostActiveServiceOrder,
   hostJITForwardedEnvironmentNames,
   hostTaxDBMigrationVersion,
@@ -2767,4 +2768,19 @@ test('only explicit service commands persist pause during signal shutdown', () =
     pause: () => events.push('command-pause'),
   })
   assert.deepEqual(events, ['command-pause'])
+})
+
+test('parses the containerized service list and rejects broken host chains', () => {
+  assert.deepEqual([...containerizedServiceNames('')], [])
+  assert.deepEqual(
+    [...containerizedServiceNames('pdf-parser, engine, web-api')].sort(),
+    ['engine', 'pdf-parser', 'web-api'],
+  )
+  assert.deepEqual([...containerizedServiceNames('web-api')], ['web-api'])
+  // host web-api 는 host engine socket 을 읽으므로 engine 만 보낼 수 없다
+  assert.throws(() => containerizedServiceNames('engine'), /web-api/)
+  // host engine 은 host parser socket 을 읽으므로 pdf-parser 만 보낼 수 없다
+  assert.throws(() => containerizedServiceNames('pdf-parser,web-api'), /engine/)
+  assert.throws(() => containerizedServiceNames('jit'), /supports only/)
+  assert.throws(() => containerizedServiceNames('web-api,web-api'), /duplicate/)
 })
