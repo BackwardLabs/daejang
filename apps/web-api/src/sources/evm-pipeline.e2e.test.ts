@@ -52,8 +52,8 @@ const describeWithPipeline = enabled ? describe : describe.skip
 const fixtureWalletPrivateKey =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const fixtureWalletAddress = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266'
-const fixtureCoverageDate = '2015-07-30'
-const fixtureTaxYear = 2015
+const fixtureCoverageDate = '2026-07-30'
+const fixtureTaxYear = 2026
 const productAccount = {
   id: '00000000-0000-4000-8000-00000000e2e1',
   email: 'test@example.test',

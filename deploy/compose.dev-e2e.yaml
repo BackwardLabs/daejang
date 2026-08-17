@@ -411,8 +411,8 @@ configs:
             "profileHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "coverage": [
               {
-                "coverageStart": "2015-07-30",
-                "coverageEnd": "2015-07-30",
+                "coverageStart": "2026-07-30",
+                "coverageEnd": "2026-07-30",
                 "indexSnapshotId": "jit-dev-e2e-snapshot-dev-e2e",
                 "fromBlock": 302086,
                 "toBlock": 302086

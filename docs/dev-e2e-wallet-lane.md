@@ -48,14 +48,14 @@ sync-worker → jitd 경로에서 selection 재사용은 scope
 | 값 | 위치 |
 | --- | --- |
 | 지갑 주소 `0xf39f…9266` (고정 테스트 키의 주소) | compose `DAEJANG_JIT_DEV_E2E_FROM_ADDRESS`, `apps/web-api/src/sources/evm-pipeline.e2e.test.ts` |
-| coverage `2015-07-30` (fixture 블록 시각의 날짜) | compose `jit_bridge` config, EVM e2e 테스트 |
+| coverage `2026-07-30` (fixture 블록 시각의 날짜) | compose `jit_bridge` config, EVM e2e 테스트 |
 | snapshot `jit-dev-e2e-snapshot-dev-e2e` | compose `DAEJANG_JIT_DEV_E2E_SUFFIX=dev-e2e`, `jit_bridge` config |
 | 블록 302086, chain `eip155:1`, profileHash `e`×64 | jit-engine fixture 상수, `jit_bridge` config |
 
 검증은 `RUN_EVM_PIPELINE_E2E_TESTS=1`로 게이트된
 `apps/web-api/src/sources/evm-pipeline.e2e.test.ts`가 수행한다: 고정 키 지갑
 등록 → sync job 생성 → `SUCCEEDED` 폴링 → JIT publication `PUBLISHED` + posting
-생성 → ledger API(2015 과세연도) 노출.
+생성 → ledger API(2026 과세연도) 노출.
 
 이 lane은 ActionProof를 생성하지 않는다(jitd `--defi-label-dir` 미지정). 따라서
 DeFi 액션 분류·`REVIEW_REQUIRED` 경로는 커버하지 않으며, 자산 이동 Observation의
