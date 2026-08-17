@@ -411,11 +411,22 @@ const canonicalProductionEnvFile = join(
   'deploy',
   'production.env',
 )
-const productionEnvFile = resolve(
+// 운영 env 는 두 층이다: supervisor 전용 비밀이 담긴 개인 overlay
+// (~/.config/giwa/production/backend.env — launchd plist 가
+// GIWA_PRODUCTION_ENV_FILE 로 고정)와, compose·수동 CLI 가 쓰는 공용
+// canonical(deploy/production.env). 예전에는 overlay 가 canonical 을 통째로
+// 대체해서 supervisor 와 수동 CLI 가 서로 다른 env 세계를 봤다 — 수동
+// restart 가 REVIEWROOM 설정을 못 보고 taxd 를 비활성으로 판정한 사고의
+// 원인. 이제 둘 다 순서대로 읽는다. loadEnvFile 은 이미 설정된 키를 덮지
+// 않으므로 먼저 읽는 overlay 가 겹치는 키에서 이긴다.
+const productionEnvOverlayFile = resolve(
   process.env.GIWA_PRODUCTION_ENV_FILE ??
-    (existsSync(canonicalProductionEnvFile)
-      ? canonicalProductionEnvFile
-      : join(repositoryRoot, 'deploy', 'production.env')),
+    join(homedir(), '.config', 'giwa', 'production', 'backend.env'),
+)
+const productionEnvFile = resolve(
+  existsSync(canonicalProductionEnvFile)
+    ? canonicalProductionEnvFile
+    : join(repositoryRoot, 'deploy', 'production.env'),
 )
 const jitEnvrc = resolve(
   process.env.GIWA_JIT_ENVRC ?? join(jitRepository, '.envrc'),
@@ -436,6 +447,9 @@ const loadRuntimeEnvironment = () => {
       throw new Error(`Required environment file is missing: ${file}`)
   }
   loadEnvFile(databaseEnvFile)
+  if (existsSync(productionEnvOverlayFile)) {
+    loadEnvFile(productionEnvOverlayFile)
+  }
   loadEnvFile(productionEnvFile)
   loadEnvFile(indexerEnvFile)
 
