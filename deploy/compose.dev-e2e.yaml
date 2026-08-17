@@ -302,10 +302,12 @@ services:
       - /opt/daejang/schema
       - --subject-acl
       - /e2e/subject-acl.json
+      - --defi-label-dir
+      - /opt/daejang/defi-label
     environment:
       ENV_POSTGRES_DSN: ${JIT_DATABASE_URL}
       ENV_RPC_URL_ETHEREUM_MAINNET: ${DAEJANG_DEV_E2E_ETH_RPC_URL:-}
-    # bulk store 디렉터리는 backwardlabs:upside(502) 소유의 그룹 read 권한이다.
+    # bulk store와 DeFi-Label checkout은 backwardlabs:upside(502) 그룹 read 권한이다.
     group_add:
       - "502"
     extra_hosts:
@@ -317,11 +319,14 @@ services:
       - jit_socket:/run/daejang
       - ${DAEJANG_SCHEMA_DIR}:/opt/daejang/schema:ro
       - ${DAEJANG_EVM_INDEXER_DATA}:/var/lib/evm-index:ro
+      # 서명된 action registry 릴리스를 소비한다. 새 릴리스를 ship한 뒤 lane을
+      # 재기동하면 최신 registry로 분류가 갱신된다.
+      - ${DAEJANG_DEFI_LABEL_DIR}:/opt/daejang/defi-label:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/jit-healthcheck"]
       interval: 1s
       timeout: 2s
-      retries: 60
+      retries: 120
 
   sync-worker-real:
     profiles: ["wallet-real"]
@@ -438,7 +443,7 @@ services:
       - jit_socket:/run/daejang-jit
 
   posting-evm:
-    profiles: ["wallet", "wallet-real"]
+    profiles: ["wallet"]
     image: ${DAEJANG_POSTING_IMAGE}
     entrypoint: ["/usr/local/bin/evm-posting-worker"]
     # jitd(10001)가 쓴 artifact를 상주 폴링으로 함께 읽어야 하므로 같은 uid로 실행한다.
@@ -461,6 +466,42 @@ services:
       - host.docker.internal:host-gateway
     depends_on:
       jitd:
+        condition: service_healthy
+    volumes:
+      - jit_state:/e2e:ro
+      - jit_artifacts:/var/lib/daejang
+
+  posting-evm-real:
+    profiles: ["wallet-real"]
+    image: ${DAEJANG_POSTING_IMAGE}
+    entrypoint: ["/usr/local/bin/evm-posting-worker"]
+    user: "10001:10001"
+    command:
+      - --mode
+      - canonical
+      - --artifact-root
+      - /var/lib/daejang/artifacts
+      - --artifact-temp
+      - /var/lib/daejang/artifacts.tmp
+      - --claim-policy
+      - /e2e/evm-publication-claim-policy.json
+      - --poll-interval
+      - 250ms
+      # 서명된 registry 릴리스 신뢰 핀. dev-e2e.sh가 실행 시점에 DeFi-Label
+      # receipt.json에서 읽어 주입하므로 새 릴리스를 ship하면 재기동만으로 따라간다.
+      - --trusted-action-runtime-repository
+      - BackwardLabs/DeFi-Label
+      - --trusted-action-runtime-commit
+      - ${DAEJANG_ACTION_RUNTIME_COMMIT}
+      - --trusted-action-runtime-bundle-sha256
+      - ${DAEJANG_ACTION_RUNTIME_BUNDLE_SHA256}
+    environment:
+      DAEJANG_POSTING_DATABASE_URL: ${EVENT_DATABASE_URL}
+      DAEJANG_PUBLICATION_POLICY_TRUST_KEY: ${EVM_PUBLICATION_TRUST_KEY}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      jitd-real:
         condition: service_healthy
     volumes:
       - jit_state:/e2e:ro

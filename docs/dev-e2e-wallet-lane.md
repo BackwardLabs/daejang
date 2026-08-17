@@ -107,10 +107,20 @@ make dev-e2e-up
 
 - 수집 기간은 UI 고정 범위(2025-01-01~2026-08-11) 그대로 두면 된다 — bridge
   config가 이 범위를 store의 sealed 블록 범위로 매핑한다.
-- DeFi-Label을 붙이지 않으므로(BackwardLabs/DeFi-Label#43 확정 후 후속) 모든
-  자산 이동·가스는 **objective posting**으로 기록된다: 전송은
-  `UNKNOWN`/`OBSERVED_ASSET_MOVEMENT`, 가스는 `FEE`, 전부 `PARTIAL`/
-  `DETECTED_ONLY`. 잔액·수수료는 정확하고 프로토콜 의미만 미분류다.
+- **DeFi-Label 의미 분류가 포함된다.** jitd-real이
+  `DAEJANG_DEFI_LABEL_DIR`(기본 `/Users/Shared/Projects/01_Daejang/DeFi-Label`)의
+  서명된 action registry 릴리스로 ActionProof를 생성하고,
+  `posting-evm-real`의 신뢰 핀(commit·bundleSha256)은 dev-e2e.sh가 실행 시점에
+  같은 checkout의 `releases/action-registry-v1.json.receipt.json`에서 읽어
+  주입한다. 등록된 프로토콜 액션(SWAP, LENDING SUPPLY/WITHDRAW,
+  BRIDGE DEPOSIT/FILL, WRAP/UNWRAP)은 의미 분류된 posting으로,
+  미등록·미완성 액션은 **objective posting**(`UNKNOWN`/
+  `OBSERVED_ASSET_MOVEMENT` + `FEE`, `PARTIAL`/`DETECTED_ONLY`)으로 남는다 —
+  registry 커버리지가 장부에서 그대로 드러난다.
+- **registry 업데이트 테스트**: DeFi-Label에서 새 릴리스를 ship한 뒤
+  `make dev-e2e-down` → 같은 명령으로 재기동하면 새 receipt의 핀과 registry가
+  자동 반영된다. 같은 지갑을 다시 수집해 분류 변화를 비교한다(장부는
+  append-only라 재분류는 새 revision으로 supersede된다).
 - 가격을 모르는 토큰은 valuation `UNKNOWN` → 열린 Review가 생긴다(의도된
   테스트 데이터).
 - wallet lane과 상태 볼륨을 공유하므로 **두 lane을 같은 실행에서 함께 켤 수
