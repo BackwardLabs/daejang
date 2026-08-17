@@ -2869,6 +2869,14 @@
   opacity: .65;
 }
 
+.ledger-explorer-endpoint__resolved {
+  color: #166534;
+}
+
+.ledger-explorer-endpoint > p.ledger-explorer-endpoint__note {
+  color: #475569;
+}
+
 .ledger-explorer-endpoint > p {
   grid-column: 2 / -1;
   margin: 0;
