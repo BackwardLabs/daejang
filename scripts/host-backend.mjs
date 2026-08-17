@@ -3901,7 +3901,6 @@ const activateTaxRuntime = async (
 }
 
 const startServices = async ({ buildArtifacts = true } = {}) => {
-  const containerized = containerizedServiceNames()
   if (allServiceOrder.some(isRunning))
     throw new Error('Backend services are already running; use backend:restart')
   assertExternalRuntimeRoot()
@@ -3941,6 +3940,9 @@ const startServices = async ({ buildArtifacts = true } = {}) => {
     ensureUpbitCandleCollectorRunning()
   }
   loadRuntimeEnvironment()
+  // 반드시 loadRuntimeEnvironment() 다음이어야 한다. production.env 가 실어
+  // 주는 GIWA_CONTAINERIZED_SERVICES 를 그 전에 읽으면 항상 빈 값이 된다.
+  const containerized = containerizedServiceNames()
 
   const ethereumRPC = process.env.ENV_RPC_URL_ETHEREUM_MAINNET
   const optimismRPC = process.env.ENV_RPC_URL_OPTIMISM_MAINNET
@@ -4487,6 +4489,11 @@ const taxBackfill = (subjectID, eventID, taxYearInput) => withOperationLock(asyn
 })
 
 const status = () => {
+  try {
+    loadEnvFile(productionEnvFile)
+  } catch {
+    // status 는 정보 표시용이다. env 파일이 없는 환경에서도 동작해야 한다.
+  }
   const containerized = containerizedServiceNames()
   for (const name of allServiceOrder) {
     const state = isRunning(name) ? 'running' : 'stopped'
