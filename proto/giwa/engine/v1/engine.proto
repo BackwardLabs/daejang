@@ -275,6 +275,9 @@ message LedgerEvent {
   string action_profile_id = 16;
   string action_profile_version = 17;
   string action_binding_id = 18;
+  // Review workflow state for this event: "OPEN", "RESOLVED", or "" when no
+  // review exists. Presentation state, independent of `resolution`.
+  string review_state = 19;
 }
 message ListLedgerEventsResponse {
   repeated LedgerEvent items = 1;

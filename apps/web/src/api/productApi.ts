@@ -51,6 +51,8 @@ export type LedgerEventModel = {
   flowShape: string
   subtype?: string
   resolution: string
+  // 검토 워크플로 상태: OPEN | RESOLVED | 빈 값(검토 없음)
+  reviewState?: string
   interpretationSupport: string
   effectiveAt: string
   postings: LedgerPostingModel[]

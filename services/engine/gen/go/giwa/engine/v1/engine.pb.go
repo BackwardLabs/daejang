@@ -2257,8 +2257,11 @@ type LedgerEvent struct {
 	ActionProfileId       string                  `protobuf:"bytes,16,opt,name=action_profile_id,json=actionProfileId,proto3" json:"action_profile_id,omitempty"`
 	ActionProfileVersion  string                  `protobuf:"bytes,17,opt,name=action_profile_version,json=actionProfileVersion,proto3" json:"action_profile_version,omitempty"`
 	ActionBindingId       string                  `protobuf:"bytes,18,opt,name=action_binding_id,json=actionBindingId,proto3" json:"action_binding_id,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Review workflow state for this event: "OPEN", "RESOLVED", or "" when no
+	// review exists. Presentation state, independent of `resolution`.
+	ReviewState   string `protobuf:"bytes,19,opt,name=review_state,json=reviewState,proto3" json:"review_state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LedgerEvent) Reset() {
@@ -2413,6 +2416,13 @@ func (x *LedgerEvent) GetActionProfileVersion() string {
 func (x *LedgerEvent) GetActionBindingId() string {
 	if x != nil {
 		return x.ActionBindingId
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetReviewState() string {
+	if x != nil {
+		return x.ReviewState
 	}
 	return ""
 }
@@ -4900,7 +4910,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x10wallet_source_id\x18\x05 \x01(\tR\x0ewalletSourceId\x12)\n" +
 	"\x10chain_candidates\x18\x06 \x03(\tR\x0fchainCandidates\x12+\n" +
 	"\x11connection_status\x18\a \x01(\tR\x10connectionStatus\x12'\n" +
-	"\x0freview_required\x18\b \x01(\bR\x0ereviewRequired\"\xa3\x06\n" +
+	"\x0freview_required\x18\b \x01(\bR\x0ereviewRequired\"\xc6\x06\n" +
 	"\vLedgerEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1f\n" +
 	"\vrevision_id\x18\x02 \x01(\tR\n" +
@@ -4925,7 +4935,8 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x0faction_proof_id\x18\x0f \x01(\tR\ractionProofId\x12*\n" +
 	"\x11action_profile_id\x18\x10 \x01(\tR\x0factionProfileId\x124\n" +
 	"\x16action_profile_version\x18\x11 \x01(\tR\x14actionProfileVersion\x12*\n" +
-	"\x11action_binding_id\x18\x12 \x01(\tR\x0factionBindingId\"u\n" +
+	"\x11action_binding_id\x18\x12 \x01(\tR\x0factionBindingId\x12!\n" +
+	"\freview_state\x18\x13 \x01(\tR\vreviewState\"u\n" +
 	"\x18ListLedgerEventsResponse\x121\n" +
 	"\x05items\x18\x01 \x03(\v2\x1b.giwa.engine.v1.LedgerEventR\x05items\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x91\x01\n" +

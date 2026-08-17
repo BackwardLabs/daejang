@@ -504,13 +504,18 @@ function LedgerStatusBadges({ event }: { event: LedgerEventModel }) {
   const label = event.resolution === 'RESOLVED'
     ? '처리 완료'
     : event.resolution === 'PARTIAL' ? '일부 확인' : '검토 필요'
+  // 해석 상태와 검토 워크플로 상태는 다른 축이다. 검토를 이미 답했는데
+  // 해석이 아직 PARTIAL 이면 '일부 확인 · 검토 완료' 로 함께 보여준다.
+  const reviewBadge = event.resolution !== 'RESOLVED' && event.reviewState === 'RESOLVED'
+    ? '검토 완료'
+    : undefined
   return <span className="ledger-explorer__badges">
     <b
       className="is-primary"
       data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}
       title={`${ledgerState} · ${valuationState}`}
-      aria-label={`${label}. ${ledgerState}. ${valuationState}`}
-    >{label}</b>
+      aria-label={`${reviewBadge ? `${label} · ${reviewBadge}` : label}. ${ledgerState}. ${valuationState}`}
+    >{reviewBadge ? `${label} · ${reviewBadge}` : label}</b>
   </span>
 }
 
@@ -545,8 +550,9 @@ function LedgerExplorerDetail({
   const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
   // 버튼은 정적 reviewRequired 플래그가 아니라 실제 검토 상태를 따른다.
   // 확정된 검토만 있으면 '검토 완료', 검토가 없다고 판명되면 안내만 남긴다.
+  const reviewWorkflowState = event.reviewState || knownReviewStatus
   const reviewSettled = event.transferEndpoint?.reviewRequired === true &&
-    ((knownReviewStatus !== undefined && knownReviewStatus !== 'OPEN') ||
+    ((reviewWorkflowState !== undefined && reviewWorkflowState !== '' && reviewWorkflowState !== 'OPEN') ||
       reviewNavigationStatus === 'resolved')
   const showReviewButton = event.transferEndpoint?.reviewRequired === true &&
     !reviewSettled && reviewNavigationStatus !== 'none'

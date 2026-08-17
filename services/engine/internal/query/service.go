@@ -224,6 +224,7 @@ func (s *Service) ListLedgerEvents(ctx context.Context, req *enginev1.ListLedger
 			ActionProfileId:       v.ActionProfileID,
 			ActionProfileVersion:  v.ActionProfileVersion,
 			ActionBindingId:       v.ActionBindingID,
+			ReviewState:           v.ReviewState,
 		}
 		if v.TransferEndpoint != nil {
 			event.TransferEndpoint = &enginev1.LedgerTransferEndpoint{

@@ -609,6 +609,41 @@ describe('LedgerPage', () => {
     expect(screen.queryByRole('button', { name: '검토하러 가기' })).not.toBeInTheDocument()
   })
 
+  it('shows the dual badge and settled note from the server review state', async () => {
+    const transferEvent = {
+      ...ledgerEvent,
+      eventId: 'execution-server-resolved',
+      revisionId: 'transfer-server-resolved-revision',
+      eventType: 'TRANSFER',
+      flowShape: 'EXTERNAL_OUT',
+      resolution: 'PARTIAL',
+      reviewState: 'RESOLVED',
+      transferEndpoint: {
+        resolution: 'UNKNOWN',
+        kind: 'UNKNOWN',
+        display: '',
+        addressFamily: '',
+        walletSourceId: '',
+        chainCandidates: [],
+        connectionStatus: 'COUNTERPARTY_REVIEW_REQUIRED',
+        reviewRequired: true,
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/ledger?')) return jsonResponse({ items: [transferEvent] })
+      if (isReviewListRequest(url) && !init?.method) return jsonResponse({ items: [] })
+      throw new Error(`unexpected request: ${url}`)
+    }))
+
+    render(<LedgerPage />)
+
+    expect(await screen.findByText('일부 확인 · 검토 완료')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '출금 거래 상세 보기' }))
+    expect(await screen.findByText('검토 완료')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '검토하러 가기' })).not.toBeInTheDocument()
+  })
+
   it('explains when a review-required transfer has no linked review at all', async () => {
     const transferEvent = {
       ...ledgerEvent,
