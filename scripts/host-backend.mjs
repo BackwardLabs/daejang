@@ -2803,7 +2803,7 @@ const loadActiveTaxRuntime = (state) => {
   }
 }
 
-export const hostTaxDBMigrationVersion = '90'
+export const hostTaxDBMigrationVersion = '92'
 
 export const hostTaxQuoteRuntimeControls = (archiveOnly) => {
   if (typeof archiveOnly !== 'boolean') {
@@ -2816,11 +2816,23 @@ export const hostTaxQuoteRuntimeControls = (archiveOnly) => {
   }
 }
 
+// taxd applies ReviewResolved events to the ledger and publishes an
+// application receipt to the ReviewRoom API. Without these variables the
+// review application worker silently never starts and resolutions queue as
+// READY forever, so the ledger keeps showing PARTIAL after every review is
+// answered. dev-e2e forwards the same set to its taxd container.
+export const hostTaxForwardedEnvironmentNames = Object.freeze([
+  'REVIEWROOM_INTERNAL_API_URL',
+  'REVIEWROOM_APPLICATION_RECEIPT_TOKEN',
+  'REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT',
+  'REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP',
+])
+
 const taxEnvironment = (
   taxURL,
   runtime,
   { archiveOnly },
-) => serviceEnvironment([], [], {
+) => serviceEnvironment([...hostTaxForwardedEnvironmentNames], [], {
   DAEJANG_DATABASE_URL: taxURL,
   DAEJANG_ARTIFACT_ROOT: join(artifactRoot, 'tax', 'root'),
   DAEJANG_ARTIFACT_TEMP: join(artifactRoot, 'tax', 'tmp'),
@@ -3794,10 +3806,29 @@ const prepareStableTaxRuntime = async (
   throw error
 }
 
+// taxd itself tolerates a missing ReviewRoom (dev shapes exist without one),
+// but this supervisor runs the production shape where ReviewRoom is present.
+// Without these variables taxd starts healthy while ReviewResolved deliveries
+// queue forever and the ledger never leaves PARTIAL — fail before start
+// instead of running with a silently dead review application worker.
+export const assertTaxReviewApplicationConfigured = (env = process.env) => {
+  const missing = [
+    'REVIEWROOM_INTERNAL_API_URL',
+    'REVIEWROOM_APPLICATION_RECEIPT_TOKEN',
+  ].filter((name) => !String(env[name] ?? '').trim())
+  if (missing.length > 0) {
+    throw new Error(
+      'taxd review application requires ' + missing.join(' and ') +
+        '; without them resolved reviews are never applied to the ledger',
+    )
+  }
+}
+
 const startTaxdRuntime = async (taxURL, runtime) => {
   if (isRunning('taxd')) {
     throw new Error('Tax profile activation requires taxd to be stopped')
   }
+  assertTaxReviewApplicationConfigured()
   const taxdEnvironment = taxEnvironment(
     taxURL,
     runtime,

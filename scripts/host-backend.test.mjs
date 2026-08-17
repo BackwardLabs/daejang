@@ -48,6 +48,8 @@ import {
   containerizedServiceNames,
   hostActiveServiceOrder,
   hostJITForwardedEnvironmentNames,
+  hostTaxForwardedEnvironmentNames,
+  assertTaxReviewApplicationConfigured,
   hostTaxDBMigrationVersion,
   hostTaxProfileRefreshIntervalMs,
   hostTaxProfileRefreshRetryMs,
@@ -172,7 +174,7 @@ test('preflights both production RPC chain identities before services start', as
 })
 
 test('pins taxd to the current required database migration', () => {
-  assert.equal(hostTaxDBMigrationVersion, '90')
+  assert.equal(hostTaxDBMigrationVersion, '92')
   assert.match(
     readFileSync(
       new URL('../deploy/workers.runtime.env.example', import.meta.url),
@@ -2148,6 +2150,35 @@ test('forwards the Etherscan credential only to the JIT boundary', () => {
     'EVM_INDEXER_DATA_DIR',
     'ENV_ETHERSCAN_API_KEY',
   ])
+})
+
+test('forwards the ReviewRoom application receipt settings to the taxd boundary', () => {
+  // Without these, taxd's review application worker silently never starts and
+  // resolved reviews stay unapplied — the ledger keeps reporting PARTIAL.
+  assert.deepEqual(hostTaxForwardedEnvironmentNames, [
+    'REVIEWROOM_INTERNAL_API_URL',
+    'REVIEWROOM_APPLICATION_RECEIPT_TOKEN',
+    'REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT',
+    'REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP',
+  ])
+})
+
+test('refuses to start taxd without the ReviewRoom application settings', () => {
+  assert.throws(
+    () => assertTaxReviewApplicationConfigured({}),
+    /REVIEWROOM_INTERNAL_API_URL and REVIEWROOM_APPLICATION_RECEIPT_TOKEN/,
+  )
+  assert.throws(
+    () => assertTaxReviewApplicationConfigured({
+      REVIEWROOM_INTERNAL_API_URL: 'http://127.0.0.1:8081',
+      REVIEWROOM_APPLICATION_RECEIPT_TOKEN: '   ',
+    }),
+    /REVIEWROOM_APPLICATION_RECEIPT_TOKEN/,
+  )
+  assert.doesNotThrow(() => assertTaxReviewApplicationConfigured({
+    REVIEWROOM_INTERNAL_API_URL: 'http://127.0.0.1:8081',
+    REVIEWROOM_APPLICATION_RECEIPT_TOKEN: 'a'.repeat(48),
+  }))
 })
 
 test('forwards GIWA report deployment settings only to the Web API boundary', () => {

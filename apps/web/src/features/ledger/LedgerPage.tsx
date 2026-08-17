@@ -504,13 +504,18 @@ function LedgerStatusBadges({ event }: { event: LedgerEventModel }) {
   const label = event.resolution === 'RESOLVED'
     ? '처리 완료'
     : event.resolution === 'PARTIAL' ? '일부 확인' : '검토 필요'
+  // 해석 상태와 검토 워크플로 상태는 다른 축이다. 검토를 이미 답했는데
+  // 해석이 아직 PARTIAL 이면 '일부 확인 · 검토 완료' 로 함께 보여준다.
+  const reviewBadge = event.resolution !== 'RESOLVED' && event.reviewState === 'RESOLVED'
+    ? '검토 완료'
+    : undefined
   return <span className="ledger-explorer__badges">
     <b
       className="is-primary"
       data-tone={event.resolution === 'RESOLVED' ? 'success' : 'warning'}
       title={`${ledgerState} · ${valuationState}`}
-      aria-label={`${label}. ${ledgerState}. ${valuationState}`}
-    >{label}</b>
+      aria-label={`${reviewBadge ? `${label} · ${reviewBadge}` : label}. ${ledgerState}. ${valuationState}`}
+    >{reviewBadge ? `${label} · ${reviewBadge}` : label}</b>
   </span>
 }
 
@@ -526,12 +531,14 @@ function LedgerLotNote({ status, lineage }: { status: LotStatus; lineage?: Ledge
 function LedgerExplorerDetail({
   event,
   reviewNavigationStatus,
+  knownReviewStatus,
   onOpenReview,
   lotStatus,
   lotLineage,
 }: {
   event: LedgerEventModel
-  reviewNavigationStatus: 'idle' | 'loading' | 'error'
+  reviewNavigationStatus: 'idle' | 'loading' | 'error' | 'resolved' | 'none'
+  knownReviewStatus?: string
   onOpenReview: (eventId: string) => void
   lotStatus: LotStatus
   lotLineage?: LedgerLotLineageModel
@@ -541,6 +548,14 @@ function LedgerExplorerDetail({
   const material = event.postings.filter((posting) => !feeRoles.has(posting.role))
   const fees = event.postings.filter((posting) => feeRoles.has(posting.role))
   const valued = material.filter((posting) => posting.fairValue || posting.costBasis)
+  // 버튼은 정적 reviewRequired 플래그가 아니라 실제 검토 상태를 따른다.
+  // 확정된 검토만 있으면 '검토 완료', 검토가 없다고 판명되면 안내만 남긴다.
+  const reviewWorkflowState = event.reviewState || knownReviewStatus
+  const reviewSettled = event.transferEndpoint?.reviewRequired === true &&
+    ((reviewWorkflowState !== undefined && reviewWorkflowState !== '' && reviewWorkflowState !== 'OPEN') ||
+      reviewNavigationStatus === 'resolved')
+  const showReviewButton = event.transferEndpoint?.reviewRequired === true &&
+    !reviewSettled && reviewNavigationStatus !== 'none'
   const transferEndpoint = event.eventType === 'TRANSFER'
     && !['FIAT_IN', 'FIAT_OUT'].includes(event.flowShape)
     && !['FIAT_DEPOSIT', 'FIAT_WITHDRAWAL'].includes(event.subtype ?? '')
@@ -557,7 +572,10 @@ function LedgerExplorerDetail({
     {transferEndpoint ? <section className="ledger-explorer-endpoint" data-tone={transferEndpoint.tone}>
       <span>{transferEndpoint.label}</span>
       <div><strong>{transferEndpoint.title}</strong><small>{transferEndpoint.detail}</small></div>
-      {event.transferEndpoint?.reviewRequired ? <span className="ledger-explorer-endpoint__actions">
+      {reviewSettled ? <span className="ledger-explorer-endpoint__actions">
+        <b>{event.reviewResolutionLabel || transferEndpoint.status}</b>
+        <b className="ledger-explorer-endpoint__resolved">검토 완료</b>
+      </span> : showReviewButton ? <span className="ledger-explorer-endpoint__actions">
         <b>{transferEndpoint.status}</b>
         <button
           type="button"
@@ -568,7 +586,9 @@ function LedgerExplorerDetail({
           {reviewNavigationStatus === 'loading' ? '검토 찾는 중…' : '검토하러 가기'}
         </button>
       </span> : <b>{transferEndpoint.status}</b>}
-      {reviewNavigationStatus === 'error' ? <p role="alert">이 거래의 열린 검토를 찾지 못했습니다. 검토 목록을 새로고침한 뒤 다시 시도해 주세요.</p> : null}
+      {reviewSettled ? <p className="ledger-explorer-endpoint__note">{event.reviewResolutionLabel ? `"${event.reviewResolutionLabel}" 으로 확정되었습니다. ` : '검토 답변이 확정되었습니다. '}장부 반영은 자동으로 진행되며 완료되면 상태가 바뀝니다.</p> : null}
+      {reviewNavigationStatus === 'none' ? <p className="ledger-explorer-endpoint__note">이 거래에 열린 검토가 없습니다. 이미 답한 검토라면 장부 반영이 끝나는 대로 상태가 바뀝니다.</p> : null}
+      {reviewNavigationStatus === 'error' ? <p role="alert">검토 목록을 불러오지 못했습니다. 새로고침한 뒤 다시 시도해 주세요.</p> : null}
     </section> : null}
 
     <section className="ledger-explorer-detail__postings" aria-labelledby={`posting-title-${event.eventId}`}>
@@ -649,7 +669,7 @@ export function LedgerPage() {
   const [reviewPreviewStatusById, setReviewPreviewStatusById] = useState<Record<string, ReviewPreviewStatus>>({})
   const reviewPreviewByIdRef = useRef<Record<string, ReviewDetailModel>>({})
   const reviewPreviewLoadingRef = useRef(new Set<string>())
-  const [reviewNavigation, setReviewNavigation] = useState<{ eventId?: string; status: 'idle' | 'loading' | 'error' }>({ status: 'idle' })
+  const [reviewNavigation, setReviewNavigation] = useState<{ eventId?: string; status: 'idle' | 'loading' | 'error' | 'resolved' | 'none' }>({ status: 'idle' })
   const [selectedId, setSelectedId] = useState<string>()
   const [lotLineage, setLotLineage] = useState<LedgerLotLineageModel>()
   const [lotStatus, setLotStatus] = useState<LotStatus>('idle')
@@ -937,6 +957,7 @@ export function LedgerPage() {
       setView('review')
       return
     }
+    let sawSettledReview = reviews.some((review) => review.executionId === eventId)
 
     const generation = reviewListGenerationRef.current
     let cursor = reviewCursor
@@ -957,9 +978,13 @@ export function LedgerPage() {
           setView('review')
           return
         }
+        if (page.items.some((review) => review.executionId === eventId)) sawSettledReview = true
         cursor = page.nextCursor
       }
-      setReviewNavigation({ eventId, status: 'error' })
+      // 전체 목록을 다 봤는데 열린 검토가 없다. 목록 API 는 열린 검토만
+      // 돌려주므로 '이미 확정됨'과 '애초에 없음'은 여기서 구분할 수 없다 —
+      // 두 경우를 모두 덮는 안내 하나로 합친다.
+      setReviewNavigation({ eventId, status: sawSettledReview ? 'resolved' : 'none' })
     } catch {
       if (reviewListGenerationRef.current === generation) {
         setReviewNavigation({ eventId, status: 'error' })
@@ -1181,6 +1206,7 @@ export function LedgerPage() {
                       {isOpen ? <tr className="ledger-explorer__detail-row"><td colSpan={7}><div className="ledger-explorer__detail-panel" id={`ledger-detail-${event.eventId}`}><LedgerExplorerDetail
                         event={event}
                         reviewNavigationStatus={reviewNavigation.eventId === event.eventId ? reviewNavigation.status : 'idle'}
+                        knownReviewStatus={reviews.find((review) => review.executionId === event.eventId)?.status}
                         onOpenReview={openReviewForEvent}
                         lotStatus={lotStatus}
                         lotLineage={lotLineage}
