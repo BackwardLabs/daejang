@@ -153,3 +153,23 @@ test('each public command dispatches exactly one internal container mode', () =>
   assert.match(runner, /-- "\$repo_root\/scripts\/dev-e2e\.sh" \\\n\s+"\$container_action"/)
   assert.doesNotMatch(runner, /\$\(\[\[ "\$action" == up \]\]/)
 })
+
+test('production engine carries every store env the dev-e2e engine uses', async () => {
+  // 같은 image 라도 배선(env)은 compose 파일마다 따로 적힌다. dev 에서 잘
+  // 보이는데 production 에서 저장소 하나가 조용히 빠지는 drift(예: tax
+  // report artifact 누락 — 보고서 상세만 UNAVAILABLE)를 머지 전에 잡는다.
+  const { readFile } = await import('node:fs/promises')
+  const engineEnvKeys = (compose) => {
+    const match = compose.match(/^  engine:\n(?:.|\n)*?^ {4}environment:\n((?: {6}.*\n)+)/m)
+    if (!match) throw new Error('engine environment block not found')
+    return new Set(
+      match[1].split('\n')
+        .map((line) => line.trim().split(':')[0])
+        .filter((key) => key.startsWith('DAEJANG_')),
+    )
+  }
+  const devE2E = engineEnvKeys(await readFile(new URL('../deploy/compose.dev-e2e.yaml', import.meta.url), 'utf8'))
+  const production = engineEnvKeys(await readFile(new URL('../deploy/compose.production.yaml', import.meta.url), 'utf8'))
+  const missing = [...devE2E].filter((key) => !production.has(key))
+  assert.deepEqual(missing, [], `production engine is missing store env keys: ${missing.join(', ')}`)
+})
