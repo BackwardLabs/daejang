@@ -391,7 +391,7 @@ describe('ReportPage', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('presents one revisioned ledger workspace without legacy or EAS controls', async () => {
+  it('presents the current ledger workspace without automatic publication history', async () => {
     render(<ReportWorkspacePage />)
 
     expect(
@@ -407,9 +407,11 @@ describe('ReportPage', () => {
     expect(
       screen.queryByRole('heading', { name: '발행 산출물 이력' }),
     ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: '발행 이력' }),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '발행 이력' }))
+      .not.toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.some(([url]) =>
+      String(url).includes('/history'),
+    )).toBe(false)
     expect(screen.getAllByText('미확정').length).toBeGreaterThanOrEqual(4)
     expect(
       screen.getByText('‘미확정’은 0원을 뜻하지 않습니다.'),
@@ -562,7 +564,7 @@ describe('ReportPage', () => {
           '/api/v1/tax-reports/2027/history?limit=20',
         ),
       ),
-    ).toBe(true)
+    ).toBe(false)
     expect(
       fetchMock.mock.calls.some(([url]) =>
         String(url).endsWith('/api/v1/reports?taxYear=2027'),
@@ -688,7 +690,7 @@ describe('ReportPage', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('keeps the current pointer version when history repeats the same report as revision zero', async () => {
+  it('does not expose automatic generations as user publication revisions', async () => {
     stubReportRequests({
       history: [{ ...partialTaxReport, pointerVersion: 0 }],
     })
@@ -696,13 +698,10 @@ describe('ReportPage', () => {
     render(<ReportWorkspacePage />)
 
     await screen.findByRole('heading', { name: '장부 계산 요약' })
-    const revisionTrigger = await screen.findByRole('button', {
-      name: /2027\. 02\. 01\. 09:00 KST.*현재 발행본 · 발행 2/u,
-    })
-    fireEvent.click(revisionTrigger)
-    expect(screen.getByRole('listbox', { name: '발행본 선택' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: /발행 0/u })).not.toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: '발행본 선택' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('listbox', { name: '발행본 선택' })).not.toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.some(([url]) =>
+      String(url).includes('/history'),
+    )).toBe(false)
   })
 
   it('renders a large disposal ledger inside the exact report detail', async () => {
@@ -910,25 +909,23 @@ describe('ReportPage', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('keeps the revision visible when exact detail returns 404', async () => {
+  it('keeps the current report state visible when exact detail returns 404', async () => {
     stubReportRequests({ detailStatus: 404 })
 
     render(<ReportWorkspacePage />)
 
     expect(
       await screen.findByText(
-        '장부 발행 이력은 확인했지만 상세 문서는 아직 준비되지 않았습니다.',
+        '최신 장부는 확인했지만 상세 문서는 아직 준비되지 않았습니다.',
       ),
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: '발행 이력' }),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
     expect(
       screen.queryByRole('link', { name: /PDF/u }),
     ).not.toBeInTheDocument()
   })
 
-  it('isolates an exact detail failure from revision history', async () => {
+  it('isolates an exact detail failure from the current report pointer', async () => {
     stubReportRequests({ detailStatus: 503 })
 
     render(<ReportWorkspacePage />)
@@ -936,11 +933,9 @@ describe('ReportPage', () => {
     expect(
       await screen.findByRole('alert'),
     ).toHaveTextContent(
-      '발행 이력은 유지되지만 선택한 상세 장부를 불러오지 못했습니다.',
+      '최신 장부의 상세 내용을 불러오지 못했습니다.',
     )
-    expect(
-      screen.getByRole('heading', { name: '발행 이력' }),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '발행 이력' })).not.toBeInTheDocument()
   })
 
   it('isolates an evidence-pack failure from the report detail', async () => {
@@ -966,9 +961,7 @@ describe('ReportPage', () => {
     expect(
       await screen.findByRole('heading', { name: '장부 계산 요약' }),
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', {
-      name: /2027\. 02\. 01\. 09:00 KST.*현재 발행본 · 발행 2/u,
-    })).toBeInTheDocument()
+    expect(screen.queryByRole('listbox', { name: '발행본 선택' })).not.toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: '검토용 PDF' }),
     ).toHaveAttribute(
@@ -1029,22 +1022,13 @@ describe('ReportPage', () => {
 
     render(<ReportWorkspacePage />)
 
-    const revisionTrigger = await screen.findByRole('button', {
-      name: /2027\. 02\. 01\. 09:00 KST.*현재 발행본 · 발행 2/u,
-    })
-    expect(revisionTrigger).toBeInTheDocument()
     expect(
       await screen.findByRole('link', { name: '검토용 PDF' }),
     ).toHaveAttribute(
       'href',
       '/api/v1/tax-reports/tax-report-1/artifacts/pdf',
     )
-    fireEvent.click(revisionTrigger)
-    expect(
-      screen.getByRole('option', {
-        name: /2027\. 01\. 01\. 09:00 KST.*이전 발행본 · 발행 1/u,
-      }),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('listbox', { name: '발행본 선택' })).not.toBeInTheDocument()
   })
 
   it('loads 2026 and updates the shared tax-year preference', async () => {
@@ -1066,11 +1050,9 @@ describe('ReportPage', () => {
         ),
       ),
     ).toBe(true)
-    expect(
-      vi.mocked(fetch).mock.calls.some(([url]) =>
-        String(url).endsWith('/api/v1/tax-reports/2026/history?limit=20'),
-      ),
-    ).toBe(true)
+    expect(vi.mocked(fetch).mock.calls.some(([url]) =>
+      String(url).includes('/history'),
+    )).toBe(false)
 
     fireEvent.change(screen.getByRole('combobox', { name: '조회 기간' }), {
       target: { value: '2025' },

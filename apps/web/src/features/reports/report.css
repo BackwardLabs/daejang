@@ -1410,6 +1410,14 @@
   border-radius: 12px;
 }
 
+.tax-report-v2__panel > .tax-report-v2__attestation {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid var(--report-v3-subtle-border);
+  border-radius: 12px;
+  background: var(--report-v3-subtle);
+}
+
 @media (max-width: 1100px) {
   .tax-report-v2__status {
     flex-wrap: wrap;
