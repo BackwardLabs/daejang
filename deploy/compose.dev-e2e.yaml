@@ -347,7 +347,9 @@ services:
         target: /run/config/jit-bridge.json
     volumes:
       - private_objects:/var/lib/daejang/private:ro
-      - jit_socket:/run/daejang
+      # engine-runtime image에 /run/daejang/pdf-parser(65532)가 있어 같은 경로에
+      # 마운트하면 volume 소유권이 복사돼 jitd의 socket 신뢰 검사가 깨진다.
+      - jit_socket:/run/daejang-jit
 
   posting-evm:
     profiles: ["wallet"]
@@ -396,7 +398,7 @@ configs:
   jit_bridge:
     content: |
       {
-        "endpoint": "unix:///run/daejang/jitd.sock",
+        "endpoint": "unix:///run/daejang-jit/jitd.sock",
         "requestTimeout": "30s",
         "pollInterval": "500ms",
         "awaitTimeout": "2m",

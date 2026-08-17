@@ -263,6 +263,11 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
             "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
                 --file "$compose_file" --project-name "$project_name" \
                 logs --no-color --tail=200 posting-worker tax-engine engine web-api || true
+            if [[ "$wallet_lane" == 1 ]]; then
+                "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
+                    --file "$compose_file" --project-name "$project_name" --profile wallet \
+                    logs --no-color --tail=200 jit-rpc jitd sync-worker posting-evm || true
+            fi
             if [[ -n "$reviewroom_delivery_log" && -f "$reviewroom_delivery_log" ]]; then
                 printf '%s\n' '[ReviewRoom delivery worker]'
                 tail -n 100 "$reviewroom_delivery_log" || true
