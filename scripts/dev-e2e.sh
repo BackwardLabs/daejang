@@ -86,8 +86,10 @@ app_compose_from_state() {
     local app_env app_project
     app_env=$(state_value APP_ENV_FILE)
     app_project=$(state_value APP_PROJECT_NAME)
+    # wallet profile을 항상 활성화해 down이 wallet lane 컨테이너까지 정리하게 한다.
+    # up은 서비스를 명시적으로 지정하므로 wallet 미사용 실행에는 영향이 없다.
     "${compose_command[@]}" --env-file "$app_env" --project-directory "$repo_root" \
-        --file "$compose_file" --project-name "$app_project" "$@"
+        --file "$compose_file" --project-name "$app_project" --profile wallet "$@"
 }
 
 db_compose_from_state() {
@@ -274,7 +276,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
             fi
         fi
         "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
-            --file "$compose_file" --project-name "$project_name" \
+            --file "$compose_file" --project-name "$project_name" --profile wallet \
             down --volumes --remove-orphans >/dev/null 2>&1 || true
         rm -f "$env_file"
         [[ -z "$reviewroom_delivery_log" ]] || rm -f "$reviewroom_delivery_log"
