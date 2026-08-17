@@ -130,6 +130,12 @@ services:
       DAEJANG_REVIEW_ARTIFACT_DATABASE_URL: ${REVIEW_ARTIFACT_DATABASE_URL}
       DAEJANG_REVIEW_ARTIFACT_ROOT: ${REVIEW_ARTIFACT_ROOT:-}
       DAEJANG_REVIEW_ARTIFACT_TEMP: ${REVIEW_ARTIFACT_TEMP:-}
+      # Without the tax artifact store the engine serves the report LIST but
+      # returns UNAVAILABLE for every report DETAIL ("tax report model query
+      # is unavailable") — the page then degrades to its error shell.
+      DAEJANG_TAX_ARTIFACT_DATABASE_URL: ${TAX_ARTIFACT_DATABASE_URL:?Set TAX_ARTIFACT_DATABASE_URL to the daejang_tax_app connection URL}
+      DAEJANG_TAX_ARTIFACT_ROOT: /var/lib/daejang/tax-artifacts/root
+      DAEJANG_TAX_ARTIFACT_TEMP: /var/lib/daejang/tax-artifacts/tmp
       ENGINE_TLS_CERT_PATH: /run/secrets/engine-server-cert.pem
       ENGINE_TLS_KEY_PATH: /run/secrets/engine-server-key.pem
       ENGINE_TLS_CLIENT_CA_PATH: /run/secrets/engine-client-ca.pem
@@ -150,6 +156,7 @@ services:
       - ${ENGINE_PROBE_KEY_PATH}:/run/secrets/probe-client-key.pem:ro
       - ${REVIEW_ARTIFACTS_PATH:?Set REVIEW_ARTIFACTS_PATH to the host review artifacts directory}:/var/lib/daejang/review-artifacts
       - ${SOURCE_ARTIFACTS_PATH:?Set SOURCE_ARTIFACTS_PATH to the host source artifacts directory}:/var/lib/daejang/source-artifacts
+      - ${TAX_ARTIFACTS_PATH:?Set TAX_ARTIFACTS_PATH to the host tax artifacts directory}:/var/lib/daejang/tax-artifacts
       - pdf_parser_socket:/run/daejang/pdf-parser:ro
     depends_on:
       pdf-parser: { condition: service_healthy }
