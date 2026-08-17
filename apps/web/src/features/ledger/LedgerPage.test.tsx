@@ -644,7 +644,7 @@ describe('LedgerPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '출금 거래 상세 보기' }))
     fireEvent.click(screen.getByRole('button', { name: '검토하러 가기' }))
 
-    expect(await screen.findByText(/이 거래에 연결된 검토가 없습니다/)).toBeInTheDocument()
+    expect(await screen.findByText(/이 거래에 열린 검토가 없습니다/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '검토하러 가기' })).not.toBeInTheDocument()
   })
 

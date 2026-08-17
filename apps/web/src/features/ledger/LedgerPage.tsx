@@ -581,7 +581,7 @@ function LedgerExplorerDetail({
         </button>
       </span> : <b>{transferEndpoint.status}</b>}
       {reviewSettled ? <p className="ledger-explorer-endpoint__note">검토 답변이 확정되었습니다. 장부 반영은 자동으로 진행되며 완료되면 상태가 바뀝니다.</p> : null}
-      {reviewNavigationStatus === 'none' ? <p className="ledger-explorer-endpoint__note">이 거래에 연결된 검토가 없습니다. 검토 없이 확인이 필요한 항목은 자료가 추가되면 다시 생성됩니다.</p> : null}
+      {reviewNavigationStatus === 'none' ? <p className="ledger-explorer-endpoint__note">이 거래에 열린 검토가 없습니다. 이미 답한 검토라면 장부 반영이 끝나는 대로 상태가 바뀝니다.</p> : null}
       {reviewNavigationStatus === 'error' ? <p role="alert">검토 목록을 불러오지 못했습니다. 새로고침한 뒤 다시 시도해 주세요.</p> : null}
     </section> : null}
 
@@ -975,7 +975,9 @@ export function LedgerPage() {
         if (page.items.some((review) => review.executionId === eventId)) sawSettledReview = true
         cursor = page.nextCursor
       }
-      // 전체 목록을 다 봤는데 열린 검토가 없다: 이미 확정되었거나 애초에 없다.
+      // 전체 목록을 다 봤는데 열린 검토가 없다. 목록 API 는 열린 검토만
+      // 돌려주므로 '이미 확정됨'과 '애초에 없음'은 여기서 구분할 수 없다 —
+      // 두 경우를 모두 덮는 안내 하나로 합친다.
       setReviewNavigation({ eventId, status: sawSettledReview ? 'resolved' : 'none' })
     } catch {
       if (reviewListGenerationRef.current === generation) {
