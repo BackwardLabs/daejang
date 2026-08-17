@@ -16,7 +16,8 @@ RELEASE_ROOT="${GIWA_RELEASE_ROOT:-$DAEJANG_ROOT/releases}"
 PUBLISHER_STATE_FILE="${DAEJANG_PUBLISHER_STATE_FILE:-/Users/Shared/DaejangRegistry/publisher/state.json}"
 PROMOTION_LOCK_DIR="$RELEASE_ROOT/.promotion.lock"
 MANIFEST_TOOL="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/release-manifest.mjs"
-REVIEWROOM_COMPOSE_FILE="${REVIEWROOM_COMPOSE_FILE:-$DAEJANG_ROOT/daejang/deploy/compose.reviewroom.yaml}"
+# ReviewRoom 은 production compose 파일 하나에 통합되었다 (#186).
+REVIEWROOM_COMPOSE_FILE="${REVIEWROOM_COMPOSE_FILE:-$DAEJANG_ROOT/daejang/deploy/compose.production.yaml}"
 # Follow the existing Mac Studio deployment convention: private deployment env
 # files live in their ignored locations inside the shared deployment checkout.
 # This supplies only Compose interpolation values and paths to the
@@ -382,13 +383,21 @@ reviewroom_compose() {
   [[ -r "$REVIEWROOM_DEPLOY_ENV_FILE" ]] \
     || { echo "ReviewRoom deployment env file is missing: $REVIEWROOM_DEPLOY_ENV_FILE" >&2; return 1; }
 
+  # 통합 compose(#186)는 파일 전체를 인터폴레이션하므로 production env 와
+  # 버전(images.env)도 함께 필요하다. 프로젝트도 통합 프로젝트(daejang)다 —
+  # 별도 프로젝트명을 쓰면 reviewroom 컨테이너가 이중으로 생긴다.
   # A process environment value takes precedence over --env-file. This keeps a
   # stale or accidental REVIEWROOM_IMAGE_REF in the private file from moving a
   # verified Release to another image.
+  local images_env="${DAEJANG_IMAGES_ENV_FILE:-/Users/Shared/DaejangRelease/images.env}"
+  [[ -r "$images_env" ]] \
+    || { echo "release images env file is missing: $images_env (compose-env.sh 로 생성)" >&2; return 1; }
   REVIEWROOM_IMAGE_REF="$image_ref" docker_compose \
+    --env-file "$DAEJANG_ROOT/daejang/deploy/production.env" \
     --env-file "$REVIEWROOM_DEPLOY_ENV_FILE" \
+    --env-file "$images_env" \
     --project-directory "$DAEJANG_ROOT/daejang" \
-    --project-name daejang-reviewroom \
+    --project-name daejang \
     --file "$REVIEWROOM_COMPOSE_FILE" "$@"
 }
 
@@ -686,10 +695,10 @@ deploy_reviewroom() {
   # and all workload-specific secret-file paths. It emits no resolved secrets.
   reviewroom_compose "$image_ref" config --quiet
   reviewroom_compose "$image_ref" --profile migrate config --quiet
-  reviewroom_compose "$image_ref" pull
-  reviewroom_compose "$image_ref" up --detach postgres
-  reviewroom_compose "$image_ref" run --rm migrate
-  reviewroom_compose "$image_ref" up --detach --wait api anchor-worker delivery-worker
+  reviewroom_compose "$image_ref" pull reviewroom-postgres reviewroom-api reviewroom-anchor-worker reviewroom-delivery-worker
+  reviewroom_compose "$image_ref" up --detach reviewroom-postgres
+  reviewroom_compose "$image_ref" run --rm reviewroom-migrate
+  reviewroom_compose "$image_ref" up --detach --wait reviewroom-api reviewroom-anchor-worker reviewroom-delivery-worker
   reviewroom_compose "$image_ref" ps
 }
 
@@ -698,7 +707,9 @@ stop_reviewroom() {
   image_ref="$(reviewroom_image_reference "$release_dir")"
   # Never remove the named database volume during a failed first deployment or
   # a source rollback. Migration/data recovery is a separately approved task.
-  reviewroom_compose "$image_ref" down --remove-orphans
+  # down 금지: 통합 compose 에서 down 은 web-api·engine 까지 전부 내린다.
+  reviewroom_compose "$image_ref" stop reviewroom-api reviewroom-anchor-worker reviewroom-delivery-worker reviewroom-postgres
+  reviewroom_compose "$image_ref" rm -f reviewroom-api reviewroom-anchor-worker reviewroom-delivery-worker reviewroom-postgres
 }
 
 deploy_backend() {
