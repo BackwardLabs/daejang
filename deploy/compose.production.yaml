@@ -200,6 +200,11 @@ services:
     # Same image as engine; the entrypoint selects the workload.
     image: ${ENGINE_IMAGE_REF:?Set ENGINE_IMAGE_REF to an immutable digest reference}
     entrypoint: ["/usr/local/bin/sync-worker"]
+    # The sync workload still runs as a host binary under the supervisor, and
+    # jitd is only reachable from the host. Keep this service out of a bare
+    # `compose up` until the containerized JIT bridge is ready; start it
+    # explicitly with `--profile jit-bridge` when that day comes.
+    profiles: ["jit-bridge"]
     restart: unless-stopped
     environment:
       DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
