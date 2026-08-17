@@ -255,7 +255,7 @@ services:
       DAEJANG_JIT_DEV_E2E_STATE_DIR: /e2e
       DAEJANG_JIT_DEV_E2E_SELECTION_DIR: /var/lib/daejang/selections
       DAEJANG_JIT_DEV_E2E_SUFFIX: dev-e2e
-      DAEJANG_JIT_DEV_E2E_FROM_ADDRESS: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+      DAEJANG_JIT_DEV_E2E_FROM_ADDRESS: ${DAEJANG_JIT_DEV_E2E_FROM_ADDRESS}
       DAEJANG_E2E_SUBJECT_ID: ${DAEJANG_E2E_SUBJECT_ID}
     volumes:
       - jit_state:/e2e
@@ -281,7 +281,7 @@ services:
     environment:
       DAEJANG_JIT_DEV_E2E_MODE: rpc
       DAEJANG_JIT_DEV_E2E_RPC_ADDRESS: :8080
-      DAEJANG_JIT_DEV_E2E_FROM_ADDRESS: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+      DAEJANG_JIT_DEV_E2E_FROM_ADDRESS: ${DAEJANG_JIT_DEV_E2E_FROM_ADDRESS}
     healthcheck:
       test: ["CMD", "/bin/bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 1s
@@ -394,7 +394,9 @@ volumes:
 configs:
   # sync-worker의 JIT 브리지 계약. 공유 Docker 데몬이 개인 checkout을 bind-mount할 수
   # 없으므로 인라인 config로 전달한다. chain·coverage 값은 jit-fixture의 selection
-  # scope(주소·suffix·블록·profileHash)와 정확히 일치해야 한다.
+  # scope(주소·suffix·블록·profileHash)와 정확히 일치해야 한다. coverage 조회는
+  # 날짜 exact-match라서 두 항목을 둔다: EVM e2e 테스트가 쓰는 하루짜리와, 웹 UI
+  # 지갑 flow가 항상 보내는 고정 범위(apps/web의 EVM_WALLET_COVERAGE_*_DATE 상수).
   jit_bridge:
     content: |
       {
@@ -413,6 +415,13 @@ configs:
               {
                 "coverageStart": "2026-07-30",
                 "coverageEnd": "2026-07-30",
+                "indexSnapshotId": "jit-dev-e2e-snapshot-dev-e2e",
+                "fromBlock": 302086,
+                "toBlock": 302086
+              },
+              {
+                "coverageStart": "2025-01-01",
+                "coverageEnd": "2026-08-11",
                 "indexSnapshotId": "jit-dev-e2e-snapshot-dev-e2e",
                 "fromBlock": 302086,
                 "toBlock": 302086

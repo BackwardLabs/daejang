@@ -10,6 +10,9 @@ jit_engine_dir=${DAEJANG_JIT_ENGINE_DIR:-"$repo_root/../daejang-jit-engine"}
 # checkout을 기본값으로 사용한다.
 schema_dir=${SCHEMA_DIR:-/Users/Shared/Projects/01_Daejang/schema}
 wallet_lane=${DAEJANG_DEV_E2E_WALLET:-0}
+# 지갑 lane fixture가 selection을 materialize할 주소. 기본값은 hardhat 테스트 키
+# #0의 주소이며, 본인 지갑으로 UI 테스트를 하려면 그 주소로 덮어쓴다.
+wallet_address=$(printf '%s' "${DAEJANG_DEV_E2E_WALLET_ADDRESS:-0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266}" | LC_ALL=C tr '[:upper:]' '[:lower:]')
 registry=${REGISTRY:-backwardlabss-mac-studio.tail344fa1.ts.net}
 web_port=${DAEJANG_DEV_E2E_WEB_PORT:-15173}
 tax_db_migration_version=${DAEJANG_TAXD_DB_MIGRATION_VERSION:-92}
@@ -233,6 +236,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'DAEJANG_JIT_TEST_IMAGE=%s\n' "$jit_test_image"
         printf 'DAEJANG_SCHEMA_DIR=%s\n' "$schema_dir"
         printf 'JIT_DATABASE_URL=%s\n' "$(docker_host_dsn "${DAEJANG_E2E_JIT_DATABASE_URL:-}")"
+        printf 'DAEJANG_JIT_DEV_E2E_FROM_ADDRESS=%s\n' "$wallet_address"
         printf 'RUN_EVM_PIPELINE_E2E_TESTS=%s\n' "${RUN_EVM_PIPELINE_E2E_TESTS:-0}"
         printf 'OWNER_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_OWNER_DATABASE_URL")"
         printf 'WEB_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_WEB_DATABASE_URL")"
@@ -433,6 +437,11 @@ case "$wallet_lane" in
         exit 2
         ;;
 esac
+if [[ ! "$wallet_address" =~ ^0x[0-9a-f]{40}$ ]]; then
+    printf 'DAEJANG_DEV_E2E_WALLET_ADDRESS가 올바른 EVM 주소가 아닙니다: %s\n' "$wallet_address" >&2
+    exit 2
+fi
+export DAEJANG_DEV_E2E_WALLET_ADDRESS="$wallet_address"
 export DAEJANG_DEV_E2E_WALLET="$wallet_lane"
 export RUN_EVM_PIPELINE_E2E_TESTS="${RUN_EVM_PIPELINE_E2E_TESTS:-0}"
 export DAEJANG_TAXD_DB_MIGRATION_VERSION="$tax_db_migration_version"

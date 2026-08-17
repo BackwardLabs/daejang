@@ -38,6 +38,20 @@ DAEJANG_DEV_E2E_WALLET=1 make dev-e2e-up
   데몬은 개인 checkout(`/Users/wiimdy/...` 등 700 권한)을 bind-mount할 수 없어
   공용 read-only checkout을 기본값으로 사용한다.
 
+### 웹 UI로 직접 테스트할 때
+
+- 본인 브라우저 지갑을 쓰려면 그 주소로 환경을 띄운다:
+  `DAEJANG_DEV_E2E_WALLET=1 DAEJANG_DEV_E2E_WALLET_ADDRESS=0x<주소> make dev-e2e-up`
+  (기본값은 hardhat 테스트 키 #0 주소 `0xf39f…9266`.)
+- 지갑 등록 화면에서 **수집 네트워크는 Ethereum만** 체크한다. fixture는
+  `eip155:1`만 구성돼 있어 Optimism이 포함되면 coverage 조회에서 실패한다.
+- 수집 기간은 현재 지갑 flow가 고정 범위(`EVM_WALLET_COVERAGE_*_DATE` 상수,
+  2025-01-01~2026-08-11)만 보내므로 그대로 두면 된다. bridge config에 이 범위가
+  매핑돼 있으며, UI 상수가 바뀌면 compose의 `jit_bridge` coverage도 함께 바꿔야
+  한다.
+- 수집 완료 후 장부 화면에서 **연도 2026**을 선택하면 fixture 거래
+  (2026-07-30)가 보인다.
+
 ### 결정적 불변식
 
 sync-worker → jitd 경로에서 selection 재사용은 scope
