@@ -14,7 +14,7 @@ services:
     networks: [edge]
 
   web-api:
-    build: { context: .., dockerfile: apps/web-api/Dockerfile }
+    image: ${WEB_API_IMAGE_REF:?Set WEB_API_IMAGE_REF to an immutable digest reference}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -116,11 +116,7 @@ services:
     networks: [edge, backend, database]
 
   engine:
-    build:
-      context: ..
-      dockerfile: services/engine/Dockerfile
-      target: engine-runtime
-      secrets: [github_token]
+    image: ${ENGINE_IMAGE_REF:?Set ENGINE_IMAGE_REF to an immutable digest reference}
     restart: unless-stopped
     environment:
       ENGINE_LISTEN: 0.0.0.0:50051
@@ -166,11 +162,7 @@ services:
     networks: [backend, database]
 
   pdf-parser:
-    build:
-      context: ..
-      dockerfile: services/engine/Dockerfile
-      target: parser-runtime
-      secrets: [github_token]
+    image: ${PDF_PARSER_IMAGE_REF:?Set PDF_PARSER_IMAGE_REF to an immutable digest reference}
     restart: unless-stopped
     network_mode: none
     read_only: true
@@ -198,11 +190,8 @@ services:
       start_period: 5s
 
   sync-worker:
-    build:
-      context: ..
-      dockerfile: services/engine/Dockerfile
-      target: engine-runtime
-      secrets: [github_token]
+    # Same image as engine; the entrypoint selects the workload.
+    image: ${ENGINE_IMAGE_REF:?Set ENGINE_IMAGE_REF to an immutable digest reference}
     entrypoint: ["/usr/local/bin/sync-worker"]
     restart: unless-stopped
     environment:
@@ -234,6 +223,3 @@ volumes:
   source_artifacts: {}
   review_artifacts: {}
   pdf_parser_socket: {}
-secrets:
-  github_token:
-    environment: GH_PAT
