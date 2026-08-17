@@ -66,7 +66,7 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
     expect(publication).toMatchObject({
       reportId: REPORT_ID,
       revision: 1,
-      sourceVersion: 'giwa.tax-report-publication.v2',
+      sourceVersion: 'giwa.tax-report-publication.v3',
       derivationRuleDigest:
         TAX_REPORT_DERIVATION_RULE_DIGEST,
     })
@@ -78,7 +78,7 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
       coverageAssurance: 'DOCUMENT_METADATA_VERIFIED',
       coverageStatus: 'COMPLETE',
       derivationRuleVersion:
-        'giwa.tax-report-publication-allowlist.v2',
+        'giwa.tax-report-publication-allowlist.v3',
       evidencePackDigest: 'd'.repeat(64),
       filingStatus: 'READY',
       finality: 'FINAL',
@@ -109,7 +109,7 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
     )
   })
 
-  it('does not publish a provisional or review-required report', async () => {
+  it('publishes an exact current provisional review snapshot without claiming filing readiness', async () => {
     const { source } = sourceWithRows([
       row({
         finality: 'PROVISIONAL',
@@ -121,11 +121,26 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
       }),
     ])
 
-    await expect(
-      source.getPublication(OWNER_ID, REPORT_ID),
-    ).rejects.toBeInstanceOf(
-      InconsistentTaxReportPublicationError,
-    )
+    const publication = await source.getPublication(OWNER_ID, REPORT_ID)
+    const safe = JSON.parse(
+      new TextDecoder().decode(publication?.safeArtifactBytes),
+    ) as Record<string, unknown>
+    expect(safe).toMatchObject({
+      finality: 'PROVISIONAL',
+      filingStatus: 'BLOCKED',
+      reportStatus: 'PARTIAL',
+      coverageStatus: 'PARTIAL',
+      taxYearCloseStatus: 'OPEN',
+    })
+  })
+
+  it('fails closed for an unreadable building generation', async () => {
+    const { source } = sourceWithRows([
+      row({ generation_state: 'BUILDING' }),
+    ])
+
+    await expect(source.getPublication(OWNER_ID, REPORT_ID))
+      .rejects.toBeInstanceOf(InconsistentTaxReportPublicationError)
   })
 
   it('does not reinterpret a DB pointer version as an EAS revision', async () => {

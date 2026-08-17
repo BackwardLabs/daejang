@@ -10,9 +10,9 @@ import type { Hex32 } from './types.js'
 
 const REPORT_ID_PATTERN = /^tax-report-v2:[0-9a-f]{64}$/u
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u
-const SOURCE_VERSION = 'giwa.tax-report-publication.v2'
+const SOURCE_VERSION = 'giwa.tax-report-publication.v3'
 const DERIVATION_RULE_VERSION =
-  'giwa.tax-report-publication-allowlist.v2'
+  'giwa.tax-report-publication-allowlist.v3'
 
 export const TAX_REPORT_DERIVATION_RULE_DIGEST =
   `0x${createHash('sha256')
@@ -106,23 +106,30 @@ const publicationFromRow = (
     !REPORT_ID_PATTERN.test(reportId) ||
     !Number.isSafeInteger(row.tax_year) ||
     Number(row.tax_year) < 2025 ||
-    row.finality !== 'FINAL' ||
-    row.status !== 'FINAL' ||
-    row.filing_status !== 'READY' ||
+    (row.finality !== 'FINAL' && row.finality !== 'PROVISIONAL') ||
+    (row.status !== 'FINAL' && row.status !== 'PARTIAL') ||
+    (row.filing_status !== 'READY' && row.filing_status !== 'BLOCKED') ||
     (row.generation_state !== 'ACTIVE' &&
+      row.generation_state !== 'REVIEW_REQUIRED' &&
       row.generation_state !== 'SUPERSEDED') ||
     !validDigest(row.generation_id) ||
     pointerVersion === undefined ||
     !validDigest(row.report_model_v2_artifact_digest) ||
     !validDigest(row.evidence_pack_v2_artifact_digest) ||
     !validDigest(row.policy_artifact_digest) ||
-    row.coverage_status !== 'COMPLETE' ||
+    (row.coverage_status !== 'COMPLETE' &&
+      row.coverage_status !== 'PARTIAL' &&
+      row.coverage_status !== 'UNKNOWN') ||
     (row.coverage_assurance !== 'DOCUMENT_METADATA_VERIFIED' &&
-      row.coverage_assurance !== 'CHAIN_VERIFIED') ||
-    row.tax_year_close_status !== 'CLOSED' ||
+      row.coverage_assurance !== 'CHAIN_VERIFIED' &&
+      row.coverage_assurance !== 'USER_DECLARED' &&
+      row.coverage_assurance !== 'UNKNOWN') ||
+    (row.tax_year_close_status !== 'OPEN' &&
+      row.tax_year_close_status !== 'CLOSED') ||
     calculatedAsOf === undefined ||
     (requireCurrent &&
-      (row.generation_state !== 'ACTIVE' ||
+      ((row.generation_state !== 'ACTIVE' &&
+        row.generation_state !== 'REVIEW_REQUIRED') ||
         row.is_current_report !== true ||
         row.is_current_tax_result !== true ||
         row.is_current_ledger_scope !== true ||
@@ -224,7 +231,7 @@ export class PostgresTaxReportAttestationPublicationSource
       throw new InconsistentTaxReportPublicationError()
     }
     // A route lookup omits revision and is allowed to prepare only the current
-    // filing-ready report. The durable attestation store supplies revision 1
+    // readable current report. The durable attestation store supplies revision 1
     // while hydrating an existing record, so a superseded immutable report can
     // still be verified after a newer report becomes current.
     return publicationFromRow(

@@ -49,13 +49,13 @@ describe('ReportAttestationControl', () => {
       />,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: '상태 갱신·검증' }))
+    fireEvent.click(await screen.findByRole('button', { name: '증빙 상태 확인' }))
     expect(api.prepare).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: '변경 불가 증명 대상 확인' })).toBeInTheDocument()
     expect(screen.getByText('GIWA 테스트 네트워크')).toBeInTheDocument()
     expect(screen.getByText('증명 범위')).toBeInTheDocument()
-    expect(screen.getByText('현재 발행본')).toBeInTheDocument()
-    expect(screen.getByText('이 발행본의 계산 결과와 원본 근거')).toBeInTheDocument()
+    expect(screen.getByText('현재 장부')).toBeInTheDocument()
+    expect(screen.getByText('현재 계산 결과와 원본 근거')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '변경 불가 증명 제출' }))
     expect(await screen.findByText('검증 가능한 승인본')).toBeInTheDocument()
     expect(screen.getByRole('dialog', { name: '블록체인 기록 완료' })).toBeInTheDocument()
@@ -98,8 +98,8 @@ describe('ReportAttestationControl', () => {
     expect(screen.getByText('원본 근거 보관됨')).toBeInTheDocument()
     expect(screen.queryByText(transactionHash)).not.toBeInTheDocument()
     expect(screen.queryByText(attestationUID)).not.toBeInTheDocument()
-    expect(screen.getByText('이 발행본에 남은 온체인 증명을 읽기 전용으로 확인합니다.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '새 증명 제출 불가' })).toBeDisabled()
+    expect(screen.getByText('이 장부에 남은 블록체인 증명을 확인합니다.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '현재 장부 확인 필요' })).toBeDisabled()
     expect(api.getStatus).toHaveBeenCalledWith(reportId, expect.any(AbortSignal))
     expect(api.getVerification).toHaveBeenCalledWith(
       reportId,

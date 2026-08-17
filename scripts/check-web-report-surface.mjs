@@ -13,7 +13,8 @@ const profiles = {
       '연간 세금 요약',
       '신고 준비 자료 PDF',
       '검토용 PDF',
-      '발행 이력',
+      '최신 반영',
+      'EAS 증빙',
     ],
     forbidden: [
       'SYNTHETIC · GIWA SEPOLIA TESTNET',
@@ -21,6 +22,8 @@ const profiles = {
       'SYNTHETIC_POLICY_PASS',
       '/report-payments/capabilities',
       'FINAL 현재 세금 결과 내려받기',
+      '발행 이력',
+      '연간 자료·마감 확인 후 가능합니다.',
     ],
   },
   'giwa28-demo': {

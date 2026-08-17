@@ -135,13 +135,13 @@ export function ReportAttestationControl({
     <section className="tax-report-v2__attestation" aria-label="블록체인 기록 검증">
       <div>
         <span>기록 검증</span>
-        <h4>블록체인 기록 검증</h4>
+        <h4>현재 장부 증빙</h4>
         <p>
           {eligible
-            ? '현재 확정 장부의 변경 이력 확인 정보를 제출하고 검증합니다.'
+            ? '현재 장부의 계산 결과와 원본 근거를 변경 불가한 기록으로 남깁니다.'
             : status?.submissionEvidence
-              ? '이 발행본에 남은 온체인 증명을 읽기 전용으로 확인합니다.'
-            : '연간 자료·마감 확인 후 가능합니다.'}
+              ? '이 장부에 남은 블록체인 증명을 확인합니다.'
+            : '현재 장부를 불러온 뒤 증빙할 수 있습니다.'}
         </p>
       </div>
       <div className="tax-report-v2__attestation-action">
@@ -169,12 +169,12 @@ export function ReportAttestationControl({
           onClick={() => setConfirmOpen(true)}
         >
           {!eligible
-            ? '새 증명 제출 불가'
+            ? '현재 장부 확인 필요'
             : phase === 'running'
               ? '처리 중…'
               : status
-                ? '상태 갱신·검증'
-                : '온체인 검증 시작'}
+                ? '증빙 상태 확인'
+                : '현재 장부 증빙하기'}
         </button>
         {phase === 'error' ? <small role="alert">온체인 검증 상태를 확인하지 못했습니다.</small> : null}
       </div>
@@ -188,11 +188,11 @@ export function ReportAttestationControl({
               </div>
               <button type="button" onClick={() => setConfirmOpen(false)} aria-label="증명 확인 닫기">닫기</button>
             </header>
-            <p>제출하면 이 발행본의 변경 이력 확인 정보가 네트워크에 남습니다. 수정이 필요하면 새 발행본을 만들어야 합니다.</p>
+            <p>제출하면 현재 장부의 정확한 상태가 네트워크에 남습니다. 이후 계산 내용이 바뀌면 새 상태를 다시 증빙할 수 있습니다.</p>
             <dl>
               <div><dt>기록 네트워크</dt><dd>GIWA 테스트 네트워크</dd></div>
-              <div><dt>발행본</dt><dd>현재 발행본</dd></div>
-              <div><dt>증명 범위</dt><dd>이 발행본의 계산 결과와 원본 근거</dd></div>
+              <div><dt>대상</dt><dd>현재 장부</dd></div>
+              <div><dt>증명 범위</dt><dd>현재 계산 결과와 원본 근거</dd></div>
             </dl>
             <footer>
               <button type="button" onClick={() => setConfirmOpen(false)}>취소</button>
@@ -211,7 +211,7 @@ export function ReportAttestationControl({
               </div>
               <button type="button" onClick={() => setSuccessOpen(false)} aria-label="블록체인 기록 완료 닫기">닫기</button>
             </header>
-            <p>이 발행본의 변경 이력 확인 정보가 네트워크에 기록되었습니다. 원본 근거 보기에서 연결 상태를 확인할 수 있습니다.</p>
+            <p>현재 장부의 계산 결과와 원본 근거가 네트워크에 기록되었습니다.</p>
             <dl>
               <div><dt>기록 네트워크</dt><dd>GIWA 테스트 네트워크</dd></div>
               <div><dt>검증 기록</dt><dd>원본 근거 보관됨</dd></div>

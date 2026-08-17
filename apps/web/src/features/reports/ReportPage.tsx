@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ApiClientError } from '../../api/client.ts'
 import { loadLedger } from '../../api/productApi.ts'
 import { AppSidebar } from '../../components/AppSidebar.tsx'
@@ -13,7 +13,6 @@ import {
   loadCurrentTaxReport,
   loadTaxReportDetail,
   loadTaxReportGenerationStatus,
-  loadTaxReportHistory,
   type AnyTaxReportDetailModel,
   type TaxReportGenerationStatusModel,
   type TaxReportModel,
@@ -37,150 +36,6 @@ const newestFirst = (left: TaxReportModel, right: TaxReportModel) => {
     String(left.pointerVersion),
     undefined,
     { numeric: true },
-  )
-}
-
-const mergeRevisions = (
-  history: TaxReportModel[],
-  ...currentReports: Array<TaxReportModel | null>
-) => {
-  const revisions = new Map<string, TaxReportModel>()
-  // History currently carries pointerVersion=0 because pointerVersion belongs to
-  // the current pointer, not to an intrinsic historical revision. Insert current
-  // pointers last so their authoritative pointer version wins for duplicate IDs.
-  for (const report of [...history, ...currentReports]) {
-    if (report) revisions.set(report.reportId, report)
-  }
-  return [...revisions.values()].sort(newestFirst)
-}
-
-const revisionDateTimeLabel = (value: string) =>
-  `${new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'Asia/Seoul',
-  }).format(new Date(value))} KST`
-
-const revisionDateLabel = (value: string) =>
-  new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    timeZone: 'Asia/Seoul',
-  }).format(new Date(value))
-
-const revisionDateKey = (value: string) => {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    timeZone: 'Asia/Seoul',
-  }).formatToParts(new Date(value))
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((item) => item.type === type)?.value ?? ''
-  return `${part('year')}-${part('month')}-${part('day')}`
-}
-
-function ReportRevisionPicker({
-  currentReportId,
-  onSelect,
-  revisions,
-  selectedReportId,
-}: {
-  currentReportId?: string
-  onSelect: (reportId: string) => void
-  revisions: TaxReportModel[]
-  selectedReportId?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const selected = revisions.find((report) => report.reportId === selectedReportId)
-  const groups = useMemo(() => {
-    const byDate = new Map<string, TaxReportModel[]>()
-    for (const report of revisions) {
-      const key = revisionDateKey(report.issuedAt)
-      byDate.set(key, [...(byDate.get(key) ?? []), report])
-    }
-    return [...byDate.entries()]
-  }, [revisions])
-
-  useEffect(() => {
-    if (!open) return
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnOutsideClick)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsideClick)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [open])
-
-  if (!selected) return null
-
-  const selectedIsCurrent = selected.reportId === currentReportId
-  return (
-    <div className="tax-report-v2__revision-control" ref={rootRef}>
-      <button
-        type="button"
-        className="tax-report-v2__revision-trigger"
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span>
-          <strong>{revisionDateTimeLabel(selected.issuedAt)}</strong>
-          <small>
-            {selectedIsCurrent ? '현재 발행본' : '이전 발행본'}
-            {String(selected.pointerVersion) !== '0'
-              ? ` · 발행 ${String(selected.pointerVersion)}`
-              : ''}
-          </small>
-        </span>
-        <i aria-hidden="true" />
-      </button>
-      {open ? (
-        <div className="tax-report-v2__revision-popover" role="listbox" aria-label="발행본 선택">
-          {groups.map(([date, reports]) => (
-            <section key={date} aria-label={revisionDateLabel(reports[0]!.issuedAt)}>
-              <h4>{revisionDateLabel(reports[0]!.issuedAt)}</h4>
-              {reports.map((report) => {
-                const isCurrent = report.reportId === currentReportId
-                const isSelected = report.reportId === selectedReportId
-                return (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    key={report.reportId}
-                    onClick={() => {
-                      onSelect(report.reportId)
-                      setOpen(false)
-                    }}
-                  >
-                    <strong>{revisionDateTimeLabel(report.issuedAt)}</strong>
-                    <small>
-                      {isCurrent ? '현재 발행본' : '이전 발행본'}
-                      {String(report.pointerVersion) !== '0'
-                        ? ` · 발행 ${String(report.pointerVersion)}`
-                        : ''}
-                    </small>
-                  </button>
-                )
-              })}
-            </section>
-          ))}
-        </div>
-      ) : null}
-    </div>
   )
 }
 
@@ -313,7 +168,7 @@ const reportPageHeader = (status: TaxReportGenerationStatusModel | null) => {
   }
   return {
     title: '세무 장부',
-    description: '발행된 계산 결과를 장부로 검토하고, 선택한 발행본의 PDF를 생성합니다.',
+    description: '최신 계산 결과를 장부로 검토하고, 필요할 때 PDF와 블록체인 증명을 생성합니다.',
   }
 }
 
@@ -546,7 +401,6 @@ export function ReportWorkspacePage() {
   )
   const [currentReport, setCurrentReport] =
     useState<TaxReportModel | null>(null)
-  const [revisions, setRevisions] = useState<TaxReportModel[]>([])
   const [selectedReportId, setSelectedReportId] = useState<string>()
   const [taxStatus, setTaxStatus] =
     useState<'error' | 'loading' | 'ready' | 'unsupported'>('loading')
@@ -565,7 +419,6 @@ export function ReportWorkspacePage() {
     const controller = new AbortController()
 
     setCurrentReport(null)
-    setRevisions([])
     setSelectedReportId(undefined)
     setReportDetail(null)
     setAssetPresentations({})
@@ -603,7 +456,6 @@ export function ReportWorkspacePage() {
         const readableStatuses = blockingStatus
           ? []
           : statuses.filter(canReadCurrent)
-        const canReadReportData = readableStatuses.length > 0
         const currentResults = await Promise.allSettled(
           readableStatuses.map((status) =>
             loadCurrentTaxReport(year, status.finality, controller.signal),
@@ -615,22 +467,6 @@ export function ReportWorkspacePage() {
             result.status === 'fulfilled')
           .map((result) => result.value.report)
         const latestCurrent = availableCurrents.sort(newestFirst)[0] ?? null
-        const historyResult = canReadReportData && latestCurrent
-          ? await loadTaxReportHistory(year, controller.signal)
-              .then((value) => ({ status: 'fulfilled' as const, value }))
-              .catch((reason: unknown) => ({ status: 'rejected' as const, reason }))
-          : {
-              status: 'fulfilled' as const,
-              value: { items: [] as TaxReportModel[] },
-            }
-        if (controller.signal.aborted) return
-        const history = historyResult.status === 'fulfilled'
-          ? historyResult.value.items
-          : []
-        const availableRevisions = mergeRevisions(
-          history,
-          ...availableCurrents,
-        )
         const rejectedCurrent = currentResults.find(
           (result) => result.status === 'rejected',
         )
@@ -646,10 +482,7 @@ export function ReportWorkspacePage() {
         setGenerationStatus(
           blockingStatus ?? selectGenerationStatus(statuses, latestCurrent),
         )
-        setRevisions(availableRevisions)
-        setSelectedReportId(
-          latestCurrent?.reportId ?? availableRevisions[0]?.reportId,
-        )
+        setSelectedReportId(latestCurrent?.reportId)
         setTaxStatus('ready')
 
         const building = statuses.some((status) => status.state === 'BUILDING')
@@ -725,9 +558,9 @@ export function ReportWorkspacePage() {
     return () => controller.abort()
   }, [selectedReportId, year])
 
-  const selectedReport = revisions.find(
-    (report) => report.reportId === selectedReportId,
-  )
+  const selectedReport = currentReport?.reportId === selectedReportId
+    ? currentReport
+    : undefined
 
   function handleYearChange(nextYear: AppYear) {
     buildingPollCount.current = 0
@@ -746,15 +579,6 @@ export function ReportWorkspacePage() {
     showsInitialLoadingSurface || showsV2LoadingSurface
   const showsModernReportSurface =
     showsV2Detail || showsReportLoadingSurface
-  const revisionControl = revisions.length > 0 ? (
-    <ReportRevisionPicker
-      currentReportId={currentReport?.reportId}
-      onSelect={setSelectedReportId}
-      revisions={revisions}
-      selectedReportId={selectedReportId}
-    />
-  ) : null
-
   return (
     <div className="ledger-page report-page product-shell">
       <AppSidebar
@@ -789,7 +613,7 @@ export function ReportWorkspacePage() {
               세무 장부는 2025년 이후 과세연도부터 제공됩니다.
             </p>
           ) : null}
-          {taxStatus === 'ready' && revisions.length === 0 ? (
+          {taxStatus === 'ready' && !currentReport ? (
             generationStatus ? (
               <ReportGenerationState
                 status={generationStatus}
@@ -800,7 +624,7 @@ export function ReportWorkspacePage() {
 
           {!showsModernReportSurface && taxStatus === 'ready' && generationStatus &&
           (generationStatus.state === 'REVIEW_REQUIRED' ||
-            !canReadCurrent(generationStatus)) && revisions.length > 0 ? (
+            !canReadCurrent(generationStatus)) && currentReport ? (
             <ReportGenerationState
               status={generationStatus}
               onRetry={() => setStatusRequestVersion((value) => value + 1)}
@@ -820,17 +644,6 @@ export function ReportWorkspacePage() {
             </aside>
           ) : null}
 
-          {revisions.length > 0 && !showsModernReportSurface ? (
-            <section className="tax-report-revisions" aria-labelledby="tax-report-revisions-title">
-              <h3 id="tax-report-revisions-title">발행 이력</h3>
-              <div>
-                <span>{selectedReportId === currentReport?.reportId ? '현재 장부' : '이전 발행본'}</span>
-                <strong>{selectedReport ? revisionDateTimeLabel(selectedReport.issuedAt) : '발행본 선택'}</strong>
-              </div>
-              {revisionControl}
-            </section>
-          ) : null}
-
           {showsReportLoadingSurface ? (
             <article className="tax-report-v2 tax-report-v2--loading" aria-busy="true">
               <header className="tax-report-v2__header">
@@ -838,15 +651,14 @@ export function ReportWorkspacePage() {
                   <h1>{year} 가상자산 세금 리포트</h1>
                   <p>
                     {showsInitialLoadingSurface
-                      ? '발행된 계산 결과와 장부 상태를 확인하고 있습니다.'
-                      : '선택한 발행본의 계산 결과를 불러오고 있습니다.'}
+                      ? '최신 계산 결과와 장부 상태를 확인하고 있습니다.'
+                      : '최신 장부의 계산 결과를 불러오고 있습니다.'}
                   </p>
                 </div>
               </header>
               <section className="tax-report-v2__status" aria-label="리포트 불러오는 중">
                 <span className="tax-report-v2__status-context">귀속연도 {year}</span>
                 <div className="tax-report-v2__status-spacer" />
-                {showsV2LoadingSurface ? revisionControl : null}
               </section>
               <div className="tax-report-v2__loading-body" role="status">
                 <span />
@@ -863,14 +675,12 @@ export function ReportWorkspacePage() {
           ) : null}
           {detailStatus === 'not-found' ? (
             <p className="report-detail-state">
-              장부 발행 이력은 확인했지만 상세 문서는 아직 준비되지
-              않았습니다.
+              최신 장부는 확인했지만 상세 문서는 아직 준비되지 않았습니다.
             </p>
           ) : null}
           {detailStatus === 'error' ? (
             <p className="report-detail-state is-error" role="alert">
-              발행 이력은 유지되지만 선택한 상세 장부를 불러오지
-              못했습니다.
+              최신 장부의 상세 내용을 불러오지 못했습니다.
             </p>
           ) : null}
           {detailStatus === 'ready' && reportDetail ? (
@@ -886,7 +696,6 @@ export function ReportWorkspacePage() {
                 }
                 isCurrent={selectedReportId === currentReport?.reportId}
                 filingStatus={selectedReport?.filingStatus}
-                revisionControl={revisionControl}
                 generationState={
                   selectedReportId === currentReport?.reportId &&
                   (generationStatus?.state === 'ACTIVE' ||

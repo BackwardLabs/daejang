@@ -302,6 +302,7 @@ describe('TaxReportDetailV2', () => {
       assetPresentations={assetPresentations}
       pointerVersion={3}
       isCurrent
+      generationState="REVIEW_REQUIRED"
     />)
 
     expect(screen.getByRole('heading', {
@@ -318,16 +319,21 @@ describe('TaxReportDetailV2', () => {
       name: /계산식·법적 근거 보기/u,
     })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', {
-      name: '현재 발행본의 처분가액 비교',
+      name: '현재 장부의 처분가액 비교',
     })).toBeInTheDocument()
     expect(screen.getByText('528,000 KRW')).toBeInTheDocument()
     expect(screen.getByText('2027. 07. 01. 09:00:00 KST')).toBeInTheDocument()
-    expect(screen.getByText('연간 자료·마감 확인 후 가능합니다.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '새 증명 제출 불가' })).toBeDisabled()
+    expect(screen.queryByText('연간 자료·마감 확인 후 가능합니다.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'EAS 증빙' }))
+    expect(screen.getByRole('heading', { name: '현재 장부 EAS 증빙' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '현재 장부 증빙하기' })).toBeEnabled()
+    })
     expect(screen.getByRole('link', { name: 'PDF 내려받기' })).toHaveAttribute(
       'href',
       `/api/v1/tax-reports/${encodeURIComponent(report.reportId)}/artifacts/pdf`,
     )
+    fireEvent.click(screen.getByRole('tab', { name: '세금 요약' }))
     expect(screen.getByRole('heading', {
       name: '직접 검토할 거래가 없습니다',
     })).toBeInTheDocument()

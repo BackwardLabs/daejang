@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 
 import { requestRaw } from '../../api/client.ts'
 import { AppLink } from '../../components/AppLink.tsx'
@@ -15,13 +15,14 @@ import { ReportAttestationControl } from './ReportAttestationControl.tsx'
 import { formatLedgerQuantity } from '../ledger/ledgerPresentation.ts'
 import type { ReportAssetPresentations } from './reportAssetPresentation.ts'
 
-type V2Tab = 'summary' | 'assets' | 'events' | 'basis'
+type V2Tab = 'summary' | 'assets' | 'events' | 'basis' | 'verification'
 
 const tabs: Array<{ id: V2Tab; label: string }> = [
   { id: 'summary', label: '세금 요약' },
   { id: 'assets', label: '자산별 장부' },
   { id: 'events', label: '소득·처분' },
   { id: 'basis', label: '계산·법적 근거' },
+  { id: 'verification', label: 'EAS 증빙' },
 ]
 
 const reportDenominationSymbols: Record<string, string> = {
@@ -383,7 +384,6 @@ export function TaxReportDetailV2({
   isCurrent = false,
   generationState,
   filingStatus,
-  revisionControl,
 }: {
   report: TaxReportV2DetailModel
   assetPresentations?: ReportAssetPresentations
@@ -391,7 +391,6 @@ export function TaxReportDetailV2({
   isCurrent?: boolean
   generationState?: 'ACTIVE' | 'REVIEW_REQUIRED'
   filingStatus?: TaxReportModel['filingStatus']
-  revisionControl?: ReactNode
 }) {
   const [activeTab, setActiveTab] = useState<V2Tab>('summary')
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
@@ -424,10 +423,6 @@ export function TaxReportDetailV2({
     if (!Number.isFinite(rate)) return '세율 확인 필요'
     return `${new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 4 }).format(rate)}%`
   }
-  const verifiedCoverage = [
-    'DOCUMENT_METADATA_VERIFIED',
-    'CHAIN_VERIFIED',
-  ].includes(report.dataCoverage.assurance)
   const effectiveFilingStatus = filingStatus ?? report.filingStatus
   const disposalCount =
     report.counts.disposals + report.counts.feeAssetDisposals
@@ -443,14 +438,7 @@ export function TaxReportDetailV2({
   const chartMaximum = chartAssets[0]?.amount ?? 0n
   const attestationEligible =
     isCurrent &&
-    generationState === 'ACTIVE' &&
-    effectiveFilingStatus === 'READY' &&
-    report.reportFinality === 'FINAL' &&
-    report.status === 'FINAL' &&
-    report.calculationStatus === 'COMPLETE' &&
-    report.taxYearCloseStatus === 'CLOSED' &&
-    report.dataCoverage.status === 'COMPLETE' &&
-    verifiedCoverage
+    (generationState === 'ACTIVE' || generationState === 'REVIEW_REQUIRED')
 
   useEffect(() => {
     if (!pdfPreviewOpen) {
@@ -507,8 +495,8 @@ export function TaxReportDetailV2({
           </h1>
           <p>
             {report.reportFinality === 'FINAL'
-              ? '검증된 연간 데이터와 발행본에 고정된 정책으로 계산한 결과입니다'
-              : '지금까지 등록된 데이터와 발행본에 고정된 정책으로 계산한 예상값입니다'}
+              ? '검증된 연간 데이터와 고정된 정책으로 계산한 최신 결과입니다'
+              : '지금까지 등록된 데이터와 고정된 정책으로 계산한 최신 예상값입니다'}
           </p>
         </div>
         <div className="tax-report-v2__pdf-actions">
@@ -523,7 +511,7 @@ export function TaxReportDetailV2({
         </span>
         <i aria-hidden="true" />
         <span className="tax-report-v2__status-time">
-          최근 계산 <time dateTime={report.calculatedAsOf}>{dateTimeLabel(report.calculatedAsOf)}</time>
+          최신 반영 <time dateTime={report.issuedAt}>{dateTimeLabel(report.issuedAt)}</time>
         </span>
         <button
           type="button"
@@ -545,7 +533,6 @@ export function TaxReportDetailV2({
           </span>
         </div>
         <div className="tax-report-v2__status-spacer" />
-        {revisionControl}
       </section>
 
       <nav
@@ -575,7 +562,7 @@ export function TaxReportDetailV2({
               <span>연간 세금 요약</span>
               <h3>세금 계산 결과</h3>
             </div>
-            <p>발행본에 저장된 계산 결과이며, 이 화면에서 다시 계산하지 않습니다.</p>
+            <p>현재 연결된 데이터가 반영된 최신 계산 결과입니다.</p>
           </header>
           <div className="tax-report-v2__kpis">
             <article>
@@ -678,7 +665,7 @@ export function TaxReportDetailV2({
             <header>
               <div>
                 <span>자산별 처분 규모</span>
-                <h4 id="tax-report-v2-asset-chart-title">현재 발행본의 처분가액 비교</h4>
+                <h4 id="tax-report-v2-asset-chart-title">현재 장부의 처분가액 비교</h4>
               </div>
               <small>확인된 처분가액 기준 · 최대 6개 자산</small>
             </header>
@@ -870,7 +857,7 @@ export function TaxReportDetailV2({
         <section className="tax-report-v2__panel" role="tabpanel" id="tax-report-v2-panel-basis" aria-labelledby="tax-report-v2-tab-basis">
           <header>
             <div><span>계산 기준과 원본 근거</span><h3>계산 규칙과 법적 근거</h3></div>
-            <p>이 발행본에 적용된 계산 기준과 확인 가능한 근거 자료입니다.</p>
+            <p>현재 장부에 적용된 계산 기준과 확인 가능한 근거 자료입니다.</p>
           </header>
           <div className="tax-report-v2__basis-grid">
             <section>
@@ -943,12 +930,20 @@ export function TaxReportDetailV2({
           ) : null}
         </section>
       ) : null}
-      <ReportAttestationControl
-        reportId={report.reportId}
-        reportModelDigest={report.reportModelDigest}
-        pointerVersion={pointerVersion ?? 1}
-        eligible={attestationEligible}
-      />
+      {activeTab === 'verification' ? (
+        <section className="tax-report-v2__panel" role="tabpanel" id="tax-report-v2-panel-verification" aria-labelledby="tax-report-v2-tab-verification">
+          <header>
+            <div><span>변경 불가 증명</span><h3>현재 장부 EAS 증빙</h3></div>
+            <p>필요한 시점에 현재 장부와 원본 근거의 정확한 상태를 블록체인에 기록합니다. 이 기록은 세무 확정이나 신고 승인을 뜻하지 않습니다.</p>
+          </header>
+          <ReportAttestationControl
+            reportId={report.reportId}
+            reportModelDigest={report.reportModelDigest}
+            pointerVersion={pointerVersion ?? 1}
+            eligible={attestationEligible}
+          />
+        </section>
+      ) : null}
       {pdfPreviewOpen ? (
         <div className="tax-report-v2__pdf-dialog" role="dialog" aria-modal="true" aria-labelledby="tax-report-v2-pdf-title">
           <div>
