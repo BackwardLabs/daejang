@@ -951,7 +951,7 @@ describe('source flow pages', () => {
     expect(screen.queryByText('PDF 업로드')).not.toBeInTheDocument()
   })
 
-  it('uses readable dark text for the enabled Upbit PDF registration action', async () => {
+  it('uses white text for the enabled Upbit PDF registration action', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -972,9 +972,9 @@ describe('source flow pages', () => {
 
     render(<SourceMethodIntroPage methodId="upbit-pdf" />)
 
-    expect(
-      await screen.findByRole('link', { name: 'PDF 등록 시작' }),
-    ).toHaveClass('source-primary-action--dark-text')
+    const action = await screen.findByRole('link', { name: 'PDF 등록 시작' })
+    expect(action).toHaveClass('source-primary-action')
+    expect(action).not.toHaveClass('source-primary-action--dark-text')
   })
 
 })

@@ -52,7 +52,7 @@ export function SourceMethodIntroPage({
           <div className="source-intro-actions">
             {registrationEnabled ? (
               <AppLink
-                className="source-primary-action source-primary-action--dark-text"
+                className="source-primary-action"
                 href="/sources/new/upbit/upload"
               >
                 PDF 등록 시작 <span aria-hidden="true">→</span>
