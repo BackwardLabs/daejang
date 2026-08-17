@@ -174,7 +174,7 @@ test('preflights both production RPC chain identities before services start', as
 })
 
 test('pins taxd to the current required database migration', () => {
-  assert.equal(hostTaxDBMigrationVersion, '90')
+  assert.equal(hostTaxDBMigrationVersion, '92')
   assert.match(
     readFileSync(
       new URL('../deploy/workers.runtime.env.example', import.meta.url),

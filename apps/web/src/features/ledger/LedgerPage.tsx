@@ -573,7 +573,7 @@ function LedgerExplorerDetail({
       <span>{transferEndpoint.label}</span>
       <div><strong>{transferEndpoint.title}</strong><small>{transferEndpoint.detail}</small></div>
       {reviewSettled ? <span className="ledger-explorer-endpoint__actions">
-        <b>{transferEndpoint.status}</b>
+        <b>{event.reviewResolutionLabel || transferEndpoint.status}</b>
         <b className="ledger-explorer-endpoint__resolved">검토 완료</b>
       </span> : showReviewButton ? <span className="ledger-explorer-endpoint__actions">
         <b>{transferEndpoint.status}</b>
@@ -586,7 +586,7 @@ function LedgerExplorerDetail({
           {reviewNavigationStatus === 'loading' ? '검토 찾는 중…' : '검토하러 가기'}
         </button>
       </span> : <b>{transferEndpoint.status}</b>}
-      {reviewSettled ? <p className="ledger-explorer-endpoint__note">검토 답변이 확정되었습니다. 장부 반영은 자동으로 진행되며 완료되면 상태가 바뀝니다.</p> : null}
+      {reviewSettled ? <p className="ledger-explorer-endpoint__note">{event.reviewResolutionLabel ? `"${event.reviewResolutionLabel}" 으로 확정되었습니다. ` : '검토 답변이 확정되었습니다. '}장부 반영은 자동으로 진행되며 완료되면 상태가 바뀝니다.</p> : null}
       {reviewNavigationStatus === 'none' ? <p className="ledger-explorer-endpoint__note">이 거래에 열린 검토가 없습니다. 이미 답한 검토라면 장부 반영이 끝나는 대로 상태가 바뀝니다.</p> : null}
       {reviewNavigationStatus === 'error' ? <p role="alert">검토 목록을 불러오지 못했습니다. 새로고침한 뒤 다시 시도해 주세요.</p> : null}
     </section> : null}

@@ -1,5 +1,11 @@
 github.com/BackwardLabs/daejang-db v0.0.0-20260813214825-76b4adb541a6 h1:0qSJBF8TemnB9HUXvzWIIZHySTW8CrNpKCvJxL7ILXM=
 github.com/BackwardLabs/daejang-db v0.0.0-20260813214825-76b4adb541a6/go.mod h1:QOZAPfGAZTNwHQ1SoENdN/xyEPA6QWUpHkoXElnGMHU=
+github.com/BackwardLabs/daejang-db v0.0.0-20260817082050-ebc65897c0eb h1:5EmZoS19jk0KoYpzrV+Q1q0E991YHmmbjMOp6m2RK+g=
+github.com/BackwardLabs/daejang-db v0.0.0-20260817082050-ebc65897c0eb/go.mod h1:QOZAPfGAZTNwHQ1SoENdN/xyEPA6QWUpHkoXElnGMHU=
+github.com/BackwardLabs/daejang-db v0.0.0-20260817083123-5ed7a67f256d h1:o6qhXY3bRtTMoTVurIgCt/jjinZEVE4RAlJILXt+4e8=
+github.com/BackwardLabs/daejang-db v0.0.0-20260817083123-5ed7a67f256d/go.mod h1:QOZAPfGAZTNwHQ1SoENdN/xyEPA6QWUpHkoXElnGMHU=
+github.com/BackwardLabs/daejang-db v0.0.0-20260817084102-052f2abec172 h1:xVFiWdQCrQ+XWC9FHm7Rtl8JB86CXylSUEKLmFJmuMA=
+github.com/BackwardLabs/daejang-db v0.0.0-20260817084102-052f2abec172/go.mod h1:QOZAPfGAZTNwHQ1SoENdN/xyEPA6QWUpHkoXElnGMHU=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467 h1:uX1JmpONuD549D73r6cgnxyUu18Zb7yHAy5AYU0Pm4Q=

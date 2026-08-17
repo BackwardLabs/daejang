@@ -2259,9 +2259,13 @@ type LedgerEvent struct {
 	ActionBindingId       string                  `protobuf:"bytes,18,opt,name=action_binding_id,json=actionBindingId,proto3" json:"action_binding_id,omitempty"`
 	// Review workflow state for this event: "OPEN", "RESOLVED", or "" when no
 	// review exists. Presentation state, independent of `resolution`.
-	ReviewState   string `protobuf:"bytes,19,opt,name=review_state,json=reviewState,proto3" json:"review_state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ReviewState string `protobuf:"bytes,19,opt,name=review_state,json=reviewState,proto3" json:"review_state,omitempty"`
+	// The option the reviewer chose when review_state is "RESOLVED":
+	// machine code (e.g. OWN_ACCOUNT) and the human label shown at answer time.
+	ReviewResolutionCode  string `protobuf:"bytes,20,opt,name=review_resolution_code,json=reviewResolutionCode,proto3" json:"review_resolution_code,omitempty"`
+	ReviewResolutionLabel string `protobuf:"bytes,21,opt,name=review_resolution_label,json=reviewResolutionLabel,proto3" json:"review_resolution_label,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *LedgerEvent) Reset() {
@@ -2423,6 +2427,20 @@ func (x *LedgerEvent) GetActionBindingId() string {
 func (x *LedgerEvent) GetReviewState() string {
 	if x != nil {
 		return x.ReviewState
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetReviewResolutionCode() string {
+	if x != nil {
+		return x.ReviewResolutionCode
+	}
+	return ""
+}
+
+func (x *LedgerEvent) GetReviewResolutionLabel() string {
+	if x != nil {
+		return x.ReviewResolutionLabel
 	}
 	return ""
 }
@@ -4910,7 +4928,7 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x10wallet_source_id\x18\x05 \x01(\tR\x0ewalletSourceId\x12)\n" +
 	"\x10chain_candidates\x18\x06 \x03(\tR\x0fchainCandidates\x12+\n" +
 	"\x11connection_status\x18\a \x01(\tR\x10connectionStatus\x12'\n" +
-	"\x0freview_required\x18\b \x01(\bR\x0ereviewRequired\"\xc6\x06\n" +
+	"\x0freview_required\x18\b \x01(\bR\x0ereviewRequired\"\xb4\a\n" +
 	"\vLedgerEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1f\n" +
 	"\vrevision_id\x18\x02 \x01(\tR\n" +
@@ -4936,7 +4954,9 @@ const file_giwa_engine_v1_engine_proto_rawDesc = "" +
 	"\x11action_profile_id\x18\x10 \x01(\tR\x0factionProfileId\x124\n" +
 	"\x16action_profile_version\x18\x11 \x01(\tR\x14actionProfileVersion\x12*\n" +
 	"\x11action_binding_id\x18\x12 \x01(\tR\x0factionBindingId\x12!\n" +
-	"\freview_state\x18\x13 \x01(\tR\vreviewState\"u\n" +
+	"\freview_state\x18\x13 \x01(\tR\vreviewState\x124\n" +
+	"\x16review_resolution_code\x18\x14 \x01(\tR\x14reviewResolutionCode\x126\n" +
+	"\x17review_resolution_label\x18\x15 \x01(\tR\x15reviewResolutionLabel\"u\n" +
 	"\x18ListLedgerEventsResponse\x121\n" +
 	"\x05items\x18\x01 \x03(\v2\x1b.giwa.engine.v1.LedgerEventR\x05items\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x91\x01\n" +

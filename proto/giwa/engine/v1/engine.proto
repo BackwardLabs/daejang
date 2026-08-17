@@ -278,6 +278,10 @@ message LedgerEvent {
   // Review workflow state for this event: "OPEN", "RESOLVED", or "" when no
   // review exists. Presentation state, independent of `resolution`.
   string review_state = 19;
+  // The option the reviewer chose when review_state is "RESOLVED":
+  // machine code (e.g. OWN_ACCOUNT) and the human label shown at answer time.
+  string review_resolution_code = 20;
+  string review_resolution_label = 21;
 }
 message ListLedgerEventsResponse {
   repeated LedgerEvent items = 1;

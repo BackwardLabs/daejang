@@ -53,6 +53,9 @@ export type LedgerEventModel = {
   resolution: string
   // 검토 워크플로 상태: OPEN | RESOLVED | 빈 값(검토 없음)
   reviewState?: string
+  // 확정 시 검토자가 고른 선택지 (코드와 당시 화면 라벨)
+  reviewResolutionCode?: string
+  reviewResolutionLabel?: string
   interpretationSupport: string
   effectiveAt: string
   postings: LedgerPostingModel[]

@@ -618,6 +618,8 @@ describe('LedgerPage', () => {
       flowShape: 'EXTERNAL_OUT',
       resolution: 'PARTIAL',
       reviewState: 'RESOLVED',
+      reviewResolutionCode: 'OWN_ACCOUNT',
+      reviewResolutionLabel: '내 계정 간 이동',
       transferEndpoint: {
         resolution: 'UNKNOWN',
         kind: 'UNKNOWN',
@@ -641,6 +643,8 @@ describe('LedgerPage', () => {
     expect(await screen.findByText('일부 확인 · 검토 완료')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '출금 거래 상세 보기' }))
     expect(await screen.findByText('검토 완료')).toBeInTheDocument()
+    expect(screen.getByText('내 계정 간 이동')).toBeInTheDocument()
+    expect(screen.getByText(/"내 계정 간 이동" 으로 확정/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '검토하러 가기' })).not.toBeInTheDocument()
   })
 
