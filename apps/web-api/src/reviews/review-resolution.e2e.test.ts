@@ -18,6 +18,9 @@ const e2eTimeoutMilliseconds = 360_000
 const requestTimeoutMilliseconds = 10_000
 const pollIntervalMilliseconds = 1_000
 const giwaSepoliaChainId = '91342'
+// dev-e2e 는 일회용 anvil 체인에 앵커한다. 실제 GIWA Sepolia 를 기대하는
+// 배포 검증에서는 이 변수를 비워 두면 기본값이 유지된다.
+const expectedAnchorChainId = process.env.REVIEW_E2E_ANCHOR_CHAIN_ID || giwaSepoliaChainId
 
 const testAccount = {
   id: '00000000-0000-4000-8000-00000000e2e1',
@@ -33,7 +36,11 @@ const requireEnvironment = (name: string) => {
 
 const allowedHosts = () => {
   const result = new Set(['127.0.0.1', 'localhost', '[::1]'])
-  if (dockerHostEnabled) result.add('host.docker.internal')
+  if (dockerHostEnabled) {
+    result.add('host.docker.internal')
+    // dev-e2e compose 프로젝트 내부에서 실행될 때의 ReviewRoom 서비스 호스트.
+    result.add('reviewroom-api')
+  }
   return result
 }
 
@@ -822,7 +829,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
       status.resolution.resolutionCode === 'OWN_ACCOUNT' &&
       status.resolution.proof.status === 'ANCHORED' &&
       status.resolution.anchor.status === 'CONFIRMED' &&
-      status.resolution.anchor.chainId === giwaSepoliaChainId,
+      status.resolution.anchor.chainId === expectedAnchorChainId,
       'ReviewRoom canonical status was not anchored on GIWA Sepolia',
     )
     invariant(
@@ -853,7 +860,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     invariant(
       vector.schema === 'daejang.review-proof-vector/v1' &&
       vector.complete === true &&
-      vector.verificationCheckpoint.chainId === giwaSepoliaChainId &&
+      vector.verificationCheckpoint.chainId === expectedAnchorChainId &&
       vector.items.length === 1,
       'ReviewRoom proof vector did not complete on GIWA Sepolia',
     )
@@ -876,7 +883,7 @@ describeWithReviewResolution('authenticated Review resolution E2E', () => {
     invariant(
       vectorAnchor !== undefined &&
       vectorProof !== undefined &&
-      vectorAnchor.chainId === giwaSepoliaChainId &&
+      vectorAnchor.chainId === expectedAnchorChainId &&
       /^0x[0-9a-fA-F]{64}$/.test(vectorAnchor.transactionHash) &&
       vectorAnchor.transactionHash === status.resolution.anchor.transactionHash &&
       /^0x[0-9a-fA-F]{64}$/.test(vectorProof.proofId) &&

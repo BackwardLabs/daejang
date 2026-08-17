@@ -5,7 +5,22 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 db_dir=${DAEJANG_DB_DIR:-"$repo_root/../daejang-db"}
 reviewroom_dir=${DAEJANG_REVIEWROOM_DIR:-"$repo_root/../daejang-reviewroom"}
+# Docker Desktop 은 심볼릭 원본 경로를 못 열 수 있으므로 물리 경로로 확정한다.
+reviewroom_dir=$(CDPATH= cd -- "$reviewroom_dir" && pwd -P)
+# ReviewRoom 풀 사이클(확정→적용→영수증→온체인 앵커)을 기본으로 켠다.
+# 토큰은 dev 전용 고정값이며 전부 32자 이상·서로 달라야 한다 (config 검증).
+RUN_REVIEW_RESOLUTION_E2E_TESTS=${RUN_REVIEW_RESOLUTION_E2E_TESTS:-1}
+REVIEWROOM_INTERNAL_API_URL=${REVIEWROOM_INTERNAL_API_URL:-http://reviewroom-api:8081}
+REVIEWROOM_INTERNAL_API_TOKEN=${REVIEWROOM_INTERNAL_API_TOKEN:-dev-e2e-internal-api-token-000000000000001}
+REVIEWROOM_RESOLUTION_INGEST_TOKEN=${REVIEWROOM_RESOLUTION_INGEST_TOKEN:-dev-e2e-resolution-ingest-token-0000000001}
+REVIEWROOM_APPLICATION_RECEIPT_TOKEN=${REVIEWROOM_APPLICATION_RECEIPT_TOKEN:-dev-e2e-application-receipt-token-00000001}
+REVIEWROOM_PROOF_VECTOR_TOKEN=${REVIEWROOM_PROOF_VECTOR_TOKEN:-dev-e2e-proof-vector-token-000000000000001}
+REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT=${REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT:-5s}
+REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=${REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP:-true}
+REVIEWROOM_COMMITMENT_KEY_BASE64=${REVIEWROOM_COMMITMENT_KEY_BASE64:-ZGV2LWUyZS1jb21taXRtZW50LWtleS0zMi1ieXRlcyE=}
+REVIEW_E2E_ANCHOR_CHAIN_ID=${REVIEW_E2E_ANCHOR_CHAIN_ID:-31337}
 registry=${REGISTRY:-backwardlabss-mac-studio.tail344fa1.ts.net}
+reviewroom_image=${DAEJANG_REVIEWROOM_IMAGE:-$registry/daejang/reviewroom:latest}
 web_port=${DAEJANG_DEV_E2E_WEB_PORT:-15173}
 tax_db_migration_version=${DAEJANG_TAXD_DB_MIGRATION_VERSION:-92}
 e2e_suffix=${DAEJANG_E2E_SUFFIX:-}
@@ -213,6 +228,12 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT=%s\n' "$REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT"
         printf 'REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=%s\n' "$REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP"
         printf 'REVIEWROOM_PROOF_VECTOR_TOKEN=%s\n' "${REVIEWROOM_PROOF_VECTOR_TOKEN:-}"
+        printf 'REVIEWROOM_INTERNAL_API_TOKEN=%s\n' "$REVIEWROOM_INTERNAL_API_TOKEN"
+        printf 'REVIEWROOM_RESOLUTION_INGEST_TOKEN=%s\n' "$REVIEWROOM_RESOLUTION_INGEST_TOKEN"
+        printf 'REVIEWROOM_COMMITMENT_KEY_BASE64=%s\n' "$REVIEWROOM_COMMITMENT_KEY_BASE64"
+        printf 'DAEJANG_REVIEWROOM_IMAGE=%s\n' "$reviewroom_image"
+        printf 'DAEJANG_REVIEWROOM_DIR=%s\n' "$reviewroom_dir"
+        printf 'REVIEW_E2E_ANCHOR_CHAIN_ID=%s\n' "$REVIEW_E2E_ANCHOR_CHAIN_ID"
         printf 'ACTIVATION_SHA256=%064d\n' 0
         printf 'PUBLICATION_TRUST_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
         printf 'OWNER_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_OWNER_DATABASE_URL")"
@@ -292,9 +313,11 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         fi
     fi
 
-    app_services=(web-api posting-worker tax-engine)
+    # reviewroom-anchor / reviewroom-delivery 를 올리면 의존성으로 chain →
+    # registry 배포 → postgres → migrate → api 까지 딸려 온다.
+    app_services=(web-api posting-worker tax-engine reviewroom-anchor reviewroom-delivery)
     if [[ "$action" == --run-persistent ]]; then
-        app_services=(web-ui posting-worker tax-engine)
+        app_services=(web-ui posting-worker tax-engine reviewroom-anchor reviewroom-delivery)
     fi
     "${current_compose[@]}" up --detach --wait "${app_services[@]}"
     "${current_compose[@]}" run --rm --no-deps pipeline-verify
