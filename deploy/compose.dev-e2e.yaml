@@ -261,8 +261,94 @@ services:
       - jit_state:/e2e
       - jit_selections:/var/lib/daejang/selections
 
+  # wallet-real lane: 운영 evm-indexer bulk store를 read-only로 마운트해 임의
+  # 실지갑을 수집한다. selection을 사전 materialize하지 않으며, evidence 재수집은
+  # 사용자가 DAEJANG_DEV_E2E_ETH_RPC_URL로 제공하는 개인 archive RPC를 쓴다.
+  # wallet lane과 상태 볼륨을 공유하므로 두 lane은 같은 실행에서 함께 켤 수 없다.
+  jit-fixture-real:
+    profiles: ["wallet-real"]
+    image: ${DAEJANG_JIT_TEST_IMAGE}
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["go run ./cmd/jit-dev-e2e"]
+    environment:
+      DAEJANG_JIT_DEV_E2E_MODE: prepare-real
+      DAEJANG_JIT_DEV_E2E_STATE_DIR: /e2e
+      DAEJANG_E2E_SUBJECT_ID: ${DAEJANG_E2E_SUBJECT_ID}
+    volumes:
+      - jit_state:/e2e
+
+  jit-indexer-binary:
+    profiles: ["wallet-real"]
+    image: ${DAEJANG_EVM_INDEXER_IMAGE}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["install -m 0755 /usr/local/bin/evm-indexer /e2e/indexer-real"]
+    volumes:
+      - jit_state:/e2e
+
+  jitd-real:
+    profiles: ["wallet-real"]
+    image: ${DAEJANG_JIT_CANDIDATE_IMAGE}
+    command:
+      - --config
+      - /e2e/runtime-real.yaml
+      - --selection-dir
+      - /var/lib/daejang/selections
+      - --indexer-binary
+      - /e2e/indexer-real
+      - --indexer-config
+      - /e2e/indexer-real.json
+      - --schema-dir
+      - /opt/daejang/schema
+      - --subject-acl
+      - /e2e/subject-acl.json
+    environment:
+      ENV_POSTGRES_DSN: ${JIT_DATABASE_URL}
+      ENV_RPC_URL_ETHEREUM_MAINNET: ${DAEJANG_DEV_E2E_ETH_RPC_URL:-}
+    # bulk store 디렉터리는 backwardlabs:upside(502) 소유의 그룹 read 권한이다.
+    group_add:
+      - "502"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - jit_state:/e2e:ro
+      - jit_selections:/var/lib/daejang/selections
+      - jit_artifacts:/var/lib/daejang
+      - jit_socket:/run/daejang
+      - ${DAEJANG_SCHEMA_DIR}:/opt/daejang/schema:ro
+      - ${DAEJANG_EVM_INDEXER_DATA}:/var/lib/evm-index:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/jit-healthcheck"]
+      interval: 1s
+      timeout: 2s
+      retries: 60
+
+  sync-worker-real:
+    profiles: ["wallet-real"]
+    image: ${DAEJANG_ENGINE_CANDIDATE_IMAGE}
+    entrypoint: ["/usr/local/bin/sync-worker"]
+    # sync-worker와 동일: ACL uid:0 grant와 socket 디렉터리 통과를 위해 root 실행.
+    user: "0:0"
+    environment:
+      DAEJANG_SOURCE_DATABASE_URL: ${SOURCE_DATABASE_URL}
+      DAEJANG_PRIVATE_OBJECT_ROOT: /var/lib/daejang/private
+      PRIVATE_OBJECT_ENCRYPTION_KEY: CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=
+      PRIVATE_OBJECT_ENCRYPTION_KEY_ID: dev-e2e-only
+      DAEJANG_JIT_BRIDGE_CONFIG: /run/config/jit-bridge.json
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      jitd-real:
+        condition: service_healthy
+    configs:
+      - source: jit_bridge_real
+        target: /run/config/jit-bridge.json
+    volumes:
+      - private_objects:/var/lib/daejang/private:ro
+      - jit_socket:/run/daejang-jit
+
   jit-permissions:
-    profiles: ["wallet"]
+    profiles: ["wallet", "wallet-real"]
     image: ${DAEJANG_JIT_TEST_IMAGE}
     user: "0:0"
     entrypoint: ["/bin/sh", "-ec"]
@@ -352,7 +438,7 @@ services:
       - jit_socket:/run/daejang-jit
 
   posting-evm:
-    profiles: ["wallet"]
+    profiles: ["wallet", "wallet-real"]
     image: ${DAEJANG_POSTING_IMAGE}
     entrypoint: ["/usr/local/bin/evm-posting-worker"]
     # jitd(10001)가 쓴 artifact를 상주 폴링으로 함께 읽어야 하므로 같은 uid로 실행한다.
@@ -425,6 +511,37 @@ configs:
                 "indexSnapshotId": "jit-dev-e2e-snapshot-dev-e2e",
                 "fromBlock": 302086,
                 "toBlock": 302086
+              }
+            ]
+          }
+        ]
+      }
+  # wallet-real lane의 브리지 계약. coverage의 날짜 키는 웹 UI 지갑 flow가 항상
+  # 보내는 고정 범위(apps/web의 EVM_WALLET_COVERAGE_*_DATE)와 정확히 일치해야
+  # 하고, 블록 범위·profileHash는 운영 bulk store
+  # ethereum-mainnet-bulk-tail-partial의 sealed 상태를 고정한 값이다. store를
+  # 다시 인덱싱하거나 sealed head를 갱신할 때 의도적으로 함께 범프한다.
+  jit_bridge_real:
+    content: |
+      {
+        "endpoint": "unix:///run/daejang-jit/jitd.sock",
+        "requestTimeout": "10m",
+        "pollInterval": "1s",
+        "awaitTimeout": "15m",
+        "chains": [
+          {
+            "chainId": "eip155:1",
+            "chainStore": "ethereum-mainnet-bulk-tail-partial",
+            "genesisHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+            "evidenceProfile": "EVM_ACCOUNT_FULL",
+            "profileHash": "c2ac89635fb91591f1c6908443f309f937a1ee6313b23bf1935a6f3e19083931",
+            "coverage": [
+              {
+                "coverageStart": "2025-01-01",
+                "coverageEnd": "2026-08-11",
+                "indexSnapshotId": "jit-dev-e2e-bulk-eth-tail-v1",
+                "fromBlock": 22431084,
+                "toBlock": 25728817
               }
             ]
           }

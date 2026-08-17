@@ -75,43 +75,49 @@ sync-worker → jitd 경로에서 selection 재사용은 scope
 DeFi 액션 분류·`REVIEW_REQUIRED` 경로는 커버하지 않으며, 자산 이동 Observation의
 posting까지가 범위다.
 
-## Lane B — 실데이터 lane (설계, 미구현)
+## Lane B — 실데이터 lane (`--profile wallet-real`)
 
-운영 Mac Studio에 이미 인덱싱된 evm-indexer bulk store를 read-only로 재사용해
-실지갑 주소의 selection을 만드는 lane이다. `evm-indexer query`는 RPC 없이
-온디스크 store만 읽으므로 인덱싱 시간 없이 실데이터 selection이 가능하다.
+운영 Mac Studio에 이미 인덱싱된 evm-indexer bulk store
+(`ethereum-mainnet-bulk-tail-partial`, 블록 22,431,084→25,728,817)를 read-only로
+마운트해 **임의 실지갑**을 수집한다. selection을 사전 materialize하지 않고
+jitd가 요청마다 `evm-indexer query`를 실행하므로 지갑 주소 제약이 없다.
+evidence 재수집(tx·trace)은 사용자의 개인 archive RPC로 한다.
 
-구성 스케치 (Lane A의 `jitd` 서비스 변형):
+### 실행
 
-```yaml
-jitd-real:
-  profiles: ["wallet-real"]
-  image: ${DAEJANG_JIT_CANDIDATE_IMAGE}
-  command: [--config, /e2e/runtime.yaml, --selection-dir, /var/lib/daejang/selections,
-            --indexer-binary, /usr/local/bin/evm-indexer,
-            --indexer-config, /e2e/indexer-real.json,
-            --schema-dir, /opt/daejang/schema, --subject-acl, /e2e/subject-acl.json]
-  environment:
-    ENV_POSTGRES_DSN: ${JIT_DATABASE_URL}
-    ENV_RPC_URL_ETHEREUM_MAINNET: ${DAEJANG_DEV_E2E_ETH_RPC_URL:?archive RPC URL이 필요합니다}
-  volumes:
-    - ${DAEJANG_EVM_INDEXER_DATA:-/Users/Shared/Projects/01_Daejang/evm-indexer-data}:/var/lib/daejang/evm-index:ro
+```bash
+DAEJANG_DEV_E2E_WALLET_REAL=1 \
+DAEJANG_DEV_E2E_ETH_RPC_URL=https://<개인 archive RPC> \
+make dev-e2e-up
 ```
 
-구현 전에 해소해야 하는 경계:
+전제조건:
 
-1. **evm-indexer 이미지가 없다.** `daejang-evm-indexer`에는 Dockerfile이 없어
-   컨테이너 안에서 `query`를 실행할 방법부터 만들어야 한다
-   ([컨테이너화 로드맵](containerization-roadmap.md) 참조). jitd 이미지에
-   `COPY --from`으로 주입하는 방안 포함.
-2. **evidence 수집용 archive RPC.** selection 이후 tx·receipt·
-   `debug_traceTransaction`(prestateTracer) 재조회는 실제 archive RPC가 필요하다.
-   운영 secret은 dev 검증에 사용할 수 없으므로 사용자가 자신의 RPC URL을
-   `DAEJANG_DEV_E2E_ETH_RPC_URL`로 제공해야 한다.
-3. **bulk store 권한.** 호스트 store는 `2750/0640`(sharedRead 그룹) 권한이다.
-   컨테이너 uid(10001)와의 매핑, macOS virtiofs의 그룹 매핑 동작은 미검증이다.
-4. **coverage 구성.** 실지갑 주소는 사용자마다 다르고 bridge config의 coverage
-   항목(스냅샷 ID, 블록 범위)도 대상 store에 맞춰야 하므로 정적 config로는
-   불가능하다. env 치환 또는 사용자별 config 생성 스텝이 필요하다.
-5. **로컬 체인 대안은 불성립.** evm-indexer는 `headTag=finalized`를 강제하므로
-   anvil 등 로컬 체인 인덱싱으로 이 lane을 대신할 수 없다.
+- `DAEJANG_EVM_INDEXER_DIR` (기본 `../daejang-evm-indexer`) — query 이미지를
+  로컬 빌드한다.
+- `DAEJANG_DEV_E2E_ETH_RPC_URL` — archive state + EIP-1898 + `finalized` tag +
+  `debug_traceTransaction`(callTracer withLog, prestateTracer diffMode)을
+  지원하는 개인 endpoint. **절대 커밋·로그에 남기지 않는다.** trace 미지원
+  RPC여도 동작은 하지만 결과가 PARTIAL로 강등된다.
+- 지갑은 등록 시 **Ethereum만** 선택한다(Optimism store는 아직 미배선).
+- 지갑의 해당 블록 범위 후보가 **500건 미만**이어야 한다. 초과 시 sync job이
+  `JIT_SELECTION_BUDGET_EXCEEDED`로 fail-closed된다(sync-worker 하드 상수).
+
+### 동작과 기대 결과
+
+- 수집 기간은 UI 고정 범위(2025-01-01~2026-08-11) 그대로 두면 된다 — bridge
+  config가 이 범위를 store의 sealed 블록 범위로 매핑한다.
+- DeFi-Label을 붙이지 않으므로(BackwardLabs/DeFi-Label#43 확정 후 후속) 모든
+  자산 이동·가스는 **objective posting**으로 기록된다: 전송은
+  `UNKNOWN`/`OBSERVED_ASSET_MOVEMENT`, 가스는 `FEE`, 전부 `PARTIAL`/
+  `DETECTED_ONLY`. 잔액·수수료는 정확하고 프로토콜 의미만 미분류다.
+- 가격을 모르는 토큰은 valuation `UNKNOWN` → 열린 Review가 생긴다(의도된
+  테스트 데이터).
+- wallet lane과 상태 볼륨을 공유하므로 **두 lane을 같은 실행에서 함께 켤 수
+  없다**(스크립트가 거부).
+- 실지갑을 수집한 뒤에는 `make dev-e2e-test`를 다시 돌리지 않는다 —
+  pipeline-verify가 2025 과세연도 CEX fixture의 정확한 posting 수를 단정하는데
+  실데이터 2025 posting이 섞이면 실패한다.
+- bulk store의 sealed head는 계속 전진하지만 bridge coverage의 `toBlock`은
+  의도적으로 고정돼 있다. 갱신하려면 compose의 `jit_bridge_real`과 jit-engine
+  `indexer-real.json`을 store 상태와 함께 범프한다.
