@@ -584,7 +584,7 @@ configs:
               {
                 "coverageStart": "2025-01-01",
                 "coverageEnd": "2026-08-11",
-                "indexSnapshotId": "jit-dev-e2e-bulk-eth-tail-v1",
+                "indexSnapshotId": "jit-dev-e2e-bulk-v1",
                 "fromBlock": 22431084,
                 "toBlock": 25728817
               }
@@ -600,7 +600,7 @@ configs:
               {
                 "coverageStart": "2025-01-01",
                 "coverageEnd": "2026-08-11",
-                "indexSnapshotId": "jit-dev-e2e-bulk-op-bedrock-v1",
+                "indexSnapshotId": "jit-dev-e2e-bulk-v1",
                 "fromBlock": 105235063,
                 "toBlock": 138789494
               }
