@@ -18,7 +18,7 @@ const reviewResolutionTest = readFileSync(
 )
 
 test('dev E2E uses the configurable DB migration boundary', () => {
-  assert.match(makefile, /^DAEJANG_TAXD_DB_MIGRATION_VERSION \?= 90$/m)
+  assert.match(makefile, /^DAEJANG_TAXD_DB_MIGRATION_VERSION \?= 92$/m)
   assert.match(
     compose,
     /^\s+DAEJANG_TAXD_DB_MIGRATION_VERSION: \$\{DAEJANG_TAXD_DB_MIGRATION_VERSION\}$/m,
@@ -80,16 +80,20 @@ test('connected report verification runs before the mutating Review flow', () =>
   assert.ok(service)
   const sourceCommand =
     'npm run test --workspace @daejang/web-api -- src/sources/source-pipeline.e2e.test.ts'
+  const evmCommand =
+    'npm run test --workspace @daejang/web-api -- src/sources/evm-pipeline.e2e.test.ts'
   const reviewCommand =
     'npm run test --workspace @daejang/web-api -- src/reviews/review-resolution.e2e.test.ts'
   assert.match(service, /command:\n\s+- \/bin\/sh\n\s+- -ec\n\s+- \|/)
   assert.equal(
     (service.match(/npm run test --workspace @daejang\/web-api --/g) ?? []).length,
-    2,
+    3,
   )
   assert.notEqual(service.indexOf(sourceCommand), -1)
+  assert.notEqual(service.indexOf(evmCommand), -1)
   assert.notEqual(service.indexOf(reviewCommand), -1)
-  assert.ok(service.indexOf(sourceCommand) < service.indexOf(reviewCommand))
+  assert.ok(service.indexOf(sourceCommand) < service.indexOf(evmCommand))
+  assert.ok(service.indexOf(evmCommand) < service.indexOf(reviewCommand))
   assert.doesNotMatch(service, /--no-file-parallelism/)
 })
 
