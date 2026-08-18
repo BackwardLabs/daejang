@@ -307,6 +307,7 @@ services:
     environment:
       ENV_POSTGRES_DSN: ${JIT_DATABASE_URL}
       ENV_RPC_URL_ETHEREUM_MAINNET: ${DAEJANG_DEV_E2E_ETH_RPC_URL:-}
+      ENV_RPC_URL_OPTIMISM_MAINNET: ${DAEJANG_DEV_E2E_OP_RPC_URL:-}
     # bulk store와 DeFi-Label checkout은 backwardlabs:upside(502) 그룹 read 권한이다.
     group_add:
       - "502"
@@ -559,9 +560,12 @@ configs:
       }
   # wallet-real lane의 브리지 계약. coverage의 날짜 키는 웹 UI 지갑 flow가 항상
   # 보내는 고정 범위(apps/web의 EVM_WALLET_COVERAGE_*_DATE)와 정확히 일치해야
-  # 하고, 블록 범위·profileHash는 운영 bulk store
-  # ethereum-mainnet-bulk-tail-partial의 sealed 상태를 고정한 값이다. store를
-  # 다시 인덱싱하거나 sealed head를 갱신할 때 의도적으로 함께 범프한다.
+  # 하고, 블록 범위·profileHash는 운영 bulk store의 sealed 상태를 고정한 값이다
+  # (eip155:1 = ethereum-mainnet-bulk-tail-partial, eip155:10 =
+  # optimism-mainnet-bulk-bedrock). store를 다시 인덱싱하거나 sealed head를
+  # 갱신할 때 의도적으로 함께 범프한다. optimism bedrock store는 계속 앞으로
+  # 차오르는 중이라(2026-08-18 기준 sealed 138,789,494 ≈ 2025-07) toBlock이
+  # 날짜 범위 끝(2026-08-11)보다 이르다 — 그 구간 거래는 잡히지 않는 것이 정상.
   jit_bridge_real:
     content: |
       {
@@ -583,6 +587,22 @@ configs:
                 "indexSnapshotId": "jit-dev-e2e-bulk-eth-tail-v1",
                 "fromBlock": 22431084,
                 "toBlock": 25728817
+              }
+            ]
+          },
+          {
+            "chainId": "eip155:10",
+            "chainStore": "optimism-mainnet-bulk-bedrock",
+            "genesisHash": "0x7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b",
+            "evidenceProfile": "EVM_ACCOUNT_FULL",
+            "profileHash": "dbfa3a10dfe7ee5b1c53b0dc569ff114aea70979a3e3a68674822f0409eea3d0",
+            "coverage": [
+              {
+                "coverageStart": "2025-01-01",
+                "coverageEnd": "2026-08-11",
+                "indexSnapshotId": "jit-dev-e2e-bulk-op-bedrock-v1",
+                "fromBlock": 105235063,
+                "toBlock": 138789494
               }
             ]
           }

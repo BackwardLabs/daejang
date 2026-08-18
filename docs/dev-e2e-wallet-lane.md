@@ -87,7 +87,8 @@ evidence 재수집(tx·trace)은 사용자의 개인 archive RPC로 한다.
 
 ```bash
 DAEJANG_DEV_E2E_WALLET_REAL=1 \
-DAEJANG_DEV_E2E_ETH_RPC_URL=https://<개인 archive RPC> \
+DAEJANG_DEV_E2E_ETH_RPC_URL=https://<개인 Ethereum archive RPC> \
+DAEJANG_DEV_E2E_OP_RPC_URL=https://<개인 OP Mainnet archive RPC> \
 make dev-e2e-up
 ```
 
@@ -95,13 +96,18 @@ make dev-e2e-up
 
 - `DAEJANG_EVM_INDEXER_DIR` (기본 `../daejang-evm-indexer`) — query 이미지를
   로컬 빌드한다.
-- `DAEJANG_DEV_E2E_ETH_RPC_URL` — archive state + EIP-1898 + `finalized` tag +
-  `debug_traceTransaction`(callTracer withLog, prestateTracer diffMode)을
-  지원하는 개인 endpoint. **절대 커밋·로그에 남기지 않는다.** trace 미지원
-  RPC여도 동작은 하지만 결과가 PARTIAL로 강등된다.
-- 지갑은 등록 시 **Ethereum만** 선택한다(Optimism store는 아직 미배선).
-- 지갑의 해당 블록 범위 후보가 **500건 미만**이어야 한다. 초과 시 sync job이
-  `JIT_SELECTION_BUDGET_EXCEEDED`로 fail-closed된다(sync-worker 하드 상수).
+- `DAEJANG_DEV_E2E_ETH_RPC_URL`·`DAEJANG_DEV_E2E_OP_RPC_URL` — archive state +
+  EIP-1898 + `finalized` tag + `debug_traceTransaction`(callTracer withLog,
+  prestateTracer diffMode)을 지원하는 개인 endpoint (체인별 하나씩).
+  **절대 커밋·로그에 남기지 않는다.** trace 미지원 RPC여도 동작은 하지만
+  결과가 PARTIAL로 강등된다.
+- 지갑 등록 시 **Ethereum과 Optimism 둘 다** 선택 가능하다. Optimism은
+  `optimism-mainnet-bulk-bedrock` store를 쓰며, sealed head가 아직 뒤에
+  있어서(2026-08-18 기준 ≈ 2025-07) 그 이후 거래는 수집되지 않는다 — bedrock
+  store가 차오르면 bridge coverage의 `toBlock`을 범프한다.
+- 지갑의 해당 블록 범위 후보가 체인별 **500건 미만**이어야 한다. 초과 시 sync
+  job이 `JIT_SELECTION_BUDGET_EXCEEDED`로 fail-closed된다(sync-worker 하드
+  상수).
 
 ### 동작과 기대 결과
 

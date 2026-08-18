@@ -250,6 +250,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'DAEJANG_EVM_INDEXER_IMAGE=%s\n' "$evm_indexer_image"
         printf 'DAEJANG_EVM_INDEXER_DATA=%s\n' "$evm_indexer_data"
         printf 'DAEJANG_DEV_E2E_ETH_RPC_URL=%s\n' "${DAEJANG_DEV_E2E_ETH_RPC_URL:-}"
+        printf 'DAEJANG_DEV_E2E_OP_RPC_URL=%s\n' "${DAEJANG_DEV_E2E_OP_RPC_URL:-}"
         printf 'DAEJANG_DEFI_LABEL_DIR=%s\n' "$defi_label_dir"
         printf 'DAEJANG_ACTION_RUNTIME_COMMIT=%s\n' "${DAEJANG_ACTION_RUNTIME_COMMIT:-}"
         printf 'DAEJANG_ACTION_RUNTIME_BUNDLE_SHA256=%s\n' "${DAEJANG_ACTION_RUNTIME_BUNDLE_SHA256:-}"
@@ -489,6 +490,10 @@ if [[ "$wallet_lane" == 1 && "$wallet_real_lane" == 1 ]]; then
 fi
 if [[ "$wallet_real_lane" == 1 && -z "${DAEJANG_DEV_E2E_ETH_RPC_URL:-}" ]]; then
     printf '%s\n' 'wallet-real lane에는 DAEJANG_DEV_E2E_ETH_RPC_URL이 필요합니다 (debug_traceTransaction을 지원하는 개인 archive RPC).' >&2
+    exit 2
+fi
+if [[ "$wallet_real_lane" == 1 && -z "${DAEJANG_DEV_E2E_OP_RPC_URL:-}" ]]; then
+    printf '%s\n' 'wallet-real lane에는 DAEJANG_DEV_E2E_OP_RPC_URL이 필요합니다 (OP Mainnet archive RPC, debug_traceTransaction 지원).' >&2
     exit 2
 fi
 action_runtime_commit=''
