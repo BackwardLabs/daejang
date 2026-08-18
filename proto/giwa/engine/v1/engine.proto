@@ -204,6 +204,27 @@ message SyncJob {
   string ledger_materialization_state = 24;
   // Number of distinct canonical Posting legs that cite this JIT fragment.
   int64 ledger_posting_count = 25;
+  // Coverage the JIT discovery actually delivered for this job, one entry per
+  // discovery run (per chain). Empty for non-EVM jobs and until the run
+  // commits its evidence fragment.
+  repeated DeliveredCoverage delivered_coverage = 26;
+}
+
+message DeliveredCoverage {
+  // CAIP-2 chain id, e.g. eip155:1.
+  string chain_id = 1;
+  // Inclusive block window the discovery walked.
+  int64 from_block = 2;
+  int64 to_block = 3;
+  // Block times of the window boundaries.
+  google.protobuf.Timestamp from_time = 4;
+  google.protobuf.Timestamp to_time = 5;
+  // Discovery run status: COMPLETE, PARTIAL or FAILED.
+  string status = 6;
+  // Reason code when status is PARTIAL or FAILED.
+  string limitation_reason_code = 7;
+  // Number of block segments inside the window the discovery could not cover.
+  int64 gap_segment_count = 8;
 }
 
 message GetDashboardRequest { RequestContext context = 1; int32 tax_year = 2; }

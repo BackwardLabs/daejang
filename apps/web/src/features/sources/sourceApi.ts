@@ -39,6 +39,17 @@ export type DocumentSourceApiModel = {
 }
 export type SourceApiModel = WalletSourceApiModel | DocumentSourceApiModel
 
+export type DeliveredCoverageApiModel = {
+  chainId: string
+  fromBlock: number | string
+  toBlock: number | string
+  fromTime: string
+  toTime: string
+  status: 'COMPLETE' | 'PARTIAL' | 'FAILED'
+  limitationReasonCode?: string
+  gapSegmentCount: number | string
+}
+
 export type SyncJobApiModel = {
   id: string
   sourceId: string
@@ -61,6 +72,7 @@ export type SyncJobApiModel = {
     | 'REVIEW_REQUIRED'
     | 'UNAVAILABLE'
   ledgerPostingCount?: number | string
+  deliveredCoverage?: DeliveredCoverageApiModel[]
   createdAt: string
   updatedAt: string
 }

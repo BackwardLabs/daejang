@@ -249,6 +249,59 @@ function SourceJobStatus({
   )
 }
 
+function formatCoverageDate(value: string) {
+  const timestamp = new Date(value)
+  if (Number.isNaN(timestamp.getTime())) return value
+  return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium' }).format(
+    timestamp,
+  )
+}
+
+function SourceDeliveredCoverage({ job }: { job: SyncJobApiModel | undefined }) {
+  if (
+    job?.state !== 'SUCCEEDED' ||
+    job.sourceKind !== 'EVM_WALLET' ||
+    !job.deliveredCoverage?.length
+  ) {
+    return null
+  }
+  const requestedWindow =
+    job.requestedCoverageStart && job.requestedCoverageEnd
+      ? `${job.requestedCoverageStart} – ${job.requestedCoverageEnd}`
+      : undefined
+  return (
+    <section className="source-coverage" aria-label="실제 수집 범위">
+      <header>
+        <b>실제 수집 범위</b>
+        {requestedWindow ? <span>요청 기간 {requestedWindow}</span> : null}
+      </header>
+      <ul>
+        {job.deliveredCoverage.map((coverage) => {
+          const incomplete =
+            coverage.status !== 'COMPLETE' || Number(coverage.gapSegmentCount) > 0
+          return (
+            <li data-coverage-status={coverage.status} key={coverage.chainId}>
+              <b>
+                {getEvmWalletNetwork(coverage.chainId)?.label ??
+                  coverage.chainId}
+              </b>
+              <span>
+                {formatCoverageDate(coverage.fromTime)} –{' '}
+                {formatCoverageDate(coverage.toTime)} 반영
+              </span>
+              {incomplete ? (
+                <em>
+                  일부 구간 미수집 · 인덱스가 채워지면 재수집 시 반영됩니다
+                </em>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
 function maskAddress(address: string) {
   const normalizedAddress = address.replace(/^0[×X]/, '0x')
   return `${normalizedAddress.slice(0, 6)}…${normalizedAddress.slice(-4)}`
@@ -772,6 +825,7 @@ export function SourceManagementPage() {
                     </div>
                   ) : null}
                 </div>
+                <SourceDeliveredCoverage job={latestJob} />
                 {source.type === 'EVM_WALLET' &&
                 editingNetworksId === source.id ? (
                   <section

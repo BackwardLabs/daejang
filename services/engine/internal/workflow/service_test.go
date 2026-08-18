@@ -7,6 +7,7 @@ import (
 
 	"github.com/BackwardLabs/daejang-db/pkg/sourcejobstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/coverageread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/materializationread"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,6 +28,15 @@ type fakeMaterializationReader struct {
 
 func (r fakeMaterializationReader) Get(context.Context, string, string, string) (materializationread.Snapshot, error) {
 	return r.snapshot, r.err
+}
+
+type fakeCoverageReader struct {
+	coverage []coverageread.Coverage
+	err      error
+}
+
+func (r fakeCoverageReader) List(context.Context, string, string) ([]coverageread.Coverage, error) {
+	return r.coverage, r.err
 }
 
 func (s *fakeStore) Enqueue(_ context.Context, params sourcejobstore.EnqueueParams) (sourcejobstore.SyncJob, error) {
@@ -124,6 +134,42 @@ func TestToProtoReportsCanonicalPostingMaterializationForCompletedEVMJob(t *test
 	})
 	if job.GetLedgerMaterializationState() != materializationread.StatePosted || job.GetLedgerPostingCount() != 4 {
 		t.Fatalf("canonical materialization was not exposed: %#v", job)
+	}
+}
+
+func TestToProtoExposesDeliveredCoverageForCompletedEVMJob(t *testing.T) {
+	now := time.Now().UTC()
+	from := time.Date(2025, 5, 14, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)
+	service := &Service{Coverage: fakeCoverageReader{coverage: []coverageread.Coverage{{
+		ChainID: "eip155:1", FromBlock: 22431084, ToBlock: 25728817, FromTime: from, ToTime: to,
+		Status: "PARTIAL", LimitationReasonCode: "TRACE_UNAVAILABLE", GapSegmentCount: 2,
+	}}}}
+	job := service.toProto(context.Background(), workflowSubject, sourcejobstore.SyncJob{
+		ID: "22222222-2222-4222-8222-222222222222", SourceKind: "EVM_WALLET", State: "SUCCEEDED",
+		UpstreamJITRunID: "jit-run:1", OutputFragmentID: "fragment:1", CreatedAt: now, UpdatedAt: now,
+	})
+	if len(job.GetDeliveredCoverage()) != 1 {
+		t.Fatalf("delivered coverage was not exposed: %#v", job)
+	}
+	entry := job.GetDeliveredCoverage()[0]
+	if entry.GetChainId() != "eip155:1" || entry.GetFromBlock() != 22431084 || entry.GetToBlock() != 25728817 ||
+		!entry.GetFromTime().AsTime().Equal(from) || !entry.GetToTime().AsTime().Equal(to) ||
+		entry.GetStatus() != "PARTIAL" || entry.GetLimitationReasonCode() != "TRACE_UNAVAILABLE" ||
+		entry.GetGapSegmentCount() != 2 {
+		t.Fatalf("delivered coverage fields drifted: %#v", entry)
+	}
+}
+
+func TestToProtoOmitsDeliveredCoverageWhenReadFails(t *testing.T) {
+	now := time.Now().UTC()
+	service := &Service{Coverage: fakeCoverageReader{err: context.DeadlineExceeded}}
+	job := service.toProto(context.Background(), workflowSubject, sourcejobstore.SyncJob{
+		ID: "22222222-2222-4222-8222-222222222222", SourceKind: "EVM_WALLET", State: "SUCCEEDED",
+		UpstreamJITRunID: "jit-run:1", OutputFragmentID: "fragment:1", CreatedAt: now, UpdatedAt: now,
+	})
+	if len(job.GetDeliveredCoverage()) != 0 {
+		t.Fatalf("failed coverage read was presented as data: %#v", job)
 	}
 }
 

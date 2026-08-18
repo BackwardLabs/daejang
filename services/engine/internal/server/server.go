@@ -17,6 +17,7 @@ import (
 	"github.com/BackwardLabs/daejang-db/pkg/sourcestore"
 	"github.com/BackwardLabs/daejang-db/pkg/taxreportstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/coverageread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/lotread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/materializationread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/observationread"
@@ -84,6 +85,11 @@ func Run(ctx context.Context, config Config) error {
 		return fmt.Errorf("open Posting materialization read persistence: %w", err)
 	}
 	defer materializationRuntime.Close()
+	coverageRuntime, err := coverageread.Open(ctx, config.SourceArtifactDatabaseURL, "daejang-engine-coverage-read-api")
+	if err != nil {
+		return fmt.Errorf("open delivered coverage read persistence: %w", err)
+	}
+	defer coverageRuntime.Close()
 	reportRuntime, err := reportstore.Open(ctx, reportstore.Options{DatabaseURL: config.ReportDatabaseURL, ApplicationName: "daejang-engine-report-api"})
 	if err != nil {
 		return fmt.Errorf("open report persistence: %w", err)
@@ -196,7 +202,7 @@ func Run(ctx context.Context, config Config) error {
 		},
 	})
 	enginev1.RegisterWorkflowServiceServer(grpcServer, &workflow.Service{
-		Store: jobRuntime.Store, Materializations: materializationRuntime.Store,
+		Store: jobRuntime.Store, Materializations: materializationRuntime.Store, Coverage: coverageRuntime.Store,
 	})
 	enginev1.RegisterQueryServiceServer(grpcServer, &query.Service{
 		Reads: readRuntime.Store, Reports: reportRuntime.Store, TaxReports: taxReportRuntime.Store,
