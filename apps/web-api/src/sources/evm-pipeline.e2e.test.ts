@@ -250,6 +250,26 @@ describeWithPipeline('EVM wallet sync to ledger pipeline E2E', () => {
     )
     expect(succeeded.phase).toBe('COMPLETE')
 
+    // 성공한 지갑 job은 discovery가 실제로 훑은 체인별 커버리지를 노출한다.
+    const enriched = await inject({ method: 'GET', url: `/api/v1/jobs/${job.id}` })
+    expect(enriched.statusCode, enriched.body).toBe(200)
+    const { job: withCoverage } = enriched.json<{
+      job: {
+        deliveredCoverage?: {
+          chainId: string
+          fromTime: string
+          toTime: string
+          status: string
+        }[]
+      }
+    }>()
+    expect(withCoverage.deliveredCoverage?.length).toBe(1)
+    const coverage = withCoverage.deliveredCoverage![0]
+    expect(coverage.chainId).toBe('eip155:1')
+    expect(coverage.status).toBe('COMPLETE')
+    expect(coverage.fromTime.slice(0, 10)).toBe(fixtureCoverageDate)
+    expect(coverage.toTime.slice(0, 10)).toBe(fixtureCoverageDate)
+
     const posted = await pollUntil(
       'JIT publication consumed into postings',
       120_000,

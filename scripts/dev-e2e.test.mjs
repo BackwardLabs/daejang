@@ -18,7 +18,7 @@ const reviewResolutionTest = readFileSync(
 )
 
 test('dev E2E uses the configurable DB migration boundary', () => {
-  assert.match(makefile, /^DAEJANG_TAXD_DB_MIGRATION_VERSION \?= 92$/m)
+  assert.match(makefile, /^DAEJANG_TAXD_DB_MIGRATION_VERSION \?= 93$/m)
   assert.match(
     compose,
     /^\s+DAEJANG_TAXD_DB_MIGRATION_VERSION: \$\{DAEJANG_TAXD_DB_MIGRATION_VERSION\}$/m,
