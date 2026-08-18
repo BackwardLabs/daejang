@@ -572,7 +572,7 @@ configs:
         "endpoint": "unix:///run/daejang-jit/jitd.sock",
         "requestTimeout": "10m",
         "pollInterval": "1s",
-        "awaitTimeout": "15m",
+        "awaitTimeout": "75m",
         "chains": [
           {
             "chainId": "eip155:1",
