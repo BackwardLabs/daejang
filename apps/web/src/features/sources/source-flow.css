@@ -301,11 +301,6 @@ body:has(.source-page) {
   transform: translateY(-1px);
 }
 
-.source-primary-action--dark-text,
-.source-primary-action--dark-text:hover {
-  color: var(--source-ink);
-}
-
 .source-primary-action:disabled,
 .source-primary-action[aria-disabled="true"] {
   border-color: #d8d5cf;
@@ -1240,6 +1235,10 @@ body:has(.source-page) {
   font-weight: 700;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
+}
+
+.source-intro-actions > a.source-primary-action {
+  color: #fff;
 }
 
 .source-follow-up-note {
