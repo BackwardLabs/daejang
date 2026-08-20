@@ -84,6 +84,35 @@ for repo_name in daejang daejang-jit-engine daejang-posting-service daejang-tax-
   clone_at_head "$repo_name"
 done
 
+stage_report_attestation_runtime() {
+  local source_runtime=$daejang_repo/node_modules/@backward-labs/daejang-contracts
+  local source_entry=$source_runtime/dist/public/giwaSepoliaV1.js
+  local target_runtime=$stage_dir/daejang/.docker-runtime/daejang-contracts
+  local expected_entry_sha256=d7a29f3ed606ed24897f6a7c292bfa7294be760466fba23d834b6c896f112acb
+  local actual_entry_sha256
+
+  if [ ! -f "$source_entry" ] || [ -L "$source_runtime" ]; then
+    echo "Verified GIWA report attestation runtime is not installed: $source_runtime" >&2
+    exit 2
+  fi
+  if find "$source_runtime" -type l -print -quit | grep -q .; then
+    echo "GIWA report attestation runtime contains a symbolic link" >&2
+    exit 2
+  fi
+  actual_entry_sha256=$(shasum -a 256 "$source_entry" | awk '{print $1}')
+  if [ "$actual_entry_sha256" != "$expected_entry_sha256" ]; then
+    echo "GIWA report attestation runtime entry digest does not match the verified release" >&2
+    exit 2
+  fi
+
+  mkdir -p "$target_runtime"
+  find "$target_runtime" -mindepth 1 -delete
+  COPYFILE_DISABLE=1 cp -R "$source_runtime"/. "$target_runtime"/
+  chmod -R a+rX "$target_runtime"
+}
+
+stage_report_attestation_runtime
+
 build_and_push() {
   local key=$1
   local repo_name=$2
@@ -121,6 +150,9 @@ build_and_push() {
   fi
   if [ "$needs_secret" = true ]; then
     build_args+=(--secret "id=github_token,src=$token_file")
+  fi
+  if [ "$key" = web-api ]; then
+    build_args+=(--build-arg GIWA_REPORT_ATTESTATION_RUNTIME_REQUIRED=true)
   fi
   build_args+=("$checkout")
 
