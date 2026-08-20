@@ -17,7 +17,12 @@ COPY services/engine/internal/pdfparser/testdata /app/services/engine/internal/p
 CMD ["npm","run","test","--workspace","@daejang/web-api"]
 
 FROM build AS production-build
+ARG GIWA_REPORT_ATTESTATION_RUNTIME_REQUIRED=false
 RUN npm prune --omit=dev
+COPY .docker-runtime/daejang-contracts /app/node_modules/@backward-labs/daejang-contracts
+RUN if [ "$GIWA_REPORT_ATTESTATION_RUNTIME_REQUIRED" = true ]; then \
+      node -e "import('@backward-labs/daejang-contracts/giwa-sepolia-v1').then(module => { if (typeof module.createGiwaSepoliaReportRuntimeV1 !== 'function') process.exit(1) })"; \
+    fi
 
 FROM node:22.13-bookworm-slim AS runtime
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
