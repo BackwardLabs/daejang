@@ -70,11 +70,26 @@ const writeStateFile = (name, value) => {
 const client = new pg.Client({ connectionString: ledgerURL })
 await client.connect()
 let rows
+const walletAccountChains = new Map()
+const walletBySubject = new Map()
 try {
   await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
   const result = await client.query(currentTaxProfileRowsQuery)
   rows = result.rows.filter(({ subject_id: subjectID }) =>
     isCanonicalWebSubjectID(subjectID))
+  const chains = await client.query(`
+    SELECT DISTINCT subject_id, account_id,
+      split_part(asset_id, ':', 2) || ':' || split_part(asset_id, ':', 3) AS chain
+    FROM ledger.asset_posting
+    WHERE account_id LIKE 'wallet-account-%' AND asset_id LIKE 'asset:eip155:%'`)
+  for (const { subject_id: subjectID, account_id: accountID, chain } of chains.rows) {
+    walletAccountChains.set(`${subjectID} ${accountID}`, chain)
+  }
+  const wallets = await client.query(`
+    SELECT user_id, address FROM source_private.wallet_sources WHERE status = 'ACTIVE'`)
+  for (const { user_id: subjectID, address } of wallets.rows) {
+    walletBySubject.set(subjectID, address)
+  }
   await client.query('COMMIT')
 } finally {
   await client.end()
@@ -138,6 +153,71 @@ for (const profile of profileSet.profiles) {
     if (profile.valuationDirectOnlyAssetIds.length === 0) {
       delete profile.valuationDirectOnlyAssetIds
     }
+  }
+}
+
+// [dev 가정] 2027 의제취득가액 opening inventory — GIWA-96의 dev 시뮬레이션.
+// 시행 전 보유분 취득가액 = max(실제 취득가액, 2026-12-31 시가)인데 그 시가는
+// 연말 마감 후에만 실존하므로, dev에서는 "현재 온체인 잔고 = 연말 보유,
+// 현재 업비트 KRW-ETH = 연말 시가"로 가정해 2027 프로필에만 생성한다
+// (엔진이 2025·2026 시뮬레이션에는 의제 사용을 거부한다). 실제 취득가액은
+// 미상(0)으로 두므로 max는 항상 가정 시가를 선택한다. 네트워크 실패 시
+// 경고만 남기고 건너뛴다.
+if (process.env.DAEJANG_DEV_E2E_DEEMED_2027_OPENING !== '0') {
+  try {
+    const priceOverride = process.env.DAEJANG_DEV_E2E_DEEMED_ETH_PRICE_KRW
+    const ethPriceKRW = priceOverride !== undefined
+      ? BigInt(priceOverride)
+      : BigInt(Math.round((await (await fetch(
+          'https://api.upbit.com/v1/ticker?markets=KRW-ETH')).json())[0].trade_price))
+    const rpcHosts = {
+      'eip155:1': 'https://ethereum-rpc.publicnode.com',
+      'eip155:10': 'https://optimism-rpc.publicnode.com',
+    }
+    const nativeBalance = async (chain, address) => {
+      const response = await fetch(rpcHosts[chain], {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [address, 'latest'] }),
+      })
+      return BigInt((await response.json()).result)
+    }
+    let openingCount = 0
+    for (const profile of profileSet.profiles) {
+      if (profile.taxYear !== 2027) continue
+      const walletAddress = walletBySubject.get(profile.subjectId)
+      if (walletAddress === undefined) continue
+      // 프로필에 자산 바인딩이 없는 opening은 Collapse 검증이 거부한다 —
+      // 바인딩은 해당 연도까지 장부에 등장한 자산에만 생성되므로 그 범위로
+      // 제한한다 (전 자산 바인딩은 GIWA-96 실배선의 설계 논점).
+      const boundTaxAssets = new Set(profile.assetBindings.map(({ taxAssetId }) => taxAssetId))
+      const openings = []
+      for (const binding of profile.accountBindings) {
+        const chain = walletAccountChains.get(`${profile.subjectId} ${binding.accountId}`)
+        if (chain === undefined || rpcHosts[chain] === undefined) continue
+        if (!boundTaxAssets.has(`asset:${chain}:native`)) continue
+        const quantity = await nativeBalance(chain, walletAddress)
+        if (quantity <= 0n) continue
+        const marketValue = (quantity * ethPriceKRW * 100000000n / 10n ** 18n).toString()
+        openings.push({
+          taxAddressId: binding.taxAddressId,
+          taxAssetId: `asset:${chain}:native`,
+          quantity: quantity.toString(),
+          basisStatus: 'KNOWN',
+          basisAmount: marketValue,
+          basisRule: 'PRE_EFFECTIVE_MAX_ACTUAL_MARKET',
+          actualAcquisitionAmount: '0',
+          marketValueAt2026End: marketValue,
+        })
+      }
+      if (openings.length > 0) {
+        profile.openingBalances = openings
+        openingCount += openings.length
+      }
+    }
+    console.log(`deemed 2027 openings: ${openingCount} (assumed KRW-ETH ${ethPriceKRW})`)
+  } catch (error) {
+    console.warn(`deemed 2027 opening skipped: ${error.message}`)
   }
 }
 
