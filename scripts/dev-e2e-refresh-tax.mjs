@@ -156,6 +156,30 @@ for (const profile of profileSet.profiles) {
   }
 }
 
+// [GIWA-97 P3] cross-venue 자산 등가: 선언된 쌍의 CEX·체인 ledger 자산을
+// 하나의 tax 자산(경제적 자산 id = 체인 canonical id — matcher가 발행한
+// ASSET_IDENTITY의 economicAssetId와 동일)으로 통일하고, 정규 자릿수는
+// 구성원 최대값으로 선언한다(상향 10^k 스케일만 — 무손실). 심볼 추론
+// 금지: 이 선언 목록이 dev의 등가 레지스트리다. ETH·WETH 통합은 wrap
+// 과세 처리 정책 결정이 선행이라 의도적으로 제외한다.
+const venueEquivalences = [
+  { cexAssetId: 'asset-usdc-upbit', chainAssetId: 'asset:eip155:1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', cexDecimals: 8, chainDecimals: 6 },
+  { cexAssetId: 'asset-usdt-upbit', chainAssetId: 'asset:eip155:1:0xdac17f958d2ee523a2206206994597c13d831ec7', cexDecimals: 8, chainDecimals: 6 },
+]
+for (const profile of profileSet.profiles) {
+  const byLedger = new Map(profile.assetBindings.map((binding) => [binding.ledgerAssetId, binding]))
+  for (const pair of venueEquivalences) {
+    const cexBinding = byLedger.get(pair.cexAssetId)
+    const chainBinding = byLedger.get(pair.chainAssetId)
+    if (cexBinding === undefined || chainBinding === undefined) continue
+    const canonicalDecimals = Math.max(pair.cexDecimals, pair.chainDecimals)
+    for (const binding of [cexBinding, chainBinding]) {
+      binding.taxAssetId = pair.chainAssetId
+      binding.taxAtomicDecimals = canonicalDecimals
+    }
+  }
+}
+
 // [dev 가정] 2027 의제취득가액 opening inventory — GIWA-96의 dev 시뮬레이션.
 // 시행 전 보유분 취득가액 = max(실제 취득가액, 2026-12-31 시가)인데 그 시가는
 // 연말 마감 후에만 실존하므로, dev에서는 "현재 온체인 잔고 = 연말 보유,
