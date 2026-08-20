@@ -15,6 +15,7 @@ import {
 import type {
   ReportAttestationPublicationSource,
 } from './publication-source.js'
+import { reportAttestationEligibilityCheckCodes } from './publication-source.js'
 import {
   ReportAttestationPreparationError,
   ReportAttestationService,
@@ -41,6 +42,24 @@ const config = loadConfig({
   RATE_LIMIT_HMAC_SECRET: 'report-attestation-test-secret',
 })
 const IDENTITY_KEY = new Uint8Array(32).fill(28)
+
+const eligible = (reportId: string) => ({
+  reportId,
+  eligible: true,
+  checks: reportAttestationEligibilityCheckCodes.map((code) => ({
+    code,
+    status: 'PASSED' as const,
+  })),
+})
+
+const ineligible = (reportId: string, failedCode: string) => ({
+  reportId,
+  eligible: false,
+  checks: reportAttestationEligibilityCheckCodes.map((code) => ({
+    code,
+    status: code === failedCode ? 'FAILED' as const : 'PASSED' as const,
+  })),
+})
 
 const confirmed = (attestationUID: Hex32): RedactedExecutionResult => ({
   status: 'CONFIRMED',
@@ -184,6 +203,12 @@ describe('local report attestation fixture', () => {
       }),
     )
     const publicationSource: ReportAttestationPublicationSource = {
+      getEligibility: vi.fn(async (ownerId, requestedReportId) =>
+        ownerId === OWNER_A &&
+        (requestedReportId === reportId || requestedReportId === nextReportId)
+          ? eligible(requestedReportId)
+          : undefined,
+      ),
       getPublication: vi.fn(async (ownerId, requestedReportId) => {
         if (
           ownerId !== OWNER_A ||
@@ -208,6 +233,23 @@ describe('local report attestation fixture', () => {
       publicationSource,
     )
     try {
+      const readiness = await harness.request('A', {
+        method: 'GET',
+        url:
+          `/api/v1/reports/${encodeURIComponent(reportId)}` +
+          '/attestation-eligibility',
+      })
+      expect(readiness.statusCode).toBe(200)
+      expect(readiness.headers['cache-control']).toContain('no-store')
+      expect(readiness.json()).toEqual({
+        reportId,
+        eligible: true,
+        checks: [
+          ...eligible(reportId).checks,
+          { code: 'ONCHAIN_RUNTIME', status: 'PASSED' },
+        ],
+      })
+
       const prepared = await harness.request('A', {
         method: 'POST',
         url:
@@ -266,6 +308,13 @@ describe('local report attestation fixture', () => {
       ),
     }
     const publicationSource: ReportAttestationPublicationSource = {
+      getEligibility: vi.fn(async (ownerId, requestedReportId) =>
+        ownerId === OWNER_A && requestedReportId === reportId
+          ? isCurrent
+            ? eligible(reportId)
+            : ineligible(reportId, 'CURRENT_REPORT')
+          : undefined,
+      ),
       getPublication: vi.fn(async (ownerId, requestedReportId) =>
         ownerId === OWNER_A && requestedReportId === reportId && isCurrent
           ? publication
@@ -285,7 +334,10 @@ describe('local report attestation fixture', () => {
         method: 'POST',
         url: `/api/v1/reports/${encodeURIComponent(reportId)}/attestations`,
       })
-      expect(staleSubmission.statusCode).toBe(404)
+      expect(staleSubmission.statusCode).toBe(409)
+      expect(staleSubmission.json()).toMatchObject({
+        error: { code: 'REPORT_ATTESTATION_NOT_ELIGIBLE' },
+      })
       expect(fake.executeIssuer).not.toHaveBeenCalled()
       expect(await harness.context.reportAttestationService?.getStatus(
         OWNER_A,
@@ -314,6 +366,11 @@ describe('local report attestation fixture', () => {
     const reportId = 'report-engine-result-2027'
     let revision = 1
     const publicationSource: ReportAttestationPublicationSource = {
+      getEligibility: vi.fn(async (ownerId, requestedReportId) =>
+        ownerId === OWNER_A && requestedReportId === reportId
+          ? eligible(reportId)
+          : undefined,
+      ),
       getPublication: vi.fn(
         async (ownerId, requestedReportId, requestedRevision) => {
           if (

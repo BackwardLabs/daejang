@@ -380,9 +380,9 @@ function EventRow({
 export function TaxReportDetailV2({
   report,
   assetPresentations = {},
-  pointerVersion,
-  isCurrent = false,
-  generationState,
+  pointerVersion: _pointerVersion,
+  isCurrent: _isCurrent = false,
+  generationState: _generationState,
   filingStatus,
 }: {
   report: TaxReportV2DetailModel
@@ -436,10 +436,6 @@ export function TaxReportDetailV2({
     .sort((left, right) => left.amount === right.amount ? 0 : left.amount > right.amount ? -1 : 1)
     .slice(0, 6)
   const chartMaximum = chartAssets[0]?.amount ?? 0n
-  const attestationEligible =
-    isCurrent &&
-    (generationState === 'ACTIVE' || generationState === 'REVIEW_REQUIRED')
-
   useEffect(() => {
     if (!pdfPreviewOpen) {
       setPdfPreviewUrl(null)
@@ -938,9 +934,6 @@ export function TaxReportDetailV2({
           </header>
           <ReportAttestationControl
             reportId={report.reportId}
-            reportModelDigest={report.reportModelDigest}
-            pointerVersion={pointerVersion ?? 1}
-            eligible={attestationEligible}
           />
         </section>
       ) : null}

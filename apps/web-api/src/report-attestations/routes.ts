@@ -10,7 +10,11 @@ import {
   unauthorized,
 } from '../errors.js'
 import { MOCK_REPORT_ID } from './mock-publication-source.js'
-import type { ReportAttestationPublicationSource } from './publication-source.js'
+import {
+  ReportAttestationPublicationIneligibleError,
+  reportAttestationEligibilityCheckCodes,
+  type ReportAttestationPublicationSource,
+} from './publication-source.js'
 import type { ReportAttestationWriteRateLimiter } from './write-rate-limit.js'
 import {
   ReportAttestationConflictError,
@@ -98,6 +102,44 @@ const verificationResponseSchema = {
   },
 } as const
 
+const eligibilityCheckCodes = [
+  ...reportAttestationEligibilityCheckCodes,
+  'ONCHAIN_RUNTIME',
+] as const
+
+export type ReportAttestationEligibilityResponse = Readonly<{
+  reportId: string
+  eligible: boolean
+  checks: ReadonlyArray<{
+    code: (typeof eligibilityCheckCodes)[number]
+    status: 'PASSED' | 'FAILED'
+  }>
+}>
+
+const eligibilityResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['reportId', 'eligible', 'checks'],
+  properties: {
+    reportId: { type: 'string' },
+    eligible: { type: 'boolean' },
+    checks: {
+      type: 'array',
+      minItems: eligibilityCheckCodes.length,
+      maxItems: eligibilityCheckCodes.length,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'status'],
+        properties: {
+          code: { type: 'string', enum: eligibilityCheckCodes },
+          status: { type: 'string', enum: ['PASSED', 'FAILED'] },
+        },
+      },
+    },
+  },
+} as const
+
 const reportParamsSchema = {
   type: 'object',
   additionalProperties: false,
@@ -162,6 +204,13 @@ const mapServiceError = (error: unknown): never => {
       '보고서 증명 자료를 준비하지 못했습니다.',
     )
   }
+  if (error instanceof ReportAttestationPublicationIneligibleError) {
+    throw new ApiError(
+      409,
+      'REPORT_ATTESTATION_NOT_ELIGIBLE',
+      '현재 장부의 증빙 준비 상태를 다시 확인해 주세요.',
+    )
+  }
   if (error instanceof ReportAttestationConflictError) {
     if (error.code === 'NOT_PREPARED') {
       throw resourceNotFound()
@@ -195,12 +244,71 @@ export const registerReportAttestationRoutes = async (
     devRoutesEnabled?: boolean
     automaticReview?: boolean
     writeRateLimiter?: ReportAttestationWriteRateLimiter
+    runtimeReady?: () => Promise<boolean>
   },
 ) => {
+  const loadEligibility = async (
+    ownerId: string,
+    reportId: string,
+  ): Promise<ReportAttestationEligibilityResponse> => {
+    const sourceEligibility =
+      await options.publicationSource.getEligibility(ownerId, reportId)
+    if (!sourceEligibility || sourceEligibility.reportId !== reportId) {
+      throw resourceNotFound()
+    }
+    const sourceCodes = new Set(
+      sourceEligibility.checks.map((check) => check.code),
+    )
+    if (
+      sourceEligibility.checks.length !==
+        reportAttestationEligibilityCheckCodes.length ||
+      sourceCodes.size !== reportAttestationEligibilityCheckCodes.length ||
+      reportAttestationEligibilityCheckCodes.some(
+        (code) => !sourceCodes.has(code),
+      ) ||
+      sourceEligibility.eligible !== sourceEligibility.checks.every(
+        (check) => check.status === 'PASSED',
+      )
+    ) {
+      throw new Error('Invalid report attestation eligibility response')
+    }
+    let runtimeReady = true
+    try {
+      runtimeReady = await (options.runtimeReady?.() ?? Promise.resolve(true))
+    } catch {
+      runtimeReady = false
+    }
+    const checks: ReportAttestationEligibilityResponse['checks'] = [
+      ...sourceEligibility.checks,
+      {
+        code: 'ONCHAIN_RUNTIME',
+        status: runtimeReady ? 'PASSED' : 'FAILED',
+      },
+    ]
+    return {
+      reportId,
+      eligible:
+        sourceEligibility.eligible &&
+        checks.every((check) => check.status === 'PASSED'),
+      checks,
+    }
+  }
+
+  const assertEligible = async (
+    ownerId: string,
+    reportId: string,
+  ) => {
+    const eligibility = await loadEligibility(ownerId, reportId)
+    if (!eligibility.eligible) {
+      throw new ReportAttestationPublicationIneligibleError()
+    }
+  }
+
   const preparePublication = async (
     ownerId: string,
     reportId: string,
   ) => {
+    await assertEligible(ownerId, reportId)
     const publication = await options.publicationSource.getPublication(
       ownerId,
       reportId,
@@ -210,6 +318,26 @@ export const registerReportAttestationRoutes = async (
     }
     return options.service.preparePublication(ownerId, publication)
   }
+
+  app.get<{ Params: { reportId: string } }>(
+    '/api/v1/reports/:reportId/attestation-eligibility',
+    {
+      schema: {
+        params: reportParamsSchema,
+        querystring: emptyQuerySchema,
+        response: { 200: eligibilityResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      reply.header('cache-control', 'private, no-store')
+      const ownerId = assertAuthenticatedOwner(request)
+      try {
+        return await loadEligibility(ownerId, request.params.reportId)
+      } catch (error) {
+        return mapServiceError(error)
+      }
+    },
+  )
 
   const consumeWrite = async (
     request: FastifyRequest,
@@ -293,6 +421,7 @@ export const registerReportAttestationRoutes = async (
       assertEmptyBody(request.body)
       const ownerId = assertAuthenticatedOwner(request)
       try {
+        await assertEligible(ownerId, request.params.reportId)
         const currentPublication =
           await options.publicationSource.getPublication(
             ownerId,

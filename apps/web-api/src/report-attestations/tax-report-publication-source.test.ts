@@ -1,8 +1,8 @@
 import type { Pool } from 'pg'
 import { describe, expect, it, vi } from 'vitest'
 
+import { ReportAttestationPublicationIneligibleError } from './publication-source.js'
 import {
-  InconsistentTaxReportPublicationError,
   PostgresTaxReportAttestationPublicationSource,
   TAX_REPORT_DERIVATION_RULE_DIGEST,
 } from './tax-report-publication-source.js'
@@ -48,12 +48,13 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
   it('builds deterministic privacy-safe bytes from the exact owner-scoped V2 binding', async () => {
     const { query, source } = sourceWithRows([row()])
 
+    const eligibility = await source.getEligibility(OWNER_ID, REPORT_ID)
     const publication = await source.getPublication(
       OWNER_ID,
       REPORT_ID,
     )
 
-    expect(query).toHaveBeenCalledTimes(1)
+    expect(query).toHaveBeenCalledTimes(2)
     const [sql, params] = query.mock.calls[0] as unknown as [
       string,
       unknown[],
@@ -69,6 +70,17 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
       sourceVersion: 'giwa.tax-report-publication.v3',
       derivationRuleDigest:
         TAX_REPORT_DERIVATION_RULE_DIGEST,
+    })
+    expect(eligibility).toEqual({
+      reportId: REPORT_ID,
+      eligible: true,
+      checks: [
+        { code: 'CURRENT_REPORT', status: 'PASSED' },
+        { code: 'CALCULATION_RESULT', status: 'PASSED' },
+        { code: 'EVIDENCE_PACK', status: 'PASSED' },
+        { code: 'CURRENT_LEDGER', status: 'PASSED' },
+        { code: 'CURRENT_SOURCE_COVERAGE', status: 'PASSED' },
+      ],
     })
     const safe = JSON.parse(
       new TextDecoder().decode(publication?.safeArtifactBytes),
@@ -105,7 +117,7 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
     await expect(
       source.getPublication(OWNER_ID, REPORT_ID),
     ).rejects.toBeInstanceOf(
-      InconsistentTaxReportPublicationError,
+      ReportAttestationPublicationIneligibleError,
     )
   })
 
@@ -140,7 +152,7 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
     ])
 
     await expect(source.getPublication(OWNER_ID, REPORT_ID))
-      .rejects.toBeInstanceOf(InconsistentTaxReportPublicationError)
+      .rejects.toBeInstanceOf(ReportAttestationPublicationIneligibleError)
   })
 
   it('does not reinterpret a DB pointer version as an EAS revision', async () => {
@@ -167,7 +179,7 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
     await expect(
       source.getPublication(OWNER_ID, REPORT_ID),
     ).rejects.toBeInstanceOf(
-      InconsistentTaxReportPublicationError,
+      ReportAttestationPublicationIneligibleError,
     )
     const [current, historical] = await Promise.all([
       currentSource.getPublication(OWNER_ID, REPORT_ID),
@@ -190,7 +202,7 @@ describe('PostgresTaxReportAttestationPublicationSource', () => {
     await expect(
       source.getPublication(OWNER_ID, REPORT_ID),
     ).rejects.toBeInstanceOf(
-      InconsistentTaxReportPublicationError,
+      ReportAttestationPublicationIneligibleError,
     )
   })
 })

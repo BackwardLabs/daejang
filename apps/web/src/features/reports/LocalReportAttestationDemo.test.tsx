@@ -55,6 +55,23 @@ const usableVerification = {
 const createApi = (
   overrides: Partial<LocalReportAttestationApi> = {},
 ): LocalReportAttestationApi => ({
+  getEligibility: vi.fn(async (reportId) => ({
+    reportId,
+    eligible: true,
+    checks: [
+      'CURRENT_REPORT',
+      'CALCULATION_RESULT',
+      'EVIDENCE_PACK',
+      'CURRENT_LEDGER',
+      'CURRENT_SOURCE_COVERAGE',
+      'ONCHAIN_RUNTIME',
+    ].map((code) => ({
+      code: code as Awaited<
+        ReturnType<LocalReportAttestationApi['getEligibility']>
+      >['checks'][number]['code'],
+      status: 'PASSED' as const,
+    })),
+  })),
   prepare: vi.fn(async () => status('PREPARED')),
   prepareFixture: vi.fn(async () => status('PREPARED')),
   submit: vi.fn(async () =>

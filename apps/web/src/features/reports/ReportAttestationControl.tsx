@@ -5,6 +5,8 @@ import {
   localReportAttestationApi,
   pollReportAttestationStatus,
   type LocalReportAttestationApi,
+  type ReportAttestationEligibility,
+  type ReportAttestationEligibilityCheckCode,
   type ReportAttestationStatus,
   type ReportVerification,
 } from './reportAttestationApi.ts'
@@ -37,17 +39,44 @@ const lifecycleLabel: Record<string, string> = {
   PENDING: '처리 대기',
 }
 
+const eligibilityCopy: Record<
+  ReportAttestationEligibilityCheckCode,
+  Readonly<{ title: string; description: string }>
+> = {
+  CURRENT_REPORT: {
+    title: '현재 장부',
+    description: '지금 보고 있는 장부가 최신 계산 결과인지 확인합니다.',
+  },
+  CALCULATION_RESULT: {
+    title: '계산 결과',
+    description: '세금 계산 결과와 장부 내용이 서로 일치하는지 확인합니다.',
+  },
+  EVIDENCE_PACK: {
+    title: '원본 근거',
+    description: '장부를 만든 원본 자료와 정책 근거가 준비됐는지 확인합니다.',
+  },
+  CURRENT_LEDGER: {
+    title: '최신 거래 반영',
+    description: '현재 거래 장부가 계산 결과에 반영됐는지 확인합니다.',
+  },
+  CURRENT_SOURCE_COVERAGE: {
+    title: '자료 범위',
+    description: '제출 대상 장부에 포함된 자료 범위가 최신인지 확인합니다.',
+  },
+  ONCHAIN_RUNTIME: {
+    title: '블록체인 연결',
+    description: 'GIWA 네트워크에 증빙을 기록할 준비가 됐는지 확인합니다.',
+  },
+}
+
 export function ReportAttestationControl({
   reportId,
-  eligible,
   api = localReportAttestationApi,
 }: {
   reportId: string
-  reportModelDigest: string
-  pointerVersion: number | string
-  eligible: boolean
   api?: LocalReportAttestationApi
 }) {
+  const [eligibility, setEligibility] = useState<ReportAttestationEligibility>()
   const [status, setStatus] = useState<ReportAttestationStatus>()
   const [verification, setVerification] = useState<ReportVerification>()
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -63,38 +92,70 @@ export function ReportAttestationControl({
     controllerRef.current = controller
     setConfirmOpen(false)
     setSuccessOpen(false)
+    setEligibility(undefined)
     setStatus(undefined)
     setVerification(undefined)
     setPhase('loading')
-    void api.getStatus(reportId, controller.signal)
-      .then(async (value) => {
+    void api
+      .getEligibility(reportId, controller.signal)
+      .then(async (nextEligibility) => {
+        if (controller.signal.aborted) return
+        setEligibility(nextEligibility)
+        const value = await api
+          .getStatus(reportId, controller.signal)
+          .catch((error: unknown) => {
+            if (error instanceof ApiClientError && error.status === 404) {
+              return undefined
+            }
+            throw error
+          })
         if (controller.signal.aborted) return
         setStatus(value)
-        if (value.lifecycle === 'APPROVED') {
+        if (value?.lifecycle === 'APPROVED') {
           setVerification(await api.getVerification(reportId, controller.signal))
         }
         if (!controller.signal.aborted) setPhase('idle')
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (controller.signal.aborted) return
-        if (error instanceof ApiClientError && error.status === 404) {
-          setStatus(undefined)
-          setPhase('idle')
-          return
-        }
         setPhase('error')
       })
     return () => controller.abort()
-  }, [api, eligible, reportId])
+  }, [api, reportId])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const interval = window.setInterval(() => {
+      void api.getEligibility(reportId, controller.signal)
+        .then((value) => {
+          setEligibility(value)
+          setPhase((current) => current === 'error' ? 'idle' : current)
+        })
+        .catch(() => undefined)
+    }, 15_000)
+    return () => {
+      controller.abort()
+      window.clearInterval(interval)
+    }
+  }, [api, reportId])
 
   const start = async () => {
-    if (!eligible || phase === 'running') return
+    if (!eligibility?.eligible || phase === 'running') return
     controllerRef.current?.abort()
     const controller = new AbortController()
     controllerRef.current = controller
     setPhase('running')
     setVerification(undefined)
     try {
+      const latestEligibility = await api.getEligibility(
+        reportId,
+        controller.signal,
+      )
+      setEligibility(latestEligibility)
+      if (!latestEligibility.eligible) {
+        setPhase('idle')
+        return
+      }
       let next = await api.prepare(reportId, controller.signal)
       setStatus(next)
       if (next.lifecycle === 'PREPARING') {
@@ -131,9 +192,11 @@ export function ReportAttestationControl({
     }
   }
 
+  const eligible = eligibility?.eligible === true
+
   return (
     <section className="tax-report-v2__attestation" aria-label="블록체인 기록 검증">
-      <div>
+      <div className="tax-report-v2__attestation-heading">
         <span>기록 검증</span>
         <h4>현재 장부 증빙</h4>
         <p>
@@ -143,6 +206,28 @@ export function ReportAttestationControl({
               ? '이 장부에 남은 블록체인 증명을 확인합니다.'
             : '현재 장부를 불러온 뒤 증빙할 수 있습니다.'}
         </p>
+      </div>
+      <div
+        className="tax-report-v2__attestation-readiness"
+        aria-label="EAS 증빙 준비 상태"
+      >
+        {eligibility?.checks.map((check) => {
+          const copy = eligibilityCopy[check.code]
+          return (
+            <article key={check.code} data-status={check.status}>
+              <span aria-hidden="true" />
+              <div>
+                <strong>{copy.title}</strong>
+                <p>{copy.description}</p>
+              </div>
+              <b>{check.status === 'PASSED' ? '준비됨' : '확인 필요'}</b>
+            </article>
+          )
+        }) ?? (
+          <p className="tax-report-v2__attestation-loading" role="status">
+            증빙 준비 상태를 확인하고 있습니다.
+          </p>
+        )}
       </div>
       <div className="tax-report-v2__attestation-action">
         {status ? (
@@ -176,7 +261,7 @@ export function ReportAttestationControl({
                 ? '증빙 상태 확인'
                 : '현재 장부 증빙하기'}
         </button>
-        {phase === 'error' ? <small role="alert">온체인 검증 상태를 확인하지 못했습니다.</small> : null}
+        {phase === 'error' ? <small role="alert">증빙 준비 상태를 확인하지 못했습니다.</small> : null}
       </div>
       {confirmOpen ? (
         <div className="tax-report-v2__confirm" role="dialog" aria-modal="true" aria-labelledby="report-attestation-confirm-title">

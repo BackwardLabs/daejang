@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 
 import type {
+  ReportAttestationEligibility,
   ReportAttestationPublication,
   ReportAttestationPublicationSource,
 } from './publication-source.js'
+import { reportAttestationEligibilityCheckCodes } from './publication-source.js'
 
 export const SYNTHETIC_TESTNET_REPORT_ID =
   'giwa-sepolia-synthetic-report-2025'
@@ -68,6 +70,21 @@ export const getSyntheticTestnetPublicationCanonicalJson = () =>
 export class SyntheticTestnetReportAttestationPublicationSource
   implements ReportAttestationPublicationSource
 {
+  async getEligibility(
+    _ownerId: string,
+    reportId: string,
+  ): Promise<ReportAttestationEligibility | undefined> {
+    if (reportId !== SYNTHETIC_TESTNET_REPORT_ID) return undefined
+    return {
+      reportId,
+      eligible: true,
+      checks: reportAttestationEligibilityCheckCodes.map((code) => ({
+        code,
+        status: 'PASSED' as const,
+      })),
+    }
+  }
+
   async getPublication(
     _ownerId: string,
     reportId: string,

@@ -44,7 +44,32 @@ export type ReportVerification = Readonly<{
   reasonCode: string | null
 }>
 
+export const reportAttestationEligibilityCheckCodes = [
+  'CURRENT_REPORT',
+  'CALCULATION_RESULT',
+  'EVIDENCE_PACK',
+  'CURRENT_LEDGER',
+  'CURRENT_SOURCE_COVERAGE',
+  'ONCHAIN_RUNTIME',
+] as const
+
+export type ReportAttestationEligibilityCheckCode =
+  (typeof reportAttestationEligibilityCheckCodes)[number]
+
+export type ReportAttestationEligibility = Readonly<{
+  reportId: string
+  eligible: boolean
+  checks: ReadonlyArray<{
+    code: ReportAttestationEligibilityCheckCode
+    status: 'PASSED' | 'FAILED'
+  }>
+}>
+
 export type LocalReportAttestationApi = Readonly<{
+  getEligibility(
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<ReportAttestationEligibility>
   prepare(
     reportId: string,
     signal?: AbortSignal,
@@ -114,6 +139,11 @@ const verificationKeys = [
   'result',
   'reasonCode',
 ] as const
+const eligibilityKeys = ['reportId', 'eligible', 'checks'] as const
+const eligibilityCheckKeys = ['code', 'status'] as const
+const eligibilityCheckCodeValues = new Set<ReportAttestationEligibilityCheckCode>(
+  reportAttestationEligibilityCheckCodes,
+)
 const nonTerminalReceiptStatuses = new Set([
   'PENDING',
   'RETRY_REQUIRED',
@@ -473,10 +503,66 @@ const parseVerification = (
   }
 }
 
+const parseEligibility = (
+  value: unknown,
+  expectedReportId: string,
+): ReportAttestationEligibility => {
+  if (
+    !isExactRecord(value, eligibilityKeys) ||
+    value.reportId !== expectedReportId ||
+    typeof value.eligible !== 'boolean' ||
+    !Array.isArray(value.checks) ||
+    value.checks.length !== reportAttestationEligibilityCheckCodes.length
+  ) {
+    throw new Error('REPORT_ATTESTATION_ELIGIBILITY_RESPONSE_INVALID')
+  }
+
+  const checks = value.checks.map((check) => {
+    if (
+      !isExactRecord(check, eligibilityCheckKeys) ||
+      !eligibilityCheckCodeValues.has(
+        check.code as ReportAttestationEligibilityCheckCode,
+      ) ||
+      (check.status !== 'PASSED' && check.status !== 'FAILED')
+    ) {
+      throw new Error('REPORT_ATTESTATION_ELIGIBILITY_RESPONSE_INVALID')
+    }
+    return {
+      code: check.code as ReportAttestationEligibilityCheckCode,
+      status: check.status as 'PASSED' | 'FAILED',
+    }
+  })
+  if (
+    new Set(checks.map((check) => check.code)).size !== checks.length ||
+    reportAttestationEligibilityCheckCodes.some(
+      (code) => !checks.some((check) => check.code === code),
+    ) ||
+    value.eligible !== checks.every((check) => check.status === 'PASSED')
+  ) {
+    throw new Error('REPORT_ATTESTATION_ELIGIBILITY_RESPONSE_INVALID')
+  }
+
+  return {
+    reportId: value.reportId,
+    eligible: value.eligible,
+    checks,
+  }
+}
+
 const reportPath = (reportId: string) =>
   `/reports/${encodeURIComponent(reportId)}`
 
 export const localReportAttestationApi: LocalReportAttestationApi = {
+  async getEligibility(reportId, signal) {
+    return parseEligibility(
+      await requestApi<unknown>(
+        `${reportPath(reportId)}/attestation-eligibility`,
+        { signal },
+      ),
+      reportId,
+    )
+  },
+
   async prepare(reportId, signal) {
     return parseStatus(
       await requestApi<unknown>(

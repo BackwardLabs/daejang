@@ -1,5 +1,34 @@
 import type { Hex32 } from './types.js'
 
+export const reportAttestationEligibilityCheckCodes = [
+  'CURRENT_REPORT',
+  'CALCULATION_RESULT',
+  'EVIDENCE_PACK',
+  'CURRENT_LEDGER',
+  'CURRENT_SOURCE_COVERAGE',
+] as const
+
+export type ReportAttestationEligibilityCheckCode =
+  (typeof reportAttestationEligibilityCheckCodes)[number]
+
+export type ReportAttestationEligibilityCheck = Readonly<{
+  code: ReportAttestationEligibilityCheckCode
+  status: 'PASSED' | 'FAILED'
+}>
+
+export type ReportAttestationEligibility = Readonly<{
+  reportId: string
+  eligible: boolean
+  checks: ReadonlyArray<ReportAttestationEligibilityCheck>
+}>
+
+export class ReportAttestationPublicationIneligibleError extends Error {
+  constructor() {
+    super('Report publication is not eligible for attestation')
+    this.name = 'ReportAttestationPublicationIneligibleError'
+  }
+}
+
 export type ReportAttestationPublication = Readonly<{
   /**
    * Public product report identifier used by the Daejang API and UI.
@@ -37,6 +66,10 @@ export type ReportAttestationPublication = Readonly<{
  * attestation lifecycle.
  */
 export interface ReportAttestationPublicationSource {
+  getEligibility(
+    ownerId: string,
+    reportId: string,
+  ): Promise<ReportAttestationEligibility | undefined>
   getPublication(
     ownerId: string,
     reportId: string,
