@@ -10,7 +10,7 @@ DAEJANG_DEV_E2E_REOWN_PROJECT_ID ?= c5f8295da4fda205b905f32fd523f4c9
 DAEJANG_TAXD_DB_MIGRATION_VERSION ?= 93
 DAEJANG_E2E_SUFFIX ?=
 
-.PHONY: test test-wallet test-review-giwa test-system dev-e2e-up dev-e2e-test dev-e2e-down dev-e2e-status dev-e2e-logs
+.PHONY: test test-wallet test-review-giwa test-system dev-e2e-up dev-e2e-test dev-e2e-down dev-e2e-status dev-e2e-logs dev-e2e-refresh-tax
 test:
 	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \
 		DAEJANG_TAXD_DB_MIGRATION_VERSION="$(DAEJANG_TAXD_DB_MIGRATION_VERSION)" \
@@ -60,3 +60,8 @@ test-system: test
 	@$(MAKE) -C "$(DAEJANG_TAX_ENGINE_DIR)" test \
 		DAEJANG_DB_DIR="$(abspath $(DAEJANG_DB_DIR))" REGISTRY="$(REGISTRY)" \
 		POSTING_IMAGE=daejang-posting-service:dev-e2e-runtime
+
+# 실지갑 수집이 장부에 새 계좌·자산을 올린 뒤 taxd 프로필·정책을 운영과 같은
+# 생성기로 재생성하고 tax-engine을 재기동한다.
+dev-e2e-refresh-tax:
+	node scripts/dev-e2e-refresh-tax.mjs

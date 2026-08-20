@@ -1582,7 +1582,7 @@ export const ensureRuntimeIndexerView = (root, stores) => {
   return root
 }
 
-const canonicalJSON = (value) => {
+export const canonicalJSON = (value) => {
   const normalize = (item) => {
     if (Array.isArray(item)) return item.map(normalize)
     if (item && typeof item === 'object') {
