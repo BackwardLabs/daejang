@@ -7,13 +7,21 @@ SCHEMA_DIR ?= /Users/shared/Projects/01_Daejang/schema
 REGISTRY ?= backwardlabss-mac-studio.tail344fa1.ts.net
 DAEJANG_DEV_E2E_WEB_PORT ?= 15173
 DAEJANG_DEV_E2E_REOWN_PROJECT_ID ?= c5f8295da4fda205b905f32fd523f4c9
-DAEJANG_TAXD_DB_MIGRATION_VERSION ?= 90
+DAEJANG_TAXD_DB_MIGRATION_VERSION ?= 93
 DAEJANG_E2E_SUFFIX ?=
 
-.PHONY: test test-review-giwa test-system dev-e2e-up dev-e2e-test dev-e2e-down dev-e2e-status dev-e2e-logs
+.PHONY: test test-wallet test-review-giwa test-system dev-e2e-up dev-e2e-test dev-e2e-down dev-e2e-status dev-e2e-logs dev-e2e-refresh-tax
 test:
 	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \
 		DAEJANG_TAXD_DB_MIGRATION_VERSION="$(DAEJANG_TAXD_DB_MIGRATION_VERSION)" \
+		./scripts/dev-e2e.sh test
+
+test-wallet:
+	@DAEJANG_DB_DIR="$(DAEJANG_DB_DIR)" REGISTRY="$(REGISTRY)" \
+		DAEJANG_JIT_ENGINE_DIR="$(DAEJANG_JIT_ENGINE_DIR)" \
+		SCHEMA_DIR="$(SCHEMA_DIR)" \
+		DAEJANG_TAXD_DB_MIGRATION_VERSION="$(DAEJANG_TAXD_DB_MIGRATION_VERSION)" \
+		DAEJANG_DEV_E2E_WALLET=1 RUN_EVM_PIPELINE_E2E_TESTS=1 \
 		./scripts/dev-e2e.sh test
 
 test-review-giwa:
@@ -52,3 +60,8 @@ test-system: test
 	@$(MAKE) -C "$(DAEJANG_TAX_ENGINE_DIR)" test \
 		DAEJANG_DB_DIR="$(abspath $(DAEJANG_DB_DIR))" REGISTRY="$(REGISTRY)" \
 		POSTING_IMAGE=daejang-posting-service:dev-e2e-runtime
+
+# 실지갑 수집이 장부에 새 계좌·자산을 올린 뒤 taxd 프로필·정책을 운영과 같은
+# 생성기로 재생성하고 tax-engine을 재기동한다.
+dev-e2e-refresh-tax:
+	node scripts/dev-e2e-refresh-tax.mjs

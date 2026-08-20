@@ -19,6 +19,22 @@ REVIEWROOM_APPLICATION_RECEIPT_HTTP_TIMEOUT=${REVIEWROOM_APPLICATION_RECEIPT_HTT
 REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP=${REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP:-true}
 REVIEWROOM_COMMITMENT_KEY_BASE64=${REVIEWROOM_COMMITMENT_KEY_BASE64:-ZGV2LWUyZS1jb21taXRtZW50LWtleS0zMi1ieXRlcyE=}
 REVIEW_E2E_ANCHOR_CHAIN_ID=${REVIEW_E2E_ANCHOR_CHAIN_ID:-31337}
+jit_engine_dir=${DAEJANG_JIT_ENGINE_DIR:-"$repo_root/../daejang-jit-engine"}
+# 공유 Docker 데몬이 개인 checkout을 bind-mount할 수 없어 schema는 공용 read-only
+# checkout을 기본값으로 사용한다.
+schema_dir=${SCHEMA_DIR:-/Users/Shared/Projects/01_Daejang/schema}
+wallet_lane=${DAEJANG_DEV_E2E_WALLET:-0}
+# wallet-real lane: 운영 bulk store를 read-only로 재사용해 임의 실지갑을 수집한다.
+# evidence 재수집용 archive RPC는 사용자가 DAEJANG_DEV_E2E_ETH_RPC_URL로 제공한다.
+wallet_real_lane=${DAEJANG_DEV_E2E_WALLET_REAL:-0}
+evm_indexer_dir=${DAEJANG_EVM_INDEXER_DIR:-"$repo_root/../daejang-evm-indexer"}
+evm_indexer_data=${DAEJANG_EVM_INDEXER_DATA:-/Users/Shared/Projects/01_Daejang/evm-indexer-data/index-bulk}
+# 서명된 action registry 릴리스를 담은 DeFi-Label checkout. jitd-real이 의미
+# 분류에 사용하고, posting 신뢰 핀은 이 checkout의 receipt에서 읽는다.
+defi_label_dir=${DAEJANG_DEFI_LABEL_DIR:-/Users/Shared/Projects/01_Daejang/DeFi-Label}
+# 지갑 lane fixture가 selection을 materialize할 주소. 기본값은 hardhat 테스트 키
+# #0의 주소이며, 본인 지갑으로 UI 테스트를 하려면 그 주소로 덮어쓴다.
+wallet_address=$(printf '%s' "${DAEJANG_DEV_E2E_WALLET_ADDRESS:-0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266}" | LC_ALL=C tr '[:upper:]' '[:lower:]')
 registry=${REGISTRY:-backwardlabss-mac-studio.tail344fa1.ts.net}
 reviewroom_image=${DAEJANG_REVIEWROOM_IMAGE:-$registry/daejang/reviewroom:latest}
 web_port=${DAEJANG_DEV_E2E_WEB_PORT:-15173}
@@ -43,6 +59,9 @@ web_candidate_image="daejang-web-api:dev-e2e-$user_segment"
 web_ui_candidate_image="daejang-web-ui:dev-e2e-$user_segment"
 engine_candidate_image="daejang-engine:dev-e2e-$user_segment"
 parser_candidate_image="daejang-pdf-parser:dev-e2e-$user_segment"
+jit_candidate_image="daejang-jit-engine:dev-e2e-$user_segment"
+jit_test_image="daejang-jit-engine:dev-e2e-test-$user_segment"
+evm_indexer_image="daejang-evm-indexer:dev-e2e-$user_segment"
 posting_image=${DAEJANG_POSTING_IMAGE:-"$registry/daejang/posting-service:latest"}
 tax_engine_image=${DAEJANG_TAX_ENGINE_IMAGE:-"$registry/daejang/tax-engine:latest"}
 tax_dev_e2e_image=${DAEJANG_TAX_DEV_E2E_IMAGE:-"$registry/daejang/tax-engine-dev-e2e:latest"}
@@ -94,8 +113,11 @@ app_compose_from_state() {
     local app_env app_project
     app_env=$(state_value APP_ENV_FILE)
     app_project=$(state_value APP_PROJECT_NAME)
+    # wallet profile을 항상 활성화해 down이 wallet lane 컨테이너까지 정리하게 한다.
+    # up은 서비스를 명시적으로 지정하므로 wallet 미사용 실행에는 영향이 없다.
     "${compose_command[@]}" --env-file "$app_env" --project-directory "$repo_root" \
-        --file "$compose_file" --project-name "$app_project" "$@"
+        --file "$compose_file" --project-name "$app_project" \
+        --profile wallet --profile wallet-real "$@"
 }
 
 db_compose_from_state() {
@@ -172,12 +194,16 @@ if [[ "$action" == run-tests ]]; then
 fi
 
 if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests || "$action" == --run-persistent ]]; then
-    for required_variable in \
-        DAEJANG_E2E_OWNER_DATABASE_URL DAEJANG_E2E_WEB_DATABASE_URL \
-        DAEJANG_E2E_SOURCE_DATABASE_URL DAEJANG_E2E_QUERY_DATABASE_URL \
-        DAEJANG_E2E_REPORT_DATABASE_URL DAEJANG_E2E_EVENT_DATABASE_URL \
+    required_variables=(
+        DAEJANG_E2E_OWNER_DATABASE_URL DAEJANG_E2E_WEB_DATABASE_URL
+        DAEJANG_E2E_SOURCE_DATABASE_URL DAEJANG_E2E_QUERY_DATABASE_URL
+        DAEJANG_E2E_REPORT_DATABASE_URL DAEJANG_E2E_EVENT_DATABASE_URL
         DAEJANG_E2E_TAX_DATABASE_URL
-    do
+    )
+    if [[ "$wallet_lane" == 1 || "$wallet_real_lane" == 1 ]]; then
+        required_variables+=(DAEJANG_E2E_JIT_DATABASE_URL)
+    fi
+    for required_variable in "${required_variables[@]}"; do
         [[ -n "${!required_variable:-}" ]] || {
             printf '%s is required.\n' "$required_variable" >&2
             exit 2
@@ -236,6 +262,20 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         printf 'REVIEW_E2E_ANCHOR_CHAIN_ID=%s\n' "$REVIEW_E2E_ANCHOR_CHAIN_ID"
         printf 'ACTIVATION_SHA256=%064d\n' 0
         printf 'PUBLICATION_TRUST_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+        printf 'EVM_PUBLICATION_TRUST_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+        printf 'DAEJANG_JIT_CANDIDATE_IMAGE=%s\n' "$jit_candidate_image"
+        printf 'DAEJANG_JIT_TEST_IMAGE=%s\n' "$jit_test_image"
+        printf 'DAEJANG_SCHEMA_DIR=%s\n' "$schema_dir"
+        printf 'JIT_DATABASE_URL=%s\n' "$(docker_host_dsn "${DAEJANG_E2E_JIT_DATABASE_URL:-}")"
+        printf 'DAEJANG_JIT_DEV_E2E_FROM_ADDRESS=%s\n' "$wallet_address"
+        printf 'DAEJANG_EVM_INDEXER_IMAGE=%s\n' "$evm_indexer_image"
+        printf 'DAEJANG_EVM_INDEXER_DATA=%s\n' "$evm_indexer_data"
+        printf 'DAEJANG_DEV_E2E_ETH_RPC_URL=%s\n' "${DAEJANG_DEV_E2E_ETH_RPC_URL:-}"
+        printf 'DAEJANG_DEV_E2E_OP_RPC_URL=%s\n' "${DAEJANG_DEV_E2E_OP_RPC_URL:-}"
+        printf 'DAEJANG_DEFI_LABEL_DIR=%s\n' "$defi_label_dir"
+        printf 'DAEJANG_ACTION_RUNTIME_COMMIT=%s\n' "${DAEJANG_ACTION_RUNTIME_COMMIT:-}"
+        printf 'DAEJANG_ACTION_RUNTIME_BUNDLE_SHA256=%s\n' "${DAEJANG_ACTION_RUNTIME_BUNDLE_SHA256:-}"
+        printf 'RUN_EVM_PIPELINE_E2E_TESTS=%s\n' "${RUN_EVM_PIPELINE_E2E_TESTS:-0}"
         printf 'OWNER_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_OWNER_DATABASE_URL")"
         printf 'WEB_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_WEB_DATABASE_URL")"
         printf 'SOURCE_DATABASE_URL=%s\n' "$(docker_host_dsn "$DAEJANG_E2E_SOURCE_DATABASE_URL")"
@@ -250,6 +290,12 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root"
         --file "$compose_file" --project-name "$project_name"
     )
+    if [[ "$wallet_lane" == 1 ]]; then
+        current_compose+=(--profile wallet)
+    fi
+    if [[ "$wallet_real_lane" == 1 ]]; then
+        current_compose+=(--profile wallet-real)
+    fi
 
     reviewroom_delivery_pid=''
     reviewroom_delivery_log=''
@@ -264,6 +310,16 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
             "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
                 --file "$compose_file" --project-name "$project_name" \
                 logs --no-color --tail=200 posting-worker tax-engine engine web-api || true
+            if [[ "$wallet_lane" == 1 ]]; then
+                "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
+                    --file "$compose_file" --project-name "$project_name" --profile wallet \
+                    logs --no-color --tail=200 jit-rpc jitd sync-worker posting-evm || true
+            fi
+            if [[ "$wallet_real_lane" == 1 ]]; then
+                "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
+                    --file "$compose_file" --project-name "$project_name" --profile wallet-real \
+                    logs --no-color --tail=200 jitd-real sync-worker-real posting-evm-real || true
+            fi
             if [[ -n "$reviewroom_delivery_log" && -f "$reviewroom_delivery_log" ]]; then
                 printf '%s\n' '[ReviewRoom delivery worker]'
                 tail -n 100 "$reviewroom_delivery_log" || true
@@ -271,6 +327,7 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
         fi
         "${compose_command[@]}" --env-file "$env_file" --project-directory "$repo_root" \
             --file "$compose_file" --project-name "$project_name" \
+            --profile wallet --profile wallet-real \
             down --volumes --remove-orphans >/dev/null 2>&1 || true
         rm -f "$env_file"
         [[ -z "$reviewroom_delivery_log" ]] || rm -f "$reviewroom_delivery_log"
@@ -321,6 +378,25 @@ if [[ "$action" == --run-container-tests || "$action" == --run-review-container-
     fi
     "${current_compose[@]}" up --detach --wait "${app_services[@]}"
     "${current_compose[@]}" run --rm --no-deps pipeline-verify
+
+    if [[ "$wallet_lane" == 1 ]]; then
+        printf '%s\n' '지갑(EVM) lane을 준비합니다: jitd fixture selection과 JIT claim policy를 만듭니다.'
+        jit_fixture_state=$("${current_compose[@]}" run --rm --no-deps jit-fixture)
+        evm_publication_trust_key=$(printf '%s\n' "$jit_fixture_state" | python3 -c 'import json,sys; print(json.load(sys.stdin)["evmPublicationTrustKey"])')
+        printf 'EVM_PUBLICATION_TRUST_KEY=%s\n' "$evm_publication_trust_key" >> "$env_file"
+        "${current_compose[@]}" run --rm --no-deps jit-permissions
+        "${current_compose[@]}" up --detach --wait jit-rpc jitd sync-worker posting-evm
+    fi
+
+    if [[ "$wallet_real_lane" == 1 ]]; then
+        printf '%s\n' '실데이터 지갑 lane을 준비합니다: 실체인 jitd 설정과 JIT claim policy를 만듭니다.'
+        jit_real_state=$("${current_compose[@]}" run --rm --no-deps jit-fixture-real)
+        evm_publication_trust_key=$(printf '%s\n' "$jit_real_state" | python3 -c 'import json,sys; print(json.load(sys.stdin)["evmPublicationTrustKey"])')
+        printf 'EVM_PUBLICATION_TRUST_KEY=%s\n' "$evm_publication_trust_key" >> "$env_file"
+        "${current_compose[@]}" run --rm --no-deps jit-permissions
+        "${current_compose[@]}" run --rm --no-deps jit-indexer-binary
+        "${current_compose[@]}" up --detach --wait jitd-real sync-worker-real posting-evm-real
+    fi
 
     if [[ "$action" == --run-container-tests || "$action" == --run-review-container-tests ]]; then
         "${current_compose[@]}" run --rm --no-deps web-api-tests
@@ -413,6 +489,59 @@ case "$REVIEWROOM_DELIVERY_ALLOW_INSECURE_HTTP" in
         exit 2
         ;;
 esac
+case "$wallet_lane" in
+    0|1) ;;
+    *)
+        printf '%s\n' 'DAEJANG_DEV_E2E_WALLET은 0 또는 1이어야 합니다.' >&2
+        exit 2
+        ;;
+esac
+if [[ ! "$wallet_address" =~ ^0x[0-9a-f]{40}$ ]]; then
+    printf 'DAEJANG_DEV_E2E_WALLET_ADDRESS가 올바른 EVM 주소가 아닙니다: %s\n' "$wallet_address" >&2
+    exit 2
+fi
+case "$wallet_real_lane" in
+    0|1) ;;
+    *)
+        printf '%s\n' 'DAEJANG_DEV_E2E_WALLET_REAL은 0 또는 1이어야 합니다.' >&2
+        exit 2
+        ;;
+esac
+if [[ "$wallet_lane" == 1 && "$wallet_real_lane" == 1 ]]; then
+    printf '%s\n' 'wallet과 wallet-real lane은 상태 볼륨을 공유하므로 함께 켤 수 없습니다. 하나만 선택하세요.' >&2
+    exit 2
+fi
+if [[ "$wallet_real_lane" == 1 && -z "${DAEJANG_DEV_E2E_ETH_RPC_URL:-}" ]]; then
+    printf '%s\n' 'wallet-real lane에는 DAEJANG_DEV_E2E_ETH_RPC_URL이 필요합니다 (debug_traceTransaction을 지원하는 개인 archive RPC).' >&2
+    exit 2
+fi
+if [[ "$wallet_real_lane" == 1 && -z "${DAEJANG_DEV_E2E_OP_RPC_URL:-}" ]]; then
+    printf '%s\n' 'wallet-real lane에는 DAEJANG_DEV_E2E_OP_RPC_URL이 필요합니다 (OP Mainnet archive RPC, debug_traceTransaction 지원).' >&2
+    exit 2
+fi
+action_runtime_commit=''
+action_runtime_bundle_sha256=''
+if [[ "$wallet_real_lane" == 1 ]]; then
+    defi_label_receipt="$defi_label_dir/releases/action-registry-v1.json.receipt.json"
+    [[ -f "$defi_label_receipt" ]] || {
+        printf '서명된 action registry receipt를 찾을 수 없습니다: %s\n' "$defi_label_receipt" >&2
+        printf 'DAEJANG_DEFI_LABEL_DIR=/path/to/DeFi-Label 로 지정하세요.\n' >&2
+        exit 2
+    }
+    action_runtime_commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["registrySourceCommit"])' "$defi_label_receipt")
+    action_runtime_bundle_sha256=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["bundleSha256"])' "$defi_label_receipt")
+    if [[ ! "$action_runtime_commit" =~ ^[0-9a-f]{40}$ || ! "$action_runtime_bundle_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+        printf 'action registry receipt의 신뢰 핀 형식이 올바르지 않습니다: %s\n' "$defi_label_receipt" >&2
+        exit 2
+    fi
+fi
+export DAEJANG_DEV_E2E_WALLET_ADDRESS="$wallet_address"
+export DAEJANG_DEV_E2E_WALLET="$wallet_lane"
+export DAEJANG_DEV_E2E_WALLET_REAL="$wallet_real_lane"
+export DAEJANG_DEFI_LABEL_DIR="$defi_label_dir"
+export DAEJANG_ACTION_RUNTIME_COMMIT="$action_runtime_commit"
+export DAEJANG_ACTION_RUNTIME_BUNDLE_SHA256="$action_runtime_bundle_sha256"
+export RUN_EVM_PIPELINE_E2E_TESTS="${RUN_EVM_PIPELINE_E2E_TESTS:-0}"
 export DAEJANG_TAXD_DB_MIGRATION_VERSION="$tax_db_migration_version"
 export DAEJANG_REVIEWROOM_DIR="$reviewroom_dir"
 export DAEJANG_E2E_SUFFIX="$e2e_suffix"
@@ -493,6 +622,40 @@ fi
 "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
     --file "$repo_root/services/engine/Dockerfile" --target parser-runtime \
     --tag "$parser_candidate_image" "$repo_root"
+if [[ "$wallet_lane" == 1 || "$wallet_real_lane" == 1 ]]; then
+    [[ -f "$jit_engine_dir/Dockerfile" ]] || {
+        printf 'daejang-jit-engine checkout을 찾을 수 없습니다: %s\n' "$jit_engine_dir" >&2
+        printf 'DAEJANG_JIT_ENGINE_DIR=/path/to/owned/daejang-jit-engine 으로 지정하세요.\n' >&2
+        exit 2
+    }
+    [[ -d "$schema_dir/cue.mod" ]] || {
+        printf 'schema checkout을 찾을 수 없습니다: %s\n' "$schema_dir" >&2
+        printf 'SCHEMA_DIR=/path/to/schema 로 지정하세요.\n' >&2
+        exit 2
+    }
+    "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
+        --file "$jit_engine_dir/Dockerfile" --target test \
+        --tag "$jit_test_image" "$jit_engine_dir"
+    "${buildx[@]}" build --load --secret "id=github_token,src=$token_file" \
+        --file "$jit_engine_dir/Dockerfile" \
+        --tag "$jit_candidate_image" "$jit_engine_dir"
+fi
+if [[ "$wallet_real_lane" == 1 ]]; then
+    [[ -f "$evm_indexer_dir/Dockerfile" ]] || {
+        printf 'daejang-evm-indexer checkout을 찾을 수 없습니다: %s\n' "$evm_indexer_dir" >&2
+        printf 'DAEJANG_EVM_INDEXER_DIR=/path/to/owned/daejang-evm-indexer 로 지정하세요.\n' >&2
+        exit 2
+    }
+    [[ -d "$evm_indexer_data" ]] || {
+        printf 'evm-indexer bulk store를 찾을 수 없습니다: %s\n' "$evm_indexer_data" >&2
+        printf 'DAEJANG_EVM_INDEXER_DATA=/path/to/index-bulk 로 지정하세요.\n' >&2
+        exit 2
+    }
+    "${buildx[@]}" build --load \
+        --build-arg "VERSION=dev-e2e-$user_segment" \
+        --file "$evm_indexer_dir/Dockerfile" \
+        --tag "$evm_indexer_image" "$evm_indexer_dir"
+fi
 if [[ "$action" == up ]]; then
     "${buildx[@]}" build --load \
         --build-arg "VITE_REOWN_PROJECT_ID=$reown_project_id" \
@@ -522,6 +685,9 @@ db_args=(
     --role-env DAEJANG_E2E_EVENT_DATABASE_URL=event
     --role-env DAEJANG_E2E_TAX_DATABASE_URL=tax
 )
+if [[ "$wallet_lane" == 1 || "$wallet_real_lane" == 1 ]]; then
+    db_args+=(--role-env DAEJANG_E2E_JIT_DATABASE_URL=jit)
+fi
 if [[ "$action" == up ]]; then
     db_args=(--keep "${db_args[@]}")
 fi

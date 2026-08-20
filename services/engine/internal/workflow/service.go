@@ -8,6 +8,7 @@ import (
 
 	"github.com/BackwardLabs/daejang-db/pkg/sourcejobstore"
 	enginev1 "github.com/BackwardLabs/daejang/services/engine/gen/go/giwa/engine/v1"
+	"github.com/BackwardLabs/daejang/services/engine/internal/coverageread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/materializationread"
 	"github.com/BackwardLabs/daejang/services/engine/internal/source"
 	"google.golang.org/grpc/codes"
@@ -25,10 +26,15 @@ type MaterializationReader interface {
 	Get(context.Context, string, string, string) (materializationread.Snapshot, error)
 }
 
+type CoverageReader interface {
+	List(context.Context, string, string) ([]coverageread.Coverage, error)
+}
+
 type Service struct {
 	enginev1.UnimplementedWorkflowServiceServer
 	Store            Store
 	Materializations MaterializationReader
+	Coverage         CoverageReader
 }
 
 func (s *Service) EnqueueSync(ctx context.Context, request *enginev1.EnqueueSyncRequest) (*enginev1.EnqueueSyncResponse, error) {
@@ -146,6 +152,19 @@ func (s *Service) toProto(ctx context.Context, subjectID string, value sourcejob
 			if err == nil {
 				result.LedgerMaterializationState = snapshot.State
 				result.LedgerPostingCount = snapshot.PostingCount
+			}
+		}
+		if s.Coverage != nil {
+			coverage, err := s.Coverage.List(ctx, subjectID, value.OutputFragmentID)
+			if err == nil {
+				for _, entry := range coverage {
+					result.DeliveredCoverage = append(result.DeliveredCoverage, &enginev1.DeliveredCoverage{
+						ChainId: entry.ChainID, FromBlock: entry.FromBlock, ToBlock: entry.ToBlock,
+						FromTime: timestamppb.New(entry.FromTime), ToTime: timestamppb.New(entry.ToTime),
+						Status: entry.Status, LimitationReasonCode: entry.LimitationReasonCode,
+						GapSegmentCount: entry.GapSegmentCount,
+					})
+				}
 			}
 		}
 	}

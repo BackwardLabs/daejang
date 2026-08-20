@@ -565,6 +565,58 @@ body:has(.source-page) {
   grid-column: 1 / -1;
 }
 
+.source-coverage {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding-top: 14px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 13px;
+}
+
+.source-coverage header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.source-coverage header b {
+  color: #111827;
+  font-weight: 600;
+}
+
+.source-coverage header span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.source-coverage ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-coverage li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  color: #374151;
+}
+
+.source-coverage li b {
+  min-width: 72px;
+  font-weight: 600;
+}
+
+.source-coverage li em {
+  color: #b45309;
+  font-style: normal;
+  font-size: 12px;
+}
+
 .source-network-editor {
   display: grid;
   gap: 0;
