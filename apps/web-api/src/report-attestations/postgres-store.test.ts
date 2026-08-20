@@ -14,6 +14,7 @@ import type {
   ReportAttestationPublication,
   ReportAttestationPublicationSource,
 } from './publication-source.js'
+import { reportAttestationEligibilityCheckCodes } from './publication-source.js'
 import type {
   Hex32,
   ReportAttestationRecord,
@@ -69,6 +70,14 @@ const publicationSource = (
   read: () => ReportAttestationPublication | undefined = () =>
     publication(),
 ): ReportAttestationPublicationSource => ({
+  getEligibility: vi.fn(async () => ({
+    reportId: REPORT_ID,
+    eligible: true,
+    checks: reportAttestationEligibilityCheckCodes.map((code) => ({
+      code,
+      status: 'PASSED' as const,
+    })),
+  })),
   getPublication: vi.fn(async () => read()),
 })
 

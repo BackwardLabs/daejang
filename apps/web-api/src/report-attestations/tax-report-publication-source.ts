@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto'
 import type { Pool } from 'pg'
 
 import type {
+  ReportAttestationEligibility,
   ReportAttestationPublication,
   ReportAttestationPublicationSource,
 } from './publication-source.js'
+import { ReportAttestationPublicationIneligibleError } from './publication-source.js'
 import type { Hex32 } from './types.js'
 
 const REPORT_ID_PATTERN = /^tax-report-v2:[0-9a-f]{64}$/u
@@ -89,6 +91,65 @@ const isoTimestamp = (value: unknown) => {
 
 const validDigest = (value: unknown): value is string =>
   typeof value === 'string' && DIGEST_PATTERN.test(value)
+
+const currentEligibilityFromRow = (
+  row: ActivatedTaxReportPublicationRow,
+  ownerId: string,
+  reportId: string,
+): ReportAttestationEligibility => {
+  const currentReport =
+    row.subject_id === ownerId &&
+    row.report_id === reportId &&
+    REPORT_ID_PATTERN.test(reportId) &&
+    Number.isSafeInteger(row.tax_year) &&
+    Number(row.tax_year) >= 2025 &&
+    (row.finality === 'FINAL' || row.finality === 'PROVISIONAL') &&
+    (row.status === 'FINAL' || row.status === 'PARTIAL') &&
+    (row.filing_status === 'READY' || row.filing_status === 'BLOCKED') &&
+    (row.generation_state === 'ACTIVE' ||
+      row.generation_state === 'REVIEW_REQUIRED') &&
+    validDigest(row.generation_id) &&
+    safePositiveInteger(row.bound_report_pointer_version) !== undefined &&
+    (row.coverage_status === 'COMPLETE' ||
+      row.coverage_status === 'PARTIAL' ||
+      row.coverage_status === 'UNKNOWN') &&
+    (row.coverage_assurance === 'DOCUMENT_METADATA_VERIFIED' ||
+      row.coverage_assurance === 'CHAIN_VERIFIED' ||
+      row.coverage_assurance === 'USER_DECLARED' ||
+      row.coverage_assurance === 'UNKNOWN') &&
+    (row.tax_year_close_status === 'OPEN' ||
+      row.tax_year_close_status === 'CLOSED') &&
+    isoTimestamp(row.calculated_as_of) !== undefined &&
+    row.is_current_report === true
+  const checks = [
+    { code: 'CURRENT_REPORT', status: currentReport },
+    {
+      code: 'CALCULATION_RESULT',
+      status:
+        row.is_current_tax_result === true &&
+        validDigest(row.report_model_v2_artifact_digest),
+    },
+    {
+      code: 'EVIDENCE_PACK',
+      status:
+        validDigest(row.evidence_pack_v2_artifact_digest) &&
+        validDigest(row.policy_artifact_digest),
+    },
+    { code: 'CURRENT_LEDGER', status: row.is_current_ledger_scope === true },
+    {
+      code: 'CURRENT_SOURCE_COVERAGE',
+      status: row.is_current_source_coverage === true,
+    },
+  ].map(({ code, status }) => ({
+    code: code as ReportAttestationEligibility['checks'][number]['code'],
+    status: status ? 'PASSED' as const : 'FAILED' as const,
+  }))
+  return {
+    reportId,
+    eligible: checks.every((check) => check.status === 'PASSED'),
+    checks,
+  }
+}
 
 const publicationFromRow = (
   row: ActivatedTaxReportPublicationRow,
@@ -181,6 +242,23 @@ export class PostgresTaxReportAttestationPublicationSource
 {
   constructor(private readonly pool: Pool) {}
 
+  async getEligibility(
+    ownerId: string,
+    reportId: string,
+  ): Promise<ReportAttestationEligibility | undefined> {
+    if (ownerId.length === 0 || !REPORT_ID_PATTERN.test(reportId)) {
+      return undefined
+    }
+    const rows = await this.#loadRows(ownerId, reportId)
+    if (rows.length === 0) return undefined
+    if (rows.length !== 1) {
+      throw new InconsistentTaxReportPublicationError()
+    }
+    const row = rows[0]
+    if (!row) return undefined
+    return currentEligibilityFromRow(row, ownerId, reportId)
+  }
+
   async getPublication(
     ownerId: string,
     reportId: string,
@@ -194,41 +272,17 @@ export class PostgresTaxReportAttestationPublicationSource
       return undefined
     }
 
-    const result =
-      await this.pool.query<ActivatedTaxReportPublicationRow>(
-        `
-          SELECT
-            subject_id,
-            report_id,
-            tax_year,
-            finality,
-            status,
-            filing_status,
-            generation_id,
-            generation_state,
-            bound_report_pointer_version,
-            report_model_v2_artifact_digest,
-            evidence_pack_v2_artifact_digest,
-            policy_artifact_digest,
-            coverage_status,
-            coverage_assurance,
-            tax_year_close_status,
-            calculated_as_of,
-            is_current_report,
-            is_current_tax_result,
-            is_current_ledger_scope,
-            is_current_source_coverage
-          FROM reporting.activated_tax_report_read_v2
-          WHERE subject_id = $1
-            AND report_id = $2
-          LIMIT 2
-        `,
-        [ownerId, reportId],
-      )
-    const row = result.rows[0]
+    const rows = await this.#loadRows(ownerId, reportId)
+    const row = rows[0]
     if (!row) return undefined
-    if (result.rows.length !== 1) {
+    if (rows.length !== 1) {
       throw new InconsistentTaxReportPublicationError()
+    }
+    if (
+      revision === undefined &&
+      !currentEligibilityFromRow(row, ownerId, reportId).eligible
+    ) {
+      throw new ReportAttestationPublicationIneligibleError()
     }
     // A route lookup omits revision and is allowed to prepare only the current
     // readable current report. The durable attestation store supplies revision 1
@@ -240,5 +294,42 @@ export class PostgresTaxReportAttestationPublicationSource
       reportId,
       revision === undefined,
     )
+  }
+
+  async #loadRows(
+    ownerId: string,
+    reportId: string,
+  ): Promise<ActivatedTaxReportPublicationRow[]> {
+    const result = await this.pool.query<ActivatedTaxReportPublicationRow>(
+      `
+        SELECT
+          subject_id,
+          report_id,
+          tax_year,
+          finality,
+          status,
+          filing_status,
+          generation_id,
+          generation_state,
+          bound_report_pointer_version,
+          report_model_v2_artifact_digest,
+          evidence_pack_v2_artifact_digest,
+          policy_artifact_digest,
+          coverage_status,
+          coverage_assurance,
+          tax_year_close_status,
+          calculated_as_of,
+          is_current_report,
+          is_current_tax_result,
+          is_current_ledger_scope,
+          is_current_source_coverage
+        FROM reporting.activated_tax_report_read_v2
+        WHERE subject_id = $1
+          AND report_id = $2
+        LIMIT 2
+      `,
+      [ownerId, reportId],
+    )
+    return result.rows
   }
 }

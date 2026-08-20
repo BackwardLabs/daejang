@@ -88,7 +88,10 @@ import type { ReportPaymentFacilitator } from './report-payment/facilitator.js'
 import type { ReportPaymentStore } from './report-payment/types.js'
 import type { ReportPaymentTaxReportReader } from './tax-report/types.js'
 import type { UploadStore } from './uploads/upload-store.js'
-import { registerReportAttestationDeploymentRoutes } from './routes/report-attestation-deployment.js'
+import {
+  assessReportAttestationDeploymentSnapshot,
+  registerReportAttestationDeploymentRoutes,
+} from './routes/report-attestation-deployment.js'
 import type { ReportAttestationDeploymentReader } from './report-attestation-deployment/reader.js'
 import { EthersWalletSignatureVerifier, type WalletSignatureVerifier } from './sources/wallet-signature-verifier.js'
 
@@ -673,6 +676,22 @@ export const buildApp = async (options: BuildAppOptions = {}) => {
         automaticReview:
           options.reportAttestations.runtime.kind ===
           GIWA_SEPOLIA_REPORT_ATTESTATION_RUNTIME_KIND,
+        runtimeReady: isLocalRuntime
+          ? async () => true
+          : async () => {
+              if (
+                !config.reportAttestationDeployment ||
+                !options.reportAttestationDeploymentReader
+              ) {
+                return false
+              }
+              const snapshot =
+                await options.reportAttestationDeploymentReader.read()
+              return assessReportAttestationDeploymentSnapshot(
+                config.reportAttestationDeployment,
+                snapshot,
+              ).status === 'CONNECTED'
+            },
         ...(reportAttestationWriteRateLimiter
           ? { writeRateLimiter: reportAttestationWriteRateLimiter }
           : {}),

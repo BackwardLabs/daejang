@@ -19,6 +19,23 @@ beforeEach(() => {
   vi.stubGlobal('URL', TestURL)
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
     const url = String(input)
+    if (url.endsWith('/attestation-eligibility')) {
+      return new Response(JSON.stringify({
+        reportId: report.reportId,
+        eligible: true,
+        checks: [
+          'CURRENT_REPORT',
+          'CALCULATION_RESULT',
+          'EVIDENCE_PACK',
+          'CURRENT_LEDGER',
+          'CURRENT_SOURCE_COVERAGE',
+          'ONCHAIN_RUNTIME',
+        ].map((code) => ({ code, status: 'PASSED' })),
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
     if (url.endsWith('/artifacts/pdf')) {
       const pdf = new Blob(['%PDF-1.7'], { type: 'application/pdf' })
       return {

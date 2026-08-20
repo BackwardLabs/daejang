@@ -42,6 +42,19 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { 'content-type': 'application/json' },
   })
 
+const wireEligibility = (eligible = true) => ({
+  reportId: 'report/mock 28',
+  eligible,
+  checks: [
+    'CURRENT_REPORT',
+    'CALCULATION_RESULT',
+    'EVIDENCE_PACK',
+    'CURRENT_LEDGER',
+    'CURRENT_SOURCE_COVERAGE',
+    'ONCHAIN_RUNTIME',
+  ].map((code) => ({ code, status: eligible ? 'PASSED' : 'FAILED' })),
+})
+
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -51,6 +64,7 @@ describe('localReportAttestationApi', () => {
   it('uses empty POST requests and exposes only confirmed public receipts', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(wireEligibility()))
       .mockResolvedValueOnce(
         jsonResponse(wireStatus('PREPARED'), 201),
       )
@@ -86,6 +100,8 @@ describe('localReportAttestationApi', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
+    const eligibility =
+      await localReportAttestationApi.getEligibility('report/mock 28')
     const preparedFromReport =
       await localReportAttestationApi.prepare('report/mock 28')
     const prepared = await localReportAttestationApi.prepareFixture()
@@ -104,6 +120,8 @@ describe('localReportAttestationApi', () => {
       submissionEvidence: null,
       reviewEvidence: null,
     })
+    expect(eligibility.eligible).toBe(true)
+    expect(eligibility.checks).toHaveLength(6)
     expect(submitted.submissionEvidence).toBeNull()
     expect(reviewed.submissionEvidence).toEqual({
       transactionHash: TRANSACTION_HASH,
@@ -121,6 +139,7 @@ describe('localReportAttestationApi', () => {
     expect(verification.result).toBe('USABLE')
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/reports/report%2Fmock%2028/attestation-eligibility',
       '/api/v1/reports/report%2Fmock%2028/attestation-preparation',
       '/api/v1/dev/reports/attestation-fixture',
       '/api/v1/reports/report%2Fmock%2028/attestations',
@@ -129,12 +148,35 @@ describe('localReportAttestationApi', () => {
       '/api/v1/reports/report%2Fmock%2028/verification',
     ])
     expect(preparedFromReport.reportId).toBe('report/mock 28')
-    for (const call of fetchMock.mock.calls.slice(0, 4)) {
+    for (const call of fetchMock.mock.calls.slice(1, 5)) {
       const init = call[1]
       expect(init?.method).toBe('POST')
       expect(init?.body).toBeUndefined()
       expect(new Headers(init?.headers).has('content-type')).toBe(false)
     }
+  })
+
+  it('rejects an eligibility response with missing checks or a contradictory summary', async () => {
+    const missingCheck = {
+      ...wireEligibility(),
+      checks: wireEligibility().checks.slice(0, 5),
+    }
+    const contradictory = {
+      ...wireEligibility(false),
+      eligible: true,
+    }
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(missingCheck))
+      .mockResolvedValueOnce(jsonResponse(contradictory))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      localReportAttestationApi.getEligibility('report/mock 28'),
+    ).rejects.toThrow('REPORT_ATTESTATION_ELIGIBILITY_RESPONSE_INVALID')
+    await expect(
+      localReportAttestationApi.getEligibility('report/mock 28'),
+    ).rejects.toThrow('REPORT_ATTESTATION_ELIGIBILITY_RESPONSE_INVALID')
   })
 
   it('does not promote an incomplete receipt to confirmed', async () => {
