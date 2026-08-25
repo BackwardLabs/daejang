@@ -114,6 +114,9 @@ const walletQuoteAssets = [
   { assetId: 'asset:eip155:10:native', baseAtomicUnits: nativeAtomicUnits, market: 'KRW-ETH' },
   { assetId: 'asset:eip155:1:0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', baseAtomicUnits: nativeAtomicUnits, market: 'KRW-ETH' },
   { assetId: 'asset:eip155:10:0x4200000000000000000000000000000000000006', baseAtomicUnits: nativeAtomicUnits, market: 'KRW-ETH' },
+  // 체인 스테이블코인은 같은 자산이 업비트 KRW 마켓에 상장돼 있어 직접 평가한다.
+  { assetId: 'asset:eip155:1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', baseAtomicUnits: '1000000', market: 'KRW-USDC' },
+  { assetId: 'asset:eip155:1:0xdac17f958d2ee523a2206206994597c13d831ec7', baseAtomicUnits: '1000000', market: 'KRW-USDT' },
 ]
 const ledgerAssetIDs = new Set(rows.map(({ asset_id: assetID }) => assetID))
 upbitConfig.assets = [

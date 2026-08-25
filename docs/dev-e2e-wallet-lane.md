@@ -137,3 +137,22 @@ make dev-e2e-up
 - bulk store의 sealed head는 계속 전진하지만 bridge coverage의 `toBlock`은
   의도적으로 고정돼 있다. 갱신하려면 compose의 `jit_bridge_real`과 jit-engine
   `indexer-real.json`을 store 상태와 함께 범프한다.
+
+### 수집 이후 — 유입 취득 성격 검토
+
+수집이 끝나면 지갑 유입도 CEX 입금과 같은 유입 성격 검토
+(`review:inbound:`)로 검토 화면에 열린다. taxd가
+`DAEJANG_TAXD_EVENT_WRITER_DATABASE_URL`이 설정돼 있을 때 주기적으로 열며,
+기본 범위는 **같은 자산의 처분이 장부에 한 번이라도 있는 유입**이다
+(`DAEJANG_TAXD_INBOUND_REVIEW_OPENING`: `DISPOSED_ASSETS` 기본 ·
+`ALL_ASSETS` · `OFF`). 실지갑은 원치 않은 토큰 수신이 수백 건이라 기본
+범위가 없으면 검토 화면이 스팸으로 덮인다.
+
+"에어드롭·리워드 수령"으로 답하면 taxd가 재분류 리비전을 발행하고, 수령
+시점 시가로 취득가액이 확정된다. 체인 자산의 시가는
+`scripts/dev-e2e-refresh-tax.mjs`가 업비트 마켓에 매핑해 둔 자산(네이티브
+ETH·WETH·체인 USDC·USDT)만 산출되므로, **답변보다 먼저**
+`make dev-e2e-refresh-tax`로 시세 설정을 반영해 둔다. 평가는 재분류 발행
+시점에 계산되고, 설정이 늦으면 그 유입은 취득가액 `UNKNOWN`으로 남는다.
+
+설계 계약은 `daejang-tax-engine/docs/contracts/inbound-acquisition-review-v1.md`.
